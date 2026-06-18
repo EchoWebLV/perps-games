@@ -18,8 +18,8 @@ export function createScene(canvas: HTMLCanvasElement): SceneCtx {
   scene.fog = new THREE.Fog("#150a26", 60, 420);
 
   const camera = new THREE.PerspectiveCamera(70, window.innerWidth / window.innerHeight, 0.1, 2000);
-  camera.position.set(0, 7.5, 18);
-  camera.lookAt(0, 1.2, -28);
+  camera.position.set(0, 9, 17);
+  camera.lookAt(0, 1.4, -34);
 
   scene.add(new THREE.AmbientLight("#8866ff", 0.7));
   const key = new THREE.DirectionalLight("#ff7ad0", 0.8);

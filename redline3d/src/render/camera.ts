@@ -8,7 +8,7 @@ export interface ChaseCam {
   shake(amount: number): void;
 }
 
-const BASE_Y = 7.5;
+const BASE_Y = 9;
 
 export function createChaseCam(): ChaseCam {
   let fov = 70;

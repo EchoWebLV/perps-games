@@ -31,7 +31,7 @@ addEventListener("resize", () => {
 const world = createWorld();
 ctx.scene.add(world.group);
 const car = createCar();
-car.group.position.set(0, 0, -4);
+car.group.position.set(0, 0, -12);
 ctx.scene.add(car.group);
 const chase = createChaseCam();
 
@@ -51,8 +51,8 @@ addEventListener("pagehide", () => priceSource.stop());
 
 // ui
 const hud = createHud(hudRoot);
-const tach = createTach(hudRoot);
-const controls = createControls(hudRoot);
+const tach = createTach(hud.tachMount);
+const controls = createControls(hud.ctrlMount, hud.goMount);
 hud.setBalance(wallet.balance());
 
 const game = { lev: tach.lev(), equity: 1 };
@@ -111,7 +111,8 @@ function frame() {
       hud.setMultiplier(snap.equity, snap.phase);
       hud.setBuffer(snap.buffer, true);
       car.setEquity("live", snap.equity);
-      controls.setLive(true, `CASH OUT $${snap.payout.toFixed(2)}`);
+      const win = snap.equity >= 1;
+      controls.setLive(true, `${win ? "CASH OUT" : "BAIL"} $${snap.payout.toFixed(2)}`, !win);
     }
   } else {
     car.setEquity("idle", 1);
