@@ -3,6 +3,7 @@ export interface Controls {
   stake(): number;
   gas(): boolean;
   brake(): boolean;
+  steer(): number; // -1 left, 0, 1 right
   setLive(live: boolean, label: string, warn?: boolean): void;
   onLaunch(cb: () => void): void;
   onCashout(cb: () => void): void;
@@ -36,7 +37,7 @@ export function createControls(ctrlMount: HTMLElement, goMount: HTMLElement, ped
 
   const q = (s: string) => (ctrlMount.querySelector(s) || goMount.querySelector(s) || pedalMount.querySelector(s)) as HTMLElement;
   let d: 1 | -1 = 1, stake = 1, live = false;
-  let gasOn = false, brakeOn = false;
+  let gasOn = false, brakeOn = false, steerL = false, steerR = false;
   let launchCb = () => {}, cashCb = () => {};
   const long = q("#long"), short = q("#short"), sval = q("#sval"), go = q("#go"), gasBtn = q("#gas"), brakeBtn = q("#brake");
 
@@ -69,14 +70,16 @@ export function createControls(ctrlMount: HTMLElement, goMount: HTMLElement, ped
     const k = e.key;
     if (k === "ArrowUp" || k === "w" || k === "W") { gasOn = true; e.preventDefault(); }
     else if (k === "ArrowDown" || k === "s" || k === "S") { brakeOn = true; e.preventDefault(); }
-    else if (k === "ArrowLeft" || k === "a" || k === "A") setDir(1);
-    else if (k === "ArrowRight" || k === "d" || k === "D") setDir(-1);
+    else if (k === "ArrowLeft" || k === "a" || k === "A") { steerL = true; e.preventDefault(); }
+    else if (k === "ArrowRight" || k === "d" || k === "D") { steerR = true; e.preventDefault(); }
     else if (k === " " || k === "Enter") { go.click(); e.preventDefault(); }
   });
   addEventListener("keyup", (e) => {
     const k = e.key;
     if (k === "ArrowUp" || k === "w" || k === "W") gasOn = false;
     else if (k === "ArrowDown" || k === "s" || k === "S") brakeOn = false;
+    else if (k === "ArrowLeft" || k === "a" || k === "A") steerL = false;
+    else if (k === "ArrowRight" || k === "d" || k === "D") steerR = false;
   });
 
   return {
@@ -84,6 +87,7 @@ export function createControls(ctrlMount: HTMLElement, goMount: HTMLElement, ped
     stake: () => stake,
     gas: () => gasOn,
     brake: () => brakeOn,
+    steer: () => (steerR ? 1 : 0) - (steerL ? 1 : 0),
     setLive(l, label, warn) {
       live = l;
       go.textContent = label;

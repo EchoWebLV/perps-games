@@ -12,6 +12,10 @@ import { createPriceSource } from "./core/price-source";
 import { RoundEngine } from "./core/round";
 import { SimSettlement } from "./core/settlement";
 import { niceLev, tToLev } from "./core/leverage";
+import { liqPriceOf } from "./core/economics";
+import { CONFIG } from "./core/config";
+import { createMinimap } from "./ui/minimap";
+import { createPickups } from "./render/pickups";
 import type { Snapshot } from "./core/types";
 
 const canvas = document.getElementById("gl") as HTMLCanvasElement;
@@ -35,6 +39,8 @@ const car = createCar();
 car.group.position.set(0, 0, -12);
 ctx.scene.add(car.group);
 const chase = createChaseCam();
+const pickups = createPickups();
+ctx.scene.add(pickups.group);
 
 // core
 const engine = new RoundEngine();
@@ -54,13 +60,29 @@ addEventListener("pagehide", () => priceSource.stop());
 const hud = createHud(hudRoot);
 const tach = createTach(hud.tachMount);
 const controls = createControls(hud.ctrlMount, hud.goMount, hud.pedalMount);
+const minimap = createMinimap(hud.miniCanvas);
 hud.setBalance(wallet.balance());
+hud.setCoins(0);
 
 // throttle = the accelerator: gas revs it up, brake slows it, release coasts down SLOWLY
 let throttle = 34; // 0..100 (starts ~50x)
 const GAS = 52, BRAKE = 78, COAST = 6;
 const game = { lev: niceLev(tToLev(throttle)), equity: 1 };
 let lastLivePrice = 0;
+
+// price history (minimap), coins, lateral steering, and the active round's entry
+const priceHist: number[] = [];
+let coins = 0;
+let carX = 0, carXTarget = 0;
+const round = { entryPx: 0, dir: 1 as 1 | -1 };
+
+// touch steering: drag horizontally on the road to move the car
+let dragging = false;
+canvas.addEventListener("pointerdown", () => { dragging = true; });
+addEventListener("pointerup", () => { dragging = false; });
+addEventListener("pointermove", (e) => {
+  if (dragging) carXTarget = Math.max(-10, Math.min(10, ((e.clientX - innerWidth / 2) / (innerWidth / 2)) * 11));
+});
 
 function endRound(snap: Snapshot) {
   wallet.credit(snap.payout);
@@ -80,6 +102,8 @@ controls.onLaunch(() => {
   if (!entry) { hud.setStatus("Waiting for the SOL feed…"); return; }
   wallet.debit(stake);
   hud.setBalance(wallet.balance());
+  round.entryPx = entry;
+  round.dir = controls.dir();
   engine.launch({ dir: controls.dir(), lev: game.lev, stake, entryRaw: entry, startMs: Date.now() });
   controls.setLive(true, "CASH OUT");
   hud.setStatus(`Riding ${controls.dir() > 0 ? "LONG" : "SHORT"} SOL at ${game.lev}× from $${entry.toFixed(2)}.`);
@@ -96,6 +120,7 @@ function frame() {
   const live = priceSource.live();
   if (live && price > 0) lastLivePrice = price;
   hud.setPrice(price, live);
+  if (price > 0) { priceHist.push(price); if (priceHist.length > 300) priceHist.shift(); }
 
   // spec §9: never settle P&L on a stale feed. Freeze equity at the last real
   // price when the feed is down so sim drift can't liquidate a live round.
@@ -126,9 +151,29 @@ function frame() {
     car.setEquity("idle", 1);
   }
 
+  // lateral steering (arrows + touch drag), with the car leaning into the turn
+  carXTarget += controls.steer() * 22 * dt;
+  carXTarget = Math.max(-10, Math.min(10, carXTarget));
+  carX += (carXTarget - carX) * 0.18;
+
   const speed = chase.update(ctx.camera, dt, throttle / 100, game.equity, engine.getPhase() === "live");
   world.update(dt, speed);
   car.update(dt);
+  car.group.position.x = carX;
+  const lean = controls.steer() !== 0 ? -controls.steer() * 0.2 : -(carXTarget - carX) * 0.05;
+  car.group.rotation.z = Math.max(-0.3, Math.min(0.3, lean));
+
+  // collectible coins: steer into them for a coin (and a small banked bonus mid-run)
+  const got = pickups.update(dt, speed, carX);
+  if (got) {
+    coins += got;
+    hud.setCoins(coins);
+    if (engine.getPhase() === "live") engine.addBonus(0.04 * got);
+  }
+
+  // minimap: live SOL price line with entry/liq overlays
+  const liqPx = engine.getPhase() === "live" ? liqPriceOf(round.entryPx, round.dir, game.lev, CONFIG.LIQ) : 0;
+  minimap.draw({ hist: priceHist, inRun: engine.getPhase() === "live", equity: game.equity, entryPx: round.entryPx, liqPx, dir: round.dir });
 
   if (post) post.render();
   else ctx.renderer.render(ctx.scene, ctx.camera);

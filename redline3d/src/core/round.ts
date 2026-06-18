@@ -54,6 +54,12 @@ export class RoundEngine {
     return this.finish("settled", "cashout", equityOf(this.pos, price));
   }
 
+  /** add an equity bonus to banked gains (e.g. from collecting a pickup); live only */
+  addBonus(amount: number): void {
+    if (this.phase !== "live") return;
+    this.pos = { ...this.pos, banked: this.pos.banked + amount };
+  }
+
   private finish(phase: Phase, reason: SettleReason, equity: number): Snapshot {
     this.phase = phase;
     this.reason = reason;

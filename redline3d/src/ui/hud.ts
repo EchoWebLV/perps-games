@@ -4,8 +4,10 @@ export interface Hud {
   ctrlMount: HTMLElement;
   goMount: HTMLElement;
   pedalMount: HTMLElement;
+  miniCanvas: HTMLCanvasElement;
   setPrice(px: number, live: boolean): void;
   setBalance(b: number): void;
+  setCoins(n: number): void;
   setMultiplier(equity: number, phase: "idle" | "live" | "settled" | "liquidated"): void;
   setBuffer(buf: number, visible: boolean): void;
   setStatus(text: string): void;
@@ -19,8 +21,11 @@ export function createHud(parent: HTMLElement): Hud {
       balance<b id="bal" style="display:block;color:#eaf0ff;font-size:15px">$100.00</b></div>
     <div class="pe" style="position:absolute;top:max(10px,env(safe-area-inset-top));right:14px;text-align:right;${chip}">
       SOL<b id="solpx" style="display:block;color:#eaf0ff;font-size:15px">$—</b><span id="feed" style="color:#ffd166">connecting…</span></div>
+    <div class="pe" id="coins" style="position:absolute;top:max(12px,env(safe-area-inset-top));left:50%;transform:translateX(-50%);${chip};padding:4px 10px;font-size:13px;color:#ffd166;font-weight:900">🪙 0</div>
+    <div style="position:absolute;left:50%;transform:translateX(-50%);top:62px;width:min(420px,92%);height:70px;border-radius:12px;overflow:hidden;background:rgba(8,6,20,.4);border:1px solid rgba(120,140,210,.2)">
+      <canvas id="mini" style="width:100%;height:100%;display:block"></canvas></div>
 
-    <div style="position:absolute;left:0;right:0;top:19%;text-align:center;pointer-events:none">
+    <div style="position:absolute;left:0;right:0;top:20%;text-align:center;pointer-events:none">
       <div id="multi" style="font-family:ui-monospace,monospace;font-weight:800;font-size:clamp(44px,15vw,64px);line-height:1;color:#2ee6a6;text-shadow:0 0 26px rgba(46,230,166,.55)">×1.00</div>
       <div id="buf" style="width:188px;max-width:60vw;height:8px;margin:10px auto 0;border-radius:6px;background:rgba(8,6,20,.62);border:1px solid rgba(120,140,210,.28);overflow:hidden;opacity:0;transition:opacity .2s">
         <div id="buffill" style="height:100%;width:100%;background:#2ee6a6;transition:width .08s linear,background .25s"></div></div>
@@ -41,7 +46,7 @@ export function createHud(parent: HTMLElement): Hud {
 
   const q = (s: string) => parent.querySelector(s) as HTMLElement;
   const bal = q("#bal"), px = q("#solpx"), feed = q("#feed"), multi = q("#multi"),
-    buf = q("#buf"), buffill = q("#buffill"), status = q("#status");
+    buf = q("#buf"), buffill = q("#buffill"), status = q("#status"), coins = q("#coins");
 
   return {
     root: parent,
@@ -49,8 +54,10 @@ export function createHud(parent: HTMLElement): Hud {
     ctrlMount: q("#ctrlMount"),
     goMount: q("#goMount"),
     pedalMount: q("#pedalMount"),
+    miniCanvas: q("#mini") as HTMLCanvasElement,
     setPrice(p, live) { px.textContent = "$" + (p ? p.toFixed(2) : "—"); feed.textContent = live ? "live" : "sim"; feed.style.color = live ? "#2ee6a6" : "#ffd166"; },
     setBalance(b) { bal.textContent = "$" + b.toFixed(2); },
+    setCoins(n) { coins.textContent = "🪙 " + n; },
     setMultiplier(equity, phase) {
       multi.textContent = "×" + equity.toFixed(2);
       const col = phase === "liquidated" ? "#ff4d6d" : phase === "settled" ? (equity >= 1 ? "#2ee6a6" : "#ffd166") : equity >= 1 ? "#2ee6a6" : "#ff5067";
