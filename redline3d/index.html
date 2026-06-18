@@ -102,11 +102,75 @@
       /* end-of-round FX: a brief screen shake on liquidation */
       @keyframes fxshake{0%,100%{transform:none}15%{transform:translate(-5px,3px)}30%{transform:translate(6px,-4px)}45%{transform:translate(-6px,-2px)}60%{transform:translate(5px,4px)}75%{transform:translate(-4px,2px)}90%{transform:translate(3px,-2px)}}
       #gl.fxshake{animation:fxshake .45s ease-out}
+
+      /* ---- loading splash: the Ferto welcome video + a neon loading bar ---- */
+      #splash{position:fixed;inset:0;z-index:50;background:#05030d;overflow:hidden;opacity:1;transition:opacity .55s ease}
+      #splash.hide{opacity:0;pointer-events:none}
+      #splashvid{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;object-position:center}
+      @media (orientation:landscape){#splashvid{object-fit:contain}}
+      #splashveil{position:absolute;inset:0;pointer-events:none;
+        background:linear-gradient(to bottom,rgba(5,3,13,.05) 35%,rgba(5,3,13,.55) 72%,rgba(5,3,13,.92) 100%)}
+      #splashui{position:absolute;left:0;right:0;bottom:max(54px,calc(env(safe-area-inset-bottom) + 40px));
+        padding:0 26px;text-align:center}
+      #splashtitle{font-family:"Chakra Petch";font-weight:700;letter-spacing:.34em;font-size:30px;color:#fff;
+        text-shadow:0 0 18px rgba(39,231,255,.85),0 0 40px rgba(255,57,192,.55);margin:0 0 16px 6px}
+      #splashbar{width:min(360px,80%);height:10px;margin:0 auto;border-radius:6px;background:rgba(255,255,255,.13);
+        border:1px solid rgba(255,255,255,.24);overflow:hidden}
+      #splashfill{height:100%;width:0;border-radius:6px;transition:width .25s ease;
+        background:linear-gradient(90deg,#27e7ff,#2ee6a6,#ff39c0);box-shadow:0 0 16px rgba(46,230,166,.7)}
+      #splashpct{margin-top:11px;font-family:"Chakra Petch";font-size:11px;letter-spacing:.24em;
+        text-transform:uppercase;color:#9fb0d8}
     </style>
   </head>
   <body>
     <canvas id="gl"></canvas>
     <div id="hud"></div>
+
+    <div id="splash">
+      <video id="splashvid" autoplay muted loop playsinline preload="auto">
+        <source src="/Ferto.mp4" type="video/mp4" />
+      </video>
+      <div id="splashveil"></div>
+      <div id="splashui">
+        <div id="splashtitle">REDLINE</div>
+        <div id="splashbar"><div id="splashfill"></div></div>
+        <div id="splashpct">loading…</div>
+      </div>
+    </div>
+    <script>
+      // Loading bar runs immediately (before the module bundle). It eases toward
+      // 90% while assets load; main.ts calls window.hideSplash() when the scene +
+      // car model are ready, which fills to 100% and fades out (min on-screen time
+      // so it never just flashes; 9s safety so the player is never trapped).
+      (function () {
+        var fill = document.getElementById("splashfill"),
+          pct = document.getElementById("splashpct"),
+          splash = document.getElementById("splash");
+        var p = 0, done = false, t0 = Date.now();
+        (function tick() {
+          if (done) return;
+          p += (90 - p) * 0.04 + 0.35;
+          if (p > 90) p = 90;
+          fill.style.width = p.toFixed(1) + "%";
+          requestAnimationFrame(tick);
+        })();
+        window.hideSplash = function () {
+          if (done) return;
+          done = true;
+          var go = function () {
+            fill.style.width = "100%";
+            pct.textContent = "ready";
+            setTimeout(function () {
+              splash.classList.add("hide");
+              setTimeout(function () { splash.remove(); }, 650);
+            }, 240);
+          };
+          setTimeout(go, Math.max(0, 1300 - (Date.now() - t0)));
+        };
+        setTimeout(function () { window.hideSplash(); }, 9000);
+      })();
+    </script>
+
     <script type="module" src="/src/main.ts"></script>
   </body>
 </html>

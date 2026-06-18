@@ -38,7 +38,8 @@ addEventListener("resize", () => {
 // world + car
 const world = createWorld();
 ctx.scene.add(world.group);
-const car = createCar();
+// dismiss the loading splash (index.html) once the real car model is in
+const car = createCar(() => (window as any).hideSplash?.());
 car.group.position.set(0, 0, -12);
 ctx.scene.add(car.group);
 const chase = createChaseCam();

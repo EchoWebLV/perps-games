@@ -28,8 +28,9 @@ const MAX_STEER = 0.5;        // radians the front wheels swing at full lock (~2
  * Either way the body tints blue→green→red with equity, and an underglow
  * PointLight carries the color cue onto the road.
  */
-export function createCar(): Car {
+export function createCar(onReady?: () => void): Car {
   const group = new THREE.Group();
+  let readyFired = false; // fire onReady once, when the first GLB finishes loading
 
   // ---- instant procedural fallback (a DeLorean-style stainless wedge) ----
   const placeholder = new THREE.Group();
@@ -134,6 +135,7 @@ export function createCar(): Car {
         placeholder.visible = false;
         group.add(model);
         applyTint();
+        if (!readyFired) { readyFired = true; onReady?.(); }
       },
       undefined,
       (err) => console.warn("[car] GLB failed to load:", url, err)
