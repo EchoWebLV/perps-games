@@ -134,30 +134,39 @@ export function createWorld(): World {
   const armGeo = new THREE.BoxGeometry(3.4, 0.24, 0.24);
   const houseGeo = new THREE.BoxGeometry(1.0, 0.55, 0.72);
   const bulbGeo = new THREE.BoxGeometry(0.78, 0.16, 0.52);
-  const coneGeo = new THREE.ConeGeometry(2.4, 11.6, 14, 1, true);
+  const coneGeo = new THREE.ConeGeometry(2.2, 8, 14, 1, true);
   const poleMat = new THREE.MeshStandardMaterial({ color: "#0c0e18", metalness: 0.7, roughness: 0.45, emissive: "#06070d", emissiveIntensity: 0.5 });
   const bulbCyan = new THREE.MeshBasicMaterial({ color: "#d6fbff", fog: false });
   const bulbMag = new THREE.MeshBasicMaterial({ color: "#ffd6f6", fog: false });
   const stripCyan = new THREE.MeshBasicMaterial({ color: "#27e7ff", fog: false });
   const stripMag = new THREE.MeshBasicMaterial({ color: "#ff39c0", fog: false });
-  const coneOpt = { transparent: true, opacity: 0.2, blending: THREE.AdditiveBlending, depthWrite: false, side: THREE.DoubleSide, fog: false } as const;
+  // soft beam: bright at the bulb, gradient-fading to nothing before the ground
+  const beamTex = (() => {
+    const cv = document.createElement("canvas"); cv.width = 4; cv.height = 64;
+    const g = cv.getContext("2d")!;
+    const grd = g.createLinearGradient(0, 0, 0, 64);
+    grd.addColorStop(0, "rgba(255,255,255,0.85)"); // top = at the bulb
+    grd.addColorStop(0.5, "rgba(255,255,255,0.28)");
+    grd.addColorStop(1, "rgba(255,255,255,0)");    // bottom = faded out, above the road
+    g.fillStyle = grd; g.fillRect(0, 0, 4, 64);
+    return new THREE.CanvasTexture(cv);
+  })();
+  const coneOpt = { map: beamTex, transparent: true, opacity: 0.5, blending: THREE.AdditiveBlending, depthWrite: false, side: THREE.DoubleSide, fog: false } as const;
   const coneCyan = new THREE.MeshBasicMaterial({ color: "#27e7ff", ...coneOpt });
   const coneMag = new THREE.MeshBasicMaterial({ color: "#ff39c0", ...coneOpt });
-  // a glowing pool on the road so the light actually lands instead of fading in mid-air
-  const poolTex = (() => {
+  // glowing halo at the lamp head — the soft orb of light that reads as an actual lamp (bloom amplifies it)
+  const haloTex = (() => {
     const s = 128, cv = document.createElement("canvas"); cv.width = cv.height = s;
     const g = cv.getContext("2d")!;
     const rg = g.createRadialGradient(s / 2, s / 2, 0, s / 2, s / 2, s / 2);
-    rg.addColorStop(0, "rgba(255,255,255,1)"); rg.addColorStop(0.45, "rgba(255,255,255,0.4)"); rg.addColorStop(1, "rgba(255,255,255,0)");
+    rg.addColorStop(0, "rgba(255,255,255,1)"); rg.addColorStop(0.22, "rgba(255,255,255,0.7)"); rg.addColorStop(1, "rgba(255,255,255,0)");
     g.fillStyle = rg; g.fillRect(0, 0, s, s);
     return new THREE.CanvasTexture(cv);
   })();
-  const poolGeo = new THREE.CircleGeometry(4.0, 24);
-  const poolOpt = { map: poolTex, transparent: true, opacity: 1, blending: THREE.AdditiveBlending, depthWrite: false, fog: false } as const;
-  const poolCyan = new THREE.MeshBasicMaterial({ color: "#27e7ff", ...poolOpt });
-  const poolMag = new THREE.MeshBasicMaterial({ color: "#ff39c0", ...poolOpt });
+  const haloCyan = new THREE.SpriteMaterial({ map: haloTex, color: "#86eaff", blending: THREE.AdditiveBlending, depthWrite: false, transparent: true, opacity: 0.95, fog: false });
+  const haloMag = new THREE.SpriteMaterial({ map: haloTex, color: "#ff86e0", blending: THREE.AdditiveBlending, depthWrite: false, transparent: true, opacity: 0.95, fog: false });
 
-  type Lamp = { o: THREE.Group; lights: THREE.Object3D[]; mode: 0 | 1 | 2; seed: number };
+  type Lamp = { o: THREE.Group; lights: THREE.Object3D[]; mode: 0 | 1 | 2; seed: number; side: number };
   const lamps: Lamp[] = [];
   for (let i = 0; i < COUNT; i++) {
     for (const side of [-1, 1]) {
@@ -170,19 +179,33 @@ export function createWorld(): World {
       const arm = new THREE.Mesh(armGeo, poleMat); arm.position.set(inward * 1.55, 12.7, 0); arm.rotation.z = inward * 0.08;
       const house = new THREE.Mesh(houseGeo, poleMat); house.position.set(inward * 3.05, 12.35, 0);
       const b = new THREE.Mesh(bulbGeo, left ? bulbCyan : bulbMag); b.position.set(inward * 3.05, 12.02, 0);
-      const c = new THREE.Mesh(coneGeo, left ? coneCyan : coneMag); c.position.set(inward * 3.05, 6.2, 0);
-      const pool = new THREE.Mesh(poolGeo, left ? poolCyan : poolMag); pool.rotation.x = -Math.PI / 2; pool.position.set(inward * 3.05, 0.2, 0);
-      o.add(pole, foot, sStrip, arm, house, b, c, pool);
+      const c = new THREE.Mesh(coneGeo, left ? coneCyan : coneMag); c.position.set(inward * 3.05, 8, 0);
+      const halo = new THREE.Sprite(left ? haloCyan : haloMag); halo.scale.set(5.5, 5.5, 1); halo.position.set(inward * 3.05, 12.0, 0);
+      o.add(pole, foot, sStrip, arm, house, b, c, halo);
       o.position.set(side * 15.5, 0, RECYCLE - i * SP);
       group.add(o);
       // most lamps lit; ~1/50 dead, ~1/43 flickering — for life
       const r = Math.random();
       const mode: 0 | 1 | 2 = r < 1 / 50 ? 1 : r < 1 / 50 + 1 / 43 ? 2 : 0;
-      const lights: THREE.Object3D[] = [sStrip, b, c, pool];
+      const lights: THREE.Object3D[] = [sStrip, b, c, halo];
       if (mode === 1) for (const m of lights) m.visible = false;
-      lamps.push({ o, lights, mode, seed: i * 2.7 + side });
+      lamps.push({ o, lights, mode, seed: i * 2.7 + side, side });
     }
   }
+
+  // a few REAL point-lights ride the lamps nearest the car, so the car + poles
+  // actually get lit as lamps sweep past (the road/grid are custom shaders and
+  // don't receive scene lights — the car catching the light is what sells it)
+  const LIGHT_N = 5;
+  const realLights: THREE.PointLight[] = [];
+  for (let i = 0; i < LIGHT_N; i++) {
+    const pl = new THREE.PointLight(0xffffff, 0, 36, 2);
+    group.add(pl); // always present (intensity 0 when idle) so the light count never changes → no shader recompiles
+    realLights.push(pl);
+  }
+  const cyanCol = new THREE.Color("#3df0ff"), magCol = new THREE.Color("#ff5ccf");
+  const nearScratch: Lamp[] = [];
+  const CAR_Z = -12, REAL_I = 850;
 
   let scroll = 0, biasCur = 0, time = 0;
   // the plane is rotated -90° about X and sits at z=PLANE_Z, so a world z maps to
@@ -216,6 +239,21 @@ export function createWorld(): World {
           const on = ph > -0.55 || Math.sin(time * 55 + l.seed) > 0;
           for (const m of l.lights) m.visible = on;
         }
+      }
+      // assign the real lights to the lamps nearest the car, with a distance fade in/out
+      nearScratch.length = 0;
+      for (const l of lamps) if (l.mode !== 1) nearScratch.push(l);
+      nearScratch.sort((a, b) => Math.abs(a.o.position.z - CAR_Z) - Math.abs(b.o.position.z - CAR_Z));
+      for (let i = 0; i < LIGHT_N; i++) {
+        const pl = realLights[i];
+        const l = nearScratch[i];
+        if (!l) { pl.intensity = 0; continue; }
+        const lit = l.mode === 2 ? l.lights[1].visible : true; // respect flicker
+        const inward = l.side < 0 ? 1 : -1;
+        pl.position.set(l.o.position.x + inward * 3.05, l.o.position.y + 12, l.o.position.z);
+        pl.color.copy(l.side < 0 ? cyanCol : magCol);
+        const t = Math.max(0, 1 - Math.abs(l.o.position.z - CAR_Z) / 60);
+        pl.intensity = lit ? t * t * REAL_I : 0;
       }
     },
   };
