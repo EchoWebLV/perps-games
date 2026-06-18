@@ -80,7 +80,7 @@ hud.setBalance(wallet.balance());
 createCarPicker(hudRoot, [
   { name: "DeLorean", url: "/models/car.glb?v=2" },
   { name: "Cybertruck", url: "/models/cybertruck.glb", scale: 1.3 },
-  { name: "Orion", url: "/models/orion.glb", yaw: Math.PI / 2 },
+  { name: "Orion", url: "/models/orion.glb", yaw: -Math.PI / 2 },
   { name: "Vaporwave", url: "/models/vaporwave.glb" },
   { name: "Flintstone", url: "/models/flinstone.glb", scale: 0.7 },
   { name: "Clown Car", url: "/models/clowncar.glb" },
