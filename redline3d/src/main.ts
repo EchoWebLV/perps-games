@@ -69,6 +69,7 @@ let throttle = 34; // 0..100 (starts ~50x)
 const GAS = 52, BRAKE = 78, COAST = 6;
 const game = { lev: niceLev(tToLev(throttle)), equity: 1 };
 let lastLivePrice = 0;
+let solSmooth = 0; // eased display price → a flowing minimap curve (raw price drives economics)
 
 // price history (minimap), coins, lateral steering, and the active round's entry
 const priceHist: number[] = [];
@@ -119,8 +120,10 @@ function frame() {
   const price = priceSource.price();
   const live = priceSource.live();
   if (live && price > 0) lastLivePrice = price;
-  hud.setPrice(price, live);
-  if (price > 0) { priceHist.push(price); if (priceHist.length > 300) priceHist.shift(); }
+  // ease the display price toward the latest tick → smooth, wave-like minimap line
+  if (price > 0) solSmooth = solSmooth ? solSmooth + (price - solSmooth) * 0.1 : price;
+  hud.setPrice(solSmooth || price, live);
+  if (solSmooth > 0) { priceHist.push(solSmooth); if (priceHist.length > 300) priceHist.shift(); }
 
   // spec §9: never settle P&L on a stale feed. Freeze equity at the last real
   // price when the feed is down so sim drift can't liquidate a live round.
