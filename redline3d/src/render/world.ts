@@ -136,8 +136,8 @@ export function createWorld(): World {
   const bulbGeo = new THREE.BoxGeometry(0.78, 0.16, 0.52);
   const coneGeo = new THREE.ConeGeometry(2.2, 8, 14, 1, true);
   // the pole itself glows a little in its side colour (like the original neon pillars)
-  const poleCyan = new THREE.MeshStandardMaterial({ color: "#0c0e18", metalness: 0.6, roughness: 0.5, emissive: "#27e7ff", emissiveIntensity: 0.55 });
-  const poleMag = new THREE.MeshStandardMaterial({ color: "#120814", metalness: 0.6, roughness: 0.5, emissive: "#ff39c0", emissiveIntensity: 0.55 });
+  const poleCyan = new THREE.MeshStandardMaterial({ color: "#0c0e18", metalness: 0.6, roughness: 0.5, emissive: "#27e7ff", emissiveIntensity: 1.05 });
+  const poleMag = new THREE.MeshStandardMaterial({ color: "#120814", metalness: 0.6, roughness: 0.5, emissive: "#ff39c0", emissiveIntensity: 1.05 });
   const bulbCyan = new THREE.MeshBasicMaterial({ color: "#d6fbff", fog: false });
   const bulbMag = new THREE.MeshBasicMaterial({ color: "#ffd6f6", fog: false });
   const stripCyan = new THREE.MeshBasicMaterial({ color: "#27e7ff", fog: false });
@@ -199,7 +199,7 @@ export function createWorld(): World {
   // a few REAL point-lights ride the lamps nearest the car, so the car + poles
   // actually get lit as lamps sweep past (the road/grid are custom shaders and
   // don't receive scene lights — the car catching the light is what sells it)
-  const LIGHT_N = 4; // 2 per side, on the lamps straddling the car
+  const LIGHT_N = 6; // 3 per side — enough that the cutoff lamp is already past the fade (dark)
   const realLights: THREE.PointLight[] = [];
   for (let i = 0; i < LIGHT_N; i++) {
     const pl = new THREE.PointLight(0xffffff, 0, 36, 2);
@@ -251,16 +251,22 @@ export function createWorld(): World {
       const byCar = (a: Lamp, b: Lamp) => Math.abs(a.o.position.z - CAR_Z) - Math.abs(b.o.position.z - CAR_Z);
       leftScratch.sort(byCar); rightScratch.sort(byCar);
       const setLight = (pl: THREE.PointLight, l: Lamp | undefined) => {
-        if (!l) { pl.intensity = 0; return; }
-        const lit = l.mode === 2 ? l.lights[1].visible : true; // respect flicker
-        const inward = l.side < 0 ? 1 : -1;
-        pl.position.set(l.o.position.x + inward * 3.05, l.o.position.y + 12, l.o.position.z);
-        pl.color.copy(l.side < 0 ? cyanCol : magCol);
-        const t = Math.max(0, 1 - Math.abs(l.o.position.z - CAR_Z) / 64);
-        pl.intensity = lit ? t * t * REAL_I : 0;
+        let target = 0;
+        if (l) {
+          const inward = l.side < 0 ? 1 : -1;
+          pl.position.set(l.o.position.x + inward * 3.05, l.o.position.y + 12, l.o.position.z);
+          pl.color.copy(l.side < 0 ? cyanCol : magCol);
+          const lit = l.mode === 2 ? l.lights[1].visible : true; // respect flicker
+          const t = Math.max(0, 1 - Math.abs(l.o.position.z - CAR_Z) / 64);
+          target = lit ? t * t * REAL_I : 0;
+        }
+        pl.intensity += (target - pl.intensity) * 0.3; // lerp smooths any reassignment / fade
       };
-      setLight(realLights[0], leftScratch[0]); setLight(realLights[1], leftScratch[1]);
-      setLight(realLights[2], rightScratch[0]); setLight(realLights[3], rightScratch[1]);
+      const PER = LIGHT_N / 2;
+      for (let i = 0; i < PER; i++) {
+        setLight(realLights[i], leftScratch[i]);
+        setLight(realLights[PER + i], rightScratch[i]);
+      }
     },
   };
 }
