@@ -1,0 +1,58 @@
+#!/usr/bin/env bash
+# Redline 3D — APK build pipeline (Capacitor + Android Gradle).
+#
+#   ./scripts/build-apk.sh            build a debug APK
+#   ./scripts/build-apk.sh --install  build + adb install -r to a connected device
+#
+# Toolchain paths default to the Homebrew install; override by exporting
+# JAVA_HOME / ANDROID_HOME before running.
+set -euo pipefail
+cd "$(dirname "$0")/.."   # -> redline3d/
+
+export JAVA_HOME="${JAVA_HOME:-/opt/homebrew/opt/openjdk@21/libexec/openjdk.jdk/Contents/Home}"
+export ANDROID_HOME="${ANDROID_HOME:-/opt/homebrew/share/android-commandlinetools}"
+export ANDROID_SDK_ROOT="$ANDROID_HOME"
+export PATH="$JAVA_HOME/bin:$ANDROID_HOME/platform-tools:$PATH"
+
+INSTALL=0
+for arg in "$@"; do
+  if [ "$arg" = "--install" ]; then INSTALL=1; fi
+done
+
+if [ ! -x "$JAVA_HOME/bin/java" ]; then
+  echo "✗ JDK not found at JAVA_HOME=$JAVA_HOME — see BUILD_APK.md (one-time setup)." >&2
+  exit 1
+fi
+if [ ! -x "$ANDROID_HOME/platform-tools/adb" ]; then
+  echo "✗ Android SDK not found at ANDROID_HOME=$ANDROID_HOME — see BUILD_APK.md." >&2
+  exit 1
+fi
+
+# Gradle locates the SDK via local.properties (gitignored); write it if missing.
+[ -f android/local.properties ] || echo "sdk.dir=$ANDROID_HOME" > android/local.properties
+
+echo "▶ 1/3  building web bundle (vite)…"
+npm run build
+
+echo "▶ 2/3  syncing web assets into the android project…"
+npx --yes cap sync android
+
+echo "▶ 3/3  assembling debug APK (gradle)…"
+( cd android && ./gradlew --console=plain assembleDebug )
+
+APK="android/app/build/outputs/apk/debug/app-debug.apk"
+echo ""
+echo "✅ APK built: $(pwd)/$APK"
+ls -lh "$APK"
+
+if [ "$INSTALL" = "1" ]; then
+  echo ""
+  echo "▶ installing to connected device…"
+  if [ -z "$(adb devices | sed -n '2p')" ]; then
+    echo "✗ no device detected. Enable USB debugging on the Seeker, plug it in," >&2
+    echo "  approve the RSA prompt, then re-run with --install." >&2
+    exit 1
+  fi
+  adb install -r "$APK"
+  echo "✅ installed. Launch 'Redline 3D' from the Seeker app drawer."
+fi
