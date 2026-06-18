@@ -19,6 +19,7 @@ import { createPickups } from "./render/pickups";
 import { createCarPicker } from "./ui/carpicker";
 import { createFx } from "./ui/fx";
 import { createJoystick } from "./ui/joystick";
+import { createAudio } from "./core/audio";
 import type { Snapshot } from "./core/types";
 
 const canvas = document.getElementById("gl") as HTMLCanvasElement;
@@ -72,6 +73,7 @@ const controls = createControls(hud.ctrlMount, hud.goMount, hud.pedalMount);
 const minimap = createMinimap(hud.miniCanvas);
 const fx = createFx();
 const joystick = createJoystick();
+const audio = createAudio();
 hud.setBalance(wallet.balance());
 
 // car picker (test) — swap the GLB model live; easily hideable
@@ -113,6 +115,7 @@ hud.setActiveAsset(asset);
 let holding = false, touchGas = false, touchBrake = false;
 let anchorX = 0, anchorY = 0, anchorCarX = 0;
 canvas.addEventListener("pointerdown", (e) => {
+  audio.resume(); // unlock audio on the first touch (autoplay policy)
   holding = true; touchGas = true; touchBrake = false;
   anchorX = e.clientX; anchorY = e.clientY; anchorCarX = carXTarget;
   joystick.show(e.clientX, e.clientY); // white ring at the thumb
@@ -139,11 +142,17 @@ function endRound(snap: Snapshot) {
   controls.setLive(false, "GO!");
   hud.setTimer(CONFIG.MAXSEC, false);
   hud.setMultiplier(snap.equity, snap.phase);
-  if (snap.phase === "liquidated") { hud.setStatus(`💥 Liquidated at ${snap.lev}×. Lost your stake.`); fx.liquidate(); }
-  else { hud.setStatus(`Settled at ×${snap.equity.toFixed(2)} — banked $${snap.payout.toFixed(2)} (${snap.reason}).`); fx.confetti(); }
+  if (snap.phase === "liquidated") {
+    hud.setStatus(`💥 Liquidated at ${snap.lev}×. Lost your stake.`);
+    fx.liquidate(); audio.liquidate(); navigator.vibrate?.([30, 40, 30, 40, 90]);
+  } else {
+    hud.setStatus(`Settled at ×${snap.equity.toFixed(2)} — banked $${snap.payout.toFixed(2)} (${snap.reason}).`);
+    fx.confetti(); audio.cashout(); navigator.vibrate?.(35);
+  }
 }
 
 controls.onLaunch(() => {
+  audio.resume(); // unlock audio if GO! is the first interaction
   const stake = controls.stake();
   if (!wallet.canAfford(stake)) { hud.setStatus("Not enough balance — lower your stake."); return; }
   const entry = priceSource.price();
@@ -188,6 +197,7 @@ function frame() {
   throttle = Math.max(0, Math.min(100, throttle));
   game.lev = niceLev(tToLev(throttle));
   tach.setThrottle(throttle / 100, game.lev);
+  audio.engine(throttle / 100, gasOn || engine.getPhase() === "live"); // rev drone tracks leverage
   if (engine.getPhase() === "live") engine.setLeverage(game.lev, roundPrice);
 
   if (engine.getPhase() === "live") {
