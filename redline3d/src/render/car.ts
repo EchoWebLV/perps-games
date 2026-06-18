@@ -13,7 +13,7 @@ const WIN = "#2ee6a6";
 const LOSE = "#ff5067";
 
 const MODEL_URL = "/models/car.glb?v=2"; // bump to bust the browser cache when the model changes
-const TARGET_LEN = 9.36;      // scale the model so its longest horizontal axis ≈ our footprint (+30%)
+const TARGET_LEN = 11.23;     // scale the model so its longest horizontal axis ≈ our footprint (+30% then +20%)
 const MODEL_YAW = Math.PI;    // spin so the car faces down the road (-Z); tune in π/2 steps if needed
 
 /**
@@ -82,7 +82,8 @@ export function createCar(): Car {
     const col = phaseS === "idle" ? IDLE : eqS >= 1 ? WIN : LOSE;
     glow.color.set(col);
     if (modelMats) {
-      const inten = phaseS === "idle" ? 0.1 : 0.34;
+      // keep the tint a faint hint so the stainless steel stays visible, not painted
+      const inten = phaseS === "idle" ? 0.03 : 0.06;
       for (const m of modelMats) { m.emissive.set(col); m.emissiveIntensity = inten; }
     } else {
       bodyMat.emissive.set(col);
@@ -133,7 +134,7 @@ export function createCar(): Car {
     },
     update(dt) {
       t += dt;
-      glow.intensity = 8 + Math.sin(t * 3) * 1.5; // subtle underglow breathing
+      glow.intensity = 2 + Math.sin(t * 3) * 0.5; // faint underglow breathing
     },
   };
 }
