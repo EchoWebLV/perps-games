@@ -3,6 +3,7 @@ export interface Hud {
   tachMount: HTMLElement;
   ctrlMount: HTMLElement;
   goMount: HTMLElement;
+  pedalMount: HTMLElement;
   setPrice(px: number, live: boolean): void;
   setBalance(b: number): void;
   setMultiplier(equity: number, phase: "idle" | "live" | "settled" | "liquidated"): void;
@@ -25,12 +26,14 @@ export function createHud(parent: HTMLElement): Hud {
         <div id="buffill" style="height:100%;width:100%;background:#2ee6a6;transition:width .08s linear,background .25s"></div></div>
     </div>
 
-    <div class="pe" id="dock" style="position:absolute;left:50%;transform:translateX(-50%);bottom:0;width:min(448px,97%);
-      padding:8px 12px max(10px,env(safe-area-inset-bottom));display:flex;flex-direction:column;gap:8px;
-      background:linear-gradient(0deg,rgba(5,3,13,.66),rgba(5,3,13,.16) 70%,transparent)">
+    <div class="pe" id="dock" style="position:absolute;left:50%;transform:translateX(-50%);bottom:max(28px,env(safe-area-inset-bottom));width:min(448px,96%);
+      display:flex;flex-direction:column;gap:8px">
       <div id="status" style="text-align:center;font-size:10.5px;color:#cdd6f5;min-height:14px;text-shadow:0 1px 8px rgba(0,0,0,.7)"></div>
-      <div style="display:flex;gap:10px;align-items:center">
-        <div id="tachMount" style="flex:none;width:150px"></div>
+      <div style="display:flex;gap:10px;align-items:flex-end">
+        <div style="flex:none;width:140px;display:flex;flex-direction:column">
+          <div id="tachMount"></div>
+          <div id="pedalMount"></div>
+        </div>
         <div id="ctrlMount" style="flex:1;display:flex;flex-direction:column;gap:7px;justify-content:center"></div>
       </div>
       <div id="goMount"></div>
@@ -45,6 +48,7 @@ export function createHud(parent: HTMLElement): Hud {
     tachMount: q("#tachMount"),
     ctrlMount: q("#ctrlMount"),
     goMount: q("#goMount"),
+    pedalMount: q("#pedalMount"),
     setPrice(p, live) { px.textContent = "$" + (p ? p.toFixed(2) : "—"); feed.textContent = live ? "live" : "sim"; feed.style.color = live ? "#2ee6a6" : "#ffd166"; },
     setBalance(b) { bal.textContent = "$" + b.toFixed(2); },
     setMultiplier(equity, phase) {

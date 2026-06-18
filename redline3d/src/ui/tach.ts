@@ -1,9 +1,8 @@
-import { tToLev, niceLev } from "../core/leverage";
 import { CONFIG } from "../core/config";
 
 export interface Tach {
-  lev(): number;
-  onChange(cb: (lev: number) => void): void;
+  /** drive the gauge from the throttle (0..1) + current leverage */
+  setThrottle(frac: number, lev: number): void;
 }
 
 const CX = 160, CY = 170, R = 140;
@@ -29,9 +28,8 @@ function gcol(gfrac: number): string {
   return gfrac >= lf(REDLINE) ? "#ff4d6d" : gfrac >= 0.4 ? "#ffd166" : "#2ee6a6";
 }
 
-/** Curved redline tachometer used to set leverage. Drag across the arc. */
+/** Curved redline tachometer — a live readout of the throttle/leverage. */
 export function createTach(mount: HTMLElement): Tach {
-  mount.style.touchAction = "none";
   mount.innerHTML = `
     <svg viewBox="0 0 320 184" style="width:100%;display:block">
       <path d="${arc(0, 1, R, 56)}" fill="none" stroke="#1a2036" stroke-width="16" stroke-linecap="round"/>
@@ -40,55 +38,25 @@ export function createTach(mount: HTMLElement): Tach {
       <line id="tneedle" x1="${CX}" y1="${CY}" x2="${CX}" y2="40" stroke="#fff" stroke-width="4" stroke-linecap="round"/>
       <circle id="thub" cx="${CX}" cy="${CY}" r="11" fill="#0a0820" stroke="#2ee6a6" stroke-width="3"/>
       <text id="tval" x="${CX}" y="150" text-anchor="middle" font-family="ui-monospace,monospace" font-size="46" font-weight="900" fill="#2ee6a6">50×</text>
-    </svg>
-    <div style="text-align:center;font-size:9px;letter-spacing:.12em;color:#6a76a0;font-weight:800;margin-top:-2px">LEVERAGE · drag</div>`;
-  const svg = mount.querySelector("svg") as SVGSVGElement;
+    </svg>`;
   const fill = mount.querySelector("#tfill") as SVGPathElement;
   const needle = mount.querySelector("#tneedle") as SVGLineElement;
   const hub = mount.querySelector("#thub") as SVGCircleElement;
   const val = mount.querySelector("#tval") as SVGTextElement;
 
-  let gfrac = 0.34;
-  let lev = niceLev(tToLev(gfrac * 100));
-  let cb: (lev: number) => void = () => {};
-
-  function render() {
-    const c = gcol(gfrac);
-    fill.setAttribute("d", arc(0, Math.max(0.001, gfrac), R, Math.max(2, Math.round(gfrac * 56))));
-    fill.setAttribute("stroke", c);
-    const tip = pt(gfrac, R - 34);
-    needle.setAttribute("x2", tip[0].toFixed(1));
-    needle.setAttribute("y2", tip[1].toFixed(1));
-    needle.setAttribute("stroke", c);
-    hub.setAttribute("stroke", c);
-    val.textContent = lev + "×";
-    val.setAttribute("fill", c);
-  }
-  function setFrac(f: number) {
-    gfrac = Math.max(0, Math.min(1, f));
-    const newLev = niceLev(tToLev(gfrac * 100));
-    render();
-    if (newLev !== lev) {
-      lev = newLev;
-      render();
-      cb(lev);
-    }
-  }
-  function fromPoint(clientX: number, clientY: number) {
-    const r = svg.getBoundingClientRect();
-    if (!r.width) return;
-    const vx = ((clientX - r.left) / r.width) * 320;
-    const vy = ((clientY - r.top) / r.height) * 184;
-    let ang = Math.atan2(CY - vy, vx - CX);
-    if (ang < 0) ang = vx < CX ? Math.PI : 0;
-    setFrac(1 - ang / Math.PI);
-  }
-
-  let drag = false;
-  svg.addEventListener("pointerdown", (e) => { drag = true; fromPoint(e.clientX, e.clientY); e.preventDefault(); });
-  addEventListener("pointermove", (e) => { if (drag) fromPoint(e.clientX, e.clientY); });
-  addEventListener("pointerup", () => { drag = false; });
-  render();
-
-  return { lev: () => lev, onChange: (fn) => (cb = fn) };
+  return {
+    setThrottle(frac, lev) {
+      const f = Math.max(0, Math.min(1, frac));
+      const c = gcol(f);
+      fill.setAttribute("d", arc(0, Math.max(0.001, f), R, Math.max(2, Math.round(f * 56))));
+      fill.setAttribute("stroke", c);
+      const tip = pt(f, R - 34);
+      needle.setAttribute("x2", tip[0].toFixed(1));
+      needle.setAttribute("y2", tip[1].toFixed(1));
+      needle.setAttribute("stroke", c);
+      hub.setAttribute("stroke", c);
+      val.textContent = lev + "×";
+      val.setAttribute("fill", c);
+    },
+  };
 }

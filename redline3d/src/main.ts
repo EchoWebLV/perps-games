@@ -11,6 +11,7 @@ import { connectFeed } from "./core/feed";
 import { createPriceSource } from "./core/price-source";
 import { RoundEngine } from "./core/round";
 import { SimSettlement } from "./core/settlement";
+import { niceLev, tToLev } from "./core/leverage";
 import type { Snapshot } from "./core/types";
 
 const canvas = document.getElementById("gl") as HTMLCanvasElement;
@@ -52,16 +53,14 @@ addEventListener("pagehide", () => priceSource.stop());
 // ui
 const hud = createHud(hudRoot);
 const tach = createTach(hud.tachMount);
-const controls = createControls(hud.ctrlMount, hud.goMount);
+const controls = createControls(hud.ctrlMount, hud.goMount, hud.pedalMount);
 hud.setBalance(wallet.balance());
 
-const game = { lev: tach.lev(), equity: 1 };
+// throttle = the accelerator: gas revs it up, brake slows it, release coasts down SLOWLY
+let throttle = 34; // 0..100 (starts ~50x)
+const GAS = 52, BRAKE = 78, COAST = 6;
+const game = { lev: niceLev(tToLev(throttle)), equity: 1 };
 let lastLivePrice = 0;
-
-tach.onChange((lev) => {
-  game.lev = lev;
-  if (engine.getPhase() === "live") engine.setLeverage(lev, priceSource.price());
-});
 
 function endRound(snap: Snapshot) {
   wallet.credit(snap.payout);
@@ -81,9 +80,9 @@ controls.onLaunch(() => {
   if (!entry) { hud.setStatus("Waiting for the SOL feed…"); return; }
   wallet.debit(stake);
   hud.setBalance(wallet.balance());
-  engine.launch({ dir: controls.dir(), lev: tach.lev(), stake, entryRaw: entry, startMs: Date.now() });
+  engine.launch({ dir: controls.dir(), lev: game.lev, stake, entryRaw: entry, startMs: Date.now() });
   controls.setLive(true, "CASH OUT");
-  hud.setStatus(`Riding ${controls.dir() > 0 ? "LONG" : "SHORT"} SOL at ${tach.lev()}× from $${entry.toFixed(2)}.`);
+  hud.setStatus(`Riding ${controls.dir() > 0 ? "LONG" : "SHORT"} SOL at ${game.lev}× from $${entry.toFixed(2)}.`);
 });
 
 controls.onCashout(() => {
@@ -102,6 +101,15 @@ function frame() {
   // price when the feed is down so sim drift can't liquidate a live round.
   const roundPrice = live ? price : lastLivePrice || price;
 
+  // accelerator with momentum: gas revs up, brake slows, release coasts down slowly
+  if (controls.gas()) throttle += GAS * dt;
+  else if (controls.brake()) throttle -= BRAKE * dt;
+  else throttle -= COAST * dt;
+  throttle = Math.max(0, Math.min(100, throttle));
+  game.lev = niceLev(tToLev(throttle));
+  tach.setThrottle(throttle / 100, game.lev);
+  if (engine.getPhase() === "live") engine.setLeverage(game.lev, roundPrice);
+
   if (engine.getPhase() === "live") {
     const snap = engine.tick(roundPrice, Date.now());
     game.equity = snap.equity;
@@ -118,7 +126,7 @@ function frame() {
     car.setEquity("idle", 1);
   }
 
-  const speed = chase.update(ctx.camera, dt, game.lev, game.equity, engine.getPhase() === "live");
+  const speed = chase.update(ctx.camera, dt, throttle / 100, game.equity, engine.getPhase() === "live");
   world.update(dt, speed);
   car.update(dt);
 

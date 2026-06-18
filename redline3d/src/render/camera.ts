@@ -1,9 +1,8 @@
 import * as THREE from "three";
-import { levFrac } from "../core/leverage";
 
 export interface ChaseCam {
-  /** call each frame; returns the road speed (world units/sec) to scroll the world */
-  update(camera: THREE.PerspectiveCamera, dt: number, lev: number, equity: number, live: boolean): number;
+  /** call each frame; speedFrac is the throttle 0..1. returns road speed (world units/sec). */
+  update(camera: THREE.PerspectiveCamera, dt: number, speedFrac: number, equity: number, live: boolean): number;
   /** add an instantaneous camera shake (0..1+), e.g. for cinematics */
   shake(amount: number): void;
 }
@@ -15,10 +14,11 @@ export function createChaseCam(): ChaseCam {
   let t = 0;
   let kick = 0;
   return {
-    update(camera, dt, lev, equity, live) {
+    update(camera, dt, speedFrac, equity, live) {
       t += dt;
-      // road speed (units/sec): slow at min lev, very fast near the redline; winning revs harder
-      const base = 44 + Math.pow(levFrac(lev), 1.5) * 360; // ~44 .. 404
+      // road speed (units/sec): coasts smoothly with the throttle; winning revs harder
+      const f = Math.max(0, Math.min(1, speedFrac));
+      const base = 44 + Math.pow(f, 1.5) * 360; // ~44 .. 404
       const boost = live ? Math.max(0.9, Math.min(1.7, 0.9 + Math.max(0, equity) * 0.09)) : 1;
       const speed = base * boost;
 

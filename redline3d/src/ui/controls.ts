@@ -1,6 +1,8 @@
 export interface Controls {
   dir(): 1 | -1;
   stake(): number;
+  gas(): boolean;
+  brake(): boolean;
   setLive(live: boolean, label: string, warn?: boolean): void;
   onLaunch(cb: () => void): void;
   onCashout(cb: () => void): void;
@@ -8,8 +10,9 @@ export interface Controls {
 
 const seg = "background:rgba(8,6,20,.62);border:1px solid rgba(120,140,210,.22);border-radius:13px;padding:7px 9px";
 const lab = "font-size:9px;letter-spacing:.12em;color:#6a76a0;font-weight:800;display:block;margin-bottom:5px";
+const pedal = "flex:1;text-align:center;border-radius:11px;font-weight:900;font-size:18px;padding:9px 0;cursor:pointer;user-select:none;border:1px solid rgba(120,140,210,.3);color:#cdd6f5;background:rgba(8,6,20,.5)";
 
-export function createControls(ctrlMount: HTMLElement, goMount: HTMLElement): Controls {
+export function createControls(ctrlMount: HTMLElement, goMount: HTMLElement, pedalMount: HTMLElement): Controls {
   ctrlMount.innerHTML = `
     <div style="${seg}"><span style="${lab}">YOUR CALL</span>
       <div style="display:flex;gap:6px">
@@ -22,13 +25,20 @@ export function createControls(ctrlMount: HTMLElement, goMount: HTMLElement): Co
         <div id="sval" style="flex:1;text-align:center;font-weight:900;font-size:15px">$1.00</div>
         <div id="sup" style="width:30px;height:30px;border:1px solid rgba(120,140,210,.3);border-radius:9px;text-align:center;line-height:30px;font-size:17px;font-weight:800;color:#eaf0ff">+</div>
       </div></div>`;
+  pedalMount.innerHTML = `
+    <div style="display:flex;gap:6px;margin-top:6px">
+      <div id="brake" style="${pedal}">▼</div>
+      <div id="gas" style="${pedal};flex:1.6;border-color:#2ee6a6;color:#2ee6a6">▲ GAS</div>
+    </div>
+    <div style="text-align:center;font-size:9px;letter-spacing:.12em;color:#6a76a0;font-weight:800;margin-top:3px">HOLD GAS TO REV · ↑↓</div>`;
   goMount.innerHTML = `
     <button id="go" style="width:100%;border:none;border-radius:15px;padding:15px;font-size:18px;font-weight:900;letter-spacing:.04em;text-transform:uppercase;color:#06121a;cursor:pointer;background:linear-gradient(180deg,#43f0b0,#13c98a);box-shadow:0 8px 26px rgba(46,230,166,.36)">🚀 LAUNCH</button>`;
 
-  const q = (s: string) => (ctrlMount.querySelector(s) || goMount.querySelector(s)) as HTMLElement;
+  const q = (s: string) => (ctrlMount.querySelector(s) || goMount.querySelector(s) || pedalMount.querySelector(s)) as HTMLElement;
   let d: 1 | -1 = 1, stake = 1, live = false;
+  let gasOn = false, brakeOn = false;
   let launchCb = () => {}, cashCb = () => {};
-  const long = q("#long"), short = q("#short"), sval = q("#sval"), go = q("#go");
+  const long = q("#long"), short = q("#short"), sval = q("#sval"), go = q("#go"), gasBtn = q("#gas"), brakeBtn = q("#brake");
 
   const setDir = (nd: 1 | -1) => {
     if (live) return;
@@ -46,9 +56,34 @@ export function createControls(ctrlMount: HTMLElement, goMount: HTMLElement): Co
   q("#sdn").onclick = () => { if (!live) { stake = Math.max(1, stake - 1); sval.textContent = "$" + stake.toFixed(2); } };
   go.onclick = () => (live ? cashCb() : launchCb());
 
+  // hold-to-accelerate pedals (pointer + keyboard)
+  const hold = (el: HTMLElement, set: (v: boolean) => void) => {
+    el.addEventListener("pointerdown", (e) => { set(true); el.setPointerCapture(e.pointerId); e.preventDefault(); });
+    el.addEventListener("pointerup", () => set(false));
+    el.addEventListener("pointercancel", () => set(false));
+    el.addEventListener("pointerleave", () => set(false));
+  };
+  hold(gasBtn, (v) => (gasOn = v));
+  hold(brakeBtn, (v) => (brakeOn = v));
+  addEventListener("keydown", (e) => {
+    const k = e.key;
+    if (k === "ArrowUp" || k === "w" || k === "W") { gasOn = true; e.preventDefault(); }
+    else if (k === "ArrowDown" || k === "s" || k === "S") { brakeOn = true; e.preventDefault(); }
+    else if (k === "ArrowLeft" || k === "a" || k === "A") setDir(1);
+    else if (k === "ArrowRight" || k === "d" || k === "D") setDir(-1);
+    else if (k === " " || k === "Enter") { go.click(); e.preventDefault(); }
+  });
+  addEventListener("keyup", (e) => {
+    const k = e.key;
+    if (k === "ArrowUp" || k === "w" || k === "W") gasOn = false;
+    else if (k === "ArrowDown" || k === "s" || k === "S") brakeOn = false;
+  });
+
   return {
     dir: () => d,
     stake: () => stake,
+    gas: () => gasOn,
+    brake: () => brakeOn,
     setLive(l, label, warn) {
       live = l;
       go.textContent = label;
