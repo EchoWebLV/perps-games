@@ -74,12 +74,49 @@ export function createWorld(): World {
   starGeo.setAttribute("position", new THREE.BufferAttribute(sp, 3));
   group.add(new THREE.Points(starGeo, new THREE.PointsMaterial({ color: "#cfe0ff", size: 2.4, sizeAttenuation: true, fog: false, transparent: true, opacity: 0.85 })));
 
-  // mountains
-  const mtnMat = new THREE.MeshBasicMaterial({ color: "#2a0f3a", fog: false });
+  // mountains — a self-lit shader gives them real form instead of flat cutouts:
+  // a dark base rising to a warm, sun-lit peak, crisp low-poly facets (flat
+  // normals), and a neon rim on the silhouette that bloom turns into a glow.
+  // Self-contained, so it never touches the car / lamp lighting.
+  const mtnMat = new THREE.ShaderMaterial({
+    fog: false,
+    uniforms: {
+      uSun: { value: new THREE.Vector3(0, 74, -860) }, // tracks the sun behind the range
+      uBase: { value: new THREE.Color("#120620") },    // near-black foot
+      uPeak: { value: new THREE.Color("#5d1c44") },    // muted magenta toward the top
+      uRim: { value: new THREE.Color("#c64f9e") },     // soft silhouette edge
+    },
+    vertexShader: `
+      varying vec3 vPosW; varying vec3 vN; varying float vY;
+      void main(){
+        vec4 wp = modelMatrix * vec4(position, 1.0);
+        vPosW = wp.xyz; vY = wp.y;
+        vN = normalize(mat3(modelMatrix) * normal);
+        gl_Position = projectionMatrix * viewMatrix * wp;
+      }`,
+    fragmentShader: `
+      varying vec3 vPosW; varying vec3 vN; varying float vY;
+      uniform vec3 uSun, uBase, uPeak, uRim;
+      void main(){
+        vec3 n = normalize(vN);
+        float hf = clamp((vY + 8.0) / 135.0, 0.0, 1.0);          // 0 foot .. 1 peak
+        vec3 col = mix(uBase, uPeak, hf * hf);
+        vec3 toSun = normalize(uSun - vPosW);
+        col += uPeak * max(dot(n, toSun), 0.0) * 0.18;           // warm kick on sun-facing facets
+        col *= 0.5 + 0.4 * (0.5 + 0.5 * dot(n, vec3(0.35, 0.45, 0.82))); // facet shading
+        vec3 viewDir = normalize(cameraPosition - vPosW);
+        float rim = pow(1.0 - max(dot(n, viewDir), 0.0), 2.8);   // glowing silhouette edge
+        col += uRim * rim * 0.3;
+        gl_FragColor = vec4(col, 1.0);
+      }`,
+  });
   for (let i = 0; i < 12; i++) {
     const h = 90 + Math.random() * 90;
     const r = 90 + Math.random() * 60;
-    const c = new THREE.Mesh(new THREE.ConeGeometry(r, h, 4), mtnMat);
+    // non-indexed + recomputed normals → flat per-facet shading (crisp low-poly look)
+    const geo = new THREE.ConeGeometry(r, h, 4).toNonIndexed();
+    geo.computeVertexNormals();
+    const c = new THREE.Mesh(geo, mtnMat);
     c.position.set(-420 + i * 78 + (Math.random() - 0.5) * 30, h / 2 - 8, -820 + (Math.random() - 0.5) * 50);
     c.rotation.y = Math.random() * Math.PI;
     group.add(c);

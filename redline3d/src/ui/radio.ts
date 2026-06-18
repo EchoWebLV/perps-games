@@ -24,8 +24,8 @@ export function createRadio(parent: HTMLElement): Radio {
   btn.setAttribute("aria-label", "Toggle music");
   btn.style.cssText = [
     "position:absolute",
-    "top:calc(50% - 71px)", // 50px above the menu hamburger
-    "right:max(12px,env(safe-area-inset-right))",
+    "top:144px", // top-right, tucked under the minimap, just left of the menu
+    "right:max(62px,calc(env(safe-area-inset-right) + 50px))",
     "z-index:8",
     "width:42px", "height:42px", "padding:0",
     "display:grid", "place-items:center",

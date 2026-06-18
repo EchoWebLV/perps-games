@@ -11,7 +11,7 @@ export function setHudMenuMode(parent: HTMLElement, menuRoot: HTMLElement, open:
 export function createCarPicker(parent: HTMLElement, cars: CarOption[], onPick: (c: CarOption) => void): void {
   const wrap = document.createElement("div");
   wrap.className = "pe";
-  wrap.style.cssText = "position:absolute;top:calc(50% - 21px);right:max(12px,env(safe-area-inset-right));z-index:8;display:block";
+  wrap.style.cssText = "position:absolute;top:144px;right:max(12px,env(safe-area-inset-right));z-index:8;display:block";
 
   const overlay = document.createElement("div");
   overlay.style.cssText = [
