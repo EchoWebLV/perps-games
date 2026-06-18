@@ -1,5 +1,5 @@
 import { describe, expect, test } from "vitest";
-import { addCoins, coinLabel } from "./coins";
+import { addCoins, coinLabel, coinPulseClass } from "./coins";
 
 describe("coins", () => {
   test("adds collected pickups to the current total", () => {
@@ -12,5 +12,10 @@ describe("coins", () => {
 
   test("formats the coin counter label", () => {
     expect(coinLabel(12)).toBe("12");
+  });
+
+  test("returns a pulse class only when the coin total increases", () => {
+    expect(coinPulseClass(3, 4)).toBe("coin-pop");
+    expect(coinPulseClass(4, 4)).toBe("");
   });
 });
