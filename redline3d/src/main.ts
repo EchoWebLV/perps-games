@@ -20,6 +20,7 @@ import { createCarPicker } from "./ui/carpicker";
 import { createFx } from "./ui/fx";
 import { createJoystick } from "./ui/joystick";
 import { createAudio } from "./core/audio";
+import { createRadio } from "./ui/radio";
 import type { Snapshot } from "./core/types";
 
 const canvas = document.getElementById("gl") as HTMLCanvasElement;
@@ -86,6 +87,9 @@ createCarPicker(hudRoot, [
   { name: "Clown Car", url: "/models/clowncar.glb" },
 ], (c) => car.setModel(c.url, c.scale, c.yaw));
 
+// synthwave radio — streams on the first gesture, toggle button stacked above the menu
+const radio = createRadio(hudRoot);
+
 // throttle = the accelerator: gas revs it up, brake slows it, release coasts down SLOWLY
 let throttle = 34; // 0..100 (starts ~50x)
 const GAS = 52, BRAKE = 78, COAST = 6;
@@ -117,7 +121,7 @@ hud.setActiveAsset(asset);
 let holding = false, touchGas = false, touchBrake = false;
 let anchorX = 0, anchorY = 0, anchorCarX = 0;
 canvas.addEventListener("pointerdown", (e) => {
-  audio.resume(); // unlock audio on the first touch (autoplay policy)
+  audio.resume(); radio.resume(); // unlock audio + start the radio on the first touch
   holding = true; touchGas = true; touchBrake = false;
   anchorX = e.clientX; anchorY = e.clientY; anchorCarX = carXTarget;
   joystick.show(e.clientX, e.clientY); // white ring at the thumb
@@ -154,7 +158,7 @@ function endRound(snap: Snapshot) {
 }
 
 controls.onLaunch(() => {
-  audio.resume(); // unlock audio if GO! is the first interaction
+  audio.resume(); radio.resume(); // unlock audio + radio if GO! is the first interaction
   const stake = controls.stake();
   if (!wallet.canAfford(stake)) { hud.setStatus("Not enough balance — lower your stake."); return; }
   const entry = priceSource.price();
