@@ -136,7 +136,7 @@ function endRound(snap: Snapshot) {
   hud.setBalance(wallet.balance());
   game.equity = 1;
   chase.setDriving(false); // blend back to the idle showroom orbit
-  controls.setLive(false, "🚀 LAUNCH");
+  controls.setLive(false, "GO!");
   hud.setBuffer(0, false);
   hud.setTimer(CONFIG.MAXSEC, false);
   hud.setMultiplier(snap.equity, snap.phase);

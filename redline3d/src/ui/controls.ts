@@ -27,7 +27,7 @@ export function createControls(ctrlMount: HTMLElement, goMount: HTMLElement, ped
       </div></div>`;
   pedalMount.innerHTML = `
     <div class="lbl" style="text-align:center;margin-top:8px;line-height:1.45;opacity:.8">hold road to drive<br>drag · pull back = brake</div>`;
-  goMount.innerHTML = `<button id="go" class="cta">Launch</button>`;
+  goMount.innerHTML = `<button id="go" class="cta">GO!</button>`;
 
   const q = (s: string) => (ctrlMount.querySelector(s) || goMount.querySelector(s) || pedalMount.querySelector(s)) as HTMLElement;
   let d: 1 | -1 = 1, stake = 1, live = false;
