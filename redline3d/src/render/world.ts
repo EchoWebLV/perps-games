@@ -14,12 +14,21 @@ const PLANE_Z = -900;     // grid/road plane center in z
 const PYLON_BASE_Y = 9;
 
 function makeSun(): THREE.Group {
+  // a proper sliced retro sun: a circle cut by horizontal gaps, widest in the
+  // middle, narrowing top + bottom, with a yellow→magenta gradient
   const g = new THREE.Group();
-  const colors = ["#ffe24a", "#ffd24a", "#ffb24a", "#ff8a4a", "#ff5a6a", "#ff3a8a", "#d83b6a"];
-  for (let i = 0; i < colors.length; i++) {
-    const w = 120 - i * 11;
-    const bar = new THREE.Mesh(new THREE.PlaneGeometry(w, 6), new THREE.MeshBasicMaterial({ color: colors[i], fog: false }));
-    bar.position.set(0, 78 - i * 9, -780);
+  const R = 58, CY = 62, Z = -780, N = 15;
+  const top = new THREE.Color("#fff27a"), mid = new THREE.Color("#ff7a3c"), bot = new THREE.Color("#ff2d9a");
+  for (let i = 0; i < N; i++) {
+    const t = (i + 0.5) / N;              // 0 = top, 1 = bottom
+    const yy = R - t * 2 * R;             // +R .. -R
+    const w = 2 * Math.sqrt(Math.max(0.001, R * R - yy * yy));
+    const barH = (2 * R / N) * 0.7;       // leaves a gap → the "slices"
+    const c = new THREE.Color();
+    if (t < 0.5) c.lerpColors(top, mid, t / 0.5);
+    else c.lerpColors(mid, bot, (t - 0.5) / 0.5);
+    const bar = new THREE.Mesh(new THREE.PlaneGeometry(w, barH), new THREE.MeshBasicMaterial({ color: c, fog: false }));
+    bar.position.set(0, CY + yy, Z);
     g.add(bar);
   }
   return g;
