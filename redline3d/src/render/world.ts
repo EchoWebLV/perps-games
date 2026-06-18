@@ -135,7 +135,9 @@ export function createWorld(): World {
   const houseGeo = new THREE.BoxGeometry(1.0, 0.55, 0.72);
   const bulbGeo = new THREE.BoxGeometry(0.78, 0.16, 0.52);
   const coneGeo = new THREE.ConeGeometry(2.2, 8, 14, 1, true);
-  const poleMat = new THREE.MeshStandardMaterial({ color: "#0c0e18", metalness: 0.7, roughness: 0.45, emissive: "#06070d", emissiveIntensity: 0.5 });
+  // the pole itself glows a little in its side colour (like the original neon pillars)
+  const poleCyan = new THREE.MeshStandardMaterial({ color: "#0c0e18", metalness: 0.6, roughness: 0.5, emissive: "#27e7ff", emissiveIntensity: 0.55 });
+  const poleMag = new THREE.MeshStandardMaterial({ color: "#120814", metalness: 0.6, roughness: 0.5, emissive: "#ff39c0", emissiveIntensity: 0.55 });
   const bulbCyan = new THREE.MeshBasicMaterial({ color: "#d6fbff", fog: false });
   const bulbMag = new THREE.MeshBasicMaterial({ color: "#ffd6f6", fog: false });
   const stripCyan = new THREE.MeshBasicMaterial({ color: "#27e7ff", fog: false });
@@ -172,6 +174,7 @@ export function createWorld(): World {
     for (const side of [-1, 1]) {
       const left = side < 0;
       const inward = -side; // arm reaches in over the road
+      const poleMat = left ? poleCyan : poleMag;
       const o = new THREE.Group();
       const pole = new THREE.Mesh(poleGeo, poleMat); pole.position.y = 6.5;
       const foot = new THREE.Mesh(footGeo, poleMat); foot.position.y = 0.4;
@@ -196,7 +199,7 @@ export function createWorld(): World {
   // a few REAL point-lights ride the lamps nearest the car, so the car + poles
   // actually get lit as lamps sweep past (the road/grid are custom shaders and
   // don't receive scene lights — the car catching the light is what sells it)
-  const LIGHT_N = 5;
+  const LIGHT_N = 4; // 2 per side, on the lamps straddling the car
   const realLights: THREE.PointLight[] = [];
   for (let i = 0; i < LIGHT_N; i++) {
     const pl = new THREE.PointLight(0xffffff, 0, 36, 2);
@@ -204,7 +207,7 @@ export function createWorld(): World {
     realLights.push(pl);
   }
   const cyanCol = new THREE.Color("#3df0ff"), magCol = new THREE.Color("#ff5ccf");
-  const nearScratch: Lamp[] = [];
+  const leftScratch: Lamp[] = [], rightScratch: Lamp[] = [];
   const CAR_Z = -12, REAL_I = 850;
 
   let scroll = 0, biasCur = 0, time = 0;
@@ -240,21 +243,24 @@ export function createWorld(): World {
           for (const m of l.lights) m.visible = on;
         }
       }
-      // assign the real lights to the lamps nearest the car, with a distance fade in/out
-      nearScratch.length = 0;
-      for (const l of lamps) if (l.mode !== 1) nearScratch.push(l);
-      nearScratch.sort((a, b) => Math.abs(a.o.position.z - CAR_Z) - Math.abs(b.o.position.z - CAR_Z));
-      for (let i = 0; i < LIGHT_N; i++) {
-        const pl = realLights[i];
-        const l = nearScratch[i];
-        if (!l) { pl.intensity = 0; continue; }
+      // real lights: the two lamps straddling the car on EACH side, both kept lit and
+      // cross-fading by distance → the sum is continuous, so the light never flickers
+      // as lamps pass (mixing both sides + an odd light count was the flicker bug).
+      leftScratch.length = 0; rightScratch.length = 0;
+      for (const l of lamps) { if (l.mode === 1) continue; (l.side < 0 ? leftScratch : rightScratch).push(l); }
+      const byCar = (a: Lamp, b: Lamp) => Math.abs(a.o.position.z - CAR_Z) - Math.abs(b.o.position.z - CAR_Z);
+      leftScratch.sort(byCar); rightScratch.sort(byCar);
+      const setLight = (pl: THREE.PointLight, l: Lamp | undefined) => {
+        if (!l) { pl.intensity = 0; return; }
         const lit = l.mode === 2 ? l.lights[1].visible : true; // respect flicker
         const inward = l.side < 0 ? 1 : -1;
         pl.position.set(l.o.position.x + inward * 3.05, l.o.position.y + 12, l.o.position.z);
         pl.color.copy(l.side < 0 ? cyanCol : magCol);
-        const t = Math.max(0, 1 - Math.abs(l.o.position.z - CAR_Z) / 60);
+        const t = Math.max(0, 1 - Math.abs(l.o.position.z - CAR_Z) / 64);
         pl.intensity = lit ? t * t * REAL_I : 0;
-      }
+      };
+      setLight(realLights[0], leftScratch[0]); setLight(realLights[1], leftScratch[1]);
+      setLight(realLights[2], rightScratch[0]); setLight(realLights[3], rightScratch[1]);
     },
   };
 }
