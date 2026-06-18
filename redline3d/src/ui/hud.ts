@@ -46,7 +46,7 @@ export function createHud(parent: HTMLElement): Hud {
     <div id="dock" class="pe" style="position:absolute;left:50%;transform:translateX(-50%);bottom:max(28px,env(safe-area-inset-bottom));width:min(448px,96%);display:flex;flex-direction:column;gap:9px">
       <div id="status" class="lbl" style="text-align:center;letter-spacing:.08em;color:#aeb8dc;min-height:13px;text-shadow:0 1px 8px rgba(0,0,0,.8)"></div>
       <div style="display:flex;gap:10px;align-items:flex-end">
-        <div id="driveCol" style="flex:none;width:142px;display:flex;flex-direction:column">
+        <div id="driveCol" style="flex:1;display:flex;flex-direction:column">
           <div id="tachMount"></div>
           <div id="pedalMount"></div>
         </div>
