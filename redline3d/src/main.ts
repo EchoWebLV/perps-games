@@ -104,12 +104,26 @@ hud.onAsset((a) => {
 });
 hud.setActiveAsset(asset);
 
-// touch steering: drag horizontally on the road to move the car
-let dragging = false;
-canvas.addEventListener("pointerdown", () => { dragging = true; });
-addEventListener("pointerup", () => { dragging = false; });
+// hold anywhere on the open scene to DRIVE: press & hold = gas, drag left/right =
+// steer, pull back (drag down) = brake, release = coast. HUD buttons capture their
+// own taps, so this only fires on the road/scene behind the dock.
+let holding = false, touchGas = false, touchBrake = false;
+let anchorX = 0, anchorY = 0, anchorCarX = 0;
+canvas.addEventListener("pointerdown", (e) => {
+  holding = true; touchGas = true; touchBrake = false;
+  anchorX = e.clientX; anchorY = e.clientY; anchorCarX = carXTarget;
+});
+const releaseHold = () => { holding = false; touchGas = false; touchBrake = false; };
+addEventListener("pointerup", releaseHold);
+addEventListener("pointercancel", releaseHold);
 addEventListener("pointermove", (e) => {
-  if (dragging) carXTarget = Math.max(-10, Math.min(10, ((e.clientX - innerWidth / 2) / (innerWidth / 2)) * 11));
+  if (!holding) return;
+  const dx = e.clientX - anchorX, dy = e.clientY - anchorY;
+  // steer relative to where the thumb first landed (~32% of the width = full lock)
+  carXTarget = Math.max(-10, Math.min(10, anchorCarX + (dx / (innerWidth * 0.32)) * 10));
+  // pulling back past a threshold brakes instead of accelerating
+  touchBrake = dy > 55;
+  touchGas = !touchBrake;
 });
 
 function endRound(snap: Snapshot) {
@@ -162,8 +176,10 @@ function frame() {
   const roundPrice = live ? price : lastLivePrice || price;
 
   // accelerator with momentum: gas revs up, brake slows, release coasts down slowly
-  if (controls.gas()) throttle += GAS * dt;
-  else if (controls.brake()) throttle -= BRAKE * dt;
+  const gasOn = controls.gas() || touchGas;
+  const brakeOn = controls.brake() || touchBrake;
+  if (gasOn) throttle += GAS * dt;
+  else if (brakeOn) throttle -= BRAKE * dt;
   else throttle -= COAST * dt;
   throttle = Math.max(0, Math.min(100, throttle));
   game.lev = niceLev(tToLev(throttle));
@@ -205,8 +221,12 @@ function frame() {
   car.group.position.x = carX;
   car.group.position.y = carY;
   car.group.rotation.x = Math.max(-0.4, Math.min(0.4, Math.atan2(aheadY - behindY, 6.8)));
-  const lean = controls.steer() !== 0 ? -controls.steer() * 0.2 : -(carXTarget - carX) * 0.05;
-  car.group.rotation.z = Math.max(-0.3, Math.min(0.3, lean));
+  // steer like a real car: turn the front wheels, yaw the nose toward the turn,
+  // and let the body roll just slightly. Derived from how hard we're cornering.
+  const turn = Math.max(-1, Math.min(1, (carXTarget - carX) / 3.2));
+  car.setSteer(turn);
+  car.group.rotation.y = turn * 0.16;
+  car.group.rotation.z = Math.max(-0.12, Math.min(0.12, -turn * 0.06));
 
   // camera: idle showroom orbit when parked, smooth blend to the chase cam while driving
   chase.update(ctx.camera, dt, speed, carY, carX);

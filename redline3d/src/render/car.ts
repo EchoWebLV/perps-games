@@ -8,6 +8,8 @@ export interface Car {
   update(dt: number): void;
   /** swap the GLB model (car picker) */
   setModel(url: string): void;
+  /** turn the front wheels for steering (−1 full left … 0 straight … +1 full right) */
+  setSteer(angle: number): void;
 }
 
 const IDLE = "#4da6ff";
@@ -17,6 +19,7 @@ const LOSE = "#ff5067";
 const MODEL_URL = "/models/car.glb?v=2"; // bump to bust the browser cache when the model changes
 const TARGET_LEN = 11.23;     // scale the model so its longest horizontal axis ≈ our footprint (+30% then +20%)
 const MODEL_YAW = Math.PI;    // spin so the car faces down the road (-Z); tune in π/2 steps if needed
+const MAX_STEER = 0.5;        // radians the front wheels swing at full lock (~28°)
 
 /**
  * The player car. Loads the real GLB model and normalizes it (scale → our
@@ -96,6 +99,8 @@ export function createCar(): Car {
   // ---- model loading / swapping (car picker) ----
   const loader = new GLTFLoader();
   let current: THREE.Object3D | null = null;
+  // front-wheel nodes (+ their rest rotation) so steering is an offset, not absolute
+  let frontWheels: { o: THREE.Object3D; baseY: number }[] = [];
   const loadModel = (url: string) => {
     loader.load(
       url,
@@ -110,9 +115,11 @@ export function createCar(): Car {
         const c = box2.getCenter(new THREE.Vector3());
         model.position.set(-c.x, -box2.min.y, -c.z);
 
-        // collect tintable materials + enable emissive
+        // collect tintable materials + the steerable front-wheel nodes
         const mats: THREE.MeshStandardMaterial[] = [];
+        const wheels: { o: THREE.Object3D; baseY: number }[] = [];
         model.traverse((o) => {
+          if (/wheel.*front/i.test(o.name)) wheels.push({ o, baseY: o.rotation.y });
           const mesh = o as THREE.Mesh;
           if (!mesh.isMesh) return;
           const list = Array.isArray(mesh.material) ? mesh.material : [mesh.material];
@@ -122,6 +129,7 @@ export function createCar(): Car {
         });
         if (current) group.remove(current);
         current = model;
+        frontWheels = wheels;
         modelMats = mats.length ? mats : null;
         placeholder.visible = false;
         group.add(model);
@@ -144,6 +152,10 @@ export function createCar(): Car {
     update(dt) {
       t += dt;
       glow.intensity = 2 + Math.sin(t * 3) * 0.5; // faint underglow breathing
+    },
+    setSteer(angle) {
+      const a = Math.max(-1, Math.min(1, angle)) * MAX_STEER;
+      for (const w of frontWheels) w.o.rotation.y = w.baseY + a;
     },
     setModel: loadModel,
   };
