@@ -23,7 +23,7 @@ export interface ChaseCam {
 // driving chase pose
 const CAM_H = 9, CAM_Z = 17, LOOK_Y = 1.6, LOOK_Z = -36;
 // idle showroom pose: a slow orbit around the parked car
-const CAR_Z = -12, IDLE_RAD = 21, IDLE_H = 7.5, IDLE_FOV = 50, ORBIT_SPD = 0.26;
+const CAR_Z = -12, IDLE_RAD = 31, IDLE_H = 9.5, IDLE_FOV = 56, ORBIT_SPD = 0.26;
 
 export function createChaseCam(): ChaseCam {
   let fov = IDLE_FOV, t = 0, kick = 0;
