@@ -16,6 +16,7 @@ import { liqPriceOf } from "./core/economics";
 import { CONFIG } from "./core/config";
 import { createMinimap } from "./ui/minimap";
 import { createPickups } from "./render/pickups";
+import { createSkyChart } from "./render/skychart";
 import type { Snapshot } from "./core/types";
 
 const canvas = document.getElementById("gl") as HTMLCanvasElement;
@@ -35,6 +36,9 @@ addEventListener("resize", () => {
 // world + car
 const world = createWorld();
 ctx.scene.add(world.group);
+// faded "pro" 15m chart far back in the sky (mock data for now)
+const skyChart = createSkyChart();
+ctx.scene.add(skyChart.mesh);
 const car = createCar();
 car.group.position.set(0, 0, -12);
 ctx.scene.add(car.group);
