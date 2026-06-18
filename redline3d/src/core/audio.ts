@@ -11,7 +11,7 @@ export interface GameAudio {
   liquidate(): void;
 }
 
-export const COIN_VOLUME = 0.25;
+export const COIN_VOLUME = 0.1;
 
 /**
  * Fully procedural Web Audio — no sample assets (so it's commercial-safe and adds
