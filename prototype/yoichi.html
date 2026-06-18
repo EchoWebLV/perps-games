@@ -1,0 +1,363 @@
+<!doctype html><html lang="en"><head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover">
+<title>夜市 YOICHI — night-market parlay</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=DotGothic16&family=Zen+Kaku+Gothic+New:wght@400;500;700;900&display=swap" rel="stylesheet">
+<style>
+:root{
+  --ink:#06060d; --ink2:#0b0b15; --panel:#10101c; --panel2:#15172a;
+  --line:rgba(150,160,215,.14); --line2:rgba(150,160,215,.26);
+  --aka:#ff2d55; --ao:#35e8ff; --kin:#ffc24d; --momo:#ff49c3; --midori:#2ee6a6;
+  --washi:#f2ecda; --sumi:#14131b; --dim:#838bb0; --faint:#4f567a; --txt:#e9ecf8;
+  --disp:'Bebas Neue','Oswald','Arial Narrow',sans-serif;
+  --jp:'Zen Kaku Gothic New','Hiragino Kaku Gothic ProN','Yu Gothic',sans-serif;
+  --dot:'DotGothic16','Hiragino Kaku Gothic ProN',monospace;
+  --mono:ui-monospace,'SF Mono',Menlo,monospace;
+}
+*{box-sizing:border-box;-webkit-tap-highlight-color:transparent;-webkit-user-select:none;user-select:none}
+html,body{margin:0;height:100%;background:var(--ink);color:var(--txt);font-family:var(--jp);overflow-x:hidden}
+body{position:relative;min-height:100%}
+#bg,#fx{position:fixed;inset:0;width:100%;height:100%;display:block}
+#bg{z-index:0} #fx{z-index:40;pointer-events:none}
+.grain{position:fixed;inset:0;z-index:1;pointer-events:none;opacity:.05;mix-blend-mode:overlay;
+  background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='120' height='120'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.9' numOctaves='2'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E")}
+.vsign{position:fixed;top:8%;z-index:1;writing-mode:vertical-rl;font-family:var(--dot);font-size:30px;letter-spacing:.18em;opacity:.14;pointer-events:none;font-weight:700}
+.vsign.l{left:6px;color:var(--ao);text-shadow:0 0 16px var(--ao)}
+.vsign.r{right:6px;top:30%;color:var(--aka);text-shadow:0 0 16px var(--aka)}
+
+.frame{position:relative;z-index:10;max-width:440px;margin:0 auto;padding:max(10px,env(safe-area-inset-top)) 14px 26px;min-height:100%}
+
+.noren{position:relative;display:flex;align-items:flex-end;justify-content:space-between;padding:10px 12px 12px;margin-bottom:10px;
+  background:linear-gradient(180deg,rgba(20,16,30,.9),rgba(12,10,20,.55));border:1px solid var(--line);border-radius:14px;
+  box-shadow:0 8px 30px rgba(0,0,0,.5), inset 0 1px 0 rgba(255,255,255,.04);overflow:hidden}
+.noren::before{content:"";position:absolute;inset:0;background:repeating-linear-gradient(90deg,transparent 0 22px,rgba(255,73,195,.05) 22px 23px)}
+.brand{display:flex;flex-direction:column;gap:1px;position:relative}
+.brand .kanji{font-family:var(--jp);font-weight:900;font-size:28px;line-height:.9;color:#fff;letter-spacing:.04em;text-shadow:0 0 18px var(--momo),0 0 40px rgba(255,73,195,.5)}
+.brand .lat{font-family:var(--disp);font-size:15px;letter-spacing:.42em;color:var(--ao);margin-top:3px;text-shadow:0 0 12px var(--ao)}
+.brand .tag{font-family:var(--dot);font-size:8px;letter-spacing:.16em;color:var(--faint);margin-top:2px}
+.hd-r{display:flex;flex-direction:column;align-items:flex-end;gap:5px;position:relative}
+.bal{font-family:var(--mono);text-align:right;font-size:10px;color:var(--dim);letter-spacing:.04em}
+.bal b{display:block;font-family:var(--disp);font-size:24px;letter-spacing:.06em;color:var(--kin);text-shadow:0 0 14px rgba(255,194,77,.5);line-height:.95}
+.rank{display:flex;align-items:center;gap:5px;font-family:var(--dot);font-size:8.5px;letter-spacing:.08em;color:var(--ao);border:1px solid rgba(53,232,255,.3);border-radius:20px;padding:2px 8px;background:rgba(53,232,255,.06)}
+.rank b{color:#fff}
+.live{width:6px;height:6px;border-radius:50%;background:var(--midori);box-shadow:0 0 8px var(--midori);animation:pulse 1.4s infinite}
+@keyframes pulse{0%,100%{opacity:1}50%{opacity:.3}}
+
+.vault{display:flex;align-items:center;gap:10px;padding:8px 12px;margin-bottom:11px;border:1px solid var(--line);border-radius:11px;background:linear-gradient(90deg,rgba(255,73,195,.06),rgba(53,232,255,.04));font-family:var(--mono);font-size:10px;color:var(--dim)}
+.vault .seal{width:34px;height:34px;flex:none;border-radius:50%;border:2px solid var(--aka);display:flex;align-items:center;justify-content:center;font-family:var(--jp);font-weight:900;font-size:9px;color:var(--aka);transform:rotate(-12deg);text-shadow:0 0 8px rgba(255,45,85,.6);box-shadow:0 0 14px rgba(255,45,85,.25),inset 0 0 8px rgba(255,45,85,.2);line-height:1;text-align:center}
+.vault .col{display:flex;flex-direction:column;gap:1px}
+.vault .k{font-family:var(--dot);font-size:7.5px;letter-spacing:.1em;color:var(--faint)}
+.vault .v{font-size:13px;color:var(--txt);font-weight:700}
+.vault .v.up{color:var(--midori)}
+.vault .grow{flex:1}
+
+.stage{position:relative;text-align:center;margin:4px 0 9px}
+.stage .mk{position:absolute;right:8px;top:-2px;writing-mode:vertical-rl;font-family:var(--jp);font-weight:900;font-size:18px;color:var(--faint);letter-spacing:.1em}
+.mult{font-family:var(--disp);font-size:60px;line-height:.85;letter-spacing:.02em;color:var(--midori);text-shadow:0 0 26px rgba(46,230,166,.55);transition:color .2s}
+.msub{font-family:var(--dot);font-size:9px;letter-spacing:.1em;color:var(--dim);margin-top:3px;min-height:12px}
+
+/* ---- night-market = wall of live charts ---- */
+.gridhead{display:flex;justify-content:space-between;align-items:center;margin:2px 2px 7px}
+.gridhead .t{font-family:var(--jp);font-weight:700;font-size:11px;color:var(--txt);letter-spacing:.04em}
+.gridhead .t small{font-family:var(--dot);font-size:8px;color:var(--faint);letter-spacing:.08em;margin-left:6px}
+.gridhead .legend{font-family:var(--dot);font-size:8px;color:var(--faint);letter-spacing:.06em}
+.gridhead .legend .a{color:var(--ao)} .gridhead .legend .b{color:var(--aka)}
+.grid{display:grid;grid-template-columns:repeat(2,1fr);gap:7px;margin:0 0 12px}
+.card{position:relative;border-radius:10px;background:linear-gradient(180deg,#11111e,#0a0a14);border:1px solid rgba(150,160,215,.13);
+  overflow:hidden;cursor:pointer;height:92px;box-shadow:inset 0 -10px 20px rgba(0,0,0,.35);transition:transform .1s,border-color .2s,box-shadow .2s}
+.card:active{transform:scale(.97)}
+.card .chd{position:relative;z-index:2;display:flex;align-items:center;gap:5px;padding:6px 8px 0}
+.card .cg{font-family:var(--jp);font-weight:900;font-size:13px;color:#39406a;line-height:1}
+.card .cs{font-family:var(--dot);font-size:9px;color:var(--dim);letter-spacing:.04em}
+.card .cpx{margin-left:auto;font-family:var(--mono);font-size:10px;color:var(--txt)}
+.card .cch{font-family:var(--mono);font-size:8.5px;min-width:34px;text-align:right}
+.card .cch.up{color:var(--midori)} .card .cch.down{color:var(--aka)}
+.card canvas{position:absolute;left:0;bottom:0;width:100%;height:62px;display:block;z-index:1}
+.card .cstate{position:absolute;left:8px;bottom:6px;z-index:3;font-family:var(--mono);font-weight:700;font-size:13px;display:none;text-shadow:0 1px 6px #000}
+.card .cside{position:absolute;right:8px;bottom:6px;z-index:3;font-family:var(--jp);font-weight:900;font-size:15px;display:none}
+.card.on .cstate,.card.on .cside{display:block}
+.card.on.long{border-color:var(--ao);box-shadow:0 0 16px rgba(53,232,255,.32),inset 0 0 18px rgba(53,232,255,.12)}
+.card.on.long .cside{color:var(--ao)} .card.on.long .cstate{color:#bdf6ff} .card.on.long .cg{color:var(--ao)}
+.card.on.short{border-color:var(--aka);box-shadow:0 0 16px rgba(255,45,85,.32),inset 0 0 18px rgba(255,45,85,.12)}
+.card.on.short .cside{color:var(--aka)} .card.on.short .cstate{color:#ffd0d8} .card.on.short .cg{color:var(--aka)}
+.card.dead{opacity:.4;filter:grayscale(.5)}
+.card.dead .cstate{color:var(--aka)!important}
+
+.ctrls{display:flex;gap:7px;margin-bottom:9px}
+.seg{flex:1;background:var(--panel);border:1px solid var(--line);border-radius:11px;padding:7px 8px}
+.seg .lab{font-family:var(--dot);font-size:7.5px;letter-spacing:.1em;color:var(--faint);display:block;margin-bottom:5px}
+.opts{display:flex;gap:5px}
+.opt{flex:1;text-align:center;padding:7px 0;border-radius:8px;border:1px solid var(--line2);background:#0e0e18;font-family:var(--jp);font-weight:700;font-size:12px;color:var(--dim);cursor:pointer;transition:.12s}
+.opt .jp{font-size:9px;display:block;font-family:var(--dot);letter-spacing:.06em;opacity:.7}
+.opt.long.on{border-color:var(--ao);color:var(--ao);background:rgba(53,232,255,.12);box-shadow:0 0 12px rgba(53,232,255,.25)}
+.opt.short.on{border-color:var(--aka);color:var(--aka);background:rgba(255,45,85,.12);box-shadow:0 0 12px rgba(255,45,85,.25)}
+.opt.on{border-color:var(--momo);color:#fff;background:rgba(255,73,195,.12)}
+.stk{display:flex;align-items:center;gap:6px;justify-content:center}
+.stkb{width:26px;height:26px;border-radius:7px;background:#0e0e18;border:1px solid var(--line2);color:var(--txt);font-size:16px;font-weight:800;display:flex;align-items:center;justify-content:center;cursor:pointer}
+.stkv{font-family:var(--disp);font-size:18px;letter-spacing:.04em;min-width:54px;text-align:center}
+
+.cash{width:100%;border:none;border-radius:13px;padding:16px;font-family:var(--disp);font-size:23px;letter-spacing:.1em;cursor:pointer;color:#06121a;background:linear-gradient(180deg,#46f0c0,#16c596);box-shadow:0 8px 26px rgba(46,230,166,.35);position:relative;overflow:hidden}
+.cash .jp{font-family:var(--jp);font-weight:900;font-size:13px;letter-spacing:.04em;margin-right:8px}
+.cash:disabled{background:#171826;color:#3b4366;box-shadow:none;cursor:default}
+.cash.warn{background:linear-gradient(180deg,#ff7a90,#e53050);color:#fff}
+.cash:active:not(:disabled){transform:translateY(2px)}
+
+.ticker{margin-top:12px;height:26px;overflow:hidden;border:1px solid var(--line);border-radius:9px;background:#08080f;display:flex;align-items:center;position:relative}
+.ticker::before{content:"市況";position:sticky;left:0;z-index:2;font-family:var(--dot);font-size:8px;color:#06060d;background:var(--kin);padding:0 7px;height:100%;display:flex;align-items:center;letter-spacing:.1em}
+.tstrip{display:inline-flex;gap:20px;white-space:nowrap;padding-left:14px;font-family:var(--mono);font-size:10.5px;color:var(--dim);animation:scroll 28s linear infinite}
+@keyframes scroll{to{transform:translateX(-50%)}}
+.tstrip b{color:var(--txt)} .tstrip .u{color:var(--midori)} .tstrip .d{color:var(--aka)}
+.status{text-align:center;font-family:var(--dot);font-size:9px;letter-spacing:.06em;color:var(--dim);margin-top:9px;min-height:12px}
+.status.win{color:var(--kin)} .status.lose{color:var(--aka)}
+.foot{text-align:center;font-family:var(--dot);font-size:7.5px;color:var(--faint);margin-top:10px;line-height:1.7;letter-spacing:.04em}
+</style></head>
+<body>
+<canvas id="bg"></canvas>
+<div class="grain"></div>
+<div class="vsign l">ネオン夜市</div>
+<div class="vsign r">読め</div>
+<canvas id="fx"></canvas>
+
+<div class="frame">
+  <div class="noren">
+    <div class="brand">
+      <div class="kanji">夜市</div>
+      <div class="lat">YOICHI</div>
+      <div class="tag">NIGHT-MARKET PARLAY ・ 実価格</div>
+    </div>
+    <div class="hd-r">
+      <div class="rank"><span class="live"></span>等級 <b id="rank">RONIN Ⅲ</b></div>
+      <div class="bal">残高 BALANCE<b id="bal">$100.00</b></div>
+    </div>
+  </div>
+
+  <div class="vault">
+    <div class="seal">公正<br>FAIR</div>
+    <div class="col"><span class="k">金庫 HOUSE VAULT</span><span class="v" id="vault">$48,210</span></div>
+    <div class="col"><span class="k">EDGE 30D</span><span class="v up">+11.4%</span></div>
+    <div class="grow"></div>
+    <div class="col" style="text-align:right"><span class="k">SEASON 01</span><span class="v">3d 12h</span></div>
+  </div>
+
+  <div class="stage">
+    <div class="mk">倍率</div>
+    <div class="mult" id="mult">×1.00</div>
+    <div class="msub" id="msub">読め — read the tape, pick your markets</div>
+  </div>
+
+  <div class="gridhead">
+    <span class="t">相場 MARKETS <small>10 live ・ tap to add a leg</small></span>
+    <span class="legend"><span class="a">▲買</span> / <span class="b">▼売</span></span>
+  </div>
+  <div class="grid" id="grid"></div>
+
+  <div class="ctrls">
+    <div class="seg"><span class="lab">向き SIDE</span>
+      <div class="opts">
+        <div class="opt long on" data-dir="1">▲ LONG<span class="jp">買い</span></div>
+        <div class="opt short" data-dir="-1">▼ SHORT<span class="jp">売り</span></div>
+      </div></div>
+    <div class="seg"><span class="lab">倍率 LEVERAGE</span>
+      <div class="opts">
+        <div class="opt on" data-lev="100">100×</div>
+        <div class="opt" data-lev="250">250×</div>
+      </div></div>
+  </div>
+  <div class="ctrls">
+    <div class="seg" style="flex:.7"><span class="lab">賭け金 STAKE</span>
+      <div class="stk"><div class="stkb" id="sd">−</div><div class="stkv" id="sv">$1</div><div class="stkb" id="su">+</div></div></div>
+    <div class="seg"><span class="lab">賭け票 SLIP</span>
+      <div class="opts"><div class="opt on" style="cursor:default;font-size:11px"><span id="nlegs">0</span> legs ・ 支払 <span id="tot">$0.00</span></div></div></div>
+  </div>
+
+  <button class="cash" id="cash" disabled><span class="jp">換金</span>CASH OUT</button>
+
+  <div class="ticker"><div class="tstrip" id="tstrip"></div></div>
+  <div class="status" id="status">向きを選び、チャートをタップして賭け票を組め。一つでも消えれば全て失う。</div>
+  <div class="foot">夜市 YOICHI ・ 10 live markets ・ linear-from-entry P&amp;L ・ all-or-nothing parlay ・ 60s ・ 5% 手数料 ・ provably-fair<br>prototype — synthetic house vault, no real funds</div>
+</div>
+
+<script src="feed.js?v=3"></script>
+<script>
+(function(){
+  var $=function(i){return document.getElementById(i);};
+  var balance=100, stake=1, dir=1, lev=100, EDGE=0.05, BUST=0.20, CAP=25, MAXMS=60000;
+  var inRun=false, over=false, positions=[], runStart=0, HIST=72;
+  var STAKES=[1,2,5,10,25];
+
+  var ASSETS=[
+    {s:'SOL', g:'ソ', base:73.4,   lz:6,  id:'ef0d8b6fda2ceba41da15d4095d1da392a0d2f8ed0c6c7bc0f4cfac8c280b56d'},
+    {s:'BTC', g:'ビ', base:65300,  lz:1,  id:'e62df6c8b4a85fe1a67db44dc12de5db330f7ac66b72dc658afedf0f4a415b43'},
+    {s:'ETH', g:'イ', base:1750,   lz:2,  id:'ff61491a931112ddf1bd8147cd1b641375f79f5825126d665480874634fd0ace'},
+    {s:'BNB', g:'ビ', base:607,    lz:15, id:'2f95862b045670cd22bee3114c39763a4a08beeb663b145d283c31d7d1101c4f'},
+    {s:'XRP', g:'リ', base:1.19,   lz:14, id:'ec5d399846a9209f3fe5881d70aae9268c94339ff9817e8d18ff19fa05eea1c8'},
+    {s:'DOGE',g:'ド', base:0.12,   lz:13, id:'dcef50dd0a4cd2dcc17e45df1676dcb336a11a61c69df7a0299b0150c672d25c'},
+    {s:'AVAX',g:'ア', base:19,     lz:18, id:'93da3352f9f1d105fdfe4971cfa80e9dd777bfc5d0f683ebb6e1294b92137bb7'},
+    {s:'LINK',g:'リ', base:12,     lz:19, id:'8ac0c70fff57e9aefdf5edf44b51d62c2d433653cbb2cf5cc06bb115af04d221'},
+    {s:'JUP', g:'ジ', base:0.50,   lz:92, id:'0a0408d619e9380abad35060f9192039ed5042fa6f82301d0e48bb52be830996'},
+    {s:'BONK',g:'ボ', base:0.000013, lz:9, id:'72b021217ca3fe68922a19aaf990109cb9d84e9ad004b4d2025ad6f529314419', expo:-10}
+  ];
+  // seed each asset with a plausible random-walk history so the charts read as "alive" immediately
+  ASSETS.forEach(function(a){ a.price=a.base; a.target=a.base; a.last=0; a.live=false; a.reb=false; a.hist=[]; a.pos=null;
+    var p=a.base, drift=(Math.random()-0.5)*0.0008;
+    for(var k=0;k<HIST;k++){ p*=(1+drift+(Math.random()-0.5)*0.006); a.hist.push(p); } a.price=p; });
+  var BYK={}; ASSETS.forEach(function(a){BYK[a.s]=a;});
+  var feedLabel='…';
+  PythPro.connect({
+    feeds:ASSETS.map(function(a){return {key:a.s,lz:a.lz,hx:a.id,expo:a.expo!=null?a.expo:-8};}),
+    onPrice:function(k,v){var a=BYK[k];if(a&&v>0){a.target=v;a.last=Date.now();a.live=true;}},
+    onStatus:function(s){feedLabel=s.label;}
+  });
+
+  /* ---- backdrop + fx ---- */
+  var bg=$('bg'),bc=bg.getContext('2d'),fx=$('fx'),fc=fx.getContext('2d'),W=0,H=0,DPR=1,t=0;
+  function fit(){DPR=Math.min(2,devicePixelRatio||1);W=innerWidth;H=innerHeight;[bg,fx].forEach(function(c){c.width=W*DPR;c.height=H*DPR;});bc.setTransform(DPR,0,0,DPR,0,0);fc.setTransform(DPR,0,0,DPR,0,0);}
+  addEventListener('resize',fit);fit();
+  function drawBg(){
+    t++;
+    var g=bc.createLinearGradient(0,0,0,H);g.addColorStop(0,'#0a0716');g.addColorStop(.5,'#070611');g.addColorStop(1,'#03030a');
+    bc.fillStyle=g;bc.fillRect(0,0,W,H);
+    var lamps=[[W*0.18,H*0.18,'255,73,195'],[W*0.85,H*0.3,'53,232,255'],[W*0.5,H*0.06,'255,194,77'],[W*0.1,H*0.72,'53,232,255'],[W*0.92,H*0.82,'255,45,85']];
+    lamps.forEach(function(l,i){var r=180+Math.sin(t/90+i)*30;var rg=bc.createRadialGradient(l[0],l[1],0,l[0],l[1],r);rg.addColorStop(0,'rgba('+l[2]+',.09)');rg.addColorStop(1,'rgba('+l[2]+',0)');bc.fillStyle=rg;bc.fillRect(0,0,W,H);});
+  }
+  var parts=[],shake=0,flashA=0,flashC='46,230,166';
+  function flash(c,a){flashC=c;flashA=Math.max(flashA,a);}
+  function burst(x,y,col,n,up){for(var i=0;i<(n||18);i++){var a=Math.random()*6.28,sp=2+Math.random()*5;parts.push({x:x,y:y,vx:Math.cos(a)*sp,vy:Math.sin(a)*sp-(up||0),life:1,g:.16,size:2+Math.random()*3,col:col});}}
+  function lanterns(){flash('255,194,77',.3);for(var i=0;i<32;i++)parts.push({x:Math.random()*W,y:-20-Math.random()*180,vx:(Math.random()-.5)*1.5,vy:1.5+Math.random()*3,life:1.7,g:.05,size:3+Math.random()*4,col:i%3?'255,194,77':'255,73,195',gl:1});}
+  function drawFx(){
+    fc.clearRect(0,0,W,H);
+    if(flashA>.004){fc.fillStyle='rgba('+flashC+','+(flashA*.45)+')';fc.fillRect(0,0,W,H);flashA*=.88;}
+    for(var i=parts.length-1;i>=0;i--){var p=parts[i];p.vy+=p.g;p.x+=p.vx;p.y+=p.vy;p.life-=.016;if(p.life<=0||p.y>H+30){parts.splice(i,1);continue;}
+      fc.globalAlpha=Math.max(0,Math.min(1,p.life));if(p.gl){fc.shadowColor='rgb('+p.col+')';fc.shadowBlur=10;}fc.beginPath();fc.arc(p.x,p.y,p.size,0,7);fc.fillStyle='rgb('+p.col+')';fc.fill();fc.shadowBlur=0;fc.globalAlpha=1;}
+    if(shake>.4){shake*=.85;$('grid').style.transform='translate('+((Math.random()-.5)*shake)+'px,'+((Math.random()-.5)*shake)+'px)';}else $('grid').style.transform='';
+  }
+
+  /* ---- build chart cards (one per asset) ---- */
+  var grid=$('grid');
+  ASSETS.forEach(function(a,ai){
+    var c=document.createElement('div');c.className='card';c.dataset.ai=ai;
+    c.innerHTML='<div class="chd"><span class="cg">'+a.g+'</span><span class="cs">'+a.s+'</span>'+
+      '<span class="cpx" id="px_'+ai+'">—</span><span class="cch" id="ch_'+ai+'">·</span></div>'+
+      '<canvas></canvas><div class="cside" id="sd_'+ai+'"></div><div class="cstate" id="st_'+ai+'"></div>';
+    c.addEventListener('click',function(){openLeg(a,ai,c);});
+    grid.appendChild(c); a.card=c; a.cv=c.querySelector('canvas'); a.cvx=c.querySelector('.cpx')?null:null;
+  });
+
+  function fmtpx(p){if(p>=1000)return '$'+Math.round(p).toLocaleString();if(p>=1)return '$'+p.toFixed(2);if(p>=0.01)return '$'+p.toFixed(4);return '$'+p.toPrecision(2);}
+  function drawSpark(a){
+    var cv=a.cv; if(!cv)return; var w=cv.clientWidth,h=cv.clientHeight; if(!w||!h)return;
+    if(cv.width!==(w*DPR|0)||cv.height!==(h*DPR|0)){cv.width=w*DPR;cv.height=h*DPR;}
+    var x=cv.getContext('2d'); x.setTransform(DPR,0,0,DPR,0,0); x.clearRect(0,0,w,h);
+    var H2=a.hist,n=H2.length; if(n<2)return;
+    var lo=Infinity,hi=-Infinity,i; for(i=0;i<n;i++){if(H2[i]<lo)lo=H2[i];if(H2[i]>hi)hi=H2[i];}
+    var entry=a.pos?a.pos.entry:null; if(entry!=null){if(entry<lo)lo=entry;if(entry>hi)hi=entry;}
+    var pad=(hi-lo)*0.22||hi*0.001||1; lo-=pad; hi+=pad; var rng=hi-lo||1;
+    function X(k){return 4+k/(n-1)*(w-8);} function Y(v){return h-4-((v-lo)/rng)*(h-8);}
+    var up=H2[n-1]>=H2[0];
+    var col = a.pos ? (a.pos.dir>0?'53,232,255':'255,45,85') : (up?'46,230,166':'255,80,110');
+    // entry line + liq shading when a position is open
+    if(entry!=null){
+      var ey=Y(entry); x.strokeStyle='rgba(205,214,245,.35)';x.setLineDash([3,3]);x.lineWidth=1;x.beginPath();x.moveTo(0,ey);x.lineTo(w,ey);x.stroke();x.setLineDash([]);
+    }
+    // area fill
+    x.beginPath();x.moveTo(X(0),Y(H2[0]));for(i=1;i<n;i++)x.lineTo(X(i),Y(H2[i]));x.lineTo(X(n-1),h);x.lineTo(X(0),h);x.closePath();
+    var ag=x.createLinearGradient(0,0,0,h);ag.addColorStop(0,'rgba('+col+',.22)');ag.addColorStop(1,'rgba('+col+',0)');x.fillStyle=ag;x.fill();
+    // line
+    x.beginPath();for(i=0;i<n;i++){var px=X(i),py=Y(H2[i]);i?x.lineTo(px,py):x.moveTo(px,py);}
+    x.strokeStyle='rgb('+col+')';x.lineWidth=1.6;x.lineJoin='round';x.shadowColor='rgba('+col+',.7)';x.shadowBlur=5;x.stroke();x.shadowBlur=0;
+    // head dot
+    x.beginPath();x.arc(X(n-1),Y(H2[n-1]),2.4,0,7);x.fillStyle='rgb('+col+')';x.fill();
+  }
+
+  /* ---- parlay ---- */
+  function startRun(){
+    if(balance<stake){status('残高不足 — lower your stake.','lose');return false;}
+    balance-=stake;$('bal').textContent='$'+balance.toFixed(2);
+    inRun=true;over=false;positions=[];
+    ASSETS.forEach(function(a){a.pos=null;a.card.className='card';a.card.style.opacity='';$('st_'+ASSETS.indexOf(a)).textContent='';$('sd_'+ASSETS.indexOf(a)).textContent='';});
+    $('mult').textContent='×1.00';$('mult').style.color='var(--midori)';runStart=Date.now();sync();return true;
+  }
+  function openLeg(a,ai,card){
+    if(over)return; if(a.pos)return;
+    if(!inRun){if(!startRun())return;}
+    if(!a.target){status('待機中…','');return;}
+    var pos={ai:ai,dir:dir,lev:lev,entry:a.target,mi:1}; a.pos=pos; positions.push(pos);  // entry = RAW price
+    card.className='card on '+(dir>0?'long':'short');
+    $('sd_'+ai).textContent=(dir>0?'▲':'▼'); $('st_'+ai).textContent='×1.00';
+    var r=card.getBoundingClientRect();burst(r.left+r.width/2,r.top+r.height/2,dir>0?'53,232,255':'255,45,85',14,2);
+    if(navigator.vibrate)try{navigator.vibrate(9);}catch(e){}
+    sync(); status((dir>0?'買い ':'売り ')+a.s+' '+lev+'× 追加 — '+positions.length+' legs. survive all, then 換金.','');
+  }
+  function book(){var prod=1,dead=-1;for(var i=0;i<positions.length;i++){var p=positions[i],a=ASSETS[p.ai];
+    p.mi=1+p.dir*p.lev*(a.target-p.entry)/p.entry;if(p.mi<=0)dead=i;prod*=Math.max(0,p.mi);}return {prod:prod,dead:dead};}  // P&L on RAW a.target
+  function sync(){
+    $('nlegs').textContent=positions.length;
+    var m=positions.length?book().prod*(1-EDGE):0; $('tot').textContent='$'+(stake*Math.max(0,m)).toFixed(2);
+  }
+
+  function loop(){
+    drawBg();
+    var nlive=0;
+    ASSETS.forEach(function(a,ai){
+      var fresh=a.live&&(Date.now()-a.last<4000); if(fresh)nlive++;
+      if(fresh){
+        if(!a.reb){ a.reb=true; a.price=a.target; a.hist=[]; for(var rk=0;rk<HIST;rk++)a.hist.push(a.target*(1+(Math.random()-0.5)*0.003)); }
+      } else { a.target*=(1+(Math.random()-0.5)*0.0014); }   // sim drives the RAW price (a.target)
+      a.price+=(a.target-a.price)*0.16;                       // smoothing is DISPLAY-ONLY — P&L below uses raw a.target
+      if(t%2===0){a.hist.push(a.price);if(a.hist.length>HIST)a.hist.shift();}
+      drawSpark(a);
+      var pe=$('px_'+ai),ce=$('ch_'+ai); if(pe)pe.textContent=fmtpx(a.price);
+      var ch=(a.price/a.hist[0]-1)*100; if(ce){ce.textContent=(ch>=0?'+':'')+ch.toFixed(2)+'%';ce.className='cch '+(ch>=0?'up':'down');}
+    });
+    $('nlegs')&&($('status'),0);
+    if(inRun&&!over&&positions.length){
+      var b=book(),m=b.prod*(1-EDGE);
+      positions.forEach(function(p){var st=$('st_'+p.ai);if(st)st.textContent='×'+Math.max(0,p.mi).toFixed(2);});
+      var mEl=$('mult');mEl.textContent='×'+Math.max(0,m).toFixed(2);
+      var col=m>=2?'var(--kin)':m>=1?'var(--midori)':m>=0.6?'#ff8a5c':'var(--aka)';mEl.style.color=col;mEl.style.textShadow='0 0 '+(22+Math.min(40,m*4))+'px '+col;
+      $('tot').textContent='$'+(stake*Math.max(0,m)).toFixed(2);
+      var cb=$('cash');cb.disabled=false;cb.className='cash'+(m<1?' warn':'');cb.innerHTML='<span class="jp">'+(m>=1?'換金':'撤退')+'</span>'+(m>=1?'CASH OUT':'BAIL')+' $'+(stake*Math.max(0,m)).toFixed(2);
+      if(b.dead>=0||m<=BUST)liquidate(b.dead);
+      else if(m>=CAP)settle(m,true);
+      else{var left=(MAXMS-(Date.now()-runStart))/1000;$('msub').textContent=positions.length+' legs ・ '+Math.max(0,left).toFixed(0)+'s 残 ・ bust ×0.20';if(left<=0)settle(m,false);}
+    }
+    drawFx();requestAnimationFrame(loop);
+  }
+  requestAnimationFrame(loop);
+
+  function settle(m,capped){if(over)return;over=true;inRun=false;
+    var win=stake*Math.max(0,m),profit=win-stake;balance+=win;$('bal').textContent='$'+balance.toFixed(2);
+    if(profit>=0)lanterns();$('mult').textContent='×'+Math.max(0,m).toFixed(2);
+    $('msub').textContent=(capped?'🏮 上限 MAX ×'+CAP+' — ':'')+'換金 $'+win.toFixed(2);
+    status((profit>=0?'✅ 換金 ':'撤退 ')+'$'+win.toFixed(2)+' ('+(profit>=0?'+':'')+'$'+profit.toFixed(2)+') — tap a chart to run again.',profit>=0?'win':'lose');endBtn();}
+  function liquidate(deadIdx){over=true;inRun=false;
+    var dp=(deadIdx!=null&&positions[deadIdx])?positions[deadIdx]:null;
+    if(dp){var dc=ASSETS[dp.ai].card;dc.classList.add('dead');$('st_'+dp.ai).textContent='×0.00';var r=dc.getBoundingClientRect();burst(r.left+r.width/2,r.top+r.height/2,'255,45,85',40,1);}
+    flash('255,45,85',.55);shake=18;if(navigator.vibrate)try{navigator.vibrate([25,40,25]);}catch(e){}
+    ASSETS.forEach(function(a){if(!a.pos)a.card.style.opacity='.32';});
+    $('mult').textContent='×0.00';$('mult').style.color='var(--aka)';$('mult').style.textShadow='0 0 26px rgba(255,45,85,.6)';
+    $('msub').textContent='💥 一つ消えた — 賭け票 全損';$('tot').textContent='$0.00';
+    status('💥 a market turned — the whole slip is gone. −$'+stake.toFixed(2)+'. tap a chart to play again.','lose');endBtn();}
+  function endBtn(){var cb=$('cash');cb.disabled=true;cb.className='cash';cb.innerHTML='<span class="jp">換金</span>CASH OUT';
+    setTimeout(function(){ASSETS.forEach(function(a){a.card.style.opacity='';});},900);}
+
+  $('cash').addEventListener('click',function(){if(!inRun||over||!positions.length)return;settle(book().prod*(1-EDGE),false);});
+  document.querySelectorAll('.opt[data-dir]').forEach(function(o){o.addEventListener('click',function(){
+    document.querySelectorAll('.opt[data-dir]').forEach(function(x){x.classList.remove('on');});o.classList.add('on');dir=+o.dataset.dir;});});
+  document.querySelectorAll('.opt[data-lev]').forEach(function(o){o.addEventListener('click',function(){if(inRun&&positions.length){status('finish this slip first.','lose');return;}
+    document.querySelectorAll('.opt[data-lev]').forEach(function(x){x.classList.remove('on');});o.classList.add('on');lev=+o.dataset.lev;});});
+  function setStake(d){if(inRun&&positions.length)return;var i=STAKES.indexOf(stake);i=Math.max(0,Math.min(STAKES.length-1,i+d));stake=STAKES[i];$('sv').textContent='$'+stake;}
+  $('su').addEventListener('click',function(){setStake(1);});$('sd').addEventListener('click',function(){setStake(-1);});
+
+  /* ---- ticker ---- */
+  (function(){var h='';for(var pass=0;pass<2;pass++)for(var i=0;i<ASSETS.length;i++)h+='<span>'+ASSETS[i].s+' <b id="tk_'+pass+'_'+i+'">—</b> <span id="ta_'+pass+'_'+i+'">·</span></span>';$('tstrip').innerHTML=h;})();
+  setInterval(function(){for(var pass=0;pass<2;pass++)for(var i=0;i<ASSETS.length;i++){var a=ASSETS[i],e=$('tk_'+pass+'_'+i),ar=$('ta_'+pass+'_'+i);if(!e)continue;e.textContent=fmtpx(a.price);ar.textContent='●';ar.className=(a.price>=a.hist[0])?'u':'d';}},500);
+
+  function status(m,c){var s=$('status');s.textContent=m;s.className='status'+(c?' '+c:'');}
+  // initial paint so charts are alive even before the loop spins
+  ASSETS.forEach(drawSpark);
+})();
+</script>
+</body></html>

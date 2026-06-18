@@ -106,6 +106,7 @@ function endRound(snap: Snapshot) {
   wallet.credit(snap.payout);
   hud.setBalance(wallet.balance());
   game.equity = 1;
+  chase.setDriving(false); // blend back to the idle showroom orbit
   controls.setLive(false, "🚀 LAUNCH");
   hud.setBuffer(0, false);
   hud.setMultiplier(snap.equity, snap.phase);
@@ -123,6 +124,7 @@ controls.onLaunch(() => {
   round.entryPx = entry;
   round.dir = controls.dir();
   engine.launch({ dir: controls.dir(), lev: game.lev, stake, entryRaw: entry, startMs: Date.now() });
+  chase.setDriving(true); // smooth transition from the idle orbit into the chase cam
   controls.setLive(true, "CASH OUT");
   hud.setStatus(`Riding ${controls.dir() > 0 ? "LONG" : "SHORT"} SOL at ${game.lev}× from $${entry.toFixed(2)}.`);
 });
@@ -193,8 +195,8 @@ function frame() {
   const lean = controls.steer() !== 0 ? -controls.steer() * 0.2 : -(carXTarget - carX) * 0.05;
   car.group.rotation.z = Math.max(-0.3, Math.min(0.3, lean));
 
-  // chase camera tracks the car's height → car stays framed, the road flows under it
-  chase.update(ctx.camera, dt, speed, carY);
+  // camera: idle showroom orbit when parked, smooth blend to the chase cam while driving
+  chase.update(ctx.camera, dt, speed, carY, carX);
 
   // collectible coins: cosmetic tally only — they must NOT affect P&L, or every
   // round becomes a guaranteed win and the long/short bet stops mattering

@@ -1,0 +1,18 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "perps-prototype",
+      "runtimeExecutable": "python3",
+      "runtimeArgs": ["-m", "http.server", "8766", "--directory", "prototype"],
+      "port": 8766
+    },
+    {
+      "name": "redline3d",
+      "runtimeExecutable": "npm",
+      "runtimeArgs": ["run", "dev", "--", "--port", "5180", "--strictPort", "--host"],
+      "cwd": "redline3d",
+      "port": 5180
+    }
+  ]
+}
