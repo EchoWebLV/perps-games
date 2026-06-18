@@ -13,7 +13,7 @@ const WIN = "#2ee6a6";
 const LOSE = "#ff5067";
 
 const MODEL_URL = "/models/car.glb?v=2"; // bump to bust the browser cache when the model changes
-const TARGET_LEN = 7.2;       // scale the model so its longest horizontal axis ≈ our footprint
+const TARGET_LEN = 9.36;      // scale the model so its longest horizontal axis ≈ our footprint (+30%)
 const MODEL_YAW = Math.PI;    // spin so the car faces down the road (-Z); tune in π/2 steps if needed
 
 /**
