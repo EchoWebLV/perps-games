@@ -5,11 +5,12 @@ export interface SceneCtx {
   scene: THREE.Scene;
   camera: THREE.PerspectiveCamera;
   clock: THREE.Clock;
+  /** resize renderer + camera together; pixel ratio is owned by the caller (perf tier) */
+  resize(w: number, h: number): void;
 }
 
 export function createScene(canvas: HTMLCanvasElement): SceneCtx {
   const renderer = new THREE.WebGLRenderer({ canvas, antialias: true, powerPreference: "high-performance" });
-  renderer.setPixelRatio(Math.min(2, window.devicePixelRatio || 1));
   renderer.setSize(window.innerWidth, window.innerHeight, false);
 
   const scene = new THREE.Scene();
@@ -25,11 +26,11 @@ export function createScene(canvas: HTMLCanvasElement): SceneCtx {
   key.position.set(0, 40, -10);
   scene.add(key);
 
-  addEventListener("resize", () => {
-    camera.aspect = window.innerWidth / window.innerHeight;
+  function resize(w: number, h: number) {
+    camera.aspect = w / h;
     camera.updateProjectionMatrix();
-    renderer.setSize(window.innerWidth, window.innerHeight, false);
-  });
+    renderer.setSize(w, h, false);
+  }
 
-  return { renderer, scene, camera, clock: new THREE.Clock() };
+  return { renderer, scene, camera, clock: new THREE.Clock(), resize };
 }

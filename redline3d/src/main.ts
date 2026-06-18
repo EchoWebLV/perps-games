@@ -22,7 +22,10 @@ const ctx = createScene(canvas);
 const quality = detectQuality();
 ctx.renderer.setPixelRatio(Math.min(quality.pixelRatioCap, window.devicePixelRatio || 1));
 const post = quality.bloom ? createPost(ctx.renderer, ctx.scene, ctx.camera) : null;
-addEventListener("resize", () => post?.setSize(window.innerWidth, window.innerHeight));
+addEventListener("resize", () => {
+  ctx.resize(window.innerWidth, window.innerHeight);
+  post?.setSize(window.innerWidth, window.innerHeight);
+});
 
 // world + car
 const world = createWorld();
@@ -44,6 +47,7 @@ const priceSource = createPriceSource({
     return () => h.stop();
   },
 });
+addEventListener("pagehide", () => priceSource.stop());
 
 // ui
 const hud = createHud(hudRoot);
@@ -52,6 +56,7 @@ const controls = createControls(hudRoot);
 hud.setBalance(wallet.balance());
 
 const game = { lev: tach.lev(), equity: 1 };
+let lastLivePrice = 0;
 
 tach.onChange((lev) => {
   game.lev = lev;
@@ -89,10 +94,16 @@ controls.onCashout(() => {
 function frame() {
   const dt = ctx.clock.getDelta();
   const price = priceSource.price();
-  hud.setPrice(price, priceSource.live());
+  const live = priceSource.live();
+  if (live && price > 0) lastLivePrice = price;
+  hud.setPrice(price, live);
+
+  // spec §9: never settle P&L on a stale feed. Freeze equity at the last real
+  // price when the feed is down so sim drift can't liquidate a live round.
+  const roundPrice = live ? price : lastLivePrice || price;
 
   if (engine.getPhase() === "live") {
-    const snap = engine.tick(price, Date.now());
+    const snap = engine.tick(roundPrice, Date.now());
     game.equity = snap.equity;
     if (snap.phase !== "live") {
       endRound(snap);
