@@ -11,7 +11,7 @@ export function setHudMenuMode(parent: HTMLElement, menuRoot: HTMLElement, open:
 export function createCarPicker(parent: HTMLElement, cars: CarOption[], onPick: (c: CarOption) => void): void {
   const wrap = document.createElement("div");
   wrap.className = "pe";
-  wrap.style.cssText = "position:absolute;top:50%;right:max(12px,env(safe-area-inset-right));transform:translateY(-50%);z-index:8;display:block";
+  wrap.style.cssText = "position:absolute;top:calc(50% - 21px);right:max(12px,env(safe-area-inset-right));z-index:8;display:block";
 
   const overlay = document.createElement("div");
   overlay.style.cssText = [
@@ -43,9 +43,11 @@ export function createCarPicker(parent: HTMLElement, cars: CarOption[], onPick: 
   const head = document.createElement("div");
   head.style.cssText = "display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:2px";
   head.innerHTML = `<span class="lbl">garage</span>`;
-  const close = document.createElement("span");
+  const close = document.createElement("button");
+  close.type = "button";
+  close.setAttribute("aria-label", "Close menu");
   close.textContent = "x";
-  close.style.cssText = "cursor:pointer;color:var(--mut);font-size:16px;line-height:1;padding:3px 5px";
+  close.style.cssText = "cursor:pointer;color:var(--mut);font:700 16px/1 Chakra Petch,ui-monospace,monospace;padding:3px 5px;border:0;background:transparent";
   head.appendChild(close);
   panel.appendChild(head);
 
