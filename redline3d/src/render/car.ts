@@ -6,8 +6,8 @@ export interface Car {
   /** color by equity state: idle blue, winning green, losing red */
   setEquity(phase: "idle" | "live", equity: number): void;
   update(dt: number): void;
-  /** swap the GLB model (car picker) */
-  setModel(url: string): void;
+  /** swap the GLB model (car picker); scale multiplies the normalized footprint */
+  setModel(url: string, scale?: number): void;
   /** turn the front wheels for steering (−1 full left … 0 straight … +1 full right) */
   setSteer(angle: number): void;
 }
@@ -102,15 +102,15 @@ export function createCar(onReady?: () => void): Car {
   let current: THREE.Object3D | null = null;
   // front-wheel nodes (+ their rest rotation) so steering is an offset, not absolute
   let frontWheels: { o: THREE.Object3D; baseY: number }[] = [];
-  const loadModel = (url: string) => {
+  const loadModel = (url: string, scaleMul = 1) => {
     loader.load(
       url,
       (gltf) => {
         const model = gltf.scene;
-        // scale to our footprint, center horizontally, sit wheels on the ground
+        // scale to our footprint (× per-model tweak), center horizontally, sit wheels on the ground
         const box = new THREE.Box3().setFromObject(model);
         const size = box.getSize(new THREE.Vector3());
-        model.scale.setScalar(TARGET_LEN / (Math.max(size.x, size.z) || 1));
+        model.scale.setScalar((TARGET_LEN / (Math.max(size.x, size.z) || 1)) * scaleMul);
         model.rotation.y = MODEL_YAW;
         const box2 = new THREE.Box3().setFromObject(model);
         const c = box2.getCenter(new THREE.Vector3());

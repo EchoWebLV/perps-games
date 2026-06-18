@@ -82,8 +82,8 @@ createCarPicker(hudRoot, [
   { name: "Cybertruck", url: "/models/cybertruck.glb" },
   { name: "Orion", url: "/models/orion.glb" },
   { name: "Vaporwave", url: "/models/vaporwave.glb" },
-  { name: "Flintstone", url: "/models/flinstone.glb" },
-], (c) => car.setModel(c.url));
+  { name: "Flintstone", url: "/models/flinstone.glb", scale: 0.7 },
+], (c) => car.setModel(c.url, c.scale));
 
 // throttle = the accelerator: gas revs it up, brake slows it, release coasts down SLOWLY
 let throttle = 34; // 0..100 (starts ~50x)
