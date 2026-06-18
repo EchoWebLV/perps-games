@@ -37,7 +37,7 @@ export function createTach(mount: HTMLElement): Tach {
       <path id="tfill" fill="none" stroke="#2ee6a6" stroke-width="16" stroke-linecap="round"/>
       <line id="tneedle" x1="${CX}" y1="${CY}" x2="${CX}" y2="40" stroke="#fff" stroke-width="4" stroke-linecap="round"/>
       <circle id="thub" cx="${CX}" cy="${CY}" r="11" fill="#0a0820" stroke="#2ee6a6" stroke-width="3"/>
-      <text id="tval" x="${CX}" y="150" text-anchor="middle" font-family="ui-monospace,monospace" font-size="46" font-weight="900" fill="#2ee6a6">50×</text>
+      <text id="tval" x="${CX}" y="150" text-anchor="middle" font-family="'Chakra Petch',ui-monospace,monospace" font-size="46" font-weight="700" fill="#2ee6a6">50×</text>
     </svg>`;
   const fill = mount.querySelector("#tfill") as SVGPathElement;
   const needle = mount.querySelector("#tneedle") as SVGLineElement;

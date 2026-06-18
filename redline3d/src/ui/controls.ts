@@ -9,31 +9,29 @@ export interface Controls {
   onCashout(cb: () => void): void;
 }
 
-const seg = "background:rgba(8,6,20,.62);border:1px solid rgba(120,140,210,.22);border-radius:13px;padding:7px 9px";
-const lab = "font-size:9px;letter-spacing:.12em;color:#6a76a0;font-weight:800;display:block;margin-bottom:5px";
-const pedal = "flex:1;text-align:center;border-radius:11px;font-weight:900;font-size:18px;padding:9px 0;cursor:pointer;user-select:none;border:1px solid rgba(120,140,210,.3);color:#cdd6f5;background:rgba(8,6,20,.5)";
+const seg = "background:var(--panel);border:1px solid var(--line);border-radius:11px;padding:8px 9px";
+const lab = "display:block;margin-bottom:6px";
 
 export function createControls(ctrlMount: HTMLElement, goMount: HTMLElement, pedalMount: HTMLElement): Controls {
   ctrlMount.innerHTML = `
-    <div style="${seg}"><span style="${lab}">YOUR CALL</span>
-      <div style="display:flex;gap:6px">
-        <div id="long" style="flex:1;text-align:center;padding:7px 0;border:1px solid #2ee6a6;border-radius:9px;font-weight:800;font-size:13px;color:#2ee6a6;background:rgba(46,230,166,.18)">▲ LONG</div>
-        <div id="short" style="flex:1;text-align:center;padding:7px 0;border:1px solid rgba(120,140,210,.3);border-radius:9px;font-weight:800;font-size:13px;color:#9aa6c8">▼ SHORT</div>
+    <div style="${seg}"><span class="lbl" style="${lab}">your call</span>
+      <div style="display:flex;gap:7px">
+        <div id="long" class="seg long on">▲ Long</div>
+        <div id="short" class="seg short">▼ Short</div>
       </div></div>
-    <div style="${seg}"><span style="${lab}">STAKE</span>
-      <div style="display:flex;align-items:center;gap:6px">
-        <div id="sdn" style="width:30px;height:30px;border:1px solid rgba(120,140,210,.3);border-radius:9px;text-align:center;line-height:30px;font-size:17px;font-weight:800;color:#eaf0ff">−</div>
-        <div id="sval" style="flex:1;text-align:center;font-weight:900;font-size:15px">$1.00</div>
-        <div id="sup" style="width:30px;height:30px;border:1px solid rgba(120,140,210,.3);border-radius:9px;text-align:center;line-height:30px;font-size:17px;font-weight:800;color:#eaf0ff">+</div>
+    <div style="${seg}"><span class="lbl" style="${lab}">stake</span>
+      <div style="display:flex;align-items:center;gap:7px">
+        <div id="sdn" class="step">−</div>
+        <div id="sval" class="num" style="flex:1;text-align:center;font-size:16px">$1.00</div>
+        <div id="sup" class="step">+</div>
       </div></div>`;
   pedalMount.innerHTML = `
-    <div style="display:flex;gap:6px;margin-top:6px">
-      <div id="brake" style="${pedal}">▼</div>
-      <div id="gas" style="${pedal};flex:1.6;border-color:#2ee6a6;color:#2ee6a6">▲ GAS</div>
+    <div style="display:flex;gap:7px;margin-top:7px">
+      <div id="brake" class="pedal brk">▼</div>
+      <div id="gas" class="pedal gas">▲ Gas</div>
     </div>
-    <div style="text-align:center;font-size:9px;letter-spacing:.12em;color:#6a76a0;font-weight:800;margin-top:3px">HOLD GAS TO REV · ↑↓</div>`;
-  goMount.innerHTML = `
-    <button id="go" style="width:100%;border:none;border-radius:15px;padding:15px;font-size:18px;font-weight:900;letter-spacing:.04em;text-transform:uppercase;color:#06121a;cursor:pointer;background:linear-gradient(180deg,#43f0b0,#13c98a);box-shadow:0 8px 26px rgba(46,230,166,.36)">🚀 LAUNCH</button>`;
+    <div class="lbl" style="text-align:center;margin-top:5px">hold gas to rev · ↑↓</div>`;
+  goMount.innerHTML = `<button id="go" class="cta">Launch</button>`;
 
   const q = (s: string) => (ctrlMount.querySelector(s) || goMount.querySelector(s) || pedalMount.querySelector(s)) as HTMLElement;
   let d: 1 | -1 = 1, stake = 1, live = false;
@@ -44,12 +42,8 @@ export function createControls(ctrlMount: HTMLElement, goMount: HTMLElement, ped
   const setDir = (nd: 1 | -1) => {
     if (live) return;
     d = nd;
-    long.style.borderColor = nd === 1 ? "#2ee6a6" : "rgba(120,140,210,.3)";
-    long.style.color = nd === 1 ? "#2ee6a6" : "#9aa6c8";
-    long.style.background = nd === 1 ? "rgba(46,230,166,.18)" : "transparent";
-    short.style.borderColor = nd === -1 ? "#ff4d6d" : "rgba(120,140,210,.3)";
-    short.style.color = nd === -1 ? "#ff4d6d" : "#9aa6c8";
-    short.style.background = nd === -1 ? "rgba(255,77,109,.18)" : "transparent";
+    long.classList.toggle("on", nd === 1);
+    short.classList.toggle("on", nd === -1);
   };
   long.onclick = () => setDir(1);
   short.onclick = () => setDir(-1);
@@ -57,27 +51,28 @@ export function createControls(ctrlMount: HTMLElement, goMount: HTMLElement, ped
   q("#sdn").onclick = () => { if (!live) { stake = Math.max(1, stake - 1); sval.textContent = "$" + stake.toFixed(2); } };
   go.onclick = () => (live ? cashCb() : launchCb());
 
-  // hold-to-accelerate pedals (pointer + keyboard)
+  // hold-to-accelerate pedals (pointer + keyboard), with a pressed visual
+  const press = (el: HTMLElement, on: boolean) => el.classList.toggle("held", on);
   const hold = (el: HTMLElement, set: (v: boolean) => void) => {
-    el.addEventListener("pointerdown", (e) => { set(true); el.setPointerCapture(e.pointerId); e.preventDefault(); });
-    el.addEventListener("pointerup", () => set(false));
-    el.addEventListener("pointercancel", () => set(false));
-    el.addEventListener("pointerleave", () => set(false));
+    el.addEventListener("pointerdown", (e) => { set(true); press(el, true); el.setPointerCapture(e.pointerId); e.preventDefault(); });
+    el.addEventListener("pointerup", () => { set(false); press(el, false); });
+    el.addEventListener("pointercancel", () => { set(false); press(el, false); });
+    el.addEventListener("pointerleave", () => { set(false); press(el, false); });
   };
   hold(gasBtn, (v) => (gasOn = v));
   hold(brakeBtn, (v) => (brakeOn = v));
   addEventListener("keydown", (e) => {
     const k = e.key;
-    if (k === "ArrowUp" || k === "w" || k === "W") { gasOn = true; e.preventDefault(); }
-    else if (k === "ArrowDown" || k === "s" || k === "S") { brakeOn = true; e.preventDefault(); }
+    if (k === "ArrowUp" || k === "w" || k === "W") { gasOn = true; press(gasBtn, true); e.preventDefault(); }
+    else if (k === "ArrowDown" || k === "s" || k === "S") { brakeOn = true; press(brakeBtn, true); e.preventDefault(); }
     else if (k === "ArrowLeft" || k === "a" || k === "A") { steerL = true; e.preventDefault(); }
     else if (k === "ArrowRight" || k === "d" || k === "D") { steerR = true; e.preventDefault(); }
     else if (k === " " || k === "Enter") { go.click(); e.preventDefault(); }
   });
   addEventListener("keyup", (e) => {
     const k = e.key;
-    if (k === "ArrowUp" || k === "w" || k === "W") gasOn = false;
-    else if (k === "ArrowDown" || k === "s" || k === "S") brakeOn = false;
+    if (k === "ArrowUp" || k === "w" || k === "W") { gasOn = false; press(gasBtn, false); }
+    else if (k === "ArrowDown" || k === "s" || k === "S") { brakeOn = false; press(brakeBtn, false); }
     else if (k === "ArrowLeft" || k === "a" || k === "A") steerL = false;
     else if (k === "ArrowRight" || k === "d" || k === "D") steerR = false;
   });
@@ -91,12 +86,8 @@ export function createControls(ctrlMount: HTMLElement, goMount: HTMLElement, ped
     setLive(l, label, warn) {
       live = l;
       go.textContent = label;
-      go.style.background = !l
-        ? "linear-gradient(180deg,#43f0b0,#13c98a)"
-        : warn
-          ? "linear-gradient(180deg,#ff9aa6,#ff5067)"
-          : "linear-gradient(180deg,#ffe08a,#ffc23d)";
-      go.style.color = l && warn ? "#fff" : "#06121a";
+      go.classList.toggle("live", l && !warn);
+      go.classList.toggle("warn", !!(l && warn));
     },
     onLaunch: (cb) => (launchCb = cb),
     onCashout: (cb) => (cashCb = cb),
