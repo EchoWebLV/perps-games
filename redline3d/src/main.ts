@@ -70,6 +70,7 @@ const GAS = 52, BRAKE = 78, COAST = 6;
 const game = { lev: niceLev(tToLev(throttle)), equity: 1 };
 let lastLivePrice = 0;
 let solSmooth = 0; // eased display price → a flowing minimap curve (raw price drives economics)
+let solEMA = 0;    // slow average; price vs this drives the terrain elevation
 
 // price history (minimap), coins, lateral steering, and the active round's entry
 const priceHist: number[] = [];
@@ -122,6 +123,7 @@ function frame() {
   if (live && price > 0) lastLivePrice = price;
   // ease the display price toward the latest tick → smooth, wave-like minimap line
   if (price > 0) solSmooth = solSmooth ? solSmooth + (price - solSmooth) * 0.1 : price;
+  if (solSmooth > 0) solEMA = solEMA ? solEMA + (solSmooth - solEMA) * 0.012 : solSmooth;
   hud.setPrice(solSmooth || price, live);
   if (solSmooth > 0) { priceHist.push(solSmooth); if (priceHist.length > 300) priceHist.shift(); }
 
@@ -159,24 +161,32 @@ function frame() {
   carXTarget = Math.max(-10, Math.min(10, carXTarget));
   carX += (carXTarget - carX) * 0.18;
 
-  const speed = chase.update(ctx.camera, dt, throttle / 100, game.equity, engine.getPhase() === "live");
-  world.update(dt, speed);
+  const live2 = engine.getPhase() === "live";
+  // price-driven terrain bias: road climbs when SOL is above its average, dips when below
+  const hill = Math.max(-7, Math.min(7, (solEMA ? solSmooth / solEMA - 1 : 0) * 2600));
+  const speed = chase.update(ctx.camera, dt, throttle / 100, game.equity, live2);
+  world.update(dt, speed, hill);
+
+  // everything rides the road surface (which rises on a pump, dips on a dump)
+  const surf = world.surfaceY(-12);
+  ctx.camera.position.y += surf * 0.55;
   car.update(dt);
   car.group.position.x = carX;
+  car.group.position.y += surf;
   const lean = controls.steer() !== 0 ? -controls.steer() * 0.2 : -(carXTarget - carX) * 0.05;
   car.group.rotation.z = Math.max(-0.3, Math.min(0.3, lean));
 
   // collectible coins: steer into them for a coin (and a small banked bonus mid-run)
-  const got = pickups.update(dt, speed, carX);
+  const got = pickups.update(dt, speed, carX, world.surfaceY);
   if (got) {
     coins += got;
     hud.setCoins(coins);
-    if (engine.getPhase() === "live") engine.addBonus(0.04 * got);
+    if (live2) engine.addBonus(0.04 * got);
   }
 
   // minimap: live SOL price line with entry/liq overlays
-  const liqPx = engine.getPhase() === "live" ? liqPriceOf(round.entryPx, round.dir, game.lev, CONFIG.LIQ) : 0;
-  minimap.draw({ hist: priceHist, inRun: engine.getPhase() === "live", equity: game.equity, entryPx: round.entryPx, liqPx, dir: round.dir });
+  const liqPx = live2 ? liqPriceOf(round.entryPx, round.dir, game.lev, CONFIG.LIQ) : 0;
+  minimap.draw({ hist: priceHist, inRun: live2, equity: game.equity, entryPx: round.entryPx, liqPx, dir: round.dir });
 
   if (post) post.render();
   else ctx.renderer.render(ctx.scene, ctx.camera);

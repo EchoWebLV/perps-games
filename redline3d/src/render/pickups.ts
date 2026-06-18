@@ -3,7 +3,7 @@ import * as THREE from "three";
 export interface Pickups {
   group: THREE.Group;
   /** advance pickups; returns how many were collected by the car at carX this frame */
-  update(dt: number, speed: number, carX: number): number;
+  update(dt: number, speed: number, carX: number, surfaceY: (z: number) => number): number;
 }
 
 const LANES = [-8, -4, 0, 4, 8];
@@ -33,10 +33,11 @@ export function createPickups(): Pickups {
 
   return {
     group,
-    update(dt, speed, carX) {
+    update(dt, speed, carX, surfaceY) {
       let got = 0;
       for (const m of coins) {
         m.position.z += speed * dt;
+        m.position.y = 1.8 + surfaceY(m.position.z);
         m.rotation.y += dt * 3.2;
         if (m.visible && m.position.z > CATCH_Z0 && m.position.z < CATCH_Z1 && Math.abs(m.position.x - carX) < CATCH_X) {
           m.visible = false;

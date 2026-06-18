@@ -2,34 +2,46 @@ import * as THREE from "three";
 
 export interface World {
   group: THREE.Group;
-  /** speed is in world units/sec (from the chase camera) */
-  update(dt: number, speed: number): void;
+  /** speed = world units/sec; bias = price-driven elevation (the road climbs on a pump, dips on a dump) */
+  update(dt: number, speed: number, bias: number): void;
+  /** surface height at a given world z — objects ride this so they sit on the road */
+  surfaceY(worldZ: number): number;
 }
+
+const FREQ = 0.02;        // rolling-hill frequency (matches the shader literal)
+const AMP = 3.2;          // rolling-hill amplitude
+const PLANE_Z = -900;     // grid/road plane center in z
+const PYLON_BASE_Y = 9;
 
 function makeSun(): THREE.Group {
   const g = new THREE.Group();
   const colors = ["#ffe24a", "#ffd24a", "#ffb24a", "#ff8a4a", "#ff5a6a", "#ff3a8a", "#d83b6a"];
   for (let i = 0; i < colors.length; i++) {
     const w = 120 - i * 11;
-    const bar = new THREE.Mesh(
-      new THREE.PlaneGeometry(w, 6),
-      new THREE.MeshBasicMaterial({ color: colors[i], fog: false })
-    );
+    const bar = new THREE.Mesh(new THREE.PlaneGeometry(w, 6), new THREE.MeshBasicMaterial({ color: colors[i], fog: false }));
     bar.position.set(0, 78 - i * 9, -780);
     g.add(bar);
   }
   return g;
 }
 
+// shared vertex displacement: a rolling wave (sin) plus a price-driven bias, scrolling toward the camera
+const VERT = `
+  varying vec2 vUv; uniform float uScroll; uniform float uAmp; uniform float uBias;
+  void main(){
+    vUv = uv;
+    vec3 p = position;
+    p.z += sin((position.y + uScroll) * ${FREQ}) * uAmp + uBias;
+    gl_Position = projectionMatrix * modelViewMatrix * vec4(p,1.0);
+  }`;
+
 export function createWorld(): World {
   const group = new THREE.Group();
 
-  // gradient sky dome (vertex-painted)
   const sky = new THREE.Mesh(
     new THREE.SphereGeometry(900, 24, 12),
     new THREE.ShaderMaterial({
-      side: THREE.BackSide,
-      fog: false,
+      side: THREE.BackSide, fog: false,
       uniforms: { top: { value: new THREE.Color("#160a2e") }, bot: { value: new THREE.Color("#7a1d5e") } },
       vertexShader: `varying float h; void main(){ h = normalize(position).y; gl_Position = projectionMatrix * modelViewMatrix * vec4(position,1.0);} `,
       fragmentShader: `varying float h; uniform vec3 top; uniform vec3 bot; void main(){ gl_FragColor = vec4(mix(bot, top, clamp(h*1.4+0.3,0.0,1.0)), 1.0);} `,
@@ -50,7 +62,7 @@ export function createWorld(): World {
   starGeo.setAttribute("position", new THREE.BufferAttribute(sp, 3));
   group.add(new THREE.Points(starGeo, new THREE.PointsMaterial({ color: "#cfe0ff", size: 2.4, sizeAttenuation: true, fog: false, transparent: true, opacity: 0.85 })));
 
-  // low-poly mountain silhouette along the horizon
+  // mountains
   const mtnMat = new THREE.MeshBasicMaterial({ color: "#2a0f3a", fog: false });
   for (let i = 0; i < 12; i++) {
     const h = 90 + Math.random() * 90;
@@ -61,11 +73,11 @@ export function createWorld(): World {
     group.add(c);
   }
 
-  // neon grid floor — a large plane with a scrolling grid shader
+  // neon grid floor (displaced by the shared wave)
   const gridMat = new THREE.ShaderMaterial({
     transparent: true,
-    uniforms: { uOffset: { value: 0 }, uColor: { value: new THREE.Color("#ff39c0") }, uColor2: { value: new THREE.Color("#27e7ff") } },
-    vertexShader: `varying vec2 vUv; void main(){ vUv = uv; gl_Position = projectionMatrix * modelViewMatrix * vec4(position,1.0);} `,
+    uniforms: { uOffset: { value: 0 }, uScroll: { value: 0 }, uAmp: { value: AMP }, uBias: { value: 0 }, uColor: { value: new THREE.Color("#ff39c0") }, uColor2: { value: new THREE.Color("#27e7ff") } },
+    vertexShader: VERT.replace("varying vec2 vUv;", "varying vec2 vUv; uniform float uOffset;"),
     fragmentShader: `
       varying vec2 vUv; uniform float uOffset; uniform vec3 uColor; uniform vec3 uColor2;
       float line(float x){ float g = abs(fract(x)-0.5); return smoothstep(0.46,0.5,1.0-g*2.0); }
@@ -78,16 +90,16 @@ export function createWorld(): World {
         gl_FragColor = vec4(c, g * fade);
       }`,
   });
-  const floor = new THREE.Mesh(new THREE.PlaneGeometry(800, 2000, 1, 1), gridMat);
+  const floor = new THREE.Mesh(new THREE.PlaneGeometry(800, 2000, 1, 160), gridMat);
   floor.rotation.x = -Math.PI / 2;
-  floor.position.set(0, 0, -900);
+  floor.position.set(0, 0, PLANE_Z);
   group.add(floor);
 
-  // road: a dark reflective strip down the middle with emissive neon edges
+  // road strip (same wave)
   const roadMat = new THREE.ShaderMaterial({
     transparent: true,
-    uniforms: { uOffset: { value: 0 }, uEdge: { value: new THREE.Color("#ff39c0") } },
-    vertexShader: `varying vec2 vUv; void main(){ vUv = uv; gl_Position = projectionMatrix * modelViewMatrix * vec4(position,1.0);} `,
+    uniforms: { uOffset: { value: 0 }, uScroll: { value: 0 }, uAmp: { value: AMP }, uBias: { value: 0 }, uEdge: { value: new THREE.Color("#ff39c0") } },
+    vertexShader: VERT.replace("varying vec2 vUv;", "varying vec2 vUv; uniform float uOffset;"),
     fragmentShader: `
       varying vec2 vUv; uniform float uOffset; uniform vec3 uEdge;
       void main(){
@@ -100,16 +112,13 @@ export function createWorld(): World {
         gl_FragColor = vec4(col, fade);
       }`,
   });
-  const road = new THREE.Mesh(new THREE.PlaneGeometry(26, 2000, 1, 1), roadMat);
+  const road = new THREE.Mesh(new THREE.PlaneGeometry(26, 2000, 1, 160), roadMat);
   road.rotation.x = -Math.PI / 2;
-  road.position.set(0, 0.02, -900);
+  road.position.set(0, 0.05, PLANE_Z);
   group.add(road);
 
-  // ── roadside pylons: the dominant speed cue — they rush past the camera ──
-  const SP = 44;          // spacing along the road
-  const COUNT = 22;       // pylons per side
-  const TOTAL = SP * COUNT;
-  const RECYCLE = 26;     // z past which a pylon wraps back to the far end
+  // roadside pylons (the speed cue) — they ride the surface
+  const SP = 44, COUNT = 22, TOTAL = SP * COUNT, RECYCLE = 26;
   const pyGeo = new THREE.BoxGeometry(0.9, 18, 0.9);
   const capGeo = new THREE.BoxGeometry(2.2, 1.4, 2.2);
   const matCyan = new THREE.MeshStandardMaterial({ color: "#06121a", emissive: "#27e7ff", emissiveIntensity: 1.6 });
@@ -123,21 +132,34 @@ export function createWorld(): World {
       cap.position.y = 9.5;
       const o = new THREE.Group();
       o.add(post, cap);
-      o.position.set(side * 15.5, 9, RECYCLE - i * SP);
+      o.position.set(side * 15.5, PYLON_BASE_Y, RECYCLE - i * SP);
       group.add(o);
       pylons.push(o);
     }
   }
 
+  let scroll = 0, biasCur = 0;
+  const surfaceY = (worldZ: number) => {
+    const localY = -(worldZ + PLANE_Z);
+    return Math.sin((localY + scroll) * FREQ) * AMP + biasCur;
+  };
+
   return {
     group,
-    update(dt, speed) {
+    surfaceY,
+    update(dt, speed, bias) {
       const flow = speed * dt;
-      gridMat.uniforms.uOffset.value += flow * 0.06;
-      roadMat.uniforms.uOffset.value += flow * 0.06;
+      scroll += flow;
+      biasCur += (bias - biasCur) * 0.06;
+      for (const mat of [gridMat, roadMat]) {
+        mat.uniforms.uOffset.value += flow * 0.06;
+        mat.uniforms.uScroll.value = scroll;
+        mat.uniforms.uBias.value = biasCur;
+      }
       for (const p of pylons) {
         p.position.z += flow;
         if (p.position.z > RECYCLE) p.position.z -= TOTAL;
+        p.position.y = PYLON_BASE_Y + surfaceY(p.position.z);
       }
     },
   };
