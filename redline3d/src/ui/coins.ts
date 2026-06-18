@@ -20,7 +20,7 @@ function injectCoinStyles() {
       36%{transform:scale(1.24);text-shadow:0 0 24px rgba(255,209,102,.95),0 0 32px rgba(46,230,166,.42)}
       100%{transform:scale(1);text-shadow:0 0 11px rgba(255,209,102,.55)}
     }
-    .coin-total{display:inline-block;animation:coinAmbientGlow 4.8s ease-in-out infinite;transform-origin:left center}
+    .coin-total{display:inline-block;animation:coinAmbientGlow 4.8s ease-in-out infinite;transform-origin:center center}
     .coin-total.coin-pop{animation:coinPopGlow .42s ease-out,coinAmbientGlow 4.8s ease-in-out infinite .42s}
   `;
   document.head.appendChild(s);
@@ -42,6 +42,8 @@ export function createCoinCounter(parent: HTMLElement): CoinCounter {
     "display:flex",
     "flex-direction:column",
     "justify-content:center",
+    "align-items:center",
+    "text-align:center",
     "border-radius:9px",
     "background:rgba(12,10,26,.74)",
   ].join(";");
