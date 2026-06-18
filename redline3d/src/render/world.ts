@@ -140,10 +140,25 @@ export function createWorld(): World {
   const bulbMag = new THREE.MeshBasicMaterial({ color: "#ffa6ee", fog: false });
   const stripCyan = new THREE.MeshBasicMaterial({ color: "#27e7ff", fog: false });
   const stripMag = new THREE.MeshBasicMaterial({ color: "#ff39c0", fog: false });
-  const coneOpt = { transparent: true, opacity: 0.08, blending: THREE.AdditiveBlending, depthWrite: false, side: THREE.DoubleSide, fog: false } as const;
+  const coneOpt = { transparent: true, opacity: 0.11, blending: THREE.AdditiveBlending, depthWrite: false, side: THREE.DoubleSide, fog: false } as const;
   const coneCyan = new THREE.MeshBasicMaterial({ color: "#27e7ff", ...coneOpt });
   const coneMag = new THREE.MeshBasicMaterial({ color: "#ff39c0", ...coneOpt });
-  const pylons: THREE.Object3D[] = [];
+  // a glowing pool on the road so the light actually lands instead of fading in mid-air
+  const poolTex = (() => {
+    const s = 128, cv = document.createElement("canvas"); cv.width = cv.height = s;
+    const g = cv.getContext("2d")!;
+    const rg = g.createRadialGradient(s / 2, s / 2, 0, s / 2, s / 2, s / 2);
+    rg.addColorStop(0, "rgba(255,255,255,1)"); rg.addColorStop(0.45, "rgba(255,255,255,0.4)"); rg.addColorStop(1, "rgba(255,255,255,0)");
+    g.fillStyle = rg; g.fillRect(0, 0, s, s);
+    return new THREE.CanvasTexture(cv);
+  })();
+  const poolGeo = new THREE.CircleGeometry(4.0, 24);
+  const poolOpt = { map: poolTex, transparent: true, opacity: 0.7, blending: THREE.AdditiveBlending, depthWrite: false, fog: false } as const;
+  const poolCyan = new THREE.MeshBasicMaterial({ color: "#27e7ff", ...poolOpt });
+  const poolMag = new THREE.MeshBasicMaterial({ color: "#ff39c0", ...poolOpt });
+
+  type Lamp = { o: THREE.Group; lights: THREE.Object3D[]; mode: 0 | 1 | 2; seed: number };
+  const lamps: Lamp[] = [];
   for (let i = 0; i < COUNT; i++) {
     for (const side of [-1, 1]) {
       const left = side < 0;
@@ -156,14 +171,20 @@ export function createWorld(): World {
       const house = new THREE.Mesh(houseGeo, poleMat); house.position.set(inward * 3.05, 12.35, 0);
       const b = new THREE.Mesh(bulbGeo, left ? bulbCyan : bulbMag); b.position.set(inward * 3.05, 12.02, 0);
       const c = new THREE.Mesh(coneGeo, left ? coneCyan : coneMag); c.position.set(inward * 3.05, 6.2, 0);
-      o.add(pole, foot, sStrip, arm, house, b, c);
+      const pool = new THREE.Mesh(poolGeo, left ? poolCyan : poolMag); pool.rotation.x = -Math.PI / 2; pool.position.set(inward * 3.05, 0.2, 0);
+      o.add(pole, foot, sStrip, arm, house, b, c, pool);
       o.position.set(side * 15.5, 0, RECYCLE - i * SP);
       group.add(o);
-      pylons.push(o);
+      // most lamps lit; ~1/50 dead, ~1/43 flickering — for life
+      const r = Math.random();
+      const mode: 0 | 1 | 2 = r < 1 / 50 ? 1 : r < 1 / 50 + 1 / 43 ? 2 : 0;
+      const lights: THREE.Object3D[] = [sStrip, b, c, pool];
+      if (mode === 1) for (const m of lights) m.visible = false;
+      lamps.push({ o, lights, mode, seed: i * 2.7 + side });
     }
   }
 
-  let scroll = 0, biasCur = 0;
+  let scroll = 0, biasCur = 0, time = 0;
   // the plane is rotated -90° about X and sits at z=PLANE_Z, so a world z maps to
   // local y = PLANE_Z - worldZ. sampling the wave here MUST match the vertex shader,
   // or objects float off the road (the "flying car" bug).
@@ -178,16 +199,23 @@ export function createWorld(): World {
     update(dt, speed, bias) {
       const flow = speed * dt;
       scroll += flow;
+      time += dt;
       biasCur += (bias - biasCur) * 0.06;
       for (const mat of [gridMat, roadMat]) {
         mat.uniforms.uOffset.value += flow * 0.06;
         mat.uniforms.uScroll.value = scroll;
         mat.uniforms.uBias.value = biasCur;
       }
-      for (const p of pylons) {
-        p.position.z += flow;
-        if (p.position.z > RECYCLE) p.position.z -= TOTAL;
-        p.position.y = surfaceY(p.position.z);
+      for (const l of lamps) {
+        l.o.position.z += flow;
+        if (l.o.position.z > RECYCLE) l.o.position.z -= TOTAL;
+        l.o.position.y = surfaceY(l.o.position.z);
+        if (l.mode === 2) {
+          // dying-lamp flicker: solid most of the time, fast buzz in the dips
+          const ph = Math.sin(time * 12 + l.seed);
+          const on = ph > -0.55 || Math.sin(time * 55 + l.seed) > 0;
+          for (const m of l.lights) m.visible = on;
+        }
       }
     },
   };
