@@ -11,7 +11,6 @@ export interface World {
 const FREQ = 0.02;        // rolling-hill frequency (matches the shader literal)
 const AMP = 3.2;          // rolling-hill amplitude
 const PLANE_Z = -900;     // grid/road plane center in z
-const PYLON_BASE_Y = 9;
 
 function makeSun(): THREE.Group {
   // a proper sliced retro sun: a circle cut by horizontal gaps, widest in the
@@ -126,22 +125,39 @@ export function createWorld(): World {
   road.position.set(0, 0.05, PLANE_Z);
   group.add(road);
 
-  // roadside pylons (the speed cue) — they ride the surface
+  // roadside street lamps (also the speed cue) — pole + arm + glowing head + a
+  // soft light shaft to the road, plus a neon strip up the pole. They ride the surface.
   const SP = 44, COUNT = 22, TOTAL = SP * COUNT, RECYCLE = 26;
-  const pyGeo = new THREE.BoxGeometry(0.9, 18, 0.9);
-  const capGeo = new THREE.BoxGeometry(2.2, 1.4, 2.2);
-  const matCyan = new THREE.MeshStandardMaterial({ color: "#06121a", emissive: "#27e7ff", emissiveIntensity: 1.6 });
-  const matMag = new THREE.MeshStandardMaterial({ color: "#0a0612", emissive: "#ff39c0", emissiveIntensity: 1.6 });
+  const poleGeo = new THREE.CylinderGeometry(0.3, 0.42, 13, 8);
+  const footGeo = new THREE.CylinderGeometry(0.55, 0.72, 0.8, 8);
+  const stripGeo = new THREE.BoxGeometry(0.08, 11.2, 0.18);
+  const armGeo = new THREE.BoxGeometry(3.4, 0.24, 0.24);
+  const houseGeo = new THREE.BoxGeometry(1.0, 0.55, 0.72);
+  const bulbGeo = new THREE.BoxGeometry(0.78, 0.16, 0.52);
+  const coneGeo = new THREE.ConeGeometry(2.4, 11.6, 14, 1, true);
+  const poleMat = new THREE.MeshStandardMaterial({ color: "#0c0e18", metalness: 0.7, roughness: 0.45, emissive: "#06070d", emissiveIntensity: 0.5 });
+  const bulbCyan = new THREE.MeshBasicMaterial({ color: "#a6f4ff", fog: false });
+  const bulbMag = new THREE.MeshBasicMaterial({ color: "#ffa6ee", fog: false });
+  const stripCyan = new THREE.MeshBasicMaterial({ color: "#27e7ff", fog: false });
+  const stripMag = new THREE.MeshBasicMaterial({ color: "#ff39c0", fog: false });
+  const coneOpt = { transparent: true, opacity: 0.08, blending: THREE.AdditiveBlending, depthWrite: false, side: THREE.DoubleSide, fog: false } as const;
+  const coneCyan = new THREE.MeshBasicMaterial({ color: "#27e7ff", ...coneOpt });
+  const coneMag = new THREE.MeshBasicMaterial({ color: "#ff39c0", ...coneOpt });
   const pylons: THREE.Object3D[] = [];
   for (let i = 0; i < COUNT; i++) {
     for (const side of [-1, 1]) {
-      const mat = side < 0 ? matCyan : matMag;
-      const post = new THREE.Mesh(pyGeo, mat);
-      const cap = new THREE.Mesh(capGeo, mat);
-      cap.position.y = 9.5;
+      const left = side < 0;
+      const inward = -side; // arm reaches in over the road
       const o = new THREE.Group();
-      o.add(post, cap);
-      o.position.set(side * 15.5, PYLON_BASE_Y, RECYCLE - i * SP);
+      const pole = new THREE.Mesh(poleGeo, poleMat); pole.position.y = 6.5;
+      const foot = new THREE.Mesh(footGeo, poleMat); foot.position.y = 0.4;
+      const sStrip = new THREE.Mesh(stripGeo, left ? stripCyan : stripMag); sStrip.position.set(inward * 0.36, 6.6, 0);
+      const arm = new THREE.Mesh(armGeo, poleMat); arm.position.set(inward * 1.55, 12.7, 0); arm.rotation.z = inward * 0.08;
+      const house = new THREE.Mesh(houseGeo, poleMat); house.position.set(inward * 3.05, 12.35, 0);
+      const b = new THREE.Mesh(bulbGeo, left ? bulbCyan : bulbMag); b.position.set(inward * 3.05, 12.02, 0);
+      const c = new THREE.Mesh(coneGeo, left ? coneCyan : coneMag); c.position.set(inward * 3.05, 6.2, 0);
+      o.add(pole, foot, sStrip, arm, house, b, c);
+      o.position.set(side * 15.5, 0, RECYCLE - i * SP);
       group.add(o);
       pylons.push(o);
     }
@@ -171,7 +187,7 @@ export function createWorld(): World {
       for (const p of pylons) {
         p.position.z += flow;
         if (p.position.z > RECYCLE) p.position.z -= TOTAL;
-        p.position.y = PYLON_BASE_Y + surfaceY(p.position.z);
+        p.position.y = surfaceY(p.position.z);
       }
     },
   };
