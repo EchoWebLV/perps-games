@@ -1,5 +1,7 @@
 export interface Controls {
   dir(): 1 | -1;
+  /** set the LONG/SHORT call externally (e.g. the Clown Car's lane-bet ability) */
+  setDir(d: 1 | -1): void;
   stake(): number;
   gas(): boolean;
   brake(): boolean;
@@ -70,6 +72,7 @@ export function createControls(ctrlMount: HTMLElement, goMount: HTMLElement, ped
 
   return {
     dir: () => d,
+    setDir,
     stake: () => stake,
     gas: () => gasOn,
     brake: () => brakeOn,

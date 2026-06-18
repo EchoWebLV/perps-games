@@ -6,6 +6,8 @@ export interface World {
   update(dt: number, speed: number, bias: number): void;
   /** surface height at a given world z — objects ride this so they sit on the road */
   surfaceY(worldZ: number): number;
+  /** Clown Car ability: split the road green (left=LONG) / red (right=SHORT) */
+  setLaneBet(on: boolean): void;
 }
 
 const FREQ = 0.02;        // rolling-hill frequency (matches the shader literal)
@@ -150,16 +152,21 @@ export function createWorld(): World {
   // road strip (same wave)
   const roadMat = new THREE.ShaderMaterial({
     transparent: true,
-    uniforms: { uOffset: { value: 0 }, uScroll: { value: 0 }, uAmp: { value: AMP }, uBias: { value: 0 }, uEdge: { value: new THREE.Color("#ff39c0") } },
+    uniforms: { uOffset: { value: 0 }, uScroll: { value: 0 }, uAmp: { value: AMP }, uBias: { value: 0 }, uEdge: { value: new THREE.Color("#ff39c0") }, uLane: { value: 0 } },
     vertexShader: VERT.replace("varying vec2 vUv;", "varying vec2 vUv; uniform float uOffset;"),
     fragmentShader: `
-      varying vec2 vUv; uniform float uOffset; uniform vec3 uEdge;
+      varying vec2 vUv; uniform float uOffset; uniform vec3 uEdge; uniform float uLane;
       void main(){
         float edge = smoothstep(0.0,0.06,vUv.x) * smoothstep(1.0,0.94,vUv.x);
         float edges = 1.0 - edge;
         float dash = step(0.5, fract(vUv.y*90.0 + uOffset)) * step(0.46,vUv.x)*step(vUv.x,0.54);
         vec3 road = vec3(0.06,0.07,0.12);
+        // Clown Car ability: left half green (LONG), right half red (SHORT)
+        vec3 lane = mix(vec3(0.06,0.62,0.30), vec3(0.74,0.09,0.17), step(0.5, vUv.x));
+        road = mix(road, lane, uLane);
         vec3 col = mix(road, uEdge, edges*0.9) + dash*vec3(0.9);
+        // bright divider down the centre line while the ability is on
+        col += uLane * smoothstep(0.014, 0.0, abs(vUv.x - 0.5)) * vec3(1.0);
         float fade = smoothstep(0.0,0.3,vUv.y);
         gl_FragColor = vec4(col, fade);
       }`,
@@ -257,7 +264,7 @@ export function createWorld(): World {
   const lampOf: (Lamp | undefined)[] = []; // which lamp each real light currently tracks
   const CAR_Z = -12, REAL_I = 850;
 
-  let scroll = 0, biasCur = 0, time = 0;
+  let scroll = 0, biasCur = 0, time = 0, laneTarget = 0;
   // the plane is rotated -90° about X and sits at z=PLANE_Z, so a world z maps to
   // local y = PLANE_Z - worldZ. sampling the wave here MUST match the vertex shader,
   // or objects float off the road (the "flying car" bug).
@@ -269,6 +276,7 @@ export function createWorld(): World {
   return {
     group,
     surfaceY,
+    setLaneBet(on: boolean) { laneTarget = on ? 1 : 0; },
     update(dt, speed, bias) {
       const flow = speed * dt;
       scroll += flow;
@@ -279,6 +287,8 @@ export function createWorld(): World {
         mat.uniforms.uScroll.value = scroll;
         mat.uniforms.uBias.value = biasCur;
       }
+      // ease the lane-bet road tint in/out when the Clown Car is selected/deselected
+      roadMat.uniforms.uLane.value += (laneTarget - roadMat.uniforms.uLane.value) * 0.1;
       for (const l of lamps) {
         l.o.position.z += flow;
         if (l.o.position.z > RECYCLE) l.o.position.z -= TOTAL;

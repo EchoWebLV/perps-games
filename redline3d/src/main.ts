@@ -16,7 +16,7 @@ import { liqPriceOf } from "./core/economics";
 import { CONFIG } from "./core/config";
 import { createMinimap } from "./ui/minimap";
 import { createPickups } from "./render/pickups";
-import { createCarPicker } from "./ui/carpicker";
+import { createCarPicker, type CarAbility } from "./ui/carpicker";
 import { createFx } from "./ui/fx";
 import { createJoystick } from "./ui/joystick";
 import { createAudio } from "./core/audio";
@@ -77,15 +77,20 @@ const joystick = createJoystick();
 const audio = createAudio();
 hud.setBalance(wallet.balance());
 
-// car picker (test) — swap the GLB model live; easily hideable
+// car picker — swap the GLB model live + apply the card's special ability
+let ability: CarAbility | undefined;
+const setAbility = (a?: CarAbility) => {
+  ability = a;
+  world.setLaneBet(a === "laneBet"); // Clown Car colors the road green/red
+};
 createCarPicker(hudRoot, [
   { name: "DeLorean", url: "/models/car.glb?v=2" },
   { name: "Cybertruck", url: "/models/cybertruck.glb", scale: 1.3 },
   { name: "Orion", url: "/models/orion.glb", yaw: -Math.PI / 2 },
   { name: "Vaporwave", url: "/models/vaporwave.glb" },
   { name: "Flintstone", url: "/models/flinstone.glb", scale: 0.7 },
-  { name: "Clown Car", url: "/models/clowncar.glb" },
-], (c) => car.setModel(c.url, c.scale, c.yaw));
+  { name: "Clown Car", url: "/models/clowncar.glb", ability: "laneBet" },
+], (c) => { car.setModel(c.url, c.scale, c.yaw); setAbility(c.ability); });
 
 // synthwave radio — streams on the first gesture, toggle button stacked above the menu
 const radio = createRadio(hudRoot);
@@ -227,6 +232,11 @@ function frame() {
   // lateral steering (arrows + touch drag), with the car leaning into the turn
   carXTarget += controls.steer() * 22 * dt;
   carXTarget = Math.max(-10, Math.min(10, carXTarget));
+  // Clown Car ability: your lane IS the bet — left half (green) = LONG, right (red) = SHORT
+  if (ability === "laneBet" && engine.getPhase() !== "live") {
+    if (carXTarget < -0.6) controls.setDir(1);
+    else if (carXTarget > 0.6) controls.setDir(-1);
+  }
   carX += (carXTarget - carX) * 0.18;
 
   const live2 = engine.getPhase() === "live";
