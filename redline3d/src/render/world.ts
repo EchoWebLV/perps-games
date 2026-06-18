@@ -136,11 +136,11 @@ export function createWorld(): World {
   const bulbGeo = new THREE.BoxGeometry(0.78, 0.16, 0.52);
   const coneGeo = new THREE.ConeGeometry(2.4, 11.6, 14, 1, true);
   const poleMat = new THREE.MeshStandardMaterial({ color: "#0c0e18", metalness: 0.7, roughness: 0.45, emissive: "#06070d", emissiveIntensity: 0.5 });
-  const bulbCyan = new THREE.MeshBasicMaterial({ color: "#a6f4ff", fog: false });
-  const bulbMag = new THREE.MeshBasicMaterial({ color: "#ffa6ee", fog: false });
+  const bulbCyan = new THREE.MeshBasicMaterial({ color: "#d6fbff", fog: false });
+  const bulbMag = new THREE.MeshBasicMaterial({ color: "#ffd6f6", fog: false });
   const stripCyan = new THREE.MeshBasicMaterial({ color: "#27e7ff", fog: false });
   const stripMag = new THREE.MeshBasicMaterial({ color: "#ff39c0", fog: false });
-  const coneOpt = { transparent: true, opacity: 0.11, blending: THREE.AdditiveBlending, depthWrite: false, side: THREE.DoubleSide, fog: false } as const;
+  const coneOpt = { transparent: true, opacity: 0.2, blending: THREE.AdditiveBlending, depthWrite: false, side: THREE.DoubleSide, fog: false } as const;
   const coneCyan = new THREE.MeshBasicMaterial({ color: "#27e7ff", ...coneOpt });
   const coneMag = new THREE.MeshBasicMaterial({ color: "#ff39c0", ...coneOpt });
   // a glowing pool on the road so the light actually lands instead of fading in mid-air
@@ -153,7 +153,7 @@ export function createWorld(): World {
     return new THREE.CanvasTexture(cv);
   })();
   const poolGeo = new THREE.CircleGeometry(4.0, 24);
-  const poolOpt = { map: poolTex, transparent: true, opacity: 0.7, blending: THREE.AdditiveBlending, depthWrite: false, fog: false } as const;
+  const poolOpt = { map: poolTex, transparent: true, opacity: 1, blending: THREE.AdditiveBlending, depthWrite: false, fog: false } as const;
   const poolCyan = new THREE.MeshBasicMaterial({ color: "#27e7ff", ...poolOpt });
   const poolMag = new THREE.MeshBasicMaterial({ color: "#ff39c0", ...poolOpt });
 
