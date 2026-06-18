@@ -2,7 +2,9 @@
 # Redline 3D — APK build pipeline (Capacitor + Android Gradle).
 #
 #   ./scripts/build-apk.sh            build a debug APK
-#   ./scripts/build-apk.sh --install  build + adb install -r to a connected device
+#   ./scripts/build-apk.sh --install  build + adb install -r to a USB device (needs USB debugging)
+#   ./scripts/build-apk.sh --serve    build + serve over LAN so a phone can download & tap-install
+#                                      (the no-USB route — what works on the Seeker)
 #
 # Toolchain paths default to the Homebrew install; override by exporting
 # JAVA_HOME / ANDROID_HOME before running.
@@ -13,10 +15,13 @@ export JAVA_HOME="${JAVA_HOME:-/opt/homebrew/opt/openjdk@21/libexec/openjdk.jdk/
 export ANDROID_HOME="${ANDROID_HOME:-/opt/homebrew/share/android-commandlinetools}"
 export ANDROID_SDK_ROOT="$ANDROID_HOME"
 export PATH="$JAVA_HOME/bin:$ANDROID_HOME/platform-tools:$PATH"
+SERVE_PORT="${SERVE_PORT:-8077}"
 
 INSTALL=0
+SERVE=0
 for arg in "$@"; do
   if [ "$arg" = "--install" ]; then INSTALL=1; fi
+  if [ "$arg" = "--serve" ]; then SERVE=1; fi
 done
 
 if [ ! -x "$JAVA_HOME/bin/java" ]; then
@@ -55,4 +60,17 @@ if [ "$INSTALL" = "1" ]; then
   fi
   adb install -r "$APK"
   echo "✅ installed. Launch 'Redline 3D' from the Seeker app drawer."
+fi
+
+if [ "$SERVE" = "1" ]; then
+  IP="$(ipconfig getifaddr en0 2>/dev/null || ipconfig getifaddr en1 2>/dev/null || echo 'YOUR-LAN-IP')"
+  DIR="$(mktemp -d)"
+  cp "$APK" "$DIR/redline.apk"
+  echo ""
+  echo "📲 On the phone (same Wi-Fi) open Chrome and go to:"
+  echo "      http://$IP:$SERVE_PORT/redline.apk"
+  echo "   Download → tap → allow 'install unknown apps' → Install."
+  echo "   (Ctrl+C to stop the server once it's installed.)"
+  echo ""
+  ( cd "$DIR" && python3 -m http.server "$SERVE_PORT" --bind 0.0.0.0 )
 fi

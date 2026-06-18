@@ -10,7 +10,8 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "apk": "bash scripts/build-apk.sh",
-    "apk:install": "bash scripts/build-apk.sh --install"
+    "apk:install": "bash scripts/build-apk.sh --install",
+    "apk:serve": "bash scripts/build-apk.sh --serve"
   },
   "devDependencies": {
     "@capacitor/cli": "^8.4.0",

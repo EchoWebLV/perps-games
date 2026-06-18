@@ -15,8 +15,14 @@ All of that is one command: **`npm run apk`**.
 ```bash
 cd redline3d
 npm run apk            # → android/app/build/outputs/apk/debug/app-debug.apk
-npm run apk:install    # same, then `adb install -r` to a USB-connected device
+npm run apk:serve      # build, then serve over Wi-Fi to download & tap-install (no USB)
+npm run apk:install    # build, then `adb install -r` to a USB device (needs USB debugging)
 ```
+
+`apk:serve` is the route that works on the Seeker: it prints a
+`http://<your-lan-ip>:8077/redline.apk` URL — open it in the phone's browser
+(same Wi-Fi), download, tap, and allow "install unknown apps". Ctrl+C to stop the
+server. (USB/`adb` needs USB debugging enabled on the phone, which can be fiddly.)
 
 `npm run apk` reuses the debug keystore, so the APK is installable immediately
 (no signing needed for testing). After any code change just run it again — the
