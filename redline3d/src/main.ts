@@ -17,6 +17,7 @@ import { CONFIG } from "./core/config";
 import { createMinimap } from "./ui/minimap";
 import { createPickups } from "./render/pickups";
 import { createCarPicker } from "./ui/carpicker";
+import { createFx } from "./ui/fx";
 import type { Snapshot } from "./core/types";
 
 const canvas = document.getElementById("gl") as HTMLCanvasElement;
@@ -67,6 +68,7 @@ const hud = createHud(hudRoot);
 const tach = createTach(hud.tachMount);
 const controls = createControls(hud.ctrlMount, hud.goMount, hud.pedalMount);
 const minimap = createMinimap(hud.miniCanvas);
+const fx = createFx();
 hud.setBalance(wallet.balance());
 
 // car picker (test) — swap the GLB model live; easily hideable
@@ -133,8 +135,8 @@ function endRound(snap: Snapshot) {
   hud.setBuffer(0, false);
   hud.setTimer(CONFIG.MAXSEC, false);
   hud.setMultiplier(snap.equity, snap.phase);
-  if (snap.phase === "liquidated") hud.setStatus(`💥 Liquidated at ${snap.lev}×. Lost your stake.`);
-  else hud.setStatus(`Settled at ×${snap.equity.toFixed(2)} — banked $${snap.payout.toFixed(2)} (${snap.reason}).`);
+  if (snap.phase === "liquidated") { hud.setStatus(`💥 Liquidated at ${snap.lev}×. Lost your stake.`); fx.liquidate(); }
+  else { hud.setStatus(`Settled at ×${snap.equity.toFixed(2)} — banked $${snap.payout.toFixed(2)} (${snap.reason}).`); fx.confetti(); }
 }
 
 controls.onLaunch(() => {

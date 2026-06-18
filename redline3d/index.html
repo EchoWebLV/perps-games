@@ -90,6 +90,10 @@
         #ctrlMount{position:fixed!important;right:max(12px,env(safe-area-inset-right))!important;bottom:74px!important;width:244px!important}
         #goMount{position:fixed!important;right:max(12px,env(safe-area-inset-right))!important;bottom:max(14px,env(safe-area-inset-bottom))!important;width:244px!important}
       }
+
+      /* end-of-round FX: a brief screen shake on liquidation */
+      @keyframes fxshake{0%,100%{transform:none}15%{transform:translate(-5px,3px)}30%{transform:translate(6px,-4px)}45%{transform:translate(-6px,-2px)}60%{transform:translate(5px,4px)}75%{transform:translate(-4px,2px)}90%{transform:translate(3px,-2px)}}
+      #gl.fxshake{animation:fxshake .45s ease-out}
     </style>
   </head>
   <body>
