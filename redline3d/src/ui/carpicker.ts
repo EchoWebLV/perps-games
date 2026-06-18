@@ -4,7 +4,7 @@ export interface CarOption { name: string; url: string; }
 export function createCarPicker(parent: HTMLElement, cars: CarOption[], onPick: (c: CarOption) => void): void {
   const wrap = document.createElement("div");
   wrap.className = "pe";
-  wrap.style.cssText = "position:absolute;top:140px;left:50%;transform:translateX(-50%);z-index:6;display:flex;flex-direction:column;align-items:center;gap:6px";
+  wrap.style.cssText = "position:absolute;top:148px;right:12px;z-index:6;display:flex;flex-direction:column;align-items:flex-end;gap:6px";
 
   const panel = document.createElement("div");
   panel.className = "panel";
@@ -35,11 +35,12 @@ export function createCarPicker(parent: HTMLElement, cars: CarOption[], onPick: 
   }
   if (btns[0]) mark(btns[0]);
 
-  // hidden state: a tiny chip to bring it back
+  // collapsed by default: a tiny top-right chip that opens the picker
   const reopen = document.createElement("div");
   reopen.className = "panel";
   reopen.textContent = "🚗";
-  reopen.style.cssText = "display:none;padding:5px 9px;font-size:15px;cursor:pointer;border-radius:9px";
+  reopen.style.cssText = "padding:6px 10px;font-size:16px;cursor:pointer;border-radius:9px";
+  panel.style.display = "none";
 
   close.onclick = () => { panel.style.display = "none"; reopen.style.display = "block"; };
   reopen.onclick = () => { panel.style.display = "flex"; reopen.style.display = "none"; };

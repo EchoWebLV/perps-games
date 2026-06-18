@@ -90,6 +90,7 @@ let solEMA = 0;    // slow average; price vs this drives the terrain elevation
 const priceHist: number[] = [];
 let coins = 0;
 let carX = 0, carXTarget = 0;
+let roundStartMs = 0;
 const round = { entryPx: 0, dir: 1 as 1 | -1 };
 
 // asset switching (BTC/ETH/SOL) — blocked mid-bet; resets the chart for the new asset
@@ -118,6 +119,7 @@ function endRound(snap: Snapshot) {
   chase.setDriving(false); // blend back to the idle showroom orbit
   controls.setLive(false, "🚀 LAUNCH");
   hud.setBuffer(0, false);
+  hud.setTimer(0, false);
   hud.setMultiplier(snap.equity, snap.phase);
   if (snap.phase === "liquidated") hud.setStatus(`💥 Liquidated at ${snap.lev}×. Lost your stake.`);
   else hud.setStatus(`Settled at ×${snap.equity.toFixed(2)} — banked $${snap.payout.toFixed(2)} (${snap.reason}).`);
@@ -132,7 +134,8 @@ controls.onLaunch(() => {
   hud.setBalance(wallet.balance());
   round.entryPx = entry;
   round.dir = controls.dir();
-  engine.launch({ dir: controls.dir(), lev: game.lev, stake, entryRaw: entry, startMs: Date.now() });
+  roundStartMs = Date.now();
+  engine.launch({ dir: controls.dir(), lev: game.lev, stake, entryRaw: entry, startMs: roundStartMs });
   chase.setDriving(true); // smooth transition from the idle orbit into the chase cam
   controls.setLive(true, "CASH OUT");
   hud.setStatus(`Riding ${controls.dir() > 0 ? "LONG" : "SHORT"} SOL at ${game.lev}× from $${entry.toFixed(2)}.`);
@@ -175,6 +178,7 @@ function frame() {
     } else {
       hud.setMultiplier(snap.equity, snap.phase);
       hud.setBuffer(snap.buffer, true);
+      hud.setTimer(CONFIG.MAXSEC - (Date.now() - roundStartMs) / 1000, true);
       car.setEquity("live", snap.equity);
       const win = snap.equity >= 1;
       controls.setLive(true, `${win ? "CASH OUT" : "BAIL"} $${snap.payout.toFixed(2)}`, !win);

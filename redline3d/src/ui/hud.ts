@@ -12,6 +12,7 @@ export interface Hud {
   setActiveAsset(asset: string): void;
   setMultiplier(equity: number, phase: "idle" | "live" | "settled" | "liquidated"): void;
   setBuffer(buf: number, visible: boolean): void;
+  setTimer(secLeft: number, visible: boolean): void;
   setStatus(text: string): void;
 }
 
@@ -37,7 +38,8 @@ export function createHud(parent: HTMLElement): Hud {
         <div class="atab" data-asset="SOL">SOL</div>
       </div></div>
 
-    <div style="position:absolute;left:0;right:0;top:20%;text-align:center;pointer-events:none">
+    <div style="position:absolute;left:0;right:0;top:19%;text-align:center;pointer-events:none">
+      <div id="timer" class="num" style="font-size:clamp(22px,6.5vw,32px);line-height:1;letter-spacing:.08em;color:#aef0d0;opacity:0;transition:opacity .2s,color .25s;margin-bottom:8px">1:00</div>
       <div id="multi" class="num" style="font-size:clamp(46px,15vw,66px);line-height:1;letter-spacing:.02em;color:var(--grn);text-shadow:0 0 26px rgba(46,230,166,.5)">×1.00</div>
       <div id="buf" style="width:188px;max-width:60vw;height:7px;margin:11px auto 0;border-radius:5px;background:rgba(8,6,20,.7);border:1px solid var(--line2);overflow:hidden;opacity:0;transition:opacity .2s">
         <div id="buffill" style="height:100%;width:100%;background:var(--grn);transition:width .08s linear,background .25s"></div></div>
@@ -57,7 +59,7 @@ export function createHud(parent: HTMLElement): Hud {
 
   const q = (s: string) => parent.querySelector(s) as HTMLElement;
   const bal = q("#bal"), px = q("#solpx"), feed = q("#feed"), multi = q("#multi"),
-    buf = q("#buf"), buffill = q("#buffill"), status = q("#status"), coins = q("#coins"), assetEl = q("#asset");
+    buf = q("#buf"), buffill = q("#buffill"), status = q("#status"), coins = q("#coins"), assetEl = q("#asset"), timer = q("#timer");
   const tabs = Array.from(parent.querySelectorAll<HTMLElement>(".atab"));
 
   return {
@@ -90,6 +92,12 @@ export function createHud(parent: HTMLElement): Hud {
       buf.style.opacity = visible ? "1" : "0";
       buffill.style.width = (b * 100).toFixed(1) + "%";
       buffill.style.background = b > 0.5 ? "#2ee6a6" : b > 0.25 ? "#ffd166" : "#ff4d6d";
+    },
+    setTimer(secLeft, visible) {
+      timer.style.opacity = visible ? "1" : "0";
+      const s = Math.max(0, Math.ceil(secLeft));
+      timer.textContent = Math.floor(s / 60) + ":" + String(s % 60).padStart(2, "0");
+      timer.style.color = secLeft > 20 ? "#aef0d0" : secLeft > 8 ? "#ffd166" : "#ff5067";
     },
     setStatus(t) { status.textContent = t; },
   };
