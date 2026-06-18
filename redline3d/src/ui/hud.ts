@@ -19,17 +19,17 @@ const top = "top:max(10px,env(safe-area-inset-top))";
 
 export function createHud(parent: HTMLElement): Hud {
   parent.innerHTML = `
-    <div class="pe panel chip" style="position:absolute;${top};left:14px">
+    <div id="balchip" class="pe panel chip" style="position:absolute;${top};left:14px">
       <span class="lbl">balance</span><span id="bal" class="num">$100.00</span></div>
 
-    <div class="pe panel chip" style="position:absolute;${top};right:14px;text-align:right">
+    <div id="pxchip" class="pe panel chip" style="position:absolute;${top};right:14px;text-align:right">
       <span class="lbl"><span id="asset">SOL</span> · <span id="feed" style="color:var(--amb)">connecting</span></span>
       <span id="solpx" class="num">$—</span></div>
 
-    <div class="panel chip" style="position:absolute;top:max(12px,env(safe-area-inset-top));left:50%;transform:translateX(-50%);padding:5px 13px">
+    <div id="tmrchip" class="panel chip" style="position:absolute;top:max(12px,env(safe-area-inset-top));left:50%;transform:translateX(-50%);padding:5px 13px">
       <span id="timer" class="num" style="font-size:15px;letter-spacing:.1em;color:var(--mut)">1:00</span></div>
 
-    <div class="panel" style="position:absolute;left:50%;transform:translateX(-50%);top:64px;width:min(420px,92%);height:70px;overflow:hidden;padding:0">
+    <div id="minipanel" class="panel" style="position:absolute;left:50%;transform:translateX(-50%);top:64px;width:min(420px,92%);height:70px;overflow:hidden;padding:0">
       <canvas id="mini" style="width:100%;height:100%;display:block"></canvas>
       <div class="pe" style="position:absolute;top:6px;left:7px;display:flex;gap:5px">
         <div class="atab" data-asset="BTC">BTC</div>
@@ -37,16 +37,16 @@ export function createHud(parent: HTMLElement): Hud {
         <div class="atab" data-asset="SOL">SOL</div>
       </div></div>
 
-    <div style="position:absolute;left:0;right:0;top:19%;text-align:center;pointer-events:none">
+    <div id="ctr" style="position:absolute;left:0;right:0;top:19%;text-align:center;pointer-events:none">
       <div id="multi" class="num" style="font-size:clamp(46px,15vw,66px);line-height:1;letter-spacing:.02em;color:var(--grn);text-shadow:0 0 26px rgba(46,230,166,.5)">×1.00</div>
       <div id="buf" style="width:188px;max-width:60vw;height:7px;margin:11px auto 0;border-radius:5px;background:rgba(8,6,20,.7);border:1px solid var(--line2);overflow:hidden;opacity:0;transition:opacity .2s">
         <div id="buffill" style="height:100%;width:100%;background:var(--grn);transition:width .08s linear,background .25s"></div></div>
     </div>
 
-    <div class="pe" style="position:absolute;left:50%;transform:translateX(-50%);bottom:max(28px,env(safe-area-inset-bottom));width:min(448px,96%);display:flex;flex-direction:column;gap:9px">
+    <div id="dock" class="pe" style="position:absolute;left:50%;transform:translateX(-50%);bottom:max(28px,env(safe-area-inset-bottom));width:min(448px,96%);display:flex;flex-direction:column;gap:9px">
       <div id="status" class="lbl" style="text-align:center;letter-spacing:.08em;color:#aeb8dc;min-height:13px;text-shadow:0 1px 8px rgba(0,0,0,.8)"></div>
       <div style="display:flex;gap:10px;align-items:flex-end">
-        <div style="flex:none;width:142px;display:flex;flex-direction:column">
+        <div id="driveCol" style="flex:none;width:142px;display:flex;flex-direction:column">
           <div id="tachMount"></div>
           <div id="pedalMount"></div>
         </div>
