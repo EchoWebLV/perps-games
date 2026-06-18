@@ -3,6 +3,8 @@ export interface GameAudio {
   resume(): void;
   /** rev drone: pitch + volume follow the throttle; silent when not active */
   engine(frac: number, active: boolean): void;
+  /** sampled coin pickup sound; count allows multiple pickups in one frame */
+  coin(count?: number): void;
   /** win sting — a bright ascending arpeggio */
   cashout(): void;
   /** loss sting — a blown-engine drop + noise burst */
@@ -22,6 +24,8 @@ export function createAudio(): GameAudio {
   let eg: GainNode | null = null;
   let o1: OscillatorNode | null = null;
   let o2: OscillatorNode | null = null;
+  let coinPool: HTMLAudioElement[] | null = null;
+  let coinI = 0;
 
   const ensure = () => {
     if (ctx) return;
@@ -48,8 +52,18 @@ export function createAudio(): GameAudio {
     o.start(at); o.stop(at + dur + 0.03);
   };
 
+  const ensureCoinPool = () => {
+    if (coinPool) return;
+    coinPool = Array.from({ length: 4 }, () => {
+      const a = new Audio("/audio/drop-coin.mp3");
+      a.preload = "auto";
+      a.volume = 0.72;
+      return a;
+    });
+  };
+
   return {
-    resume() { ensure(); if (ctx && ctx.state === "suspended") void ctx.resume(); },
+    resume() { ensure(); ensureCoinPool(); if (ctx && ctx.state === "suspended") void ctx.resume(); },
     engine(frac, active) {
       if (!ctx || !eg || !o1 || !o2 || !lp) return;
       const f = Math.max(0, Math.min(1, frac));
@@ -59,6 +73,16 @@ export function createAudio(): GameAudio {
       o1.frequency.setTargetAtTime(freq, now, 0.05);
       o2.frequency.setTargetAtTime(freq, now, 0.05);
       lp.frequency.setTargetAtTime(600 + f * 2200, now, 0.06);
+    },
+    coin(count = 1) {
+      ensureCoinPool();
+      if (!coinPool) return;
+      const n = Math.max(0, Math.floor(count));
+      for (let i = 0; i < n; i++) {
+        const a = coinPool[coinI++ % coinPool.length];
+        a.currentTime = 0;
+        void a.play().catch(() => {});
+      }
     },
     cashout() {
       ensure(); if (!ctx) return;

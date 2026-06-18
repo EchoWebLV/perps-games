@@ -13,6 +13,7 @@ import { RoundEngine } from "./core/round";
 import { SimSettlement } from "./core/settlement";
 import { niceLev, tToLev } from "./core/leverage";
 import { liqPriceOf } from "./core/economics";
+import { addCoins } from "./core/coins";
 import { CONFIG } from "./core/config";
 import { createMinimap } from "./ui/minimap";
 import { createPickups } from "./render/pickups";
@@ -21,6 +22,7 @@ import { createFx } from "./ui/fx";
 import { createJoystick } from "./ui/joystick";
 import { createAudio } from "./core/audio";
 import { createRadio } from "./ui/radio";
+import { createCoinCounter } from "./ui/coins";
 import type { Snapshot } from "./core/types";
 
 const canvas = document.getElementById("gl") as HTMLCanvasElement;
@@ -75,7 +77,10 @@ const minimap = createMinimap(hud.miniCanvas);
 const fx = createFx();
 const joystick = createJoystick();
 const audio = createAudio();
+const coins = createCoinCounter(hudRoot);
 hud.setBalance(wallet.balance());
+let coinTotal = 0;
+coins.set(coinTotal);
 
 // car picker — swap the GLB model live + apply the card's special ability
 let ability: CarAbility | undefined;
@@ -264,7 +269,12 @@ function frame() {
 
   // collectible coins: cosmetic only — they must NOT affect P&L, or every
   // round becomes a guaranteed win and the long/short bet stops mattering
-  pickups.update(dt, speed, carX, world.surfaceY);
+  const collected = pickups.update(dt, speed, carX, world.surfaceY);
+  if (collected > 0) {
+    coinTotal = addCoins(coinTotal, collected);
+    coins.set(coinTotal);
+    audio.coin(collected);
+  }
 
   // minimap: live SOL price line with entry/liq overlays
   const liqPx = live2 ? liqPriceOf(round.entryPx, round.dir, game.lev, CONFIG.LIQ) : 0;
