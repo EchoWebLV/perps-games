@@ -1,4 +1,5 @@
 import * as THREE from "three";
+import { RoomEnvironment } from "three/examples/jsm/environments/RoomEnvironment.js";
 
 export interface SceneCtx {
   renderer: THREE.WebGLRenderer;
@@ -25,6 +26,13 @@ export function createScene(canvas: HTMLCanvasElement): SceneCtx {
   const key = new THREE.DirectionalLight("#ff7ad0", 0.8);
   key.position.set(0, 40, -10);
   scene.add(key);
+
+  // environment map → reflections on metallic surfaces (the stainless car reads as metal,
+  // not a flat blob). Kept subtle so it doesn't wash out the dark synthwave mood.
+  const pmrem = new THREE.PMREMGenerator(renderer);
+  scene.environment = pmrem.fromScene(new RoomEnvironment(), 0.04).texture;
+  scene.environmentIntensity = 0.55;
+  pmrem.dispose();
 
   function resize(w: number, h: number) {
     camera.aspect = w / h;
