@@ -16,6 +16,7 @@ import { liqPriceOf } from "./core/economics";
 import { CONFIG } from "./core/config";
 import { createMinimap } from "./ui/minimap";
 import { createPickups } from "./render/pickups";
+import { createCarPicker } from "./ui/carpicker";
 import type { Snapshot } from "./core/types";
 
 const canvas = document.getElementById("gl") as HTMLCanvasElement;
@@ -68,6 +69,14 @@ const controls = createControls(hud.ctrlMount, hud.goMount, hud.pedalMount);
 const minimap = createMinimap(hud.miniCanvas);
 hud.setBalance(wallet.balance());
 hud.setCoins(0);
+
+// car picker (test) — swap the GLB model live; easily hideable
+createCarPicker(hudRoot, [
+  { name: "DeLorean", url: "/models/car.glb?v=2" },
+  { name: "Cybertruck", url: "/models/cybertruck.glb" },
+  { name: "Orion", url: "/models/orion.glb" },
+  { name: "Vaporwave", url: "/models/vaporwave.glb" },
+], (c) => car.setModel(c.url));
 
 // throttle = the accelerator: gas revs it up, brake slows it, release coasts down SLOWLY
 let throttle = 34; // 0..100 (starts ~50x)

@@ -6,6 +6,8 @@ export interface Car {
   /** color by equity state: idle blue, winning green, losing red */
   setEquity(phase: "idle" | "live", equity: number): void;
   update(dt: number): void;
+  /** swap the GLB model (car picker) */
+  setModel(url: string): void;
 }
 
 const IDLE = "#4da6ff";
@@ -91,38 +93,45 @@ export function createCar(): Car {
     }
   };
 
-  // ---- load the real model and swap it in ----
-  new GLTFLoader().load(
-    MODEL_URL,
-    (gltf) => {
-      const model = gltf.scene;
-      // scale to our footprint, center horizontally, sit wheels on the ground
-      const box = new THREE.Box3().setFromObject(model);
-      const size = box.getSize(new THREE.Vector3());
-      model.scale.setScalar(TARGET_LEN / (Math.max(size.x, size.z) || 1));
-      model.rotation.y = MODEL_YAW;
-      const box2 = new THREE.Box3().setFromObject(model);
-      const c = box2.getCenter(new THREE.Vector3());
-      model.position.set(-c.x, -box2.min.y, -c.z);
+  // ---- model loading / swapping (car picker) ----
+  const loader = new GLTFLoader();
+  let current: THREE.Object3D | null = null;
+  const loadModel = (url: string) => {
+    loader.load(
+      url,
+      (gltf) => {
+        const model = gltf.scene;
+        // scale to our footprint, center horizontally, sit wheels on the ground
+        const box = new THREE.Box3().setFromObject(model);
+        const size = box.getSize(new THREE.Vector3());
+        model.scale.setScalar(TARGET_LEN / (Math.max(size.x, size.z) || 1));
+        model.rotation.y = MODEL_YAW;
+        const box2 = new THREE.Box3().setFromObject(model);
+        const c = box2.getCenter(new THREE.Vector3());
+        model.position.set(-c.x, -box2.min.y, -c.z);
 
-      // collect tintable materials + enable emissive
-      const mats: THREE.MeshStandardMaterial[] = [];
-      model.traverse((o) => {
-        const mesh = o as THREE.Mesh;
-        if (!mesh.isMesh) return;
-        const list = Array.isArray(mesh.material) ? mesh.material : [mesh.material];
-        for (const mm of list) {
-          if ((mm as THREE.MeshStandardMaterial).isMeshStandardMaterial) mats.push(mm as THREE.MeshStandardMaterial);
-        }
-      });
-      modelMats = mats.length ? mats : null;
-      placeholder.visible = false;
-      group.add(model);
-      applyTint();
-    },
-    undefined,
-    (err) => console.warn("[car] GLB failed to load — keeping procedural wedge", err)
-  );
+        // collect tintable materials + enable emissive
+        const mats: THREE.MeshStandardMaterial[] = [];
+        model.traverse((o) => {
+          const mesh = o as THREE.Mesh;
+          if (!mesh.isMesh) return;
+          const list = Array.isArray(mesh.material) ? mesh.material : [mesh.material];
+          for (const mm of list) {
+            if ((mm as THREE.MeshStandardMaterial).isMeshStandardMaterial) mats.push(mm as THREE.MeshStandardMaterial);
+          }
+        });
+        if (current) group.remove(current);
+        current = model;
+        modelMats = mats.length ? mats : null;
+        placeholder.visible = false;
+        group.add(model);
+        applyTint();
+      },
+      undefined,
+      (err) => console.warn("[car] GLB failed to load:", url, err)
+    );
+  };
+  loadModel(MODEL_URL);
 
   let t = 0;
   return {
@@ -136,5 +145,6 @@ export function createCar(): Car {
       t += dt;
       glow.intensity = 2 + Math.sin(t * 3) * 0.5; // faint underglow breathing
     },
+    setModel: loadModel,
   };
 }
