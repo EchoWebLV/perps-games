@@ -77,28 +77,8 @@ let lastLivePrice = 0;
 let solSmooth = 0; // eased display price → a flowing minimap curve (raw price drives economics)
 let solEMA = 0;    // slow average; price vs this drives the terrain elevation
 
-// minimap data: a steady ~4 Hz price sample buffer (up to 15 min) with a
-// selectable window so players can "zoom out" the chart to a wider timeframe
-const SAMPLE_MS = 250;
-const TF = [
-  { key: "15s", ms: 15_000 },
-  { key: "1m", ms: 60_000 },
-  { key: "5m", ms: 300_000 },
-  { key: "15m", ms: 900_000 },
-];
-const MAXK = Math.round(TF[TF.length - 1].ms / SAMPLE_MS);
-const samples: number[] = [];
-let lastSampleMs = 0;
-let tf = "1m";
-const downsample = (arr: number[], max: number): number[] => {
-  if (arr.length <= max) return arr;
-  const out: number[] = [];
-  const stride = arr.length / max;
-  for (let i = 0; i < max; i++) out.push(arr[Math.floor(i * stride)]);
-  return out;
-};
-
-// coins, lateral steering, and the active round's entry
+// price history (minimap), coins, lateral steering, and the active round's entry
+const priceHist: number[] = [];
 let coins = 0;
 let carX = 0, carXTarget = 0;
 const round = { entryPx: 0, dir: 1 as 1 | -1 };
@@ -109,15 +89,10 @@ hud.onAsset((a) => {
   asset = a;
   solSmooth = 0;
   solEMA = 0;
-  samples.length = 0;
-  lastSampleMs = 0;
+  priceHist.length = 0;
   hud.setActiveAsset(a);
 });
 hud.setActiveAsset(asset);
-
-// timeframe (zoom) selector for the minimap chart
-hud.onTimeframe((t) => { tf = t; hud.setActiveTimeframe(t); });
-hud.setActiveTimeframe(tf);
 
 // touch steering: drag horizontally on the road to move the car
 let dragging = false;
@@ -161,7 +136,6 @@ controls.onCashout(() => {
 
 function frame() {
   const dt = Math.min(0.05, ctx.clock.getDelta()); // clamp so a frame hitch can't teleport the world
-  const now = Date.now();
   const price = priceSource.price();
   const live = priceSource.live();
   if (live && price > 0) lastLivePrice = price;
@@ -169,11 +143,7 @@ function frame() {
   if (price > 0) solSmooth = solSmooth ? solSmooth + (price - solSmooth) * 0.1 : price;
   if (solSmooth > 0) solEMA = solEMA ? solEMA + (solSmooth - solEMA) * 0.012 : solSmooth;
   hud.setPrice(solSmooth || price, live);
-  if (solSmooth > 0 && now - lastSampleMs >= SAMPLE_MS) {
-    samples.push(solSmooth);
-    if (samples.length > MAXK) samples.shift();
-    lastSampleMs = now;
-  }
+  if (solSmooth > 0) { priceHist.push(solSmooth); if (priceHist.length > 300) priceHist.shift(); }
 
   // spec §9: never settle P&L on a stale feed. Freeze equity at the last real
   // price when the feed is down so sim drift can't liquidate a live round.
@@ -189,7 +159,7 @@ function frame() {
   if (engine.getPhase() === "live") engine.setLeverage(game.lev, roundPrice);
 
   if (engine.getPhase() === "live") {
-    const snap = engine.tick(roundPrice, now);
+    const snap = engine.tick(roundPrice, Date.now());
     game.equity = snap.equity;
     if (snap.phase !== "live") {
       endRound(snap);
@@ -236,12 +206,9 @@ function frame() {
     hud.setCoins(coins);
   }
 
-  // minimap: windowed price line (timeframe zoom) with entry/liq overlays
+  // minimap: live SOL price line with entry/liq overlays
   const liqPx = live2 ? liqPriceOf(round.entryPx, round.dir, game.lev, CONFIG.LIQ) : 0;
-  const winMs = (TF.find((x) => x.key === tf) ?? TF[1]).ms;
-  const k = Math.min(samples.length, Math.round(winMs / SAMPLE_MS));
-  const hist = downsample(samples.slice(samples.length - k), 240);
-  minimap.draw({ hist, inRun: live2, equity: game.equity, entryPx: round.entryPx, liqPx, dir: round.dir });
+  minimap.draw({ hist: priceHist, inRun: live2, equity: game.equity, entryPx: round.entryPx, liqPx, dir: round.dir });
 
   if (post) post.render();
   else ctx.renderer.render(ctx.scene, ctx.camera);

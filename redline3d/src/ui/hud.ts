@@ -10,8 +10,6 @@ export interface Hud {
   setCoins(n: number): void;
   onAsset(cb: (asset: string) => void): void;
   setActiveAsset(asset: string): void;
-  onTimeframe(cb: (tf: string) => void): void;
-  setActiveTimeframe(tf: string): void;
   setMultiplier(equity: number, phase: "idle" | "live" | "settled" | "liquidated"): void;
   setBuffer(buf: number, visible: boolean): void;
   setStatus(text: string): void;
@@ -37,12 +35,6 @@ export function createHud(parent: HTMLElement): Hud {
         <div class="atab" data-asset="BTC">BTC</div>
         <div class="atab" data-asset="ETH">ETH</div>
         <div class="atab" data-asset="SOL">SOL</div>
-      </div>
-      <div class="pe" style="position:absolute;bottom:6px;left:7px;display:flex;gap:4px">
-        <div class="tftab" data-tf="15s">15s</div>
-        <div class="tftab" data-tf="1m">1m</div>
-        <div class="tftab" data-tf="5m">5m</div>
-        <div class="tftab" data-tf="15m">15m</div>
       </div></div>
 
     <div style="position:absolute;left:0;right:0;top:20%;text-align:center;pointer-events:none">
@@ -67,7 +59,6 @@ export function createHud(parent: HTMLElement): Hud {
   const bal = q("#bal"), px = q("#solpx"), feed = q("#feed"), multi = q("#multi"),
     buf = q("#buf"), buffill = q("#buffill"), status = q("#status"), coins = q("#coins"), assetEl = q("#asset");
   const tabs = Array.from(parent.querySelectorAll<HTMLElement>(".atab"));
-  const tfTabs = Array.from(parent.querySelectorAll<HTMLElement>(".tftab"));
 
   return {
     root: parent,
@@ -87,15 +78,6 @@ export function createHud(parent: HTMLElement): Hud {
         t.style.borderColor = on ? "var(--cyan)" : "var(--line2)";
         t.style.color = on ? "var(--cyan)" : "var(--mut)";
         t.style.background = on ? "rgba(39,231,255,.14)" : "rgba(10,8,22,.55)";
-      }
-    },
-    onTimeframe(cb) { for (const t of tfTabs) t.onclick = () => cb(t.dataset.tf!); },
-    setActiveTimeframe(tf) {
-      for (const t of tfTabs) {
-        const on = t.dataset.tf === tf;
-        t.style.borderColor = on ? "#aab4dc" : "var(--line2)";
-        t.style.color = on ? "var(--ink)" : "var(--mut)";
-        t.style.background = on ? "rgba(132,150,224,.18)" : "rgba(10,8,22,.5)";
       }
     },
     setMultiplier(equity, phase) {
