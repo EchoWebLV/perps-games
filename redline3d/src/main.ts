@@ -180,12 +180,12 @@ function frame() {
   // chase camera tracks the car's height → car stays framed, the road flows under it
   chase.update(ctx.camera, dt, speed, carY);
 
-  // collectible coins: steer into them for a coin (and a small banked bonus mid-run)
+  // collectible coins: cosmetic tally only — they must NOT affect P&L, or every
+  // round becomes a guaranteed win and the long/short bet stops mattering
   const got = pickups.update(dt, speed, carX, world.surfaceY);
   if (got) {
     coins += got;
     hud.setCoins(coins);
-    if (live2) engine.addBonus(0.04 * got);
   }
 
   // minimap: live SOL price line with entry/liq overlays
