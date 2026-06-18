@@ -157,7 +157,7 @@ controls.onLaunch(() => {
   engine.launch({ dir: controls.dir(), lev: game.lev, stake, entryRaw: entry, startMs: roundStartMs });
   chase.setDriving(true); // smooth transition from the idle orbit into the chase cam
   controls.setLive(true, "CASH OUT");
-  hud.setStatus(`Riding ${controls.dir() > 0 ? "LONG" : "SHORT"} SOL at ${game.lev}× from $${entry.toFixed(2)}.`);
+  hud.setStatus(""); // clear any prior message; no "Riding …" banner during the run
 });
 
 controls.onCashout(() => {
