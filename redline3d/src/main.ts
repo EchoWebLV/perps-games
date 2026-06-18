@@ -18,6 +18,7 @@ import { createMinimap } from "./ui/minimap";
 import { createPickups } from "./render/pickups";
 import { createCarPicker } from "./ui/carpicker";
 import { createFx } from "./ui/fx";
+import { createJoystick } from "./ui/joystick";
 import type { Snapshot } from "./core/types";
 
 const canvas = document.getElementById("gl") as HTMLCanvasElement;
@@ -69,6 +70,7 @@ const tach = createTach(hud.tachMount);
 const controls = createControls(hud.ctrlMount, hud.goMount, hud.pedalMount);
 const minimap = createMinimap(hud.miniCanvas);
 const fx = createFx();
+const joystick = createJoystick();
 hud.setBalance(wallet.balance());
 
 // car picker (test) — swap the GLB model live; easily hideable
@@ -112,13 +114,15 @@ let anchorX = 0, anchorY = 0, anchorCarX = 0;
 canvas.addEventListener("pointerdown", (e) => {
   holding = true; touchGas = true; touchBrake = false;
   anchorX = e.clientX; anchorY = e.clientY; anchorCarX = carXTarget;
+  joystick.show(e.clientX, e.clientY); // white ring at the thumb
 });
-const releaseHold = () => { holding = false; touchGas = false; touchBrake = false; };
+const releaseHold = () => { holding = false; touchGas = false; touchBrake = false; joystick.hide(); };
 addEventListener("pointerup", releaseHold);
 addEventListener("pointercancel", releaseHold);
 addEventListener("pointermove", (e) => {
   if (!holding) return;
   const dx = e.clientX - anchorX, dy = e.clientY - anchorY;
+  joystick.move(dx, dy); // knob follows the drag
   // steer relative to where the thumb first landed (~32% of the width = full lock)
   carXTarget = Math.max(-10, Math.min(10, anchorCarX + (dx / (innerWidth * 0.32)) * 10));
   // pulling back past a threshold brakes instead of accelerating
