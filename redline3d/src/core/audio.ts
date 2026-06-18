@@ -11,6 +11,8 @@ export interface GameAudio {
   liquidate(): void;
 }
 
+export const COIN_VOLUME = 0.5;
+
 /**
  * Fully procedural Web Audio — no sample assets (so it's commercial-safe and adds
  * nothing to the bundle). A synth rev drone tracks the leverage, plus short stings
@@ -57,7 +59,7 @@ export function createAudio(): GameAudio {
     coinPool = Array.from({ length: 4 }, () => {
       const a = new Audio("/audio/drop-coin.mp3");
       a.preload = "auto";
-      a.volume = 0.72;
+      a.volume = COIN_VOLUME;
       return a;
     });
   };
