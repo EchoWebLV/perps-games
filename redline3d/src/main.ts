@@ -1,7 +1,7 @@
 import { createScene } from "./render/scene";
 import { createWorld } from "./render/world";
 import { createCar } from "./render/car";
-import { createChaseCam } from "./render/camera";
+import { createChaseCam, roadSpeed } from "./render/camera";
 import { detectQuality } from "./platform/perf";
 import { createPost } from "./render/post";
 import { createHud } from "./ui/hud";
@@ -117,7 +117,7 @@ controls.onCashout(() => {
 });
 
 function frame() {
-  const dt = ctx.clock.getDelta();
+  const dt = Math.min(0.05, ctx.clock.getDelta()); // clamp so a frame hitch can't teleport the world
   const price = priceSource.price();
   const live = priceSource.live();
   if (live && price > 0) lastLivePrice = price;
@@ -164,17 +164,21 @@ function frame() {
   const live2 = engine.getPhase() === "live";
   // price-driven terrain bias: road climbs when SOL is above its average, dips when below
   const hill = Math.max(-7, Math.min(7, (solEMA ? solSmooth / solEMA - 1 : 0) * 2600));
-  const speed = chase.update(ctx.camera, dt, throttle / 100, game.equity, live2);
+  const speed = roadSpeed(throttle / 100, game.equity, live2);
   world.update(dt, speed, hill);
 
-  // everything rides the road surface (which rises on a pump, dips on a dump)
-  const surf = world.surfaceY(-12);
-  ctx.camera.position.y += surf * 0.55;
+  // car hugs the road: ride the surface height + pitch to the local slope, lean into turns
+  const carY = world.surfaceY(-12);
+  const aheadY = world.surfaceY(-15.4), behindY = world.surfaceY(-8.6);
   car.update(dt);
   car.group.position.x = carX;
-  car.group.position.y += surf;
+  car.group.position.y = carY;
+  car.group.rotation.x = Math.max(-0.4, Math.min(0.4, Math.atan2(aheadY - behindY, 6.8)));
   const lean = controls.steer() !== 0 ? -controls.steer() * 0.2 : -(carXTarget - carX) * 0.05;
   car.group.rotation.z = Math.max(-0.3, Math.min(0.3, lean));
+
+  // chase camera tracks the car's height → car stays framed, the road flows under it
+  chase.update(ctx.camera, dt, speed, carY);
 
   // collectible coins: steer into them for a coin (and a small banked bonus mid-run)
   const got = pickups.update(dt, speed, carX, world.surfaceY);
