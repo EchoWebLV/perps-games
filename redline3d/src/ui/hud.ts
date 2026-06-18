@@ -7,12 +7,11 @@ export interface Hud {
   miniCanvas: HTMLCanvasElement;
   setPrice(px: number, live: boolean): void;
   setBalance(b: number): void;
-  setCoins(n: number): void;
   onAsset(cb: (asset: string) => void): void;
   setActiveAsset(asset: string): void;
   setMultiplier(equity: number, phase: "idle" | "live" | "settled" | "liquidated"): void;
   setBuffer(buf: number, visible: boolean): void;
-  setTimer(secLeft: number, visible: boolean): void;
+  setTimer(secLeft: number, live: boolean): void;
   setStatus(text: string): void;
 }
 
@@ -27,8 +26,8 @@ export function createHud(parent: HTMLElement): Hud {
       <span class="lbl"><span id="asset">SOL</span> · <span id="feed" style="color:var(--amb)">connecting</span></span>
       <span id="solpx" class="num">$—</span></div>
 
-    <div class="pe panel chip" style="position:absolute;top:max(12px,env(safe-area-inset-top));left:50%;transform:translateX(-50%);padding:5px 12px;display:flex;align-items:center;gap:6px">
-      <span style="color:var(--amb);font-size:13px;line-height:1">◆</span><span id="coins" class="num" style="font-size:14px;color:var(--amb)">0</span></div>
+    <div class="panel chip" style="position:absolute;top:max(12px,env(safe-area-inset-top));left:50%;transform:translateX(-50%);padding:5px 13px">
+      <span id="timer" class="num" style="font-size:15px;letter-spacing:.1em;color:var(--mut)">1:00</span></div>
 
     <div class="panel" style="position:absolute;left:50%;transform:translateX(-50%);top:64px;width:min(420px,92%);height:70px;overflow:hidden;padding:0">
       <canvas id="mini" style="width:100%;height:100%;display:block"></canvas>
@@ -39,7 +38,6 @@ export function createHud(parent: HTMLElement): Hud {
       </div></div>
 
     <div style="position:absolute;left:0;right:0;top:19%;text-align:center;pointer-events:none">
-      <div id="timer" class="num" style="font-size:clamp(22px,6.5vw,32px);line-height:1;letter-spacing:.08em;color:#aef0d0;opacity:0;transition:opacity .2s,color .25s;margin-bottom:8px">1:00</div>
       <div id="multi" class="num" style="font-size:clamp(46px,15vw,66px);line-height:1;letter-spacing:.02em;color:var(--grn);text-shadow:0 0 26px rgba(46,230,166,.5)">×1.00</div>
       <div id="buf" style="width:188px;max-width:60vw;height:7px;margin:11px auto 0;border-radius:5px;background:rgba(8,6,20,.7);border:1px solid var(--line2);overflow:hidden;opacity:0;transition:opacity .2s">
         <div id="buffill" style="height:100%;width:100%;background:var(--grn);transition:width .08s linear,background .25s"></div></div>
@@ -59,7 +57,7 @@ export function createHud(parent: HTMLElement): Hud {
 
   const q = (s: string) => parent.querySelector(s) as HTMLElement;
   const bal = q("#bal"), px = q("#solpx"), feed = q("#feed"), multi = q("#multi"),
-    buf = q("#buf"), buffill = q("#buffill"), status = q("#status"), coins = q("#coins"), assetEl = q("#asset"), timer = q("#timer");
+    buf = q("#buf"), buffill = q("#buffill"), status = q("#status"), assetEl = q("#asset"), timer = q("#timer");
   const tabs = Array.from(parent.querySelectorAll<HTMLElement>(".atab"));
 
   return {
@@ -71,7 +69,6 @@ export function createHud(parent: HTMLElement): Hud {
     miniCanvas: q("#mini") as HTMLCanvasElement,
     setPrice(p, live) { px.textContent = "$" + (p ? p.toFixed(2) : "—"); feed.textContent = live ? "live" : "sim"; feed.style.color = live ? "var(--grn)" : "var(--amb)"; },
     setBalance(b) { bal.textContent = "$" + b.toFixed(2); },
-    setCoins(n) { coins.textContent = String(n); },
     onAsset(cb) { for (const t of tabs) t.onclick = () => cb(t.dataset.asset!); },
     setActiveAsset(a) {
       assetEl.textContent = a;
@@ -93,11 +90,11 @@ export function createHud(parent: HTMLElement): Hud {
       buffill.style.width = (b * 100).toFixed(1) + "%";
       buffill.style.background = b > 0.5 ? "#2ee6a6" : b > 0.25 ? "#ffd166" : "#ff4d6d";
     },
-    setTimer(secLeft, visible) {
-      timer.style.opacity = visible ? "1" : "0";
+    setTimer(secLeft, live) {
       const s = Math.max(0, Math.ceil(secLeft));
       timer.textContent = Math.floor(s / 60) + ":" + String(s % 60).padStart(2, "0");
-      timer.style.color = secLeft > 20 ? "#aef0d0" : secLeft > 8 ? "#ffd166" : "#ff5067";
+      // dim when idle; colour-coded by urgency once a round is live
+      timer.style.color = !live ? "var(--mut)" : secLeft > 20 ? "#aef0d0" : secLeft > 8 ? "#ffd166" : "#ff5067";
     },
     setStatus(t) { status.textContent = t; },
   };

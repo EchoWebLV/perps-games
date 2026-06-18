@@ -68,7 +68,6 @@ const tach = createTach(hud.tachMount);
 const controls = createControls(hud.ctrlMount, hud.goMount, hud.pedalMount);
 const minimap = createMinimap(hud.miniCanvas);
 hud.setBalance(wallet.balance());
-hud.setCoins(0);
 
 // car picker (test) — swap the GLB model live; easily hideable
 createCarPicker(hudRoot, [
@@ -86,9 +85,8 @@ let lastLivePrice = 0;
 let solSmooth = 0; // eased display price → a flowing minimap curve (raw price drives economics)
 let solEMA = 0;    // slow average; price vs this drives the terrain elevation
 
-// price history (minimap), coins, lateral steering, and the active round's entry
+// price history (minimap), lateral steering, and the active round's entry
 const priceHist: number[] = [];
-let coins = 0;
 let carX = 0, carXTarget = 0;
 let roundStartMs = 0;
 const round = { entryPx: 0, dir: 1 as 1 | -1 };
@@ -133,7 +131,7 @@ function endRound(snap: Snapshot) {
   chase.setDriving(false); // blend back to the idle showroom orbit
   controls.setLive(false, "🚀 LAUNCH");
   hud.setBuffer(0, false);
-  hud.setTimer(0, false);
+  hud.setTimer(CONFIG.MAXSEC, false);
   hud.setMultiplier(snap.equity, snap.phase);
   if (snap.phase === "liquidated") hud.setStatus(`💥 Liquidated at ${snap.lev}×. Lost your stake.`);
   else hud.setStatus(`Settled at ×${snap.equity.toFixed(2)} — banked $${snap.payout.toFixed(2)} (${snap.reason}).`);
@@ -201,6 +199,7 @@ function frame() {
     }
   } else {
     car.setEquity("idle", 1);
+    hud.setTimer(CONFIG.MAXSEC, false);
   }
 
   // lateral steering (arrows + touch drag), with the car leaning into the turn
@@ -231,13 +230,9 @@ function frame() {
   // camera: idle showroom orbit when parked, smooth blend to the chase cam while driving
   chase.update(ctx.camera, dt, speed, carY, carX);
 
-  // collectible coins: cosmetic tally only — they must NOT affect P&L, or every
+  // collectible coins: cosmetic only — they must NOT affect P&L, or every
   // round becomes a guaranteed win and the long/short bet stops mattering
-  const got = pickups.update(dt, speed, carX, world.surfaceY);
-  if (got) {
-    coins += got;
-    hud.setCoins(coins);
-  }
+  pickups.update(dt, speed, carX, world.surfaceY);
 
   // minimap: live SOL price line with entry/liq overlays
   const liqPx = live2 ? liqPriceOf(round.entryPx, round.dir, game.lev, CONFIG.LIQ) : 0;
