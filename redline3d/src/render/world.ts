@@ -38,6 +38,29 @@ export function createWorld(): World {
   group.add(sky);
   group.add(makeSun());
 
+  // stars
+  const starGeo = new THREE.BufferGeometry();
+  const STAR_N = 320;
+  const sp = new Float32Array(STAR_N * 3);
+  for (let i = 0; i < STAR_N; i++) {
+    sp[i * 3] = (Math.random() - 0.5) * 1700;
+    sp[i * 3 + 1] = 120 + Math.random() * 520;
+    sp[i * 3 + 2] = -300 - Math.random() * 760;
+  }
+  starGeo.setAttribute("position", new THREE.BufferAttribute(sp, 3));
+  group.add(new THREE.Points(starGeo, new THREE.PointsMaterial({ color: "#cfe0ff", size: 2.4, sizeAttenuation: true, fog: false, transparent: true, opacity: 0.85 })));
+
+  // low-poly mountain silhouette along the horizon
+  const mtnMat = new THREE.MeshBasicMaterial({ color: "#2a0f3a", fog: false });
+  for (let i = 0; i < 12; i++) {
+    const h = 90 + Math.random() * 90;
+    const r = 90 + Math.random() * 60;
+    const c = new THREE.Mesh(new THREE.ConeGeometry(r, h, 4), mtnMat);
+    c.position.set(-420 + i * 78 + (Math.random() - 0.5) * 30, h / 2 - 8, -820 + (Math.random() - 0.5) * 50);
+    c.rotation.y = Math.random() * Math.PI;
+    group.add(c);
+  }
+
   // neon grid floor — a large plane with a scrolling grid shader
   const gridMat = new THREE.ShaderMaterial({
     transparent: true,
