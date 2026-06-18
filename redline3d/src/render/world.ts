@@ -139,8 +139,11 @@ export function createWorld(): World {
   }
 
   let scroll = 0, biasCur = 0;
+  // the plane is rotated -90° about X and sits at z=PLANE_Z, so a world z maps to
+  // local y = PLANE_Z - worldZ. sampling the wave here MUST match the vertex shader,
+  // or objects float off the road (the "flying car" bug).
   const surfaceY = (worldZ: number) => {
-    const localY = -(worldZ + PLANE_Z);
+    const localY = PLANE_Z - worldZ;
     return Math.sin((localY + scroll) * FREQ) * AMP + biasCur;
   };
 
