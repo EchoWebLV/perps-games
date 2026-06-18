@@ -3,6 +3,6 @@ import { COIN_VOLUME } from "./audio";
 
 describe("audio constants", () => {
   test("keeps coin pickups below the main audio bed", () => {
-    expect(COIN_VOLUME).toBe(0.5);
+    expect(COIN_VOLUME).toBe(0.25);
   });
 });
