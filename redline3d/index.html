@@ -108,16 +108,15 @@
       #splash.hide{opacity:0;pointer-events:none}
       #splashvid{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;object-position:center}
       @media (orientation:landscape){#splashvid{object-fit:contain}}
+      /* the image is a finished composition — only a faint veil behind the bar */
       #splashveil{position:absolute;inset:0;pointer-events:none;
-        background:linear-gradient(to bottom,rgba(5,3,13,.05) 35%,rgba(5,3,13,.55) 72%,rgba(5,3,13,.92) 100%)}
-      #splashui{position:absolute;left:0;right:0;bottom:max(54px,calc(env(safe-area-inset-bottom) + 40px));
+        background:linear-gradient(to bottom,transparent 76%,rgba(5,3,13,.4) 90%,rgba(5,3,13,.82) 100%)}
+      #splashui{position:absolute;left:0;right:0;bottom:max(40px,calc(env(safe-area-inset-bottom) + 28px));
         padding:0 26px;text-align:center}
-      #splashtitle{font-family:"Chakra Petch";font-weight:700;letter-spacing:.34em;font-size:30px;color:#fff;
-        text-shadow:0 0 18px rgba(39,231,255,.85),0 0 40px rgba(255,57,192,.55);margin:0 0 16px 6px}
-      #splashbar{width:min(360px,80%);height:10px;margin:0 auto;border-radius:6px;background:rgba(255,255,255,.13);
+      #splashbar{width:min(360px,78%);height:10px;margin:0 auto;border-radius:6px;background:rgba(255,255,255,.13);
         border:1px solid rgba(255,255,255,.24);overflow:hidden}
       #splashfill{height:100%;width:0;border-radius:6px;transition:width .25s ease;
-        background:linear-gradient(90deg,#27e7ff,#2ee6a6,#ff39c0);box-shadow:0 0 16px rgba(46,230,166,.7)}
+        background:linear-gradient(90deg,#27e7ff,#ff39c0);box-shadow:0 0 16px rgba(39,231,255,.65)}
       #splashpct{margin-top:11px;font-family:"Chakra Petch";font-size:11px;letter-spacing:.24em;
         text-transform:uppercase;color:#9fb0d8}
     </style>
@@ -127,12 +126,9 @@
     <div id="hud"></div>
 
     <div id="splash">
-      <video id="splashvid" autoplay muted loop playsinline preload="auto">
-        <source src="/Ferto.mp4" type="video/mp4" />
-      </video>
+      <img id="splashvid" src="/loadingscreen.png" alt="" />
       <div id="splashveil"></div>
       <div id="splashui">
-        <div id="splashtitle">REDLINE</div>
         <div id="splashbar"><div id="splashfill"></div></div>
         <div id="splashpct">loading…</div>
       </div>
