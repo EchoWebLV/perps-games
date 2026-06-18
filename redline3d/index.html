@@ -86,7 +86,7 @@
          buffer drains. The multiplier carries win/lose; this carries time-to-liq. */
       @property --b{syntax:"<percentage>";inherits:false;initial-value:100%}
       .cta #gofill{position:absolute;inset:0;display:none;pointer-events:none;z-index:1;--b:100%;
-        background:linear-gradient(90deg,#2ee6a6,#2ee6a6 calc(var(--b) - 4%),#ff3b5e calc(var(--b) + 1%),#ff2d55);
+        background:linear-gradient(90deg,#2ee6a6 var(--b),#ff2d55 var(--b));
         transition:--b .12s linear}
       .cta #golabel{position:relative;z-index:3;text-shadow:0 1px 3px rgba(0,0,0,.55)}
       .cta.gauge{color:#fff;background:#160a10;filter:drop-shadow(0 10px 22px rgba(46,230,166,.26))}
