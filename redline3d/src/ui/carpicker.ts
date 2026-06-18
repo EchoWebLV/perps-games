@@ -8,10 +8,18 @@ export interface CarOption { name: string; url: string; scale?: number; yaw?: nu
 
 const MODEL_YAW = Math.PI; // base facing (matches the in-game car); per-card yaw adds to this
 
+const hudDisplayBeforeMenu = new WeakMap<HTMLElement, string>();
+
 export function setHudMenuMode(parent: HTMLElement, menuRoot: HTMLElement, open: boolean): void {
   for (const child of Array.from(parent.children) as HTMLElement[]) {
     if (child === menuRoot) continue;
-    child.style.display = open ? "none" : "";
+    if (open) {
+      if (!hudDisplayBeforeMenu.has(child)) hudDisplayBeforeMenu.set(child, child.style.display);
+      child.style.display = "none";
+    } else {
+      child.style.display = hudDisplayBeforeMenu.get(child) ?? "";
+      hudDisplayBeforeMenu.delete(child);
+    }
   }
 }
 

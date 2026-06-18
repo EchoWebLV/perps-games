@@ -1,8 +1,8 @@
 import { describe, expect, test } from "vitest";
 import { setHudMenuMode } from "./carpicker";
 
-function fakeEl() {
-  return { style: { display: "" } } as HTMLElement;
+function fakeEl(display = "") {
+  return { style: { display } } as HTMLElement;
 }
 
 function fakeParent(children: HTMLElement[]) {
@@ -24,16 +24,16 @@ describe("setHudMenuMode", () => {
   });
 
   test("restores hud children when the menu closes", () => {
-    const bal = fakeEl();
+    const bal = fakeEl("flex");
     const menu = fakeEl();
-    const dock = fakeEl();
+    const dock = fakeEl("grid");
     const parent = fakeParent([bal, menu, dock]);
 
     setHudMenuMode(parent, menu, true);
     setHudMenuMode(parent, menu, false);
 
-    expect(bal.style.display).toBe("");
+    expect(bal.style.display).toBe("flex");
     expect(menu.style.display).toBe("");
-    expect(dock.style.display).toBe("");
+    expect(dock.style.display).toBe("grid");
   });
 });
