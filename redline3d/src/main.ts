@@ -46,11 +46,16 @@ ctx.scene.add(pickups.group);
 const engine = new RoundEngine();
 const wallet = new SimSettlement();
 
-// price feed
-const SOL = { key: "SOL", lz: 6, hx: "ef0d8b6fda2ceba41da15d4095d1da392a0d2f8ed0c6c7bc0f4cfac8c280b56d", expo: -8 };
+// price feeds — BTC / ETH / SOL (subscribe to all; the active one drives the game)
+const ASSETS = [
+  { key: "BTC", lz: 1, hx: "e62df6c8b4a85fe1a67db44dc12de5db330f7ac66b72dc658afedf0f4a415b43", expo: -8 },
+  { key: "ETH", lz: 2, hx: "ff61491a931112ddf1bd8147cd1b641375f79f5825126d665480874634fd0ace", expo: -8 },
+  { key: "SOL", lz: 6, hx: "ef0d8b6fda2ceba41da15d4095d1da392a0d2f8ed0c6c7bc0f4cfac8c280b56d", expo: -8 },
+];
+let asset = "SOL";
 const priceSource = createPriceSource({
   connect: (onPrice) => {
-    const h = connectFeed({ feeds: [SOL], onPrice: (_k, v) => onPrice(v) });
+    const h = connectFeed({ feeds: ASSETS, onPrice: (k, v) => { if (k === asset) onPrice(v); } });
     return () => h.stop();
   },
 });
@@ -77,6 +82,17 @@ const priceHist: number[] = [];
 let coins = 0;
 let carX = 0, carXTarget = 0;
 const round = { entryPx: 0, dir: 1 as 1 | -1 };
+
+// asset switching (BTC/ETH/SOL) — blocked mid-bet; resets the chart for the new asset
+hud.onAsset((a) => {
+  if (engine.getPhase() === "live") return;
+  asset = a;
+  solSmooth = 0;
+  solEMA = 0;
+  priceHist.length = 0;
+  hud.setActiveAsset(a);
+});
+hud.setActiveAsset(asset);
 
 // touch steering: drag horizontally on the road to move the car
 let dragging = false;

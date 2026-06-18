@@ -69,7 +69,6 @@ export function createMinimap(canvas: HTMLCanvasElement): Minimap {
       g.addColorStop(0, "rgba(" + col + ",.22)"); g.addColorStop(1, "rgba(" + col + ",0)");
       c.fillStyle = g; c.fill();
 
-      c.fillStyle = "rgba(154,166,200,.85)"; c.font = "9px ui-monospace"; c.fillText("SOL", 6, 12);
       c.textAlign = "right"; c.fillStyle = "rgb(" + col + ")"; c.fillText("$" + hist[n - 1].toFixed(2), w - 6, 12); c.textAlign = "left";
     },
   };
