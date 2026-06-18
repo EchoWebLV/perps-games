@@ -79,11 +79,11 @@ hud.setBalance(wallet.balance());
 // car picker (test) — swap the GLB model live; easily hideable
 createCarPicker(hudRoot, [
   { name: "DeLorean", url: "/models/car.glb?v=2" },
-  { name: "Cybertruck", url: "/models/cybertruck.glb" },
-  { name: "Orion", url: "/models/orion.glb" },
+  { name: "Cybertruck", url: "/models/cybertruck.glb", scale: 1.3 },
+  { name: "Orion", url: "/models/orion.glb", yaw: Math.PI / 2 },
   { name: "Vaporwave", url: "/models/vaporwave.glb" },
   { name: "Flintstone", url: "/models/flinstone.glb", scale: 0.7 },
-], (c) => car.setModel(c.url, c.scale));
+], (c) => car.setModel(c.url, c.scale, c.yaw));
 
 // throttle = the accelerator: gas revs it up, brake slows it, release coasts down SLOWLY
 let throttle = 34; // 0..100 (starts ~50x)

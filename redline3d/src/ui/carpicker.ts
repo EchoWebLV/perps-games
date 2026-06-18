@@ -1,4 +1,4 @@
-export interface CarOption { name: string; url: string; scale?: number; }
+export interface CarOption { name: string; url: string; scale?: number; yaw?: number; }
 
 export function setHudMenuMode(parent: HTMLElement, menuRoot: HTMLElement, open: boolean): void {
   for (const child of Array.from(parent.children) as HTMLElement[]) {

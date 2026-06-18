@@ -6,8 +6,8 @@ export interface Car {
   /** color by equity state: idle blue, winning green, losing red */
   setEquity(phase: "idle" | "live", equity: number): void;
   update(dt: number): void;
-  /** swap the GLB model (car picker); scale multiplies the normalized footprint */
-  setModel(url: string, scale?: number): void;
+  /** swap the GLB model (car picker); scale multiplies the footprint, yaw adds to the facing */
+  setModel(url: string, scale?: number, yaw?: number): void;
   /** turn the front wheels for steering (−1 full left … 0 straight … +1 full right) */
   setSteer(angle: number): void;
 }
@@ -102,7 +102,7 @@ export function createCar(onReady?: () => void): Car {
   let current: THREE.Object3D | null = null;
   // front-wheel nodes (+ their rest rotation) so steering is an offset, not absolute
   let frontWheels: { o: THREE.Object3D; baseY: number }[] = [];
-  const loadModel = (url: string, scaleMul = 1) => {
+  const loadModel = (url: string, scaleMul = 1, yawAdd = 0) => {
     loader.load(
       url,
       (gltf) => {
@@ -111,7 +111,7 @@ export function createCar(onReady?: () => void): Car {
         const box = new THREE.Box3().setFromObject(model);
         const size = box.getSize(new THREE.Vector3());
         model.scale.setScalar((TARGET_LEN / (Math.max(size.x, size.z) || 1)) * scaleMul);
-        model.rotation.y = MODEL_YAW;
+        model.rotation.y = MODEL_YAW + yawAdd; // per-model facing tweak (some GLBs point sideways)
         const box2 = new THREE.Box3().setFromObject(model);
         const c = box2.getCenter(new THREE.Vector3());
         model.position.set(-c.x, -box2.min.y, -c.z);
