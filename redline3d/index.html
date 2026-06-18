@@ -75,11 +75,23 @@
         background:linear-gradient(180deg,#48f0b6,#14c78c);
         clip-path:polygon(14px 0,100% 0,100% calc(100% - 14px),calc(100% - 14px) 100%,0 100%,0 14px);
         filter:drop-shadow(0 10px 22px rgba(46,230,166,.4));transition:transform .06s ease,filter .15s}
-      .cta::after{content:"";position:absolute;inset:0;clip-path:inherit;pointer-events:none;
+      .cta::after{content:"";position:absolute;inset:0;clip-path:inherit;pointer-events:none;z-index:2;
         background:linear-gradient(180deg,rgba(255,255,255,.34),transparent 44%)}
       .cta:active{transform:translateY(1px)}
       .cta.live{background:linear-gradient(180deg,#ffe28e,#ffc23d);color:#1c1303;filter:drop-shadow(0 10px 22px rgba(255,209,102,.38))}
       .cta.warn{background:linear-gradient(180deg,#ff9aa6,#ff4d6d);color:#fff;filter:drop-shadow(0 10px 22px rgba(255,77,109,.42))}
+
+      /* LIVE = liquidation gauge: the button itself becomes the bar. A two-hue
+         fill (safe green → danger red) whose boundary --b slides left as the
+         buffer drains. The multiplier carries win/lose; this carries time-to-liq. */
+      @property --b{syntax:"<percentage>";inherits:false;initial-value:100%}
+      .cta #gofill{position:absolute;inset:0;display:none;pointer-events:none;z-index:1;--b:100%;
+        background:linear-gradient(90deg,#2ee6a6,#2ee6a6 calc(var(--b) - 4%),#ff3b5e calc(var(--b) + 1%),#ff2d55);
+        transition:--b .12s linear}
+      .cta #golabel{position:relative;z-index:3;text-shadow:0 1px 3px rgba(0,0,0,.55)}
+      .cta.gauge{color:#fff;background:#160a10;filter:drop-shadow(0 10px 22px rgba(46,230,166,.26))}
+      .cta.gauge #gofill{display:block}
+      .cta.gauge.warn{background:#160a10;filter:drop-shadow(0 10px 22px rgba(255,77,109,.42))}
 
       /* ---- PHONE LANDSCAPE ONLY (wide + short). Desktop & portrait are untouched
              because they never match max-height:500px. Splits the bottom dock into

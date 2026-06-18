@@ -137,7 +137,6 @@ function endRound(snap: Snapshot) {
   game.equity = 1;
   chase.setDriving(false); // blend back to the idle showroom orbit
   controls.setLive(false, "GO!");
-  hud.setBuffer(0, false);
   hud.setTimer(CONFIG.MAXSEC, false);
   hud.setMultiplier(snap.equity, snap.phase);
   if (snap.phase === "liquidated") { hud.setStatus(`💥 Liquidated at ${snap.lev}×. Lost your stake.`); fx.liquidate(); }
@@ -198,7 +197,7 @@ function frame() {
       endRound(snap);
     } else {
       hud.setMultiplier(snap.equity, snap.phase);
-      hud.setBuffer(snap.buffer, true);
+      controls.setBuffer(snap.buffer); // the bail button IS the liquidation bar now
       hud.setTimer(CONFIG.MAXSEC - (Date.now() - roundStartMs) / 1000, true);
       car.setEquity("live", snap.equity);
       const win = snap.equity >= 1;

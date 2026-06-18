@@ -5,6 +5,8 @@ export interface Controls {
   brake(): boolean;
   steer(): number; // -1 left, 0, 1 right
   setLive(live: boolean, label: string, warn?: boolean): void;
+  /** drain the live button's liquidation gauge: 1 = full margin, 0 = at liquidation */
+  setBuffer(buf: number): void;
   onLaunch(cb: () => void): void;
   onCashout(cb: () => void): void;
 }
@@ -27,13 +29,14 @@ export function createControls(ctrlMount: HTMLElement, goMount: HTMLElement, ped
       </div></div>`;
   pedalMount.innerHTML = `
     <div class="lbl" style="text-align:center;margin-top:8px;line-height:1.45;opacity:.8">hold road to drive<br>drag · pull back = brake</div>`;
-  goMount.innerHTML = `<button id="go" class="cta">GO!</button>`;
+  goMount.innerHTML = `<button id="go" class="cta"><span id="gofill"></span><span id="golabel">GO!</span></button>`;
 
   const q = (s: string) => (ctrlMount.querySelector(s) || goMount.querySelector(s) || pedalMount.querySelector(s)) as HTMLElement;
   let d: 1 | -1 = 1, stake = 1, live = false;
   let gasOn = false, brakeOn = false, steerL = false, steerR = false;
   let launchCb = () => {}, cashCb = () => {};
-  const long = q("#long"), short = q("#short"), sval = q("#sval"), go = q("#go"), callbox = q("#callbox");
+  const long = q("#long"), short = q("#short"), sval = q("#sval"), go = q("#go"),
+    golabel = q("#golabel"), gofill = q("#gofill"), callbox = q("#callbox");
 
   const setDir = (nd: 1 | -1) => {
     if (live) return;
@@ -73,12 +76,18 @@ export function createControls(ctrlMount: HTMLElement, goMount: HTMLElement, ped
     steer: () => (steerR ? 1 : 0) - (steerL ? 1 : 0),
     setLive(l, label, warn) {
       live = l;
-      go.textContent = label;
-      go.classList.toggle("live", l && !warn);
-      go.classList.toggle("warn", !!(l && warn));
+      golabel.textContent = label;
+      // the LIVE button becomes the liquidation gauge; idle is the green GO!
+      go.classList.toggle("gauge", l);
+      go.classList.toggle("warn", !!(l && warn)); // red glow when losing / near liq
+      if (!l) gofill.style.setProperty("--b", "100%"); // reset the fill for next round
       // long/short fades out for the live round, fades back in when it settles
       callbox.style.opacity = l ? "0" : "1";
       callbox.style.pointerEvents = l ? "none" : "auto";
+    },
+    setBuffer(buf) {
+      const b = Math.max(0, Math.min(1, buf));
+      gofill.style.setProperty("--b", (b * 100).toFixed(1) + "%");
     },
     onLaunch: (cb) => (launchCb = cb),
     onCashout: (cb) => (cashCb = cb),

@@ -10,7 +10,6 @@ export interface Hud {
   onAsset(cb: (asset: string) => void): void;
   setActiveAsset(asset: string): void;
   setMultiplier(equity: number, phase: "idle" | "live" | "settled" | "liquidated"): void;
-  setBuffer(buf: number, visible: boolean): void;
   setTimer(secLeft: number, live: boolean): void;
   setStatus(text: string): void;
 }
@@ -38,9 +37,7 @@ export function createHud(parent: HTMLElement): Hud {
       </div></div>
 
     <div id="ctr" style="position:absolute;left:0;right:0;top:19%;text-align:center;pointer-events:none">
-      <div id="multi" class="num" style="font-size:clamp(46px,15vw,66px);line-height:1;letter-spacing:.02em;color:var(--grn);text-shadow:0 0 26px rgba(46,230,166,.5)">×1.00</div>
-      <div id="buf" style="width:188px;max-width:60vw;height:7px;margin:11px auto 0;border-radius:5px;background:rgba(8,6,20,.7);border:1px solid var(--line2);overflow:hidden;opacity:0;transition:opacity .2s">
-        <div id="buffill" style="height:100%;width:100%;background:var(--grn);transition:width .08s linear,background .25s"></div></div>
+      <div id="multi" class="num" style="font-size:clamp(46px,15vw,66px);line-height:1;letter-spacing:.02em;-webkit-text-stroke:2.5px #000;text-stroke:2.5px #000;paint-order:stroke;color:var(--grn);text-shadow:0 0 26px rgba(46,230,166,.5)">×1.00</div>
     </div>
 
     <div id="dock" class="pe" style="position:absolute;left:50%;transform:translateX(-50%);bottom:max(28px,env(safe-area-inset-bottom));width:min(448px,96%);display:flex;flex-direction:column;gap:9px">
@@ -57,7 +54,7 @@ export function createHud(parent: HTMLElement): Hud {
 
   const q = (s: string) => parent.querySelector(s) as HTMLElement;
   const bal = q("#bal"), px = q("#solpx"), feed = q("#feed"), multi = q("#multi"),
-    buf = q("#buf"), buffill = q("#buffill"), status = q("#status"), assetEl = q("#asset"), timer = q("#timer");
+    status = q("#status"), assetEl = q("#asset"), timer = q("#timer");
   const tabs = Array.from(parent.querySelectorAll<HTMLElement>(".atab"));
 
   return {
@@ -84,11 +81,6 @@ export function createHud(parent: HTMLElement): Hud {
       const col = phase === "liquidated" ? "#ff4d6d" : phase === "settled" ? (equity >= 1 ? "#2ee6a6" : "#ffd166") : equity >= 1 ? "#2ee6a6" : "#ff5067";
       multi.style.color = col;
       multi.style.textShadow = "0 0 26px " + col + "8c";
-    },
-    setBuffer(b, visible) {
-      buf.style.opacity = visible ? "1" : "0";
-      buffill.style.width = (b * 100).toFixed(1) + "%";
-      buffill.style.background = b > 0.5 ? "#2ee6a6" : b > 0.25 ? "#ffd166" : "#ff4d6d";
     },
     setTimer(secLeft, live) {
       const s = Math.max(0, Math.ceil(secLeft));

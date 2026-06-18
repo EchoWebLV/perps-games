@@ -21,7 +21,8 @@ function makeSun(): THREE.Group {
   // stop the peaks clipping through the disc). -860 keeps it inside the r=900 sky.
   const R = 116, CY = 74, Z = -860, N = 15;
   const top = new THREE.Color("#fff27a"), mid = new THREE.Color("#ff7a3c"), bot = new THREE.Color("#ff2d9a");
-  for (let i = 0; i < N; i++) {
+  const DROP_BOTTOM = 4;                  // skip the lowest slices — they dip below the horizon into the play area
+  for (let i = 0; i < N - DROP_BOTTOM; i++) {
     const t = (i + 0.5) / N;              // 0 = top, 1 = bottom
     const yy = R - t * 2 * R;             // +R .. -R
     const w = 2 * Math.sqrt(Math.max(0.001, R * R - yy * yy));
@@ -133,7 +134,9 @@ export function createWorld(): World {
 
   // roadside street lamps (also the speed cue) — pole + arm + glowing head + a
   // soft light shaft to the road, plus a neon strip up the pole. They ride the surface.
-  const SP = 44, COUNT = 22, TOTAL = SP * COUNT, RECYCLE = 26;
+  // RECYCLE sits PAST the light fade (dist = RECYCLE - CAR_Z = 70 > 64) so a lamp is
+  // already dark when it teleports — recycling a still-lit lamp was the flicker.
+  const SP = 44, COUNT = 22, TOTAL = SP * COUNT, RECYCLE = 58;
   const poleGeo = new THREE.CylinderGeometry(0.3, 0.42, 13, 8);
   const footGeo = new THREE.CylinderGeometry(0.55, 0.72, 0.8, 8);
   const stripGeo = new THREE.BoxGeometry(0.08, 11.2, 0.18);
@@ -214,6 +217,7 @@ export function createWorld(): World {
   }
   const cyanCol = new THREE.Color("#3df0ff"), magCol = new THREE.Color("#ff5ccf");
   const leftScratch: Lamp[] = [], rightScratch: Lamp[] = [];
+  const lampOf: (Lamp | undefined)[] = []; // which lamp each real light currently tracks
   const CAR_Z = -12, REAL_I = 850;
 
   let scroll = 0, biasCur = 0, time = 0;
@@ -256,7 +260,7 @@ export function createWorld(): World {
       for (const l of lamps) { if (l.mode === 1) continue; (l.side < 0 ? leftScratch : rightScratch).push(l); }
       const byCar = (a: Lamp, b: Lamp) => Math.abs(a.o.position.z - CAR_Z) - Math.abs(b.o.position.z - CAR_Z);
       leftScratch.sort(byCar); rightScratch.sort(byCar);
-      const setLight = (pl: THREE.PointLight, l: Lamp | undefined) => {
+      const setLight = (idx: number, pl: THREE.PointLight, l: Lamp | undefined) => {
         let target = 0;
         if (l) {
           const inward = l.side < 0 ? 1 : -1;
@@ -266,12 +270,16 @@ export function createWorld(): World {
           const t = Math.max(0, 1 - Math.abs(l.o.position.z - CAR_Z) / 64);
           target = lit ? t * t * REAL_I : 0;
         }
-        pl.intensity += (target - pl.intensity) * 0.3; // lerp smooths any reassignment / fade
+        // when a light HOPS to a different lamp, snap to that lamp's brightness instead
+        // of carrying the old value across the teleport (that carry-over was the flicker).
+        // Same lamp → smooth lerp as it sweeps past.
+        if (lampOf[idx] !== l) { lampOf[idx] = l; pl.intensity = target; }
+        else pl.intensity += (target - pl.intensity) * 0.3;
       };
       const PER = LIGHT_N / 2;
       for (let i = 0; i < PER; i++) {
-        setLight(realLights[i], leftScratch[i]);
-        setLight(realLights[PER + i], rightScratch[i]);
+        setLight(i, realLights[i], leftScratch[i]);
+        setLight(PER + i, realLights[PER + i], rightScratch[i]);
       }
     },
   };
