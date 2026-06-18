@@ -11,8 +11,6 @@ export interface Minimap {
   draw(s: MiniState): void;
 }
 
-const MINI_N = 300;
-
 /** Port of the prototype minimap: SOL price line, scaled to history, with entry/liq overlays during a run. */
 export function createMinimap(canvas: HTMLCanvasElement): Minimap {
   const c = canvas.getContext("2d")!;
@@ -34,8 +32,8 @@ export function createMinimap(canvas: HTMLCanvasElement): Minimap {
       const pad = (hi - lo) * 0.18 || hi * 0.0008 || 1;
       lo -= pad; hi += pad;
       const rng = hi - lo || 1;
-      const off = MINI_N - n;
-      const X = (k: number) => (k / (MINI_N - 1)) * (w - 30);
+      // spread the given window across the full width (any timeframe fills the chart)
+      const X = (i: number) => (n > 1 ? (i / (n - 1)) * (w - 30) : 0);
       const Y = (v: number) => h - ((v - lo) / rng) * h;
       const col = s.inRun ? (s.equity >= 1 ? "46,230,166" : "255,77,109") : "77,166,255";
 
@@ -61,18 +59,18 @@ export function createMinimap(canvas: HTMLCanvasElement): Minimap {
       }
 
       c.beginPath();
-      for (let i = 0; i < n; i++) { const x = X(off + i), y = Y(hist[i]); i ? c.lineTo(x, y) : c.moveTo(x, y); }
+      for (let i = 0; i < n; i++) { const x = X(i), y = Y(hist[i]); i ? c.lineTo(x, y) : c.moveTo(x, y); }
       c.strokeStyle = "rgb(" + col + ")"; c.lineWidth = 2.4; c.lineJoin = "round";
       c.shadowColor = "rgba(" + col + ",.7)"; c.shadowBlur = 8; c.stroke(); c.shadowBlur = 0;
-      c.lineTo(X(off + n - 1), h); c.lineTo(X(off), h); c.closePath();
+      c.lineTo(X(n - 1), h); c.lineTo(X(0), h); c.closePath();
       const g = c.createLinearGradient(0, 0, 0, h);
       g.addColorStop(0, "rgba(" + col + ",.22)"); g.addColorStop(1, "rgba(" + col + ",0)");
       c.fillStyle = g; c.fill();
 
       // 2D DeLorean riding the latest price point, tilted to the local slope (port of the OG HTML)
-      const lx = X(off + n - 1), ly = Y(hist[n - 1]);
+      const lx = X(n - 1), ly = Y(hist[n - 1]);
       let ang = 0;
-      if (n >= 2) ang = Math.atan2(ly - Y(hist[n - 2]), lx - X(off + n - 2));
+      if (n >= 2) ang = Math.atan2(ly - Y(hist[n - 2]), lx - X(n - 2));
       ang = Math.max(-0.5, Math.min(0.5, ang));
       c.save();
       c.translate(lx, ly);
