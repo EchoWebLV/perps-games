@@ -19,7 +19,7 @@ function makeSun(): THREE.Group {
   // 2× bigger and pushed well behind the mountains (their pyramids' near faces
   // reach in front of ~-800, so the sun must sit deeper than the whole range to
   // stop the peaks clipping through the disc). -860 keeps it inside the r=900 sky.
-  const R = 116, CY = 120, Z = -860, N = 15;
+  const R = 116, CY = 74, Z = -860, N = 15;
   const top = new THREE.Color("#fff27a"), mid = new THREE.Color("#ff7a3c"), bot = new THREE.Color("#ff2d9a");
   for (let i = 0; i < N; i++) {
     const t = (i + 0.5) / N;              // 0 = top, 1 = bottom
@@ -96,6 +96,9 @@ export function createWorld(): World {
         float gx = line(vUv.x*40.0);
         float gz = line(vUv.y*160.0 + uOffset);
         float g = max(gx, gz);
+        // hide grid lines under the road strip (grid-x ±13 -> vUv.x 0.484..0.516)
+        // so they don't bleed through as extra lines in the distance
+        g *= 1.0 - step(0.484, vUv.x) * step(vUv.x, 0.516);
         vec3 c = mix(uColor2, uColor, vUv.x);
         float fade = smoothstep(0.0, 0.35, vUv.y);
         gl_FragColor = vec4(c, g * fade);
