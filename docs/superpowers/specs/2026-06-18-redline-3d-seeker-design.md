@@ -9,7 +9,7 @@
 
 ## 1. One-liner
 
-Rebuild **Redline** — the arcade game that rides the live SOL price (pick long/short, dial leverage, cash out before the redline wrecks you) — as a **true 3D, neon-synthwave driving game** that *feels* fast and high-stakes, from **one codebase that ships both a web PWA and a Seeker Android APK**. Keep the working game core (live Pyth feed, LINEAR-from-entry economics, round state machine); rebuild only the renderer, HUD, and platform layer.
+Rebuild **Redline** — the arcade game that rides the live SOL price (pick long/short, dial leverage, cash out before the redline wrecks you) — as a **true 3D, neon-synthwave driving game** that *feels* fast and high-stakes, from **one codebase that ships both a web PWA and a Seeker Android APK**. Keep the working game core (live Pyth feed, LINEAR-from-entry economics, round state machine); rebuild only the renderer, HUD, and platform layer. Redline is destined for **real money** via a **synthetic house-vault**, delivered as a separate, gated backend track (§7.5); this client pass is built real-money-ready but runs on stubs.
 
 ## 2. Goals & non-goals
 
@@ -22,7 +22,7 @@ Rebuild **Redline** — the arcade game that rides the live SOL price (pick long
 6. Preserve the solved economics (the vol-fragility fix) untouched by keeping the core headless and pure.
 
 ### Non-goals (this pass)
-- Real money, USDC custody, the vault, or the provably-real resolver — those stay on the separate **Minefield/Yoichi spec track**. This build keeps the **local simulated balance** ($100 play money).
+- **Building the real-money backend.** Redline *is* destined for real money via a **synthetic house-vault** (see §7.5), but the custody + vault + resolver + hedging + compliance stack is a **separate, gated track with its own spec** (it converges with the Minefield backend). This client pass is built **real-money-ready** — server-authoritative settlement seam, not a toy balance — but runs on a local `SimSettlement` stub until that backend lands.
 - Fully wiring real Mobile Wallet Adapter / Seed Vault (interface only this pass).
 - Publishing to the Solana dApp Store (build stays publish-clean; submission is later).
 - A second game (Yoichi/Minefield in 3D) — shared foundations are welcome but out of scope here.
@@ -38,6 +38,7 @@ Rebuild **Redline** — the arcade game that rides the live SOL price (pick long
 | Output | **Parallel web PWA + Android APK** from one codebase |
 | Art direction | **A · Neon synthwave** (evolve today's look into true 3D), with **B's performance discipline** (stylized-clean geometry, 60fps-first) |
 | Stack | **Three.js (WebGL2) + Vite + Capacitor** |
+| Money model | **Real money** via **synthetic house-vault** (LINEAR-from-entry payout + per-round payout caps + FlashTrade hedge). Built as a separate gated track; client is real-money-ready behind a settlement seam. |
 
 ## 4. Approach & rationale
 
@@ -56,10 +57,11 @@ redline3d/
   index.html · vite.config.ts · capacitor.config.ts · package.json
   public/                 icons, web manifest, (optional tiny audio samples)
   src/
-    core/                 ← KEPT (ported ~verbatim, headless & pure)
+    core/                 ← KEPT/EVOLVED (headless & pure)
       feed.ts             Pyth Lazer→Hermes→sim client (today's feed.js)
       economics.ts        LINEAR-from-entry equity, banked, leverage, caps
       round.ts            FSM: idle→launched→(settled | liquidated)
+      settlement.ts       money-truth seam: SimSettlement | VaultSettlement
       config.ts           EDGE, LIQ, CAP, MAXSEC, leverage range
     render/               ← REBUILT (Three.js)
       scene.ts world.ts car.ts camera.ts post.ts fx.ts
@@ -75,6 +77,7 @@ redline3d/
 
 ### Module contracts
 - **`core/`** emits plain state/events (`onTick`, `equity`, `multiplier`, `onSettle`, `onLiquidate`) and knows nothing about a renderer. This is what keeps the solved economics safe — we don't touch the vol-fragility fix.
+- **`core/settlement.ts`** is the seam to money truth. `SimSettlement` (this pass) resolves rounds locally for instant feel. `VaultSettlement` (money track) makes the **backend authoritative**: the client still runs `economics.ts` locally for 60fps *prediction*, but the vault is the source of truth and the client **reconciles** to server-pushed settlement (netcode-style predict + reconcile). The same `economics.ts` runs on both sides, so prediction and truth agree by construction.
 - **`render/`** subscribes to core state and draws; swappable without touching game logic.
 - **`ui/`** is a DOM overlay above the WebGL canvas (HUD, tach, controls, intro) — keeps text crisp and accessible, and reuses today's HUD CSS patterns/safe-area handling.
 - **`platform/`** hides every web-vs-APK-vs-Seeker difference behind small interfaces, so `core`/`render` never branch on platform (`if (isNative)` lives only here).
@@ -109,7 +112,7 @@ UnrealBloom for neon glow + vignette; chromatic aberration only on high-tier. Bl
 
 ## 7. Seeker / mobile readiness
 
-**Scope boundary:** this is the **game client**. It keeps today's local **simulated balance** ($100). Real USDC, vault, and resolver stay on the Minefield track. `platform/wallet.ts` is a thin interface (`connect`, `signMessage`, `signAndSendTransaction`) with a **sim implementation now**, swappable for a real MWA impl later with no `core`/`render` changes.
+**Scope boundary:** this is the **game client**, built **real-money-ready** but running on stubs this pass. It plays against a local `SimSettlement` (sim balance) until the money backend (§7.5) lands; `platform/wallet.ts` is a thin interface (`connect`, `signMessage`, `signAndSendTransaction`) with a **sim implementation now**, swappable for a real MWA impl later with no `core`/`render` changes. The client is designed so flipping `SimSettlement`→`VaultSettlement` and sim-wallet→MWA needs **no** renderer or game-logic changes.
 
 ### Two targets, one build
 - **Web PWA** — installable, offline app-shell, `manifest.json`, fullscreen, **portrait-locked**, safe-area insets (carried from today's `env()` CSS). Runs in the Seeker browser today.
@@ -123,6 +126,22 @@ UnrealBloom for neon glow + vignette; chromatic aberration only on high-tier. Bl
 
 ### Input
 One-thumb touch — long/short toggle, stake ±, tach-drag leverage, big LAUNCH / CASH-OUT button. Pinch/double-tap zoom and pull-to-refresh disabled; safe-area aware. Optional gated **device-tilt parallax** as flavor.
+
+## 7.5. Real-money model & track split
+
+Redline pays out **real money** via a **synthetic house-vault**: the house is the counterparty and the edge is baked into the LINEAR-from-entry payout. This is a **separate, gated track** with its own spec — it is *not* built in this client pass, but it is the destination the client is engineered for.
+
+**Why synthetic (not real-perp passthrough):** the arcade feel *is* the product — instant $1 stakes, the high-leverage dial, launch/cash-out with no per-trade signing. A passthrough to a real perp DEX would gut all of that ($10 min/leg, ~1s confirmation, ≤~100×, per-trade signing). Synthetic preserves the feel **and** converges Redline onto the same money backend the Minefield spec already defines (resolver, vault, ledger, hedger, compliance) — one backend, two games, differing only in economics.
+
+**House-risk controls (from `redline-economics` memory):** the high-leverage dial is *vol-fragile* under compounding, so real money uses the validated **LINEAR-from-entry** payout (vol-independent ~5% edge) with the "1000×" surfaced as a **payout-capped** dial (max single payout ≤ ~1% of vault, mirroring the Minefield anti-ruin rule), a **conservative launch leverage cap**, and **FlashTrade hedging** of net directional exposure. So "1000×" is visual flair over a bounded real payout.
+
+**Authority & trust:** economics run **server-authoritative** in the vault; the client predicts locally and reconciles (see `core/settlement.ts`). Settlement enforces the payout cap on-chain as a backstop against a compromised backend.
+
+**Hard pre-mainnet gates (per `copy-trading-pivot-verdict` memory):**
+1. **Resolver / settlement security review** — the existential module; no mainnet without it.
+2. **Jurisdiction legal read** — real-money + house-banked + leverage-flavored = gambling/derivatives exposure; geofenced low-cap beta first.
+
+These gate *launch*, not *building the client* — which is the entire point of the track split.
 
 ## 8. Asset strategy — procedural-first
 
@@ -149,9 +168,11 @@ No heavy external models/textures: car from primitives/extrusions, world from sh
 - **Phase 1 — Playable 3D:** scene/world/car/camera + HUD/controls wired to core; basic bloom; the synthwave look; one device tier. The "it's 3D and it plays" milestone.
 - **Phase 2 — Feel:** 3D fly/explode cinematics, audio, haptics, risk-driven camera/FOV/shake, perf tiering + fallback.
 - **Phase 3 — Seeker packaging:** Capacitor APK, PWA manifest/offline, portrait lock, wallet-interface stub, dApp-Store-clean build.
-- **Deferred (other track):** real MWA / Seed-Vault wiring, real USDC / vault / resolver (Minefield spec), dApp-Store publish.
+- **Money-architecture track (separate, gated spec):** real MWA / Seed-Vault wiring, USDC custody, the synthetic house-vault, server-authoritative settlement + resolver, FlashTrade hedging, compliance, legal read, dApp-Store publish. Converges with the Minefield backend. The client's `SimSettlement`→`VaultSettlement` flip is how the two tracks meet.
 
 ## 12. Open questions / risks (ranked)
+
+**Money-track existential risks** (owned by the separate money-architecture spec, listed here for visibility): resolver/settlement security, jurisdiction legal classification, and house bankroll survival under the high-leverage dial (vol-fragility). These gate mainnet launch. The **client** risks below are what this spec owns:
 
 1. **Sustained 60fps with bloom on real mid-tier Android** — the central perf risk; mitigated by the tier scaler + half-res bloom + 30fps fallback, validated on-device in Phase 2.
 2. **Capacitor + Mobile Wallet Adapter bridging** ergonomics on the Seeker — de-risked by keeping `wallet.ts` an interface (sim now), but the real wiring needs a spike before relying on it.
