@@ -69,6 +69,33 @@ export function createMinimap(canvas: HTMLCanvasElement): Minimap {
       g.addColorStop(0, "rgba(" + col + ",.22)"); g.addColorStop(1, "rgba(" + col + ",0)");
       c.fillStyle = g; c.fill();
 
+      // 2D DeLorean riding the latest price point, tilted to the local slope (port of the OG HTML)
+      const lx = X(off + n - 1), ly = Y(hist[n - 1]);
+      let ang = 0;
+      if (n >= 2) ang = Math.atan2(ly - Y(hist[n - 2]), lx - X(off + n - 2));
+      ang = Math.max(-0.5, Math.min(0.5, ang));
+      c.save();
+      c.translate(lx, ly);
+      c.rotate(ang);
+      // body — low stainless wedge silhouette, glowing in the P&L colour
+      c.shadowColor = "rgb(" + col + ")"; c.shadowBlur = 8;
+      c.fillStyle = "rgb(" + col + ")";
+      c.beginPath();
+      c.moveTo(-12, -3); c.lineTo(-11, -8); c.lineTo(-3, -9.2); c.lineTo(5, -8.2); c.lineTo(10, -4.6); c.lineTo(13, -3.6); c.lineTo(13, -3);
+      c.closePath(); c.fill();
+      c.shadowBlur = 0;
+      // cabin glass
+      c.fillStyle = "rgba(8,6,26,.85)";
+      c.beginPath(); c.moveTo(-2.5, -7.6); c.lineTo(-2, -8.8); c.lineTo(3.8, -8.1); c.lineTo(4.6, -7.3); c.closePath(); c.fill();
+      // wheels (dark tyre + glowing hub)
+      c.fillStyle = "#0a0820";
+      c.beginPath(); c.arc(-6.5, -2.6, 3, 0, 7); c.fill();
+      c.beginPath(); c.arc(7, -2.6, 3, 0, 7); c.fill();
+      c.fillStyle = "rgb(" + col + ")";
+      c.beginPath(); c.arc(-6.5, -2.6, 1.3, 0, 7); c.fill();
+      c.beginPath(); c.arc(7, -2.6, 1.3, 0, 7); c.fill();
+      c.restore();
+
       c.textAlign = "right"; c.fillStyle = "rgb(" + col + ")"; c.fillText("$" + hist[n - 1].toFixed(2), w - 6, 12); c.textAlign = "left";
     },
   };
