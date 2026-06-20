@@ -9,7 +9,12 @@
     "esModuleInterop": true,
     "skipLibCheck": true,
     "types": ["vitest/globals"],
-    "lib": ["ES2020", "DOM", "DOM.Iterable"]
+    "lib": ["ES2020", "DOM", "DOM.Iterable"],
+    "baseUrl": ".",
+    "paths": {
+      "@perps/engine": ["../packages/engine/src/index.ts"],
+      "@perps/engine/*": ["../packages/engine/src/*.ts"]
+    }
   },
   "include": ["src"]
 }

@@ -1,0 +1,22 @@
+{
+  "name": "@perps/engine",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts",
+    "./types": "./src/types.ts",
+    "./economics": "./src/economics.ts",
+    "./leverage": "./src/leverage.ts",
+    "./config": "./src/config.ts",
+    "./settle": "./src/settle.ts"
+  },
+  "scripts": {
+    "build": "tsc --noEmit",
+    "test": "vitest run"
+  },
+  "devDependencies": {
+    "typescript": "^5.6.3",
+    "vitest": "^2.1.5"
+  }
+}

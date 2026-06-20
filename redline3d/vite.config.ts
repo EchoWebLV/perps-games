@@ -1,4 +1,7 @@
 import { defineConfig } from "vite";
+import { fileURLToPath } from "node:url";
+
+const engineSrc = fileURLToPath(new URL("../packages/engine/src", import.meta.url));
 
 export default defineConfig({
   // serve dev on :3000 (and expose on LAN so a phone can hit http://<your-ip>:3000).
@@ -6,7 +9,13 @@ export default defineConfig({
   // Vite's host check — needed to install the PWA on the Seeker over HTTPS.
   server: { port: 3000, strictPort: true, host: true, allowedHosts: true },
   // one Three.js instance across core + examples/jsm addons (loaders, postprocessing)
-  resolve: { dedupe: ["three"] },
+  resolve: {
+    dedupe: ["three"],
+    alias: [
+      { find: /^@perps\/engine\/(.*)$/, replacement: `${engineSrc}/$1.ts` },
+      { find: "@perps/engine", replacement: `${engineSrc}/index.ts` },
+    ],
+  },
   test: { globals: true, environment: "node" },
   build: { target: "es2020" },
 });
