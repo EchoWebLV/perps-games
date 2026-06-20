@@ -1,3 +1,6 @@
+import { ApiError, type Api, type Asset, type Dir, type OpenResult, type CloseResult } from "./api";
+import { type KvStore } from "./identity";
+
 export function clampInt(v: number, lo: number, hi: number): number {
   return Math.max(lo, Math.min(hi, Math.round(v)));
 }
@@ -80,5 +83,95 @@ export function createActionQueue(opts: {
       if (!running) { idle = new Promise<void>((res) => (resolveIdle = res)); void run(); }
     },
     drain() { return running ? idle : Promise.resolve(); },
+  };
+}
+
+export interface Clock { now(): number; }
+
+const ROUND_KEY = "redline.round.v1";
+
+export interface RoundSync {
+  open(p: { asset: Asset; dir: Dir; lev: number; stake: number }): Promise<OpenResult | null>;
+  noteLeverage(lev: number): void;
+  noteFlip(dir: Dir): void;
+  /** call each animation frame with the wall clock advanced; pumps the coalescer */
+  pump(): void;
+  close(reason: "cashout" | "expire"): Promise<CloseResult | null>;
+  /** boot: settle any dangling open round (from /v1/me openRoundId or persisted id) */
+  recover(openRoundId: string | null): Promise<void>;
+  roundId(): string | null;
+  isOpening(): boolean;
+}
+
+export function createRoundSync(deps: {
+  api: Api; clock: Clock; store: KvStore;
+  coalesceMs?: number; actionMaxRetries?: number; actionRetryMs?: number;
+  closeBackoffMs?: number[]; delay?: (ms: number) => Promise<void>;
+}): RoundSync {
+  const { api, clock, store } = deps;
+  const delay = deps.delay ?? ((ms: number) => new Promise<void>((r) => setTimeout(r, ms)));
+  const closeBackoff = deps.closeBackoffMs ?? [500, 1000, 2000, 4000, 8000];
+  let roundId: string | null = store.get(ROUND_KEY);
+  let opening = false;
+
+  const queue = createActionQueue({
+    send: (a) => api.roundAction({ roundId: roundId!, actionId: a.actionId, kind: a.kind, dir: a.dir, lev: a.lev }),
+    maxRetries: deps.actionMaxRetries ?? 3,
+    retryDelayMs: deps.actionRetryMs ?? 250,
+    delay,
+  });
+  const coalescer = createCoalescer({
+    windowMs: deps.coalesceMs ?? 200,
+    emit: (lev) => queue.enqueue({ actionId: crypto.randomUUID(), kind: "lever", lev }),
+  });
+
+  function setRound(id: string | null) {
+    roundId = id;
+    if (id) store.set(ROUND_KEY, id); else store.set(ROUND_KEY, "");
+  }
+  const isFeedHalt = (e: unknown) => e instanceof ApiError ? e.code === "feed_halt" : (e as any)?.code === "feed_halt";
+
+  return {
+    isOpening: () => opening,
+    roundId: () => roundId || null,
+    noteLeverage(lev) { if (roundId) coalescer.note(lev, clock.now()); },
+    noteFlip(dir) { if (roundId) queue.enqueue({ actionId: crypto.randomUUID(), kind: "flip", dir }); },
+    pump() { if (roundId) coalescer.pump(clock.now()); },
+
+    async open(p) {
+      if (opening || roundId) return null;            // re-entrancy + single-round guard
+      opening = true;
+      try {
+        const out = await api.openRound(p);
+        setRound(out.roundId);
+        return out;
+      } finally { opening = false; }
+    },
+
+    async close(reason) {
+      if (!roundId) return null;
+      coalescer.flush(clock.now());                   // force any pending lever into the queue
+      await queue.drain();                            // ensure the server has the full segment set
+      for (let i = 0; i <= closeBackoff.length; i++) {
+        try {
+          const res = await api.closeRound({ roundId, reason });
+          setRound(null);
+          return res;
+        } catch (e) {
+          if (isFeedHalt(e)) return null;             // server cannot settle on a halted feed -> 1.4
+          if (i < closeBackoff.length) await delay(closeBackoff[i]);
+        }
+      }
+      return null;                                    // transport gave up; stays open for reload/1.4
+    },
+
+    async recover(openRoundId) {
+      const id = openRoundId ?? roundId;
+      if (!id) return;
+      setRound(id);
+      try { await api.closeRound({ roundId: id, reason: "expire" }); }
+      catch (e) { if ((e as ApiError)?.code === "round_not_found") { /* benign */ } }
+      setRound(null);
+    },
   };
 }

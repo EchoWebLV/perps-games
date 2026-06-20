@@ -65,3 +65,53 @@ describe("action queue (sequential, idempotent, ordered)", () => {
     expect(sent).toEqual(["ok"]); // bad dropped, ok still sent
   });
 });
+
+import { createRoundSync } from "./round-sync";
+import type { Api } from "./api";
+
+function fakeApi(over: Partial<Api> = {}): Api {
+  return {
+    me: async () => ({ userId: "u", balance: 100, cars: [], openRoundId: null }),
+    openRound: async (p) => ({ roundId: "R", asset: p.asset, dir: p.dir, lev: p.lev, stake: p.stake, entryRaw: 100, entryTsUs: 5_000_000 }),
+    roundAction: async () => {},
+    closeRound: async () => ({ outcome: "cashout", payoutCoins: 7, pnlCoins: 2, equity: 1.4, exitRaw: 101, balance: 107 }),
+    ...over,
+  };
+}
+const store = () => { const m = new Map<string,string>(); return { get: (k:string)=>m.get(k)??null, set:(k:string,v:string)=>{m.set(k,v);} }; };
+const clock = (t = { now: 0 }) => ({ now: () => t.now });
+
+describe("round-sync session", () => {
+  it("open() is re-entrant-guarded: two concurrent calls -> one POST", async () => {
+    let opens = 0;
+    const rs = createRoundSync({ api: fakeApi({ openRound: async (p) => { opens++; return { roundId: "R", asset: p.asset, dir: p.dir, lev: p.lev, stake: p.stake, entryRaw: 100, entryTsUs: 0 }; } }), clock: clock(), store: store() });
+    const [a, b] = await Promise.all([
+      rs.open({ asset: "SOL", dir: 1, lev: 50, stake: 5 }),
+      rs.open({ asset: "SOL", dir: 1, lev: 50, stake: 5 }),
+    ]);
+    expect(opens).toBe(1);
+    expect(a?.roundId ?? b?.roundId).toBe("R");
+  });
+
+  it("close() flushes a pending lever then settles, returning the server result", async () => {
+    const actions: string[] = [];
+    const api = fakeApi({ roundAction: async (a) => { actions.push(a.kind + ":" + (a.lev ?? a.dir)); } });
+    const t = { now: 0 };
+    const rs = createRoundSync({ api, clock: clock(t), store: store() });
+    await rs.open({ asset: "SOL", dir: 1, lev: 50, stake: 5 });
+    rs.noteLeverage(120); t.now = 0; rs.pump(); // no window yet
+    const res = await rs.close("cashout");      // must force-flush 120 before settling
+    expect(actions).toContain("lever:120");
+    expect(res?.balance).toBe(107);
+    expect(rs.roundId()).toBeNull();            // cleared after settle
+  });
+
+  it("close() on feed_halt gives up to settling (no infinite retry)", async () => {
+    const api = fakeApi({ closeRound: async () => { const e: any = new Error("feed_halt"); e.code = "feed_halt"; throw e; } });
+    const rs = createRoundSync({ api, clock: clock(), store: store(), closeBackoffMs: [0, 0] });
+    await rs.open({ asset: "SOL", dir: 1, lev: 50, stake: 5 });
+    const res = await rs.close("expire");
+    expect(res).toBeNull();          // surfaced as unsettled
+    expect(rs.roundId()).not.toBeNull(); // stays open for 1.4 + reload recovery
+  });
+});
