@@ -127,6 +127,12 @@ switch is the last thing flipped, not the first.
 The lobby is the **town**: a drivable space whose buildings *are* the economy. It replaces the
 original 3 market-select buildings (SOL/BTC/ETH).
 
+**Navigation flow:** the game **launches straight into the Track** — the race is home, so players
+land in the core loop with no menu friction. You **drive to the Lobby** (map/garage button) to
+manage your car & economy, then take the **Track gate** back out to a race (picking the market on
+the way). The lobby is a *side-trip for the economy*, not the front door. (This matches today's
+client: it boots into the race; the map button opens the lobby.)
+
 - 🏠 **Garage** — your car collection + the **marketplace** (browse/buy cars in soft coins; sell
   later). Doubles as showroom — other players' cars + "for sale" tags populate the world.
 - 🔧 **Upgrades** — buy upgrades from the **existing upgrade tree** ([`ui/upgrades.ts`](../../../src/ui/upgrades.ts),
