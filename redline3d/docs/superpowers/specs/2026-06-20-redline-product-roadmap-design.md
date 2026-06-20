@@ -158,6 +158,13 @@ switch is the last thing flipped, not the first. **Two corollaries from the 2026
 └─────────────────────────────┘         └──────────────────────────────────────────┘
 ```
 
+- **Build & deploy targets (one Vite codebase, two client shells).** The client builds once with
+  `vite build` and ships as **(a) a web PWA hosted on Vercel** — a *real browser* on desktop +
+  mobile web — and **(b) a Seeker APK via Capacitor** (Android System WebView wrapping the same
+  build). The server deploys to **Railway**. The **Vercel web build is the broadest real-money
+  surface** and — per Apple's "consider a web app instead" — the **iOS real-money path**; the
+  **Seeker APK** is the crypto-native showcase with native Seed Vault. Same code, two shells, two
+  deploy pipelines (Vercel + Capacitor), one Railway backend.
 - **Why Node/TypeScript on the server:** it shares the `RoundEngine`, leverage math, and
   types directly with the client — one source of truth for settlement, no reimplementation.
 - **Prices:** the existing Pyth Lazer→Hermes feed client, consumed **server-side** for
@@ -191,6 +198,12 @@ switch is the last thing flipped, not the first. **Two corollaries from the 2026
 Research (2026-06-20) is blunt: **the biggest threat to a "very smooth" Seeker experience is not
 the chain — it's WebGL on a weak GPU inside a throttled WebView.** The chain work is server-side and
 invisible to the phone; the rendering work is where tuning buys smoothness.
+
+**Scope — this is a *Seeker-APK* concern, not a web concern.** The **Vercel web build runs in a real
+browser** (Chrome / Safari / Firefox), which gets **full GPU budget and no WebView tax** — so the web
+version is the *smoother* surface, and the guardrails below target the **Capacitor / Android-WebView**
+path specifically. (The Mali-G615 *hardware* ceiling still applies to anyone running the web build in
+a mobile browser on a low-end phone, but without the WebView penalty on top.)
 
 - **The hardware:** Seeker is mid-range by design — MediaTek Dimensity 7300, **Mali-G615 MC2
   (2-core)** GPU, scores low in GPU tasks. The 120 Hz panel is a **trap**: target a **stable 60
@@ -243,7 +256,7 @@ Resolved 2026-06-20 (forks 5–6), grounded in app-store policy + wallet researc
 
 | Channel | Real money? | Wallet backend | Build |
 |---|---|---|---|
-| **Web PWA** (any browser) | ✅ yes | Privy embedded, or connect extension | full |
+| **Web PWA** (any browser, **hosted on Vercel**) | ✅ yes | Privy embedded, or connect extension | full |
 | **Seeker APK** (Solana dApp Store) | ✅ yes | **native MWA → Seed Vault** (+ Privy for newcomers; **one balance** — Seed Vault funds the embedded play-balance, never two parallel balances) | full |
 | **Plain Android** (APK sideload) | ✅ yes | Privy embedded | full |
 | **iOS** (no real sideload) | ✅ **via the web PWA only** | Privy embedded (in the PWA) | full (PWA) |
