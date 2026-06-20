@@ -32,3 +32,36 @@ describe("coalescer (wall-clock, dedup on last-sent)", () => {
     expect(out).toEqual([1000]);
   });
 });
+
+import { createActionQueue } from "./round-sync";
+
+describe("action queue (sequential, idempotent, ordered)", () => {
+  it("sends one POST at a time in enqueue order, reusing actionId on retry", async () => {
+    const calls: { actionId: string; kind: string }[] = [];
+    let failFirst = true;
+    const q = createActionQueue({
+      send: async (a) => {
+        calls.push({ actionId: a.actionId, kind: a.kind });
+        if (a.kind === "lever" && failFirst) { failFirst = false; throw new Error("net"); }
+      },
+      maxRetries: 3, retryDelayMs: 0, delay: () => Promise.resolve(),
+    });
+    q.enqueue({ actionId: "id-lever", kind: "lever", lev: 100 });
+    q.enqueue({ actionId: "id-flip", kind: "flip", dir: -1 });
+    await q.drain();
+    // lever was retried with the SAME id, then flip — order preserved
+    expect(calls.map((c) => c.actionId)).toEqual(["id-lever", "id-lever", "id-flip"]);
+  });
+
+  it("drops an action after maxRetries and continues", async () => {
+    const sent: string[] = [];
+    const q = createActionQueue({
+      send: async (a) => { if (a.kind === "lever") throw new Error("net"); sent.push(a.actionId); },
+      maxRetries: 2, retryDelayMs: 0, delay: () => Promise.resolve(),
+    });
+    q.enqueue({ actionId: "bad", kind: "lever", lev: 100 });
+    q.enqueue({ actionId: "ok", kind: "flip", dir: 1 });
+    await q.drain();
+    expect(sent).toEqual(["ok"]); // bad dropped, ok still sent
+  });
+});

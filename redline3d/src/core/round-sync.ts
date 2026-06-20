@@ -31,3 +31,54 @@ export function createCoalescer(opts: { windowMs: number; emit: (lev: number) =>
     flush(nowMs) { lastSampleMs = nowMs; maybeEmit(); },
   };
 }
+
+export interface QueuedAction {
+  actionId: string;
+  kind: "flip" | "lever";
+  dir?: 1 | -1;
+  lev?: number;
+}
+
+export interface ActionQueue {
+  enqueue(a: QueuedAction): void;
+  /** resolve once the queue is empty (used before close) */
+  drain(): Promise<void>;
+}
+
+export function createActionQueue(opts: {
+  send: (a: QueuedAction) => Promise<void>;
+  maxRetries: number;
+  retryDelayMs: number;
+  delay?: (ms: number) => Promise<void>;
+}): ActionQueue {
+  const delay = opts.delay ?? ((ms: number) => new Promise<void>((r) => setTimeout(r, ms)));
+  const items: QueuedAction[] = [];
+  let running = false;
+  let idle: Promise<void> = Promise.resolve();
+  let resolveIdle: (() => void) | null = null;
+
+  async function run() {
+    if (running) return;
+    running = true;
+    while (items.length) {
+      const a = items[0];
+      let ok = false;
+      for (let attempt = 0; attempt <= opts.maxRetries; attempt++) {
+        try { await opts.send(a); ok = true; break; }
+        catch { if (attempt < opts.maxRetries) await delay(opts.retryDelayMs); }
+      }
+      void ok; // best-effort: on permanent failure we drop and continue
+      items.shift();
+    }
+    running = false;
+    resolveIdle?.(); resolveIdle = null;
+  }
+
+  return {
+    enqueue(a) {
+      items.push(a);
+      if (!running) { idle = new Promise<void>((res) => (resolveIdle = res)); void run(); }
+    },
+    drain() { return running ? idle : Promise.resolve(); },
+  };
+}
