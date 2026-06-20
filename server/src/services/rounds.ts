@@ -191,7 +191,12 @@ export function makeRounds(deps: RoundsDeps) {
     });
   }
 
-  return { open, action, close, toEngineAction, loadRoundActions, requireRound };
+  async function get(userId: string, roundId: string): Promise<Round | null> {
+    const rows = await db.select().from(rounds).where(and(eq(rounds.id, roundId), eq(rounds.userId, userId))).limit(1);
+    return rows.length ? (rows[0] as Round) : null;
+  }
+
+  return { open, action, close, get, toEngineAction, loadRoundActions, requireRound };
 }
 
 export type Rounds = ReturnType<typeof makeRounds>;

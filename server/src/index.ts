@@ -4,6 +4,8 @@ import { buildServer } from "./http/server.js";
 import { makeUsers } from "./services/users.js";
 import { makeLedger } from "./services/ledger.js";
 import { makeInventory } from "./services/inventory.js";
+import { makeRounds } from "./services/rounds.js";
+import { makeHermesFeed } from "./feed/hermes.js";
 
 async function main(): Promise<void> {
   if (!env.DATABASE_URL) throw new Error("DATABASE_URL is required to start the server");
@@ -18,10 +20,17 @@ async function main(): Promise<void> {
   if (env.NODE_ENV !== "production") await raw.runMigrations();
   const db = raw.db;
 
+  const ledger = makeLedger(db);
+  const feed = makeHermesFeed({ assets: ["BTC", "ETH", "SOL"] });
+  feed.start();
+  const rounds = makeRounds({ db, ledger, feed });
+
   const server = buildServer({
     users: makeUsers(db),
-    ledger: makeLedger(db),
+    ledger,
     inventory: makeInventory(db),
+    rounds,
+    feed,
     devEndpoints: env.DEV_ENDPOINTS && env.NODE_ENV !== "production",
   });
 

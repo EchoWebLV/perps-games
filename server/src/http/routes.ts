@@ -3,17 +3,39 @@ import { z } from "zod";
 import type { Users } from "../services/users.js";
 import type { Ledger } from "../services/ledger.js";
 import type { Inventory } from "../services/inventory.js";
+import type { Rounds } from "../services/rounds.js";
+import type { PriceFeed } from "../feed/types.js";
+import { FeedHaltError, RoundNotFoundError, RoundClosedError, OpenRoundExistsError } from "../services/errors.js";
 import { makeRequireUser } from "./auth.js";
 
 export interface RouteDeps {
   users: Users;
   ledger: Ledger;
   inventory: Inventory;
+  rounds: Rounds;
+  feed: PriceFeed;
   devEndpoints: boolean;
 }
 
 const GrantCoins = z.object({ amount: z.number().int().positive() });
 const GrantCar = z.object({ carId: z.string().min(1) });
+
+const OpenRound = z.object({
+  asset: z.enum(["BTC", "ETH", "SOL"]),
+  dir: z.union([z.literal(1), z.literal(-1)]),
+  lev: z.number().int().min(10).max(1000),
+  stake: z.number().int().min(1).max(50),
+});
+const RoundActionBody = z
+  .object({
+    roundId: z.string().uuid(),
+    actionId: z.string().min(1),
+    kind: z.enum(["flip", "lever"]),
+    dir: z.union([z.literal(1), z.literal(-1)]).optional(),
+    lev: z.number().int().min(10).max(1000).optional(),
+  })
+  .refine((v) => (v.kind === "flip" ? v.dir !== undefined : v.lev !== undefined), { message: "flip needs dir; lever needs lev" });
+const CloseRound = z.object({ roundId: z.string().uuid(), reason: z.enum(["cashout", "expire"]).default("cashout") });
 
 export function registerRoutes(server: FastifyInstance, deps: RouteDeps): void {
   const requireUser = makeRequireUser(deps.users);
@@ -38,6 +60,66 @@ export function registerRoutes(server: FastifyInstance, deps: RouteDeps): void {
       balance,
       cars: rows.map((r) => ({ carId: r.carId, acquiredAt: r.acquiredAt })),
     };
+  });
+
+  server.post("/v1/round/open", { preHandler: requireUser }, async (req, reply) => {
+    const p = OpenRound.safeParse(req.body);
+    if (!p.success) return reply.code(400).send({ error: p.error.message });
+    try {
+      const r = await deps.rounds.open(req.userId!, p.data);
+      return { roundId: r.id, asset: r.asset, dir: r.dir, lev: r.lev, stake: r.stake, entryRaw: r.entryRaw, entryTsUs: r.entryTsUs };
+    } catch (e: any) {
+      if (e instanceof FeedHaltError) return reply.code(503).send({ error: "feed_halt" });
+      if (e instanceof OpenRoundExistsError) return reply.code(409).send({ error: "round_already_open" });
+      if (e?.message === "insufficient balance") return reply.code(402).send({ error: "insufficient_balance" });
+      throw e;
+    }
+  });
+
+  server.post("/v1/round/action", { preHandler: requireUser }, async (req, reply) => {
+    const p = RoundActionBody.safeParse(req.body);
+    if (!p.success) return reply.code(400).send({ error: p.error.message });
+    try {
+      const { round, actions } = await deps.rounds.action(req.userId!, p.data.roundId, {
+        actionId: p.data.actionId,
+        kind: p.data.kind,
+        dir: p.data.dir,
+        lev: p.data.lev,
+      });
+      return { roundId: round.id, status: round.status, actionCount: actions.length };
+    } catch (e: any) {
+      if (e instanceof FeedHaltError) return reply.code(503).send({ error: "feed_halt" });
+      if (e instanceof RoundNotFoundError) return reply.code(404).send({ error: "round_not_found" });
+      if (e instanceof RoundClosedError) return reply.code(409).send({ error: "round_not_open" });
+      throw e;
+    }
+  });
+
+  server.post("/v1/round/close", { preHandler: requireUser }, async (req, reply) => {
+    const p = CloseRound.safeParse(req.body);
+    if (!p.success) return reply.code(400).send({ error: p.error.message });
+    try {
+      const res = await deps.rounds.close(req.userId!, p.data.roundId, p.data.reason);
+      return {
+        outcome: res.outcome,
+        payoutCoins: res.payoutCoins,
+        pnlCoins: res.pnlCoins,
+        equity: res.equity,
+        exitRaw: res.round.exitRaw,
+        balance: await deps.ledger.balance(req.userId!),
+      };
+    } catch (e: any) {
+      if (e instanceof FeedHaltError) return reply.code(503).send({ error: "feed_halt" });
+      if (e instanceof RoundNotFoundError) return reply.code(404).send({ error: "round_not_found" });
+      throw e;
+    }
+  });
+
+  server.get("/v1/round/:id", { preHandler: requireUser }, async (req, reply) => {
+    const id = (req.params as { id: string }).id;
+    const round = await deps.rounds.get(req.userId!, id);
+    if (!round) return reply.code(404).send({ error: "round_not_found" });
+    return round;
   });
 
   if (deps.devEndpoints) {
