@@ -1,0 +1,37 @@
+import { describe, it, expect } from "vitest";
+import { createApi, ApiError } from "./api";
+
+function res(status: number, body: unknown): Response {
+  return new Response(JSON.stringify(body), { status, headers: { "content-type": "application/json" } });
+}
+
+describe("createApi", () => {
+  it("sends x-dev-user + base url and parses openRound", async () => {
+    let seen: { url: string; init: RequestInit } | null = null;
+    const api = createApi({
+      baseUrl: "http://x:8080", userId: "web-test",
+      fetch: async (url, init) => { seen = { url: String(url), init: init ?? {} }; return res(200, { roundId: "r1", asset: "SOL", dir: 1, lev: 50, stake: 5, entryRaw: 100, entryTsUs: 1 }); },
+    });
+    const out = await api.openRound({ asset: "SOL", dir: 1, lev: 50, stake: 5 });
+    expect(out.roundId).toBe("r1");
+    expect(seen!.url).toBe("http://x:8080/v1/round/open");
+    expect((seen!.init.headers as Record<string,string>)["x-dev-user"]).toBe("web-test");
+  });
+
+  it("maps status codes to typed ApiError codes", async () => {
+    const mk = (status: number, body: unknown) =>
+      createApi({ baseUrl: "http://x", userId: "u", fetch: async () => res(status, body) });
+    await expect(mk(402, { error: "insufficient_balance" }).openRound({ asset: "SOL", dir: 1, lev: 50, stake: 5 }))
+      .rejects.toMatchObject({ code: "insufficient_balance" });
+    await expect(mk(409, { error: "round_already_open" }).openRound({ asset: "SOL", dir: 1, lev: 50, stake: 5 }))
+      .rejects.toMatchObject({ code: "round_already_open" });
+    await expect(mk(503, { error: "feed_halt" }).closeRound({ roundId: "r", reason: "cashout" }))
+      .rejects.toMatchObject({ code: "feed_halt" });
+  });
+
+  it("maps a fetch throw to a network ApiError", async () => {
+    const api = createApi({ baseUrl: "http://x", userId: "u", fetch: async () => { throw new Error("offline"); } });
+    await expect(api.me()).rejects.toMatchObject({ code: "network" });
+    await expect(api.me()).rejects.toBeInstanceOf(ApiError);
+  });
+});
