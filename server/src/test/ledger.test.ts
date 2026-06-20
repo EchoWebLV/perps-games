@@ -37,4 +37,22 @@ describe("ledger (append-only)", () => {
     await ctx.ledger.credit(userId, 100, "deposit", "tx-abc"); // retry
     expect(await ctx.ledger.balance(userId)).toBe(100);
   });
+
+  it("debit reduces balance", async () => {
+    await ctx.ledger.credit(userId, 100, "dev_grant");
+    await ctx.ledger.debit(userId, 30, "round_stake");
+    expect(await ctx.ledger.balance(userId)).toBe(70);
+  });
+
+  it("debit refuses to overdraw", async () => {
+    await ctx.ledger.credit(userId, 20, "dev_grant");
+    await expect(ctx.ledger.debit(userId, 50, "round_stake")).rejects.toThrow(/insufficient/);
+    expect(await ctx.ledger.balance(userId)).toBe(20); // unchanged
+  });
+
+  it("canAfford reflects balance", async () => {
+    await ctx.ledger.credit(userId, 40, "dev_grant");
+    expect(await ctx.ledger.canAfford(userId, 40)).toBe(true);
+    expect(await ctx.ledger.canAfford(userId, 41)).toBe(false);
+  });
 });
