@@ -1,10 +1,12 @@
 import { createDb, type Db } from "../db/client.js";
 import { makeUsers, type Users } from "../services/users.js";
+import { makeLedger, type Ledger } from "../services/ledger.js";
 
 export interface TestCtx {
   raw: Db;
   db: any;
   users: Users;
+  ledger: Ledger;
   close(): Promise<void>;
 }
 
@@ -17,6 +19,7 @@ export async function makeTestDb(): Promise<TestCtx> {
     raw,
     db,
     users: makeUsers(db),
+    ledger: makeLedger(db),
     close: () => raw.close(),
   };
 }
