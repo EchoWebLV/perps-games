@@ -23,9 +23,17 @@ vault), hedged in aggregate — it is **not** a per-trade on-chain DEX.
 
 1. **Real money in v1**, onboarded via **Privy** (embedded wallet + auth + on-ramp/KYC via
    Privy partners). No separate KYC build.
-2. **Unlock-only items in v1** — crates and cars are bound to the account. **No P2P
-   trading/marketplace** until a later release.
-3. **Real-time shared lobby in v1** — players see each other driving in the hangout.
+2. **Soft-coin economy in v1; real value flips last.** The lobby is a player economy hub —
+   buy / sell / trade cars, buy upgrades, buy crates — all denominated in the **soft coin**.
+   Items are account-bound re: *real value*: **no real-money item cash-out / P2P real-value
+   market** until the same legal gate as F. (Evolves the earlier "unlock-only, no trading in
+   v1" call — trading IS in v1, just in soft coins.)
+3. **Lobby = async economy hub (not a market selector).** Drive up to functional buildings:
+   **Garage** (your cars + marketplace), **Upgrades** (the existing upgrade tree), **Crate
+   Shop**, and a **Track gate** (drive in → pick SOL/BTC/ETH → race). Kept "alive" without
+   netcode via **async showroom presence** (real players' parked / for-sale cars + bots).
+   **Real-time avatars (Colyseus) are deferred to post-v1** — an empty real-time room reads as
+   a dead game at launch.
 4. **Off-chain ledger + on-chain USDC treasury** — players deposit USDC into a treasury;
    balances and round settlement live in a fast off-chain ledger we operate; net exposure
    hedged on **FlashTrade**; withdraw USDC out. This is the **synthetic house-vault** model.
@@ -35,12 +43,12 @@ vault), hedged in aggregate — it is **not** a per-trade on-chain DEX.
 | | Pillar | State today |
 |---|---|---|
 | A | **Core race loop** — real perp on a live feed, skinned as driving | ✅ mostly built (client-side) |
-| B | **Lobby / world** — drivable hub, 3 market buildings | ✅ built (solo) |
+| B | **Lobby / economy hub** — Garage+marketplace, Upgrades, Crate Shop, Track gate | 🟡 3-market version built; being repurposed |
 | C | **Progression** — characters, skill trees, per-car abilities, crates, coin | 🟡 ability scaffold only |
 | D | **Economy** — coin sources/sinks, crate odds, anti-inflation | ❌ |
 | E | **Backend** — accounts, auth, server-authoritative balances + inventory, anti-cheat | ❌ |
 | F | **Vault + real money** — off-chain ledger, USDC treasury, solvency, hedging | ❌ (SimSettlement stub) |
-| G | **Marketplace** — trade/sell crates & cars | ❌ — **deferred (post-v1)** |
+| G | **Marketplace** — buy/sell/trade cars & crates | 🟡 **soft-coin market in v1**; real-money item cash-out post-v1 |
 | H | **Live-ops** — daily bonus, seasons, retention | ❌ |
 
 ### Dependency reality (why the order is what it is)
@@ -66,8 +74,10 @@ switch is the last thing flipped, not the first.
    the existing game becomes cheat-proof with no real money yet.
 2. **Economy content (C/D/H).** Crates → car drops with abilities (extend the existing
    scaffold), daily bonus, coin sink/source tuning. On soft balances.
-3. **Real-time lobby (B, multiplayer).** WebSocket presence service (positions, car models,
-   interpolation). Largely independent of the economy → **builds in parallel with #2**.
+3. **Lobby economy hub (B) + async presence.** Repurpose the lobby into the economy town
+   (Garage+marketplace, Upgrades, Crate Shop, Track gate) wired to the ledger/inventory;
+   showroom presence via async REST (parked / for-sale cars + bots), **no Colyseus in v1**.
+   Real-time avatars are a post-v1 add.
 4. **Real money (F).** USDC treasury + deposit/withdraw via Privy, off-chain settlement
    ledger, **solvency + reconciliation + manual FlashTrade hedging** (automation post-Beta),
    flip settlement from test → real value. **Gated by the legal read.**
@@ -112,6 +122,25 @@ switch is the last thing flipped, not the first.
   hedging (a second real-money trading bot) is deferred to **post-Beta** until volume proves the
   unhedged tail is real.
 
+## Lobby — the economy hub
+
+The lobby is the **town**: a drivable space whose buildings *are* the economy. It replaces the
+original 3 market-select buildings (SOL/BTC/ETH).
+
+- 🏠 **Garage** — your car collection + the **marketplace** (browse/buy cars in soft coins; sell
+  later). Doubles as showroom — other players' cars + "for sale" tags populate the world.
+- 🔧 **Upgrades** — buy upgrades from the **existing upgrade tree** ([`ui/upgrades.ts`](../../../src/ui/upgrades.ts),
+  which already tunes LIQ/MAXSEC/RMAX). Spent in soft coins.
+- 📦 **Crate Shop** — spend coins on **provably-fair** crates → cars with abilities.
+- 🏁 **Track gate** — drive in → pick **SOL / BTC / ETH** → launch the race. Market selection
+  lives here now (previously the 3 buildings).
+
+Everything is **server-authoritative** (marketplace prices, what you own, what a crate drops)
+and **soft-coin** denominated in v1. **Presence is async** (parked/for-sale cars, bots) —
+real-time avatars are post-v1. This supersedes the 3-market lobby in
+`specs/2026-06-19-garage-lobby-design.md`: the drive-into-a-building interaction model carries
+over; the buildings' purpose changes.
+
 ## MVP / First release — definition
 
 The first release is a **real-money, multiplayer, unlock-progression game** — built test-first,
@@ -123,20 +152,21 @@ real value switched on at the end. In scope:
 - **Crates** bought with coins, **provably-fair**, dropping **cars with abilities**
   (6–8 cars, each a real ability — extend the existing scaffold). **Unlock-only** (bound).
 - **One daily bonus** (the single retention hook for v1).
-- **Real-time shared lobby** as the home hub.
+- **Lobby economy hub** — Garage+marketplace, Upgrades, Crate Shop, Track gate; soft-coin
+  buy/sell/trade; async showroom presence (no real-time netcode in v1).
 
 **Cut from v1 (own specs later):** characters + skill-tree abilities (cars carry the
-abilities for v1), P2P trading/marketplace (G), seasons, chat/voice/emotes, car-to-car
-collision.
+abilities for v1), **real-time avatar netcode (Colyseus)**, **real-money item cash-out**,
+seasons, chat/voice/emotes, car-to-car collision.
 
 ### Release sequence
 
 - **Alpha** — phases 1–3 complete, running on **test balances** (real game, no real money).
-  Internal + closed testers. Validates fun, economy balance, multiplayer stability.
+  Internal + closed testers. Validates fun, the economy/marketplace loop, and crate balance.
 - **Beta** — phase 4: real USDC turned on for a limited cohort, small caps, vault watched
   closely. Legal read complete before this gate.
 - **v1.0** — phase 5 hardening done, caps raised, public Seeker release.
-- **Post-v1** — G (marketplace/trading), characters + skill trees, seasons, social.
+- **Post-v1** — real-money item cash-out, real-time avatars, characters + skill trees, seasons, social.
 
 ## Risks & owner dependencies
 
@@ -154,7 +184,10 @@ collision.
   coins (let alone money) buy crates.
 - **Privy scope.** Solves auth + wallet + on-ramp. Does **not** solve vault solvency,
   settlement correctness, or licensing.
-- **Multiplayer scale.** Room sharding + interpolation from the start; load-tested in phase 5.
+- **Empty-lobby cold start.** At launch the world is near-empty; defeat the "dead game" look
+  with **async showroom presence** (real players' parked / for-sale cars + a few bots) and by
+  concentrating who's online — *not* with real-time netcode. Real-time avatars (+ Redis room
+  sharding) come post-v1, once population justifies them.
 
 ## Per-pillar spec plan (each gets its own spec → plan → implement)
 
@@ -164,11 +197,11 @@ collision.
 | 2 | Server-side RoundEngine / settlement service (A→server) | E | test money first |
 | 3 | Provably-fair crates + economy (C/D) | E | soft balances |
 | 4 | Car abilities + unlock progression (C) | crates | extend scaffold |
-| 5 | Real-time lobby presence (B-mp) | E | parallel with 3–4 |
+| 5 | Lobby economy hub + soft-coin marketplace (B/G) | E, crates | the town: Garage/Upgrades/Crates/Track |
 | 6 | Daily bonus + live-ops (H) | E | cheap once E exists |
 | 7 | Vault: USDC treasury + ledger + hedging (F) | settlement, **legal read** | flips real money on |
 | 8 | Hardening: anti-cheat, load + vault stress (phase 5) | all | pre-launch gate |
-| — | Marketplace/trading (G) | post-v1 | deferred |
+| — | Real-money item cash-out + real-time avatars | post-v1 | deferred |
 | — | Characters + skill trees | post-v1 | deferred |
 
 ## Open questions (resolve at each pillar's own spec)
@@ -177,4 +210,5 @@ collision.
 - Exact car roster + ability designs (the Pokémon-style kit).
 - Treasury custody specifics + withdrawal limits/cooldowns.
 - Daily-bonus mechanic (streak? wheel? fixed?).
-- Multiplayer scope detail: how many concurrent per room, what state syncs.
+- Marketplace scope: buy-only vs buy+sell in v1; soft-coin pricing; showroom presence detail
+  (which cars shown, bot density).
