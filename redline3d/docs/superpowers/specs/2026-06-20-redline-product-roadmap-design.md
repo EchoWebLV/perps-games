@@ -1,4 +1,4 @@
-# Redline — Product Roadmap & MVP — master plan
+# Perps Raider — Product Roadmap & MVP — master plan
 
 **Date:** 2026-06-20
 **Status:** approved-in-dialogue (4 forks locked), pending written review
@@ -69,8 +69,8 @@ switch is the last thing flipped, not the first.
 3. **Real-time lobby (B, multiplayer).** WebSocket presence service (positions, car models,
    interpolation). Largely independent of the economy → **builds in parallel with #2**.
 4. **Real money (F).** USDC treasury + deposit/withdraw via Privy, off-chain settlement
-   ledger, **solvency + FlashTrade hedging**, flip settlement from test → real value.
-   **Gated by the legal read.**
+   ledger, **solvency + reconciliation + manual FlashTrade hedging** (automation post-Beta),
+   flip settlement from test → real value. **Gated by the legal read.**
 5. **Hardening.** Anti-cheat, multiplayer load test, vault stress test, monitoring/alerting.
 
 ## Architecture
@@ -94,11 +94,23 @@ switch is the last thing flipped, not the first.
 - **Prices:** the existing Pyth Lazer→Hermes feed client, consumed **server-side** for
   authoritative settlement (the client may still render its own feed for smoothness, but the
   server's price is the one that settles).
+- **Settlement = single-writer, single-instance (architecture review).** The authoritative
+  RoundEngine worker runs as *one* instance (two replicas = double-settlement), driven by a
+  monotonic clock, idempotent on ledger writes, crash-recoverable from durable round state in
+  Postgres. A logically separate module that can be lifted to its own process without a rewrite.
+- **Feed watchdog / HALT.** A frozen Pyth feed = no liquidations fire = unbounded house exposure;
+  a bad tick = mass false liquidations. The settlement loop needs a tick-recency watchdog + safe-mode
+  HALT and tick validation (monotonic ts, sane bounds) *before* price touches equity math (plan 1.2).
+- **Realtime presence = its own deployable.** The Colyseus presence server is a separate, supervised
+  small service (client auto-reconnect), never folded into the settlement process; Redis room
+  sharding is deferred until load demands it.
 - **Vault economics (already established, must be enforced server-side):** **linear-from-entry
-  P&L** (vol-independent edge), **leverage capped (~200–500×)**, net exposure hedged on
-  FlashTrade ($10 min/leg, isolated margin). Real-tick replay shows the house edge holds at
-  all leverage on normal markets; the sole tail risk is max leverage during a vol spike →
-  the cap exists for exactly that.
+  P&L** (vol-independent edge), **leverage capped (~200–500×)**, per-round exposure cap + bankroll
+  floor. Real-tick replay shows the house edge holds at all leverage on normal markets; the sole tail
+  risk is max leverage during a vol spike → the cap exists for exactly that. **Hedging:** Beta
+  launches on these **code-only risk levers + manual** FlashTrade hedging; *automated* programmatic
+  hedging (a second real-money trading bot) is deferred to **post-Beta** until volume proves the
+  unhedged tail is real.
 
 ## MVP / First release — definition
 
@@ -132,8 +144,10 @@ collision.
   the house is counterparty is regulated (gambling/CFD-style rules vary by country). Privy is
   **not** a license. This gates the Beta real-money switch — nothing else blocks on it, so it
   must start immediately.
-- **Vault solvency.** Enforced in code (linear P&L + leverage cap + hedging + exposure
-  limits). Stress-tested before real value goes live.
+- **Vault solvency + reconciliation.** Enforced in code (linear P&L + leverage cap + exposure
+  limits + bankroll floor). **Plan F adds system/treasury accounts so the books sum to zero, plus a
+  continuous reconciliation drift-check that auto-halts withdrawals on mismatch** — this lives in
+  plan F, not phase-5 hardening. Stress-tested before real value goes live.
 - **Server-authoritative settlement refactor.** The core's biggest change; de-risked by
   porting the existing TS engine rather than rewriting.
 - **Provably-fair crates.** Commit-reveal seeds, verifiable client-side — required before
