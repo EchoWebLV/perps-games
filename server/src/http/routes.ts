@@ -15,6 +15,8 @@ export interface RouteDeps {
   rounds: Rounds;
   feed: PriceFeed;
   devEndpoints: boolean;
+  signupFaucet: boolean;   // env-gated soft-coin seeding
+  startBalance: number;    // coins to seed on first sight
 }
 
 const GrantCoins = z.object({ amount: z.number().int().positive() });
@@ -51,14 +53,20 @@ export function registerRoutes(server: FastifyInstance, deps: RouteDeps): void {
 
   server.get("/v1/me", { preHandler: requireUser }, async (req) => {
     const userId = req.userId!;
-    const [balance, rows] = await Promise.all([
+    // soft-coin seeding: idempotent on (signup_faucet, userId) — safe to attempt every call
+    if (deps.signupFaucet) {
+      await deps.ledger.credit(userId, deps.startBalance, "signup_faucet", userId);
+    }
+    const [balance, rows, openRoundId] = await Promise.all([
       deps.ledger.balance(userId),
       deps.inventory.list(userId),
+      deps.rounds.getOpenRoundId(userId),
     ]);
     return {
       userId,
       balance,
       cars: rows.map((r) => ({ carId: r.carId, acquiredAt: r.acquiredAt })),
+      openRoundId,
     };
   });
 

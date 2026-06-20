@@ -9,6 +9,9 @@ const Env = z.object({
     .optional()
     .transform((v) => v === "true"),
   NODE_ENV: z.string().optional().default("development"),
+  SIGNUP_FAUCET: z.string().optional().transform((v) => v === "true"),
+  CORS_ORIGINS: z.string().optional().default("http://localhost:3000"),
+  START_BALANCE: z.coerce.number().int().nonnegative().default(100),
 });
 
 export type Env = z.infer<typeof Env>;

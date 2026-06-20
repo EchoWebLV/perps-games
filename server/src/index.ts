@@ -32,6 +32,8 @@ async function main(): Promise<void> {
     rounds,
     feed,
     devEndpoints: env.DEV_ENDPOINTS && env.NODE_ENV !== "production",
+    signupFaucet: env.SIGNUP_FAUCET,
+    startBalance: env.START_BALANCE,
   });
 
   const addr = await server.listen({ port: env.PORT, host: "0.0.0.0" });

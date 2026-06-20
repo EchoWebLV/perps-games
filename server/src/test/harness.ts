@@ -19,7 +19,7 @@ export interface TestCtx {
 }
 
 /** fresh in-memory pglite DB with migrations applied + services wired (stub feed) */
-export async function makeTestDb(): Promise<TestCtx> {
+export async function makeTestDb(opts: { signupFaucet?: boolean; startBalance?: number } = {}): Promise<TestCtx> {
   const raw = createDb(); // pglite
   await raw.runMigrations();
   const db = raw.db;
@@ -30,7 +30,12 @@ export async function makeTestDb(): Promise<TestCtx> {
   const feed = makeStubFeed();
   const rounds = makeRounds({ db, ledger, feed });
 
-  const server = buildServer({ users, ledger, inventory, rounds, feed, devEndpoints: true });
+  const server = buildServer({
+    users, ledger, inventory, rounds, feed,
+    devEndpoints: true,
+    signupFaucet: opts.signupFaucet ?? false,
+    startBalance: opts.startBalance ?? 100,
+  });
 
   return { raw, db, users, ledger, inventory, rounds, feed, server, close: () => raw.close() };
 }
