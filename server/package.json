@@ -9,7 +9,7 @@
     "build": "tsc --noEmit",
     "test": "vitest run",
     "test:watch": "vitest",
-    "test:concurrency": "vitest run src/test/ledger.concurrency.test.ts",
+    "test:concurrency": "vitest run --fileParallelism=false src/test/ledger.concurrency.test.ts src/test/round-settle.concurrency.test.ts",
     "db:generate": "drizzle-kit generate",
     "db:migrate": "tsx src/migrate.ts",
     "db:studio": "drizzle-kit studio"
