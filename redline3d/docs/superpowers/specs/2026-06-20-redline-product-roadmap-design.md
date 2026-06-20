@@ -1,8 +1,8 @@
 # Perps Raider — Product Roadmap & MVP — master plan
 
 **Date:** 2026-06-20
-**Status:** reviewed (6 forks locked) — revised after a 4-lens adversarial review
-**Last revised:** 2026-06-20 — folded in the resolved **distribution split**, **wallet architecture (one `AppSigner` port)**, **Seeker smoothness guardrails**, and **staged on-chain anchor proofs**; then reconciled phase placement, marketplace-sell scope, compliance-build tracking, and research-faithfulness per review.
+**Status:** reviewed (7 forks locked) — revised after a 4-lens adversarial review
+**Last revised:** 2026-06-21 — added the scoped **MagicBlock integration** decision (fork 7: adopt VRF for provably-fair crates; settlement-engine / ER-custody / anchor-rail / on-ER-feed / on-ER-presence all evaluated and DECLINED after a 21-agent adversarial research pass; engine + custody stay off-chain). Prior (2026-06-20): folded in the resolved **distribution split**, **wallet architecture (one `AppSigner` port)**, **Seeker smoothness guardrails**, and **staged on-chain anchor proofs**; then reconciled phase placement, marketplace-sell scope, compliance-build tracking, and research-faithfulness per review.
 **Branch:** redline-3d
 **Scope:** the whole product (live-service game + synthetic-perp fintech), not a single feature.
 
@@ -55,6 +55,25 @@ vault), hedged in aggregate — it is **not** a per-trade on-chain DEX.
    false choice. Privy embedded is the baseline "play-balance" wallet everywhere money is allowed;
    **Seed Vault via native MWA** is a Seeker enhancement (deposit/withdraw, never a second
    balance); the mainstream lite build has **no wallet at all**. One interface, three backends.
+7. **MagicBlock — scoped to the ONE place on-chain earns its keep: provably-fair crates (VRF).
+   Everything else evaluated and DECLINED.** A 21-agent deep-research + adversarial-verification pass
+   (2026-06-21) tested seven candidate integrations against our hard constraints with two skeptical
+   lenses each. Exactly one survived: **MagicBlock Ephemeral-VRF as the verifiable-randomness backend
+   for crates** (Pillar 2) — audited (Zenith 2025-08-06), maintained, entirely server-triggered
+   (relayer signs; client never signs or imports web3), with a public "verify this drop" link. It is
+   strictly stronger than commit-reveal on our differentiation axis and the honest centerpiece of a
+   MagicBlock sponsorship. **Declined (with reasons): settlement engine on an ER** (breaks
+   single-writer authority; ER finalize is operator-trusted = cosmetic "trustless"); **ER
+   treasury/custody** (puts the most safety-critical money behind an operator-trusted finalize —
+   defends liveness we already have, creates a wrong-but-final custody risk we don't); **ER-anchored
+   fairness rail / per-round receipts** (sub-second freshness on an async proof that doesn't need it,
+   surrenders base-layer independence); **Pyth-Lazer-on-ER feed** (marginal over hardened Hermes;
+   re-adds Lazer-token fragility); **on-ER lobby presence / SOAR** (breaks no-client-chain-touch or is
+   cosmetic). **NON-GOAL stands: the round engine + custody stay off-chain.** The competitive position
+   is the *inverse* of "match Banana Zone": they put custody+settlement on an operator-trusted ER and
+   call it trustless (cosmetic); we put genuinely-verifiable randomness on-chain and keep custody
+   auditable — more on-chain where it counts, more honest where they are cosmetic. (MagicBlock is a
+   prospective sponsor; the integration stands on merit.)
 
 ## Pillars (decomposition) and current state
 
@@ -107,7 +126,8 @@ switch is the last thing flipped, not the first. **Two corollaries from the 2026
    before real money*, so built in the soft-coin era). Outcome: the game becomes cheat-proof,
    no real money yet.
 2. **Economy content (C/D/H).** Crates → car drops with abilities (extend the existing
-   scaffold), daily bonus, coin sink/source tuning. On soft balances.
+   scaffold), daily bonus, coin sink/source tuning. On soft balances. Crate draws use **MagicBlock
+   VRF** (on-chain-verifiable; commit-reveal fallback), **prototyped + validated on devnet first**.
 3. **Lobby economy hub (B) + async presence.** Repurpose the lobby into the economy town
    (Garage+marketplace, Upgrades, Crate Shop, Track gate) wired to the ledger/inventory;
    showroom presence via async REST (parked / for-sale cars + bots), **no Colyseus in v1**.
@@ -376,6 +396,59 @@ rounds is caught only by the monotonic counter, not prevented), and they are **n
 4. **Devnet-beta phase.** Anchoring runs live on **devnet** (real tx, throwaway keypair) while the
    game is still soft-coin, exercising the whole proof path end-to-end before mainnet.
 
+## MagicBlock — one real win, six honest declines (fork 7)
+
+A deep-research + adversarial-verification workflow (2026-06-21, 21 agents, a constraint-breakage lens
+AND a benefit-reality lens per candidate) scored seven MagicBlock integration candidates. The
+discipline held: every on-chain piece must map to a benefit a player or skeptic can name, and survive
+an adversary trying to prove it cosmetic or constraint-breaking. **One survived.**
+
+**ADOPT — MagicBlock Ephemeral-VRF for provably-fair crates (Pillar 2).** *"I can verify, against a
+key the house does not control, that my crate draw was fair."* The relayer (already our only
+Solana-touching component) signs a randomness request naming a small Anchor consume-callback; the VRF
+program verifies the RFC-9381 proof **on-chain** and returns the verified value; our off-chain ledger
+grants the item; the Crate Shop surfaces a public "verify this drop" explorer link. **Both adversarial
+lenses passed.** Honest nuances baked into the plan:
+- It proves a fair *number*, not that the ledger granted the *item* the proof implies — the same
+  engine-execution gap the anchor spec already concedes (not a regression, just not oversold).
+- A self-hosted RFC-9381 proof would capture ~80% of the win with no oracle dependency; **MagicBlock's
+  non-replicable delta is removing the house from the randomness trust boundary via independent
+  on-chain verification** — which is exactly the partnership-worthy part.
+- VRF oracle liveness / operator count is **undocumented**, so a **timeout + commit-reveal fallback is
+  mandatory** and the whole path (request → on-chain verify → callback → ledger grant) **must be
+  validated end-to-end on devnet before any mainnet or sponsor claim.**
+- Isolate behind a `RandomnessProvider` port (commit-reveal / Switchboard stay swappable). Cost
+  ~$0.10–0.16/open on the L1 VRF queue (the free ER queue is reserved for later if volume warrants).
+
+**DECLINED — each killed by the adversarial pass, recorded so we don't relitigate:**
+- **Settlement engine on an ER** — makes the ER validator a *second* mutator of settlement state
+  (breaks single-writer authority), and pulls signing toward the client or an unsupported server
+  key-custody pattern; ER finalize is operator-trusted today, so "trustless on-chain settlement" would
+  be the same cosmetic overclaim we criticize. Our Postgres single-writer engine is already built and
+  verified. *Present to the sponsor as a deliberately-declined option.*
+- **ER treasury / custody (real money)** — the worst place for an unaudited operator-trusted
+  dependency: it defends a *liveness* property we already have (a plain USDC treasury is always
+  owner-reclaimable) while creating a *safety* risk we don't (an operator finalizing a wrong-but-final
+  balance). Custody stays the off-chain-ledger + on-chain-USDC-treasury + reconciliation model (Plan F).
+- **ER-anchored fairness rail + per-round receipts** — buys sub-second freshness on the one part of
+  the stack that explicitly doesn't need low latency (async tamper-evidence, already ~$0/round and
+  ~10s-fresh via batched SPL-Memo), and co-locates anchoring with FlashTrade-hedge + Pyth-feed on one
+  ER fabric, surrendering base-layer independence. Anchor proofs (Pillar I) stay direct-to-L1 SPL-Memo.
+- **Pyth-Lazer-on-ER feed** — marginal freshness over our hardened Hermes default, re-adds the
+  Lazer-token availability fragility memory warns against, and puts ER liveness near the settlement
+  hot path. For bad-tick defense, a second independent Pyth source is cheaper with no new failure mode.
+- **On-ER lobby presence / SOAR leaderboard** — the real-time variant forces client-side ER signing on
+  the weak Seeker WebView (breaks no-client-chain-touch); the server-mirrored SOAR variant is cosmetic
+  on an unaudited, stale program and contradicts our async-presence decision.
+
+**Production reality (factored in):** ERs + VRF are live on Solana mainnet (FlashTrade — our hedge
+venue — and Supersize run on ERs; Zeebit runs a provably-fair casino on ERs); MagicBlock is
+a16z/Lightspeed-backed; the Delegation Program is Halborn-audited and VRF is Zenith-audited. **But**
+the ER validator is BSL-1.1 "active development / unaudited," there is **no public SLA / status page /
+outage history**, finalize is **operator-trusted** (fraud-proofs/ZK are roadmap, not live), and the
+network is still effectively MagicBlock-operated. None of this blocks VRF-for-crates on devnet; all of
+it is why we decline the money-path and settlement-path candidates.
+
 ## Lobby — the economy hub
 
 The lobby is the **town**: a drivable space whose buildings *are* the economy. It replaces the
@@ -489,7 +562,7 @@ abilities for v1), **real-time avatar netcode (Colyseus)**, **real-money item ca
 | 1.3 | **Auth + `AppSigner` wallet port (E/J)** | 1.1 | **define the port + stub backends now** (privy-embedded baseline; mwa-seedvault stub) — full Privy auth + chain backends **activate at F**, *not* before crates |
 | 1.4 | **Autonomous liq/time settler worker (A)** | 1.2 | single-instance, monotonic-clock; settles abandoned/timed-out rounds. **REQUIRED before real money (F)** — built in the soft-coin era. May share the single dyno with the anchor worker |
 | 1.5 | **Client → server cutover + web surface (A/J)** | 1.2 | web client drives `/v1/round/*` (SimSettlement retired as the authority; local engine = render prediction only); **landscape-first desktop layout + keyboard/mouse (+ gamepad)** and a **Desktop-HIGH quality tier** (more pixels / post-FX / draw distance); installable PWA on Vercel. Makes the built backend real on the web version |
-| 2 | Provably-fair crates + economy (C/D) | 1.1 | soft balances; consumes the **commit-reveal RNG primitive** seeded in 1.1 |
+| 2 | Provably-fair crates + economy (C/D) | 1.1 | soft balances; **MagicBlock Ephemeral-VRF** as the on-chain-verifiable randomness backend (server-triggered; public "verify this drop" link) behind a `RandomnessProvider` port, with the **commit-reveal primitive from 1.1 as mandatory fallback**; VRF path **validated end-to-end on devnet first** (timeout→fallback). See *MagicBlock — one real win* |
 | 3 | Car abilities + unlock progression (C) | crates | extend scaffold; sets the v1 car count |
 | 4 | Lobby economy hub + soft-coin marketplace (B/G) | 1.1, crates | the town: Garage/Upgrades/Crates/Track; **buy/sell/trade in soft coins** (sell in v1, fork 2) |
 | 5 | Daily bonus + live-ops (H) | 1.1 | cheap once E exists |
