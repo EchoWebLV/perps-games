@@ -139,6 +139,9 @@ export function makeRounds(deps: RoundsDeps) {
     return { outcome: round.outcome as SettleResult["outcome"], equity: round.equity ?? 0, payoutCoins, pnlCoins: payoutCoins - round.stake };
   }
 
+  // `reason` is accepted-but-ignored telemetry (the client's stated intent). The authoritative
+  // outcome is derived purely from the server-stamped price/time marks in settleRound — a client
+  // claiming "expire" cannot force a "time" outcome, nor "cashout" avoid a liquidation.
   async function close(userId: string, roundId: string, reason: "cashout" | "expire"): Promise<SettleResult & { round: Round }> {
     const pre = await requireRound(db, userId, roundId);
     if (!feed.healthy(pre.asset)) throw new FeedHaltError();

@@ -52,6 +52,11 @@ function finalize(outcome: SettleReason, pos: Position, price: number, inp: Sett
  * then the close mark). At each mark, checks terminal conditions in the SAME precedence as
  * RoundEngine.tick (liq → cap → time → cashout). If none trigger, applies the action and
  * continues. Reuses equityOf/payoutOf/rebank verbatim — one source of truth with the client.
+ *
+ * NOTE: terminal conditions are evaluated ONLY at the marks the server stamped (open, each
+ * action, exit) — a dip below LIQ *between* two marks that recovers before the next mark is
+ * not liquidated. This is intentional for 1.2: continuous per-tick liquidation is the deferred
+ * autonomous settler worker's job. Marks-only is house-favorable in expectation. Not a bug.
  */
 export function settleRound(inp: SettleInput): SettleResult {
   const { cfg, entryTsUs } = inp;
