@@ -303,6 +303,32 @@ interface AppSigner {
 2. Whether native MWA reaches Seed Vault from a Capacitor app, or the Seeker build needs a native
    MWA bridge plugin (no official Capacitor MWA story exists). This answer picks the Seeker shell shape.
 
+## Client surfaces — web interface & platform UX
+
+One Vite build renders on very different surfaces; the UI and input model must **adapt per surface**,
+not assume the Seeker. These are roadmap-level considerations — the concrete control scheme,
+breakpoints, and PWA manifest get specced in the client/web pillar.
+
+- **Input model differs by surface.** Seeker / mobile-web = **touch** (steer, throttle/brake, flip,
+  leverage) + tilt + **haptics**, portrait. Desktop web = **keyboard + mouse**, landscape, large
+  viewport. The current client is built for the touch model; the web version needs a **keyboard/mouse
+  control scheme** and a **responsive layout** that works from a phone portrait up to a desktop
+  landscape window. Touch controls stay for mobile-web.
+- **Web is the primary acquisition funnel.** A shareable **Vercel URL has zero install friction** —
+  most players will land on the web build; the Seeker APK / dApp Store is hardware-gated, smaller
+  reach. So **web-first UX polish** (instant load, no-wallet trial, responsive) is where growth comes
+  from; Seeker is the premium crypto-native surface, not the top of the funnel.
+- **Installable PWA.** Web manifest + icons + offline shell + "Add to Home Screen"; fullscreen /
+  orientation handling on mobile-web. (`index.html` already carries the brand title + apple-title.)
+- **Wallet UX is lighter on web.** The web build's wallet is **Privy embedded** (email login, in-browser
+  modal) — the lowest-friction onboarding, and the **iOS real-money path**. No native Seed Vault / MWA
+  complexity on web; that's the Seeker-only path.
+- **Responsive 3D + HUD.** The canvas + DOM HUD must reflow from portrait phone to desktop landscape;
+  per-device pixel-ratio cap (the Seeker tier is the strict one). The DOM-HUD JS-thread-stall concern
+  is **Seeker-WebView-only** — desktop web has full GPU + main-thread budget.
+- **Web-native share / verify.** URL-based round share + the anchor-proof **"verify" link** (a plain
+  `https://` page — server string + link, no client Solana lib) are natural on web and land here first.
+
 ## Verifiable settlement — staged anchor proofs (Pillar I)
 
 Detailed design: [`2026-06-20-verifiable-settlement-anchor-proofs-design.md`](2026-06-20-verifiable-settlement-anchor-proofs-design.md).
@@ -374,8 +400,10 @@ The first release is a **real-money, multiplayer, unlock-progression game** — 
 real value switched on at the end, and shipped through the **full channels** (web PWA + Seeker dApp
 Store + APK); a **scrubbed soft-coin lite build** covers Apple/Google. In scope:
 
-- Core race on the real feed, **server-authoritative settlement** with **public per-round proofs**
-  (anchor Stage A; Stage B anchor on devnet→mainnet).
+- **Two client shells from one Vite build:** a **responsive web PWA on Vercel** (keyboard + mouse on
+  desktop, touch on mobile-web — the primary funnel) and the **Seeker APK** (touch + native Seed Vault).
+- Core race on the real feed, **server-authoritative settlement** (the web client drives `/v1/round/*`,
+  not a local sim) with **public per-round proofs** (anchor Stage A; Stage B anchor on devnet→mainnet).
 - **`AppSigner` wallet port:** Privy sign-in + embedded wallet (web/plain); **Seed Vault via native
   MWA** on Seeker; **USDC deposit/withdraw**; off-chain settlement ledger.
 - Single soft currency (**coin**) earned by playing; server-authoritative balance.
@@ -451,6 +479,7 @@ abilities for v1), **real-time avatar netcode (Colyseus)**, **real-money item ca
 | 1.2 | Server-side RoundEngine / settlement service (A→server) | 1.1 | ✅ BUILT — `@perps/engine` + segment-replay settle + `/v1/round/*`; single-writer verified on real PG |
 | 1.3 | **Auth + `AppSigner` wallet port (E/J)** | 1.1 | **define the port + stub backends now** (privy-embedded baseline; mwa-seedvault stub) — full Privy auth + chain backends **activate at F**, *not* before crates |
 | 1.4 | **Autonomous liq/time settler worker (A)** | 1.2 | single-instance, monotonic-clock; settles abandoned/timed-out rounds. **REQUIRED before real money (F)** — built in the soft-coin era. May share the single dyno with the anchor worker |
+| 1.5 | **Client → server cutover + web surface (A/J)** | 1.2 | web client drives `/v1/round/*` (SimSettlement retired as the authority; local engine = render prediction only); **responsive desktop layout + keyboard/mouse**; installable PWA on Vercel. Makes the built backend real on the web version |
 | 2 | Provably-fair crates + economy (C/D) | 1.1 | soft balances; consumes the **commit-reveal RNG primitive** seeded in 1.1 |
 | 3 | Car abilities + unlock progression (C) | crates | extend scaffold; sets the v1 car count |
 | 4 | Lobby economy hub + soft-coin marketplace (B/G) | 1.1, crates | the town: Garage/Upgrades/Crates/Track; **buy/sell/trade in soft coins** (sell in v1, fork 2) |
