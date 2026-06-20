@@ -154,3 +154,13 @@ describe("rounds.close", () => {
     await expect(rounds.close(userId, "00000000-0000-0000-0000-000000000000", "cashout")).rejects.toBeInstanceOf(RoundNotFoundError);
   });
 });
+
+describe("rounds.getOpenRoundId", () => {
+  it("getOpenRoundId returns the user's open round, or null", async () => {
+    expect(await rounds.getOpenRoundId(userId)).toBeNull();
+    const r = await rounds.open(userId, { asset: "SOL", dir: 1, lev: 50, stake: 5 });
+    expect(await rounds.getOpenRoundId(userId)).toBe(r.id);
+    await rounds.close(userId, r.id, "cashout");
+    expect(await rounds.getOpenRoundId(userId)).toBeNull();
+  });
+});

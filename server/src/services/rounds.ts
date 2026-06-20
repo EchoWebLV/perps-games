@@ -199,7 +199,16 @@ export function makeRounds(deps: RoundsDeps) {
     return rows.length ? (rows[0] as Round) : null;
   }
 
-  return { open, action, close, get, toEngineAction, loadRoundActions, requireRound };
+  async function getOpenRoundId(userId: string): Promise<string | null> {
+    const rows = await db
+      .select({ id: rounds.id })
+      .from(rounds)
+      .where(and(eq(rounds.userId, userId), eq(rounds.status, "open")))
+      .limit(1);
+    return rows.length ? (rows[0].id as string) : null;
+  }
+
+  return { open, action, close, get, getOpenRoundId, toEngineAction, loadRoundActions, requireRound };
 }
 
 export type Rounds = ReturnType<typeof makeRounds>;
