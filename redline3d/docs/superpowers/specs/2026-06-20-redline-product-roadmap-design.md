@@ -83,6 +83,18 @@ switch is the last thing flipped, not the first.
    flip settlement from test → real value. **Gated by the legal read.**
 5. **Hardening.** Anti-cheat, multiplayer load test, vault stress test, monitoring/alerting.
 
+### Build progress (live)
+
+- **Pillar 1.1 — Ledger foundation (E): ✅ BUILT.** `server/` skeleton (Fastify 5 + Drizzle + Postgres/PGlite), append-only integer-coin ledger (`balance = sum(delta)`, advisory-lock debit + overdraft guard + `(reason,ref)` idempotency), unlock-only car inventory, dev `x-dev-user` auth seam, REST routes (`/v1/me|balance|inventory` + dev seed), Railway deploy path (migrate-on-release). Overdraft race verified on real Postgres.
+- **Pillar 1.2 — Server-side authoritative settlement (A→server): ✅ BUILT** (test money). The race now settles on the server. Delivered:
+  - **Shared `@perps/engine` workspace** — the pure P&L/leverage math moved out of the client into one package both client and server import (drift impossible); client `src/core/*` are thin re-export shims.
+  - **Pure `settleRound`** — deterministic, integer-coin, **segment-replay** (the Clown Car flip + leverage changes fold through `rebank`); reuses `equityOf`/`payoutOf` verbatim (linear-from-entry, vol-independent).
+  - **`rounds` + `round_actions` tables** — authoritative, auditable, crash-recoverable round record with a **per-round config snapshot** (defeats the mutable-`CONFIG` bleed).
+  - **`PriceFeed` port** — deterministic stub for tests + a real Hermes REST poll, both with **HALT-on-stale** (never settle on a frozen feed); feed ids verified against the client.
+  - **`/v1/round/open|action|close|:id`** behind `requireUser`; **single-writer settle** (advisory lock + `open→settled` status guard + `WHERE status='open'` + idempotent `round_payout` ref) — **concurrent double-close → single credit verified on real Postgres**.
+  - **Decisions taken:** segment-replay (Clown Car preserved, server-authoritative); shared workspace (client stays out of npm-workspaces so its Capacitor build is untouched); feed = stub + Hermes.
+  - **Deferred (explicit):** autonomous liq/time settler worker (1.2 settles only on explicit `close`; an abandoned round leaves an escrowed-stake open round — fine for test coins, build the single-instance worker before real money); **pickups/`addBonus`** (engine-supported, no API yet — needs a canonical pickup→bonus map or a client could forge the value); per-user upgrade-tree → effective `cfg`; the vol-spike dynamic leverage cap (Plan F vault lever); Lazer WebSocket; **Privy auth** (still `x-dev-user`, Pillar 1.3).
+
 ## Architecture
 
 ```
@@ -199,8 +211,8 @@ seasons, chat/voice/emotes, car-to-car collision.
 
 | Order | Pillar spec | Depends on | Notes |
 |---|---|---|---|
-| 1 | Backend foundation + auth + server-authoritative balances (E) | — | unblocks everything |
-| 2 | Server-side RoundEngine / settlement service (A→server) | E | test money first |
+| 1 | Backend foundation + auth + server-authoritative balances (E) | — | ✅ BUILT (Plan 1.1) — ledger + inventory + dev auth + REST |
+| 2 | Server-side RoundEngine / settlement service (A→server) | E | ✅ BUILT (Plan 1.2) — `@perps/engine` + segment-replay settle + `/v1/round/*`; single-writer verified on real PG |
 | 3 | Provably-fair crates + economy (C/D) | E | soft balances |
 | 4 | Car abilities + unlock progression (C) | crates | extend scaffold |
 | 5 | Lobby economy hub + soft-coin marketplace (B/G) | E, crates | the town: Garage/Upgrades/Crates/Track |
