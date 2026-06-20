@@ -1,10 +1,10 @@
 import { randomUUID } from "node:crypto";
-import { and, eq } from "drizzle-orm";
-import { rounds, roundActions, type Round } from "../db/schema.js";
-import { BASE_CONFIG, type Dir } from "@perps/engine";
+import { and, eq, asc, sql } from "drizzle-orm";
+import { rounds, roundActions, type Round, type RoundAction } from "../db/schema.js";
+import { BASE_CONFIG, type Action, type Dir } from "@perps/engine";
 import type { Ledger } from "./ledger.js";
 import type { PriceFeed } from "../feed/types.js";
-import { FeedHaltError, OpenRoundExistsError } from "./errors.js";
+import { FeedHaltError, OpenRoundExistsError, RoundNotFoundError, RoundClosedError } from "./errors.js";
 
 export interface OpenInput {
   asset: string;
@@ -70,7 +70,66 @@ export function makeRounds(deps: RoundsDeps) {
     return row[0] as Round;
   }
 
-  return { open };
+  /** map a stored action row to the engine's pure Action shape */
+  function toEngineAction(a: RoundAction): Action {
+    if (a.kind === "flip") return { kind: "flip", dir: a.dir as Dir, priceRaw: a.priceRaw, tsUs: a.tsUs };
+    if (a.kind === "lever") return { kind: "lever", lev: a.lev as number, priceRaw: a.priceRaw, tsUs: a.tsUs };
+    return { kind: "bonus", amount: a.amount as number, priceRaw: a.priceRaw, tsUs: a.tsUs };
+  }
+
+  async function loadRoundActions(q: any, roundId: string): Promise<RoundAction[]> {
+    return q.select().from(roundActions).where(eq(roundActions.roundId, roundId)).orderBy(asc(roundActions.seq));
+  }
+
+  async function requireRound(q: any, userId: string, roundId: string): Promise<Round> {
+    const rows = await q.select().from(rounds).where(and(eq(rounds.id, roundId), eq(rounds.userId, userId))).limit(1);
+    if (!rows.length) throw new RoundNotFoundError();
+    return rows[0] as Round;
+  }
+
+  async function action(
+    userId: string,
+    roundId: string,
+    p: { actionId: string; kind: "flip" | "lever"; dir?: Dir; lev?: number },
+  ): Promise<{ round: Round; actions: RoundAction[] }> {
+    // validate the action shape
+    if (p.kind === "flip" && p.dir !== 1 && p.dir !== -1) throw new Error("flip requires dir 1 or -1");
+    if (p.kind === "lever" && (!Number.isInteger(p.lev) || (p.lev as number) < BASE_CONFIG.RMIN || (p.lev as number) > BASE_CONFIG.RMAX))
+      throw new Error(`lever requires an integer lev in [${BASE_CONFIG.RMIN}, ${BASE_CONFIG.RMAX}]`);
+
+    // load the round once to learn its asset, then HALT-check + stamp the server price
+    const pre = await requireRound(db, userId, roundId);
+    if (!feed.healthy(pre.asset)) throw new FeedHaltError();
+    const { price: priceRaw, tsUs } = feed.current(pre.asset);
+
+    await db.transaction(async (tx: any) => {
+      await tx.execute(sql`select pg_advisory_xact_lock(hashtextextended(${userId}, 0))`);
+      const round = await requireRound(tx, userId, roundId);
+      if (round.status !== "open") throw new RoundClosedError();
+      const existing = await loadRoundActions(tx, roundId);
+      const seq = existing.length + 1;
+      await tx
+        .insert(roundActions)
+        .values({
+          roundId,
+          actionId: p.actionId,
+          seq,
+          kind: p.kind,
+          dir: p.kind === "flip" ? p.dir : null,
+          lev: p.kind === "lever" ? p.lev : null,
+          amount: null,
+          priceRaw,
+          tsUs,
+        })
+        .onConflictDoNothing(); // idempotent on (round_id, action_id)
+    });
+
+    const round = await requireRound(db, userId, roundId);
+    const actions = await loadRoundActions(db, roundId);
+    return { round, actions };
+  }
+
+  return { open, action, toEngineAction, loadRoundActions, requireRound };
 }
 
 export type Rounds = ReturnType<typeof makeRounds>;

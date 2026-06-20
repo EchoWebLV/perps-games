@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { makeTestDb, type TestCtx } from "../test/harness.js";
 import { makeRounds, type Rounds } from "./rounds.js";
 import { makeStubFeed, type StubFeed } from "../feed/stub.js";
-import { FeedHaltError, OpenRoundExistsError } from "./errors.js";
+import { FeedHaltError, OpenRoundExistsError, RoundNotFoundError } from "./errors.js";
 
 let ctx: TestCtx;
 let feed: StubFeed;
@@ -54,5 +54,40 @@ describe("rounds.open", () => {
     await expect(rounds.open(userId, { asset: "SOL", dir: 1, lev: 5, stake: 10 })).rejects.toThrow(); // lev < RMIN
     await expect(rounds.open(userId, { asset: "SOL", dir: 1, lev: 50, stake: 0 })).rejects.toThrow(); // stake < MIN
     await expect(rounds.open(userId, { asset: "SOL", dir: 1, lev: 50, stake: 99 })).rejects.toThrow(); // stake > MAX
+  });
+});
+
+describe("rounds.action", () => {
+  it("records a flip with the SERVER-stamped price (not client-supplied)", async () => {
+    const r = await rounds.open(userId, { asset: "SOL", dir: 1, lev: 50, stake: 10 });
+    feed.set("SOL", { price: 110, tsUs: 1_500_000 });
+    const after = await rounds.action(userId, r.id, { actionId: "a1", kind: "flip", dir: -1 });
+    expect(after.actions).toHaveLength(1);
+    expect(after.actions[0]).toMatchObject({ kind: "flip", dir: -1, priceRaw: 110, seq: 1 });
+  });
+
+  it("records a leverage change", async () => {
+    const r = await rounds.open(userId, { asset: "SOL", dir: 1, lev: 50, stake: 10 });
+    feed.set("SOL", { price: 101, tsUs: 1_500_000 });
+    const after = await rounds.action(userId, r.id, { actionId: "a1", kind: "lever", lev: 200 });
+    expect(after.actions[0]).toMatchObject({ kind: "lever", lev: 200, seq: 1 });
+  });
+
+  it("is idempotent on actionId (a retry posts nothing)", async () => {
+    const r = await rounds.open(userId, { asset: "SOL", dir: 1, lev: 50, stake: 10 });
+    feed.set("SOL", { price: 110, tsUs: 1_500_000 });
+    await rounds.action(userId, r.id, { actionId: "dup", kind: "flip", dir: -1 });
+    const after = await rounds.action(userId, r.id, { actionId: "dup", kind: "flip", dir: -1 });
+    expect(after.actions).toHaveLength(1); // not 2
+  });
+
+  it("HALTs an action on a stale feed", async () => {
+    const r = await rounds.open(userId, { asset: "SOL", dir: 1, lev: 50, stake: 10 });
+    feed.setHealthy("SOL", false);
+    await expect(rounds.action(userId, r.id, { actionId: "a1", kind: "flip", dir: -1 })).rejects.toBeInstanceOf(FeedHaltError);
+  });
+
+  it("rejects an action on an unknown round", async () => {
+    await expect(rounds.action(userId, "00000000-0000-0000-0000-000000000000", { actionId: "a1", kind: "flip", dir: -1 })).rejects.toBeInstanceOf(RoundNotFoundError);
   });
 });
