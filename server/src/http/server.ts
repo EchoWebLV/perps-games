@@ -1,11 +1,11 @@
 import Fastify, { type FastifyInstance } from "fastify";
+import { registerRoutes, type RouteDeps } from "./routes.js";
 
-export interface ServerDeps {
-  // services are added in later tasks; empty for the healthz-only bootstrap
-}
+export type ServerDeps = RouteDeps;
 
-export function buildServer(_deps: ServerDeps = {}): FastifyInstance {
+export function buildServer(deps: ServerDeps): FastifyInstance {
   const server = Fastify({ logger: false });
   server.get("/healthz", async () => ({ ok: true }));
+  registerRoutes(server, deps);
   return server;
 }
