@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { and, eq, asc, sql } from "drizzle-orm";
 import { rounds, roundActions, type Round, type RoundAction } from "../db/schema.js";
-import { BASE_CONFIG, type Action, type Dir } from "@perps/engine";
+import { BASE_CONFIG, settleRound, type Action, type Dir, type SettleResult } from "@perps/engine";
 import type { Ledger } from "./ledger.js";
 import type { PriceFeed } from "../feed/types.js";
 import { FeedHaltError, OpenRoundExistsError, RoundNotFoundError, RoundClosedError } from "./errors.js";
@@ -129,7 +129,69 @@ export function makeRounds(deps: RoundsDeps) {
     return { round, actions };
   }
 
-  return { open, action, toEngineAction, loadRoundActions, requireRound };
+  function cfgOf(round: Round) {
+    return { EDGE: round.cfgEdge, LIQ: round.cfgLiq, CAP: round.cfgCap, MAXSEC: round.cfgMaxsec, RMIN: BASE_CONFIG.RMIN, RMAX: BASE_CONFIG.RMAX };
+  }
+
+  /** rebuild the settle result that was stored on an already-settled round (for idempotent replay) */
+  function storedResult(round: Round): SettleResult {
+    const payoutCoins = round.payoutCoins ?? 0;
+    return { outcome: round.outcome as SettleResult["outcome"], equity: round.equity ?? 0, payoutCoins, pnlCoins: payoutCoins - round.stake };
+  }
+
+  async function close(userId: string, roundId: string, reason: "cashout" | "expire"): Promise<SettleResult & { round: Round }> {
+    const pre = await requireRound(db, userId, roundId);
+    if (!feed.healthy(pre.asset)) throw new FeedHaltError();
+    const { price: exitRaw, tsUs: exitTsUs } = feed.current(pre.asset);
+
+    return db.transaction(async (tx: any) => {
+      await tx.execute(sql`select pg_advisory_xact_lock(hashtextextended(${userId}, 0))`);
+      const round = await requireRound(tx, userId, roundId);
+
+      if (round.status === "settled") {
+        // idempotent replay — return the stored result, do NOT pay again
+        return { ...storedResult(round), round };
+      }
+
+      const rows = await loadRoundActions(tx, roundId);
+      const actions: Action[] = rows.map(toEngineAction);
+      const result = settleRound({
+        openDir: round.dir as Dir,
+        openLev: round.lev,
+        entryRaw: round.entryRaw,
+        entryTsUs: round.entryTsUs,
+        stake: round.stake,
+        actions,
+        exitRaw,
+        exitTsUs,
+        cfg: cfgOf(round),
+      });
+
+      // single-writer: transition only if still open (the WHERE guard + the lock make it one-shot)
+      await tx
+        .update(rounds)
+        .set({
+          status: "settled",
+          exitRaw,
+          exitTsUs,
+          outcome: result.outcome,
+          equity: result.equity,
+          payoutCoins: result.payoutCoins,
+          settledAt: new Date(),
+        })
+        .where(and(eq(rounds.id, roundId), eq(rounds.status, "open")));
+
+      // pay winnings (skip on 0 — credit rejects 0). Idempotent on (round_payout, roundId).
+      if (result.payoutCoins > 0) {
+        await ledger.creditOn(tx, userId, result.payoutCoins, "round_payout", roundId);
+      }
+
+      const settled = await requireRound(tx, userId, roundId);
+      return { ...result, round: settled };
+    });
+  }
+
+  return { open, action, close, toEngineAction, loadRoundActions, requireRound };
 }
 
 export type Rounds = ReturnType<typeof makeRounds>;

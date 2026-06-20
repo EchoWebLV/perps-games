@@ -91,3 +91,66 @@ describe("rounds.action", () => {
     await expect(rounds.action(userId, "00000000-0000-0000-0000-000000000000", { actionId: "a1", kind: "flip", dir: -1 })).rejects.toBeInstanceOf(RoundNotFoundError);
   });
 });
+
+describe("rounds.close", () => {
+  it("happy path: settles a winning round and pays out", async () => {
+    const r = await rounds.open(userId, { asset: "SOL", dir: 1, lev: 10, stake: 10 });
+    feed.set("SOL", { price: 105, tsUs: 5_000_000 }); // +5% * 10x = +50% → eq 1.5
+    const res = await rounds.close(userId, r.id, "cashout");
+    expect(res.outcome).toBe("cashout");
+    expect(res.equity).toBeCloseTo(1.5, 9);
+    expect(res.payoutCoins).toBe(Math.floor(10 * 1.5 * 0.95)); // 14
+    expect(await ctx.ledger.balance(userId)).toBe(90 + 14); // -10 stake +14 payout
+  });
+
+  it("a liquidated close pays nothing and writes no payout entry", async () => {
+    const r = await rounds.open(userId, { asset: "SOL", dir: 1, lev: 10, stake: 10 });
+    feed.set("SOL", { price: 91, tsUs: 5_000_000 }); // eq 0.1 ≤ LIQ
+    const res = await rounds.close(userId, r.id, "cashout");
+    expect(res.outcome).toBe("liq");
+    expect(res.payoutCoins).toBe(0);
+    expect(await ctx.ledger.balance(userId)).toBe(90); // stake forfeited, no credit
+  });
+
+  it("settles 'time' when the cap elapsed", async () => {
+    const r = await rounds.open(userId, { asset: "SOL", dir: 1, lev: 10, stake: 10 });
+    feed.set("SOL", { price: 101, tsUs: 1_000_000 + 61_000_000 }); // +61s
+    const res = await rounds.close(userId, r.id, "expire");
+    expect(res.outcome).toBe("time");
+  });
+
+  it("a mid-round flip is reflected in the settlement (segment-replay)", async () => {
+    const r = await rounds.open(userId, { asset: "SOL", dir: 1, lev: 10, stake: 10 });
+    feed.set("SOL", { price: 110, tsUs: 3_000_000 }); // bank +1.0 on the long
+    await rounds.action(userId, r.id, { actionId: "flip1", kind: "flip", dir: -1 });
+    feed.set("SOL", { price: 105, tsUs: 6_000_000 }); // short gains as price falls
+    const res = await rounds.close(userId, r.id, "cashout");
+    expect(res.equity).toBeGreaterThan(2.4); // banked 1.0 + short profit
+    expect(res.payoutCoins).toBeGreaterThan(10);
+  });
+
+  it("double-close is idempotent: same result, paid once", async () => {
+    const r = await rounds.open(userId, { asset: "SOL", dir: 1, lev: 10, stake: 10 });
+    feed.set("SOL", { price: 105, tsUs: 5_000_000 });
+    const first = await rounds.close(userId, r.id, "cashout");
+    const second = await rounds.close(userId, r.id, "cashout");
+    expect(second.outcome).toBe(first.outcome);
+    expect(second.payoutCoins).toBe(first.payoutCoins);
+    expect(await ctx.ledger.balance(userId)).toBe(90 + first.payoutCoins); // credited once
+  });
+
+  it("HALTs a close on a stale feed and leaves the round open", async () => {
+    const r = await rounds.open(userId, { asset: "SOL", dir: 1, lev: 10, stake: 10 });
+    feed.setHealthy("SOL", false);
+    await expect(rounds.close(userId, r.id, "cashout")).rejects.toBeInstanceOf(FeedHaltError);
+    // recover and settle
+    feed.setHealthy("SOL", true);
+    feed.set("SOL", { price: 105, tsUs: 5_000_000 });
+    const res = await rounds.close(userId, r.id, "cashout");
+    expect(res.outcome).toBe("cashout");
+  });
+
+  it("rejects closing an unknown round", async () => {
+    await expect(rounds.close(userId, "00000000-0000-0000-0000-000000000000", "cashout")).rejects.toBeInstanceOf(RoundNotFoundError);
+  });
+});
