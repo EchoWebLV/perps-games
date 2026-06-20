@@ -38,6 +38,13 @@ export class RoundEngine {
     this.pos = { ...rebank(this.pos, price), lev: newLev };
   }
 
+  /** flip direction mid-run (Clown Car lane-bet): realize the current segment + re-anchor */
+  setDir(newDir: Dir, price: number): void {
+    if (this.phase !== "live") return;
+    if (newDir === this.pos.dir) return;
+    this.pos = { ...rebank(this.pos, price), dir: newDir };
+  }
+
   /** advance the round; auto-settles on liq/cap/time */
   tick(price: number, nowMs: number): Snapshot {
     if (this.phase !== "live") return this.snapshot(price, nowMs);

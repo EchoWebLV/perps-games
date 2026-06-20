@@ -1,7 +1,7 @@
 import { coinLabel, coinPulseClass } from "../core/coins";
 
 export interface CoinCounter {
-  set(total: number): void;
+  set(total: number, animate?: boolean): void;
 }
 
 let stylesInjected = false;
@@ -57,9 +57,9 @@ export function createCoinCounter(parent: HTMLElement): CoinCounter {
   parent.appendChild(wrap);
 
   return {
-    set(total) {
+    set(total, animate = true) {
       totalEl.textContent = coinLabel(total);
-      const pulse = coinPulseClass(previous, total);
+      const pulse = animate ? coinPulseClass(previous, total) : "";
       if (pulse) {
         totalEl.classList.remove(pulse);
         void totalEl.offsetWidth;

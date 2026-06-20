@@ -3,13 +3,15 @@ import { CONFIG } from "../core/config";
 export interface Tach {
   /** drive the gauge from the throttle (0..1) + current leverage */
   setThrottle(frac: number, lev: number): void;
+  /** redraw the RMAX-dependent rim ticks + red-zone arc (after a Turbo Kit upgrade) */
+  rebuild(): void;
 }
 
 const CX = 160, CY = 170, R = 132;
-const { RMIN, RMAX, REDLINE } = CONFIG;
+// read CONFIG live (not destructured) so a Turbo Kit RMAX bump rescales the gauge
 
 function lf(l: number): number {
-  return Math.log(l / RMIN) / Math.log(RMAX / RMIN);
+  return Math.log(l / CONFIG.RMIN) / Math.log(CONFIG.RMAX / CONFIG.RMIN);
 }
 function pt(f: number, rad: number): [number, number] {
   const a = Math.PI * (1 - f);
@@ -25,11 +27,11 @@ function arc(f0: number, f1: number, rad: number, n: number): string {
   return d;
 }
 function gcol(f: number): string {
-  return f >= lf(REDLINE) ? "#ff4d6d" : f >= 0.42 ? "#ffd166" : "#2ee6a6";
+  return f >= lf(CONFIG.REDLINE) ? "#ff4d6d" : f >= 0.42 ? "#ffd166" : "#2ee6a6";
 }
 /** graduation marks around the rim — hot (red) inside the redline zone */
 function ticks(): string {
-  const red = lf(REDLINE);
+  const red = lf(CONFIG.REDLINE);
   let s = "";
   for (let i = 0; i <= 10; i++) {
     const f = i / 10;
@@ -58,12 +60,12 @@ export function createTach(mount: HTMLElement): Tach {
           <stop offset="1" stop-color="#ff4d6d"/>
         </linearGradient>
       </defs>
-      ${ticks()}
+      <g id="tticks">${ticks()}</g>
       <path d="${arc(0, 1, R, 56)}" fill="none" stroke="#13182b" stroke-width="16" stroke-linecap="round"/>
       <path d="${arc(0, 1, R, 56)}" fill="none" stroke="url(#trev)" stroke-width="16" stroke-linecap="round" opacity="0.13"/>
       <circle cx="${CX}" cy="${CY}" r="16" fill="#0a0820" stroke="rgba(255,255,255,.16)" stroke-width="2"/>
       <g filter="url(#tglow)">
-        <path d="${arc(lf(REDLINE), 1, R, 22)}" fill="none" stroke="#ff4d6d" stroke-width="16" stroke-linecap="round" opacity="0.5"/>
+        <path id="tredzone" d="${arc(lf(CONFIG.REDLINE), 1, R, 22)}" fill="none" stroke="#ff4d6d" stroke-width="16" stroke-linecap="round" opacity="0.5"/>
         <path id="tfill" fill="none" stroke="url(#trev)" stroke-width="16" stroke-linecap="round"/>
         <line id="tneedle" x1="${CX}" y1="${CY}" x2="${CX}" y2="46" stroke="#fff" stroke-width="4.5" stroke-linecap="round"/>
         <circle id="thub" cx="${CX}" cy="${CY}" r="7" fill="#2ee6a6"/>
@@ -74,6 +76,8 @@ export function createTach(mount: HTMLElement): Tach {
   const needle = mount.querySelector("#tneedle") as SVGLineElement;
   const hub = mount.querySelector("#thub") as SVGCircleElement;
   const val = mount.querySelector("#tval") as SVGTextElement;
+  const tticks = mount.querySelector("#tticks") as SVGGElement;
+  const redzone = mount.querySelector("#tredzone") as SVGPathElement;
 
   return {
     setThrottle(frac, lev) {
@@ -86,6 +90,10 @@ export function createTach(mount: HTMLElement): Tach {
       hub.setAttribute("fill", c);
       val.textContent = lev + "×";
       val.setAttribute("fill", c);
+    },
+    rebuild() {
+      tticks.innerHTML = ticks();
+      redzone.setAttribute("d", arc(lf(CONFIG.REDLINE), 1, R, 22));
     },
   };
 }

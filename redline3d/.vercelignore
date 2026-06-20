@@ -1,0 +1,13 @@
+# Capacitor native project — not part of the web build
+android
+# rebuilt remotely by `vite build`
+dist
+node_modules
+# APK/build helper scripts + docs, not needed to serve the site
+scripts
+BUILD_APK.md
+capacitor.config.ts
+
+# macOS cruft
+.DS_Store
+**/.DS_Store

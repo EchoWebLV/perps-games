@@ -1,7 +1,9 @@
 export interface Controls {
   dir(): 1 | -1;
-  /** set the LONG/SHORT call externally (e.g. the Clown Car's lane-bet ability) */
+  /** set the LONG/SHORT call externally (e.g. the Clown Car's lane-bet ability) — works live too */
   setDir(d: 1 | -1): void;
+  /** Clown Car: keep the call box visible during a live round so it reads out the live direction */
+  setLaneMode(on: boolean): void;
   stake(): number;
   gas(): boolean;
   brake(): boolean;
@@ -40,14 +42,22 @@ export function createControls(ctrlMount: HTMLElement, goMount: HTMLElement, ped
   const long = q("#long"), short = q("#short"), sval = q("#sval"), go = q("#go"),
     golabel = q("#golabel"), gofill = q("#gofill"), callbox = q("#callbox");
 
-  const setDir = (nd: 1 | -1) => {
-    if (live) return;
+  let laneMode = false;
+  // apply a direction to the UI (used live by the lane-bet); plain clicks stay idle-only
+  const applyDir = (nd: 1 | -1) => {
     d = nd;
     long.classList.toggle("on", nd === 1);
     short.classList.toggle("on", nd === -1);
   };
+  const setDir = (nd: 1 | -1) => { if (live) return; applyDir(nd); };
   long.onclick = () => setDir(1);
   short.onclick = () => setDir(-1);
+  // the call box hides during a live round — except in lane mode, where it stays
+  // visible (but non-interactive) as a live LONG/SHORT readout the lane drives
+  const refreshCall = () => {
+    callbox.style.opacity = !live || laneMode ? "1" : "0";
+    callbox.style.pointerEvents = live ? "none" : "auto";
+  };
   q("#sup").onclick = () => { if (!live) { stake = Math.min(50, stake + 1); sval.textContent = "$" + stake.toFixed(2); } };
   q("#sdn").onclick = () => { if (!live) { stake = Math.max(1, stake - 1); sval.textContent = "$" + stake.toFixed(2); } };
   go.onclick = () => (live ? cashCb() : launchCb());
@@ -72,7 +82,8 @@ export function createControls(ctrlMount: HTMLElement, goMount: HTMLElement, ped
 
   return {
     dir: () => d,
-    setDir,
+    setDir: applyDir,
+    setLaneMode(on: boolean) { laneMode = on; refreshCall(); },
     stake: () => stake,
     gas: () => gasOn,
     brake: () => brakeOn,
@@ -84,9 +95,8 @@ export function createControls(ctrlMount: HTMLElement, goMount: HTMLElement, ped
       go.classList.toggle("gauge", l);
       go.classList.toggle("warn", !!(l && warn)); // red glow when losing / near liq
       if (!l) gofill.style.setProperty("--b", "100%"); // reset the fill for next round
-      // long/short fades out for the live round, fades back in when it settles
-      callbox.style.opacity = l ? "0" : "1";
-      callbox.style.pointerEvents = l ? "none" : "auto";
+      // long/short fades out for the live round (kept as a live readout in lane mode)
+      refreshCall();
     },
     setBuffer(buf) {
       const b = Math.max(0, Math.min(1, buf));

@@ -3,12 +3,17 @@ export interface Fx {
   confetti(): void;
   /** liquidation — a "meh" beat: red flash, gray engine smoke, screen shake */
   liquidate(): void;
+  /** Nitro Overdrive — a warp-speed streak burst + orange flash + kick */
+  nitro(): void;
+  /** Vaporwave — a floating "×N" multiplier that rises from screen point (x,y) ≈ above the car */
+  coinPop(mult: number, x?: number, y?: number): void;
 }
 
 type P = {
   x: number; y: number; vx: number; vy: number;
   rot: number; vr: number; r: number; color: string;
-  life: number; max: number; grav: number; kind: "rect" | "smoke";
+  life: number; max: number; grav: number; kind: "rect" | "smoke" | "streak" | "text";
+  text?: string;
 };
 
 /**
@@ -33,7 +38,7 @@ export function createFx(): Fx {
   window.addEventListener("resize", resize);
 
   const parts: P[] = [];
-  let flash = 0;
+  let flash = 0, flashMax = 18, flashCol = "#ff2d55";
   let raf = 0;
 
   const loop = () => {
@@ -42,8 +47,8 @@ export function createFx(): Fx {
 
     if (flash > 0) {
       g.save();
-      g.globalAlpha = (flash / 18) * 0.4;
-      g.fillStyle = "#ff2d55";
+      g.globalAlpha = (flash / flashMax) * 0.4;
+      g.fillStyle = flashCol;
       g.fillRect(0, 0, W, H);
       g.restore();
       flash--;
@@ -68,6 +73,28 @@ export function createFx(): Fx {
         g.shadowBlur = 14;
         g.fillStyle = p.color;
         g.fillRect(-p.r * 0.5, -p.r * 0.8, p.r, p.r * 1.6);
+      } else if (p.kind === "streak") {
+        g.rotate(Math.atan2(p.vy, p.vx)); // orient along motion → a trailing speed line
+        g.strokeStyle = p.color;
+        g.lineWidth = 3;
+        g.lineCap = "round";
+        g.shadowColor = p.color;
+        g.shadowBlur = 12;
+        g.beginPath();
+        g.moveTo(0, 0);
+        g.lineTo(-p.r, 0);
+        g.stroke();
+      } else if (p.kind === "text") {
+        g.font = `800 ${p.r}px 'Chakra Petch',ui-monospace,monospace`;
+        g.textAlign = "center";
+        g.textBaseline = "middle";
+        g.shadowColor = p.color;
+        g.shadowBlur = 16;
+        g.lineWidth = 4;
+        g.strokeStyle = "rgba(0,0,0,.55)";
+        g.strokeText(p.text || "", 0, 0);
+        g.fillStyle = p.color;
+        g.fillText(p.text || "", 0, 0);
       } else {
         const rad = p.r * (1 + (1 - p.life / p.max) * 2.4);
         g.fillStyle = p.color;
@@ -115,7 +142,7 @@ export function createFx(): Fx {
       start();
     },
     liquidate() {
-      flash = 18;
+      flash = 18; flashMax = 18; flashCol = "#ff2d55";
       const cx = W / 2, cy = H * 0.46;
       for (let i = 0; i < 16; i++) {
         const ang = Math.random() * Math.PI * 2;
@@ -130,6 +157,34 @@ export function createFx(): Fx {
         });
       }
       shake();
+      start();
+    },
+    nitro() {
+      flash = 14; flashMax = 14; flashCol = "#ff8a1a"; // brief orange whoosh
+      const cx = W / 2, cy = H / 2;
+      for (let i = 0; i < 48; i++) {
+        const ang = Math.random() * Math.PI * 2;
+        const sp = 15 + Math.random() * 24;       // fast outward warp lines
+        const d0 = 30 + Math.random() * 110;       // start spread out from centre
+        const c = i % 3 === 0 ? "#ffffff" : i % 3 === 1 ? "#ffd166" : "#ff7a3c";
+        parts.push({
+          x: cx + Math.cos(ang) * d0, y: cy + Math.sin(ang) * d0,
+          vx: Math.cos(ang) * sp, vy: Math.sin(ang) * sp,
+          rot: 0, vr: 0, r: 34 + Math.random() * 64, color: c,
+          life: 15 + Math.random() * 12, max: 27, grav: 0, kind: "streak",
+        });
+      }
+      shake();
+      start();
+    },
+    coinPop(mult, x, y) {
+      const col = mult >= 5 ? "#ff5ccf" : mult >= 3 ? "#27e7ff" : "#ffd166";
+      parts.push({
+        x: (x ?? W / 2) + (Math.random() - 0.5) * 18, y: y ?? H * 0.45,
+        vx: (Math.random() - 0.5) * 0.6, vy: -1.7,
+        rot: 0, vr: 0, r: mult >= 5 ? 54 : mult >= 3 ? 44 : 36,
+        color: col, life: 46, max: 46, grav: 0.02, kind: "text", text: "×" + mult,
+      });
       start();
     },
   };

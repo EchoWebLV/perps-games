@@ -12,14 +12,20 @@ export interface Hud {
   setMultiplier(equity: number, phase: "idle" | "live" | "settled" | "liquidated"): void;
   setTimer(secLeft: number, live: boolean): void;
   setStatus(text: string): void;
+  /** tapping the balance chip opens the wallet page */
+  onWallet(cb: () => void): void;
 }
 
 const top = "top:max(10px,env(safe-area-inset-top))";
 
 export function createHud(parent: HTMLElement): Hud {
   parent.innerHTML = `
-    <div id="balchip" class="pe panel chip" style="position:absolute;${top};left:14px">
-      <span class="lbl">balance</span><span id="bal" class="num">$100.00</span></div>
+    <div id="balchip" class="pe panel chip" style="position:absolute;${top};left:14px;cursor:pointer" aria-label="Open wallet">
+      <span class="lbl">balance</span>
+      <span style="display:flex;align-items:center;gap:6px">
+        <span id="bal" class="num">$100.00</span>
+        <span id="baladd" style="display:grid;place-items:center;width:17px;height:17px;border-radius:50%;font-size:14px;font-weight:700;line-height:0;color:#04101a;background:linear-gradient(180deg,#5fe3ff,#2775ca);box-shadow:0 0 9px rgba(39,231,255,.55)">+</span>
+      </span></div>
 
     <div id="pxchip" class="pe panel chip" style="position:absolute;${top};right:14px;text-align:right">
       <span class="lbl"><span id="asset">SOL</span> · <span id="feed" style="color:var(--amb)">connecting</span></span>
@@ -54,7 +60,7 @@ export function createHud(parent: HTMLElement): Hud {
 
   const q = (s: string) => parent.querySelector(s) as HTMLElement;
   const bal = q("#bal"), px = q("#solpx"), feed = q("#feed"), multi = q("#multi"),
-    status = q("#status"), assetEl = q("#asset"), timer = q("#timer");
+    status = q("#status"), assetEl = q("#asset"), timer = q("#timer"), balchip = q("#balchip");
   const tabs = Array.from(parent.querySelectorAll<HTMLElement>(".atab"));
 
   return {
@@ -89,5 +95,6 @@ export function createHud(parent: HTMLElement): Hud {
       timer.style.color = !live ? "var(--mut)" : secLeft > 20 ? "#aef0d0" : secLeft > 8 ? "#ffd166" : "#ff5067";
     },
     setStatus(t) { status.textContent = t; },
+    onWallet(cb) { balchip.onclick = cb; },
   };
 }
