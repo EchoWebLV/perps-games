@@ -40,3 +40,21 @@ export const ledgerEntries = pgTable(
 );
 
 export type LedgerEntry = typeof ledgerEntries.$inferSelect;
+
+/** unlock-only car ownership. one row per owned car; cannot own the same car twice. */
+export const inventory = pgTable(
+  "inventory",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id),
+    carId: text("car_id").notNull(),
+    acquiredAt: timestamp("acquired_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => ({
+    ownedIdx: uniqueIndex("inventory_user_car_idx").on(t.userId, t.carId),
+  }),
+);
+
+export type InventoryRow = typeof inventory.$inferSelect;
