@@ -8,9 +8,10 @@ export const CONFIG = {
   RMIN: 10,        // min leverage
   RMAX: 1000,      // max leverage (Turbo Kit raises this)
   REDLINE: 400,    // redline leverage threshold
-  START_BALANCE: 100,
-  MIN_STAKE: 1,
-  MAX_STAKE: 50,
+  // Money is denominated in CENTS (1 coin = $0.01) so payouts keep cent resolution.
+  START_BALANCE: 10000, // $100.00 faucet
+  MIN_STAKE: 25,        // $0.25 product minimum (UI-enforced; server floor is 1¢)
+  MAX_STAKE: 5000,      // $50.00 cap
 };
 
 /**

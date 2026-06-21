@@ -12,6 +12,7 @@ import { connectFeed } from "./core/feed";
 import { createPriceSource } from "./core/price-source";
 import { RoundEngine } from "./core/round";
 import { createApi } from "./core/api";
+import { usd } from "./core/money";
 import { createRoundSync, clampInt } from "./core/round-sync";
 import { niceLev, tToLev } from "./core/leverage";
 import { liqPriceOf } from "./core/economics";
@@ -296,7 +297,7 @@ async function settleVia(reason: "cashout" | "expire", localSnap: Snapshot) {
     hud.setStatus(`💥 Liquidated. Lost your stake.`);
     fx.liquidate(); audio.liquidate(); navigator.vibrate?.([30, 40, 30, 40, 90]);
   } else {
-    hud.setStatus(`Settled at ×${res.equity.toFixed(2)} — banked ${res.payoutCoins} coins.`);
+    hud.setStatus(`Settled at ×${res.equity.toFixed(2)} — banked ${usd(res.payoutCoins)}.`);
     fx.confetti(); audio.cashout(); navigator.vibrate?.(35);
   }
   void localSnap; // local prediction already animated the ride; server result is authoritative
@@ -414,7 +415,7 @@ function frame() {
       hud.setTimer(CONFIG.MAXSEC - (Date.now() - roundStartMs) / 1000, true);
       car.setEquity("live", snap.equity);
       const win = snap.equity >= 1;
-      controls.setLive(true, `${win ? "CASH OUT" : "BAIL"} $${snap.payout.toFixed(2)}`, !win);
+      controls.setLive(true, `${win ? "CASH OUT" : "BAIL"} ${usd(snap.payout)}`, !win);
     }
   } else {
     car.setEquity("idle", 1);

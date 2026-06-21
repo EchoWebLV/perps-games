@@ -11,7 +11,7 @@ const Env = z.object({
   NODE_ENV: z.string().optional().default("development"),
   SIGNUP_FAUCET: z.string().optional().transform((v) => v === "true"),
   CORS_ORIGINS: z.string().optional().default("http://localhost:3000"),
-  START_BALANCE: z.coerce.number().int().nonnegative().default(100),
+  START_BALANCE: z.coerce.number().int().nonnegative().default(10000), // cents → $100.00 faucet
 });
 
 export type Env = z.infer<typeof Env>;

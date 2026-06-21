@@ -53,7 +53,15 @@ describe("rounds.open", () => {
   it("validates leverage and stake bounds", async () => {
     await expect(rounds.open(userId, { asset: "SOL", dir: 1, lev: 5, stake: 10 })).rejects.toThrow(); // lev < RMIN
     await expect(rounds.open(userId, { asset: "SOL", dir: 1, lev: 50, stake: 0 })).rejects.toThrow(); // stake < MIN
-    await expect(rounds.open(userId, { asset: "SOL", dir: 1, lev: 50, stake: 99 })).rejects.toThrow(); // stake > MAX
+    await expect(rounds.open(userId, { asset: "SOL", dir: 1, lev: 50, stake: 5001 })).rejects.toThrow(); // stake > MAX
+  });
+
+  it("accepts a cent-denominated stake up to $50.00 (5000 coins) and rejects above it", async () => {
+    await ctx.ledger.credit(userId, 5000, "topup"); // afford a $50 stake → balance 5100
+    const r = await rounds.open(userId, { asset: "SOL", dir: 1, lev: 50, stake: 5000 });
+    expect(r.stake).toBe(5000);
+    await rounds.close(userId, r.id, "cashout"); // clear the open round
+    await expect(rounds.open(userId, { asset: "SOL", dir: 1, lev: 50, stake: 5001 })).rejects.toThrow(); // > $50 cap
   });
 });
 

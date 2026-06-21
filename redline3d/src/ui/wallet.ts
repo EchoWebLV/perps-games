@@ -172,7 +172,7 @@ export function createWallet(parent: HTMLElement, opts: WalletOpts): Wallet {
   let busy = false;
 
   const renderBalance = (bump = false) => {
-    const b = opts.balance();
+    const b = opts.balance() / 100; // balance is in cents (1 coin = $0.01)
     balEl.textContent = fmt(b);
     usdcEl.textContent = fmt(b);
     if (bump) { balEl.parentElement!.classList.remove("bump"); void balEl.offsetWidth; balEl.parentElement!.classList.add("bump"); }

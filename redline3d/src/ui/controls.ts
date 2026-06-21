@@ -1,3 +1,5 @@
+import { usd } from "../core/money";
+
 export interface Controls {
   dir(): 1 | -1;
   /** set the LONG/SHORT call externally (e.g. the Clown Car's lane-bet ability) — works live too */
@@ -36,7 +38,7 @@ export function createControls(ctrlMount: HTMLElement, goMount: HTMLElement, ped
   goMount.innerHTML = `<button id="go" class="cta"><span id="gofill"></span><span id="golabel">GO!</span></button>`;
 
   const q = (s: string) => (ctrlMount.querySelector(s) || goMount.querySelector(s) || pedalMount.querySelector(s)) as HTMLElement;
-  let d: 1 | -1 = 1, stake = 1, live = false;
+  let d: 1 | -1 = 1, stake = 100, live = false; // stake in cents → $1.00 default
   let gasOn = false, brakeOn = false, steerL = false, steerR = false;
   let launchCb = () => {}, cashCb = () => {};
   const long = q("#long"), short = q("#short"), sval = q("#sval"), go = q("#go"),
@@ -58,8 +60,8 @@ export function createControls(ctrlMount: HTMLElement, goMount: HTMLElement, ped
     callbox.style.opacity = !live || laneMode ? "1" : "0";
     callbox.style.pointerEvents = live ? "none" : "auto";
   };
-  q("#sup").onclick = () => { if (!live) { stake = Math.min(50, stake + 1); sval.textContent = "$" + stake.toFixed(2); } };
-  q("#sdn").onclick = () => { if (!live) { stake = Math.max(1, stake - 1); sval.textContent = "$" + stake.toFixed(2); } };
+  q("#sup").onclick = () => { if (!live) { stake = Math.min(5000, stake + 25); sval.textContent = usd(stake); } }; // +$0.25 → $50 cap
+  q("#sdn").onclick = () => { if (!live) { stake = Math.max(25, stake - 25); sval.textContent = usd(stake); } };   // −$0.25 → $0.25 floor
   go.onclick = () => (live ? cashCb() : launchCb());
 
   // keyboard driving (desktop): W/↑ gas, S/↓ brake, A/D or ←/→ steer, space/enter = go.

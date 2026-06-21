@@ -26,7 +26,7 @@ const OpenRound = z.object({
   asset: z.enum(["BTC", "ETH", "SOL"]),
   dir: z.union([z.literal(1), z.literal(-1)]),
   lev: z.number().int().min(10).max(1000),
-  stake: z.number().int().min(1).max(50),
+  stake: z.number().int().min(1).max(5000), // cents: 1¢ floor … $50.00 cap
 });
 const RoundActionBody = z
   .object({

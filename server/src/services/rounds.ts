@@ -19,8 +19,10 @@ export interface RoundsDeps {
   feed: PriceFeed;
 }
 
+// Stakes are in cents (1 coin = $0.01). MIN is a permissive 1¢ safety floor — the
+// product minimum ($0.25) is enforced client-side; MAX is the $50.00 cap.
 const MIN_STAKE = 1;
-const MAX_STAKE = 50;
+const MAX_STAKE = 5000;
 
 export function makeRounds(deps: RoundsDeps) {
   const { db, ledger, feed } = deps;

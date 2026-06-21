@@ -1,3 +1,5 @@
+import { usd } from "../core/money";
+
 export interface Hud {
   root: HTMLElement;
   tachMount: HTMLElement;
@@ -71,7 +73,7 @@ export function createHud(parent: HTMLElement): Hud {
     pedalMount: q("#pedalMount"),
     miniCanvas: q("#mini") as HTMLCanvasElement,
     setPrice(p, live) { px.textContent = "$" + (p ? p.toFixed(2) : "—"); feed.textContent = live ? "live" : "sim"; feed.style.color = live ? "var(--grn)" : "var(--amb)"; },
-    setBalance(b) { bal.textContent = "$" + b.toFixed(2); },
+    setBalance(b) { bal.textContent = usd(b); },
     onAsset(cb) { for (const t of tabs) t.onclick = () => cb(t.dataset.asset!); },
     setActiveAsset(a) {
       assetEl.textContent = a;
