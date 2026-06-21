@@ -76,7 +76,9 @@ const auth: AuthProvider = usePrivy
   ? createPrivyAuth(import.meta.env.VITE_PRIVY_APP_ID as string)
   : createDevAuth();
 const api = createApi({ auth });
-const authGate = createAuthGate(hudRoot);
+// Mount on <body>, NOT hudRoot: createHud() does `parent.innerHTML = …`, which would wipe a gate
+// appended to #hud. The gate is a fixed full-screen overlay, so body is the correct host anyway.
+const authGate = createAuthGate(document.body);
 if (auth.login) authGate.onLogin(() => auth.login!());
 const roundSync = createRoundSync({ api, clock: { now: () => performance.now() }, store: { get: (k) => { try { return localStorage.getItem(k); } catch { return null; } }, set: (k, v) => { try { localStorage.setItem(k, v); } catch {} } } });
 let balance = 0;                   // server-owned; seeded by api.me()
