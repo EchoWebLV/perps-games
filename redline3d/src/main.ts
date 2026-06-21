@@ -15,6 +15,10 @@ import { connectFeed } from "./core/feed";
 import { createPriceSource } from "./core/price-source";
 import { RoundEngine } from "./core/round";
 import { createApi, type MarkResult } from "./core/api";
+import { createDevAuth } from "./core/auth-dev";
+import { createPrivyAuth } from "./core/auth-privy";
+import { createAuthGate } from "./ui/auth-ui";
+import type { AuthProvider } from "./core/auth";
 import { usd } from "./core/money";
 import { createRoundSync, clampInt } from "./core/round-sync";
 import { niceLev, tToLev } from "./core/leverage";
@@ -66,7 +70,14 @@ ctx.scene.add(pickups.group);
 
 // core
 const engine = new RoundEngine();
-const api = createApi();
+// auth backend — default (dev) plays immediately as a guest; VITE_AUTH=privy gates login at boot.
+const usePrivy = (import.meta.env?.VITE_AUTH as string) === "privy";
+const auth: AuthProvider = usePrivy
+  ? createPrivyAuth(import.meta.env.VITE_PRIVY_APP_ID as string)
+  : createDevAuth();
+const api = createApi({ auth });
+const authGate = createAuthGate(hudRoot);
+if (auth.login) authGate.onLogin(() => auth.login!());
 const roundSync = createRoundSync({ api, clock: { now: () => performance.now() }, store: { get: (k) => { try { return localStorage.getItem(k); } catch { return null; } }, set: (k, v) => { try { localStorage.setItem(k, v); } catch {} } } });
 let balance = 0;                   // server-owned; seeded by api.me()
 let connected = false;
@@ -123,15 +134,20 @@ coins.set(upgrades.coins(), false); // no pulse on the persisted balance at load
 // Placeholder deposit address; the real one comes from the backend wallet later.
 const USDC_ADDRESS = "4Nd1mYpVxKfBnW9sRtQ2zJhG7cUaEo3LpXyZ6vTbKmHd";
 const walletUI = createWallet(hudRoot, {
-  address: USDC_ADDRESS,
+  // privy: the captured embedded Solana wallet (also the deposit target + drives the account row);
+  // dev/guest: walletPublicKey() is null → fall back to the placeholder so the deposit QR is unchanged.
+  address: auth.walletPublicKey?.() || USDC_ADDRESS,
   balance: () => balance,
   onBuy: () => { hud.setStatus("Deposits open when real money goes live."); },
+  // logout shows only for a real signed-in account (dev → undefined → account row stays hidden)
+  onLogout: auth.logout ? () => { void auth.logout!(); location.reload(); } : undefined,
 });
 hud.onWallet(() => { if (engine.getPhase() !== "live") walletUI.open(); });
 
 // boot: seed the server-owned balance and settle any dangling round before play
 async function boot() {
   try {
+    if (usePrivy) { authGate.show(); await auth.ready(); authGate.hide(); } // login required at boot
     const me = await api.me();
     balance = me.balance;
     connected = true;
