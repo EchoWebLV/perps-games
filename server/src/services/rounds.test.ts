@@ -163,6 +163,39 @@ describe("rounds.close", () => {
   });
 });
 
+describe("close settles at the last shown mark (see == get)", () => {
+  it("settles at the last mark's price, not a newer feed tick", async () => {
+    const r = await rounds.open(userId, { asset: "SOL", dir: 1, lev: 10, stake: 10 });
+    feed.set("SOL", { price: 105, tsUs: 5_000_000 }); // +5% * 10x → eq 1.5
+    const m = await rounds.mark(userId, r.id);          // the client "sees" eq 1.5
+    expect(m.equity).toBeCloseTo(1.5, 9);
+    feed.set("SOL", { price: 130, tsUs: 6_000_000 });   // price JUMPS after the mark
+    const res = await rounds.close(userId, r.id, "cashout");
+    expect(res.round.exitRaw).toBe(105);                // settled at what was shown, not 130
+    expect(res.equity).toBeCloseTo(1.5, 9);
+  });
+
+  it("falls back to a fresh feed read when no mark was taken", async () => {
+    const r = await rounds.open(userId, { asset: "SOL", dir: 1, lev: 10, stake: 10 });
+    feed.set("SOL", { price: 105, tsUs: 5_000_000 });
+    const res = await rounds.close(userId, r.id, "cashout"); // never marked
+    expect(res.round.exitRaw).toBe(105);
+    expect(res.equity).toBeCloseTo(1.5, 9);
+  });
+
+  it("falls back to a fresh read when the last mark is stale", async () => {
+    let t = 1000;
+    const rounds2 = makeRounds({ db: ctx.db, ledger: ctx.ledger, feed, nowMs: () => t });
+    const r = await rounds2.open(userId, { asset: "SOL", dir: 1, lev: 10, stake: 10 });
+    feed.set("SOL", { price: 105, tsUs: 5_000_000 });
+    await rounds2.mark(userId, r.id);                   // mark recorded at t=1000
+    t = 1000 + 5000;                                    // 5s later → stale
+    feed.set("SOL", { price: 130, tsUs: 6_000_000 });
+    const res = await rounds2.close(userId, r.id, "cashout");
+    expect(res.round.exitRaw).toBe(130);               // fresh, because the mark went stale
+  });
+});
+
 describe("rounds.mark", () => {
   it("returns the current equity/payout WITHOUT closing the round", async () => {
     const r = await rounds.open(userId, { asset: "SOL", dir: 1, lev: 10, stake: 10 });

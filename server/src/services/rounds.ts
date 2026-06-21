@@ -17,6 +17,8 @@ export interface RoundsDeps {
   db: any;
   ledger: Ledger;
   feed: PriceFeed;
+  /** injectable wall clock (ms) for the mark-freshness window; defaults to Date.now */
+  nowMs?: () => number;
 }
 
 // Stakes are in cents (1 coin = $0.01). MIN is a permissive 1¢ safety floor — the
@@ -26,6 +28,12 @@ const MAX_STAKE = 5000;
 
 export function makeRounds(deps: RoundsDeps) {
   const { db, ledger, feed } = deps;
+  const now = deps.nowMs ?? (() => Date.now());
+  // The last price/ts the server SHOWED the client via mark(), per open round. close() settles at
+  // this (when fresh) so "what you see == what you settle for" — not a newer feed tick. Cleared on
+  // close. (Abandoned rounds leave a stale entry until the 1.4 settler; bounded by active rounds.)
+  const MARK_FRESH_MS = 1500;
+  const lastMark = new Map<string, { exitRaw: number; exitTsUs: number; atMs: number }>();
 
   function validateOpen(p: OpenInput): void {
     if (p.dir !== 1 && p.dir !== -1) throw new Error("dir must be 1 or -1");
@@ -147,7 +155,12 @@ export function makeRounds(deps: RoundsDeps) {
   async function close(userId: string, roundId: string, reason: "cashout" | "expire"): Promise<SettleResult & { round: Round }> {
     const pre = await requireRound(db, userId, roundId);
     if (!feed.healthy(pre.asset)) throw new FeedHaltError();
-    const { price: exitRaw, tsUs: exitTsUs } = feed.current(pre.asset);
+    // settle at the price the client was last SHOWN (mark), if fresh; else a fresh feed read.
+    const fresh = feed.current(pre.asset);
+    const shown = lastMark.get(roundId);
+    const useShown = !!shown && now() - shown.atMs < MARK_FRESH_MS;
+    const exitRaw = useShown ? shown!.exitRaw : fresh.price;
+    const exitTsUs = useShown ? shown!.exitTsUs : fresh.tsUs;
 
     return db.transaction(async (tx: any) => {
       await tx.execute(sql`select pg_advisory_xact_lock(hashtextextended(${userId}, 0))`);
@@ -190,6 +203,7 @@ export function makeRounds(deps: RoundsDeps) {
       if (result.payoutCoins > 0) {
         await ledger.creditOn(tx, userId, result.payoutCoins, "round_payout", roundId);
       }
+      lastMark.delete(roundId); // settled — drop the shown-mark cache
 
       const settled = await requireRound(tx, userId, roundId);
       return { ...result, round: settled };
@@ -232,6 +246,7 @@ export function makeRounds(deps: RoundsDeps) {
       exitTsUs: tsUs,
       cfg: cfgOf(round),
     });
+    lastMark.set(roundId, { exitRaw: price, exitTsUs: tsUs, atMs: now() }); // close() settles here while fresh
     return { status: "open", stale: false, outcome: result.outcome, equity: result.equity, payoutCoins: result.payoutCoins, buffer: bufferOf(result.equity, round.cfgLiq) };
   }
 
