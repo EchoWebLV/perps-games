@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { and, eq, asc, sql } from "drizzle-orm";
 import { rounds, roundActions, type Round, type RoundAction } from "../db/schema.js";
-import { BASE_CONFIG, settleRound, type Action, type Dir, type SettleResult } from "@perps/engine";
+import { BASE_CONFIG, settleRound, bufferOf, type Action, type Dir, type SettleResult } from "@perps/engine";
 import type { Ledger } from "./ledger.js";
 import type { PriceFeed } from "../feed/types.js";
 import { FeedHaltError, OpenRoundExistsError, RoundNotFoundError, RoundClosedError } from "./errors.js";
@@ -196,6 +196,45 @@ export function makeRounds(deps: RoundsDeps) {
     });
   }
 
+  /**
+   * Read-only "mark": the round's CURRENT equity/payout from the server feed + recorded actions,
+   * computed with the SAME settleRound code path used at close — so the live number the client
+   * displays equals what it will settle for (to one server tick). Never mutates the round.
+   */
+  async function mark(userId: string, roundId: string): Promise<{
+    status: "open" | "settled";
+    stale: boolean;
+    outcome: SettleResult["outcome"] | null;
+    equity: number;
+    payoutCoins: number;
+    buffer: number;
+  }> {
+    const round = await requireRound(db, userId, roundId);
+    if (round.status === "settled") {
+      const stored = storedResult(round);
+      return { status: "settled", stale: false, outcome: stored.outcome, equity: stored.equity, payoutCoins: stored.payoutCoins, buffer: bufferOf(stored.equity, round.cfgLiq) };
+    }
+    // feed down → tell the client to FREEZE its last mark (don't snap to a bogus value)
+    if (!feed.healthy(round.asset)) {
+      return { status: "open", stale: true, outcome: null, equity: 1, payoutCoins: 0, buffer: 1 };
+    }
+    const { price, tsUs } = feed.current(round.asset);
+    const rows = await loadRoundActions(db, roundId);
+    const actions: Action[] = rows.map(toEngineAction);
+    const result = settleRound({
+      openDir: round.dir as Dir,
+      openLev: round.lev,
+      entryRaw: round.entryRaw,
+      entryTsUs: round.entryTsUs,
+      stake: round.stake,
+      actions,
+      exitRaw: price,
+      exitTsUs: tsUs,
+      cfg: cfgOf(round),
+    });
+    return { status: "open", stale: false, outcome: result.outcome, equity: result.equity, payoutCoins: result.payoutCoins, buffer: bufferOf(result.equity, round.cfgLiq) };
+  }
+
   async function get(userId: string, roundId: string): Promise<Round | null> {
     const rows = await db.select().from(rounds).where(and(eq(rounds.id, roundId), eq(rounds.userId, userId))).limit(1);
     return rows.length ? (rows[0] as Round) : null;
@@ -210,7 +249,7 @@ export function makeRounds(deps: RoundsDeps) {
     return rows.length ? (rows[0].id as string) : null;
   }
 
-  return { open, action, close, get, getOpenRoundId, toEngineAction, loadRoundActions, requireRound };
+  return { open, action, close, mark, get, getOpenRoundId, toEngineAction, loadRoundActions, requireRound };
 }
 
 export type Rounds = ReturnType<typeof makeRounds>;

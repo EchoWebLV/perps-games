@@ -163,6 +163,46 @@ describe("rounds.close", () => {
   });
 });
 
+describe("rounds.mark", () => {
+  it("returns the current equity/payout WITHOUT closing the round", async () => {
+    const r = await rounds.open(userId, { asset: "SOL", dir: 1, lev: 10, stake: 10 });
+    feed.set("SOL", { price: 105, tsUs: 5_000_000 }); // +5% * 10x → eq 1.5
+    const m = await rounds.mark(userId, r.id);
+    expect(m.status).toBe("open");
+    expect(m.stale).toBe(false);
+    expect(m.equity).toBeCloseTo(1.5, 9);
+    expect(m.payoutCoins).toBe(Math.floor(10 * 1.5 * 0.95)); // 14
+    expect(await rounds.getOpenRoundId(userId)).toBe(r.id); // still open
+  });
+
+  it("reflects a mid-round flip (same segment-replay as settle)", async () => {
+    const r = await rounds.open(userId, { asset: "SOL", dir: 1, lev: 10, stake: 10 });
+    feed.set("SOL", { price: 110, tsUs: 3_000_000 });
+    await rounds.action(userId, r.id, { actionId: "f1", kind: "flip", dir: -1 });
+    feed.set("SOL", { price: 105, tsUs: 6_000_000 });
+    const m = await rounds.mark(userId, r.id);
+    expect(m.equity).toBeGreaterThan(2.4);
+  });
+
+  it("flags stale on an unhealthy feed and leaves the round open", async () => {
+    const r = await rounds.open(userId, { asset: "SOL", dir: 1, lev: 10, stake: 10 });
+    feed.setHealthy("SOL", false);
+    const m = await rounds.mark(userId, r.id);
+    expect(m.stale).toBe(true);
+    expect(await rounds.getOpenRoundId(userId)).toBe(r.id);
+  });
+
+  it("returns the stored result for an already-settled round (matches close)", async () => {
+    const r = await rounds.open(userId, { asset: "SOL", dir: 1, lev: 10, stake: 10 });
+    feed.set("SOL", { price: 105, tsUs: 5_000_000 });
+    const closed = await rounds.close(userId, r.id, "cashout");
+    const m = await rounds.mark(userId, r.id);
+    expect(m.status).toBe("settled");
+    expect(m.equity).toBeCloseTo(closed.equity, 9);
+    expect(m.payoutCoins).toBe(closed.payoutCoins);
+  });
+});
+
 describe("rounds.getOpenRoundId", () => {
   it("getOpenRoundId returns the user's open round, or null", async () => {
     expect(await rounds.getOpenRoundId(userId)).toBeNull();

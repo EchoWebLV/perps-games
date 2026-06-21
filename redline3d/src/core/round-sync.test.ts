@@ -75,6 +75,7 @@ function fakeApi(over: Partial<Api> = {}): Api {
     openRound: async (p) => ({ roundId: "R", asset: p.asset, dir: p.dir, lev: p.lev, stake: p.stake, entryRaw: 100, entryTsUs: 5_000_000 }),
     roundAction: async () => {},
     closeRound: async () => ({ outcome: "cashout", payoutCoins: 7, pnlCoins: 2, equity: 1.4, exitRaw: 101, balance: 107 }),
+    markRound: async () => ({ status: "open", stale: false, outcome: "cashout", equity: 1.4, payoutCoins: 7, buffer: 1 }),
     ...over,
   };
 }

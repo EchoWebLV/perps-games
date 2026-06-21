@@ -6,6 +6,8 @@ export type Dir = 1 | -1;
 export interface MeResult { userId: string; balance: number; cars: { carId: string }[]; openRoundId: string | null; }
 export interface OpenResult { roundId: string; asset: Asset; dir: Dir; lev: number; stake: number; entryRaw: number; entryTsUs: number; }
 export interface CloseResult { outcome: string; payoutCoins: number; pnlCoins: number; equity: number; exitRaw: number; balance: number; }
+/** live read-only mark: the server's CURRENT equity for an open round (what the client displays) */
+export interface MarkResult { status: "open" | "settled"; stale: boolean; outcome: string | null; equity: number; payoutCoins: number; buffer: number; }
 
 export type ApiErrorCode =
   | "unauthorized" | "insufficient_balance" | "round_already_open" | "round_not_open"
@@ -31,6 +33,7 @@ export interface Api {
   openRound(p: { asset: Asset; dir: Dir; lev: number; stake: number }): Promise<OpenResult>;
   roundAction(p: { roundId: string; actionId: string; kind: "flip" | "lever"; dir?: Dir; lev?: number }): Promise<void>;
   closeRound(p: { roundId: string; reason: "cashout" | "expire" }): Promise<CloseResult>;
+  markRound(roundId: string): Promise<MarkResult>;
 }
 
 export interface ApiOpts { fetch?: typeof fetch; baseUrl?: string; userId?: string; }
@@ -64,5 +67,6 @@ export function createApi(opts: ApiOpts = {}): Api {
     openRound: (p) => call<OpenResult>("POST", "/v1/round/open", p),
     roundAction: (p) => call<void>("POST", "/v1/round/action", p),
     closeRound: (p) => call<CloseResult>("POST", "/v1/round/close", p),
+    markRound: (id) => call<MarkResult>("GET", `/v1/round/${id}/mark`),
   };
 }

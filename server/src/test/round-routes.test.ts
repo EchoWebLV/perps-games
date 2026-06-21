@@ -119,3 +119,23 @@ describe("GET /v1/round/:id", () => {
     expect(res.statusCode).toBe(404);
   });
 });
+
+describe("GET /v1/round/:id/mark", () => {
+  it("returns the live mark (equity/payout) for an open round", async () => {
+    const r = await ctx.server.inject({ method: "POST", url: "/v1/round/open", headers: H("alice"), payload: { asset: "SOL", dir: 1, lev: 10, stake: 10 } });
+    const roundId = r.json().roundId as string;
+    ctx.feed.set("SOL", { price: 105, tsUs: 5_000_000 }); // +5% * 10x → eq 1.5
+    const res = await ctx.server.inject({ method: "GET", url: `/v1/round/${roundId}/mark`, headers: H("alice") });
+    expect(res.statusCode).toBe(200);
+    const body = res.json();
+    expect(body.status).toBe("open");
+    expect(body.stale).toBe(false);
+    expect(body.equity).toBeCloseTo(1.5, 6);
+    expect(body.payoutCoins).toBe(14);
+  });
+
+  it("404 marking an unknown round", async () => {
+    const res = await ctx.server.inject({ method: "GET", url: "/v1/round/00000000-0000-0000-0000-000000000000/mark", headers: H("alice") });
+    expect(res.statusCode).toBe(404);
+  });
+});

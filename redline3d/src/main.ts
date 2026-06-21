@@ -11,7 +11,7 @@ import { createControls } from "./ui/controls";
 import { connectFeed } from "./core/feed";
 import { createPriceSource } from "./core/price-source";
 import { RoundEngine } from "./core/round";
-import { createApi } from "./core/api";
+import { createApi, type MarkResult } from "./core/api";
 import { usd } from "./core/money";
 import { createRoundSync, clampInt } from "./core/round-sync";
 import { niceLev, tToLev } from "./core/leverage";
@@ -67,6 +67,23 @@ const api = createApi();
 const roundSync = createRoundSync({ api, clock: { now: () => performance.now() }, store: { get: (k) => { try { return localStorage.getItem(k); } catch { return null; } }, set: (k, v) => { try { localStorage.setItem(k, v); } catch {} } } });
 let balance = 0;                   // server-owned; seeded by api.me()
 let connected = false;
+
+// Live "mark": the SERVER's current equity for the open round. The displayed × / buffer / payout
+// and the terminal (liq/cap/time) are driven by this so what you see == what you settle for. The
+// local engine stays only for the smooth car visual + a pre-mark fallback.
+let serverMark: MarkResult | null = null;
+let marking = false;
+let lastMarkMs = 0;
+async function pollMark() {
+  const id = roundSync.roundId();
+  if (!id || marking) return;
+  marking = true;
+  try {
+    const m = await api.markRound(id);
+    if (m.status === "open" && !m.stale) serverMark = m; // ignore stale → hold the last mark
+  } catch { /* transient: hold the last mark */ }
+  finally { marking = false; }
+}
 
 // price feeds — BTC / ETH / SOL (subscribe to all; the active one drives the game)
 const ASSETS = [
@@ -281,7 +298,7 @@ async function settleVia(reason: "cashout" | "expire", localSnap: Snapshot) {
   const res = await roundSync.close(reason);
   settling = false;
   // reset UI regardless of outcome
-  throttle = 34; game.equity = 1; chase.setDriving(false);
+  throttle = 34; game.equity = 1; serverMark = null; chase.setDriving(false);
   garage.setBusy(false); mapBtn.setVisible(true); upgrades.setBusy(false);
   walletUI.setBusy(false);
   hud.setTimer(CONFIG.MAXSEC, false);
@@ -327,6 +344,7 @@ controls.onLaunch(async () => {
   round.dir = controls.dir();
   roundStartMs = out.entryTsUs / 1000;                               // parity: server clock
   engine.launch({ dir: controls.dir(), lev, stake, entryRaw: out.entryRaw, startMs: roundStartMs });
+  serverMark = null; lastMarkMs = 0; // fresh mark for the new round
   chase.setDriving(true); // smooth transition from the idle orbit into the chase cam
   controls.setLive(true, "CASH OUT");
   garage.setBusy(true); mapBtn.setVisible(false); upgrades.setBusy(true); walletUI.setBusy(true);
@@ -405,17 +423,26 @@ function frame() {
   roundSync.pump();
 
   if (engine.getPhase() === "live") {
-    const snap = engine.tick(roundPrice, Date.now());
-    game.equity = snap.equity;
-    if (snap.phase !== "live") {
-      void settleVia("expire", snap);   // local terminal -> server is authoritative; FX waits for it
+    const nowMs = Date.now();
+    if (nowMs - lastMarkMs > 200) { lastMarkMs = nowMs; void pollMark(); } // poll the server mark ~5Hz
+    // read-only snapshot (never auto-settles) = the pre-mark fallback; the SERVER mark is authoritative
+    const snap = engine.snapshot(roundPrice, nowMs);
+    const m = serverMark;
+    const serverTerminal = m ? (m.outcome === "liq" || m.outcome === "cap" || m.outcome === "time") : false;
+    const timeUp = (nowMs - roundStartMs) / 1000 >= CONFIG.MAXSEC; // backstop if marks lag at the cap
+    if (serverTerminal || timeUp) {
+      void settleVia("expire", engine.cashout(roundPrice, nowMs)); // server settles authoritatively
     } else {
-      hud.setMultiplier(snap.equity, snap.phase);
-      controls.setBuffer(snap.buffer); // the bail button IS the liquidation bar now
-      hud.setTimer(CONFIG.MAXSEC - (Date.now() - roundStartMs) / 1000, true);
-      car.setEquity("live", snap.equity);
-      const win = snap.equity >= 1;
-      controls.setLive(true, `${win ? "CASH OUT" : "BAIL"} ${usd(snap.payout)}`, !win);
+      const eq = m ? m.equity : snap.equity;
+      const buf = m ? m.buffer : snap.buffer;
+      const payC = m ? m.payoutCoins : Math.floor(snap.payout);
+      game.equity = eq;
+      hud.setMultiplier(eq, "live");
+      controls.setBuffer(buf);              // the bail button IS the liquidation bar
+      hud.setTimer(CONFIG.MAXSEC - (nowMs - roundStartMs) / 1000, true);
+      car.setEquity("live", eq);
+      const win = eq >= 1;
+      controls.setLive(true, `${win ? "CASH OUT" : "BAIL"} ${usd(payC)}`, !win);
     }
   } else {
     car.setEquity("idle", 1);

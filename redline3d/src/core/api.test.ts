@@ -29,6 +29,19 @@ describe("createApi", () => {
       .rejects.toMatchObject({ code: "feed_halt" });
   });
 
+  it("markRound GETs the mark endpoint and parses the mark", async () => {
+    let seen: { url: string; init: RequestInit } | null = null;
+    const api = createApi({
+      baseUrl: "http://x", userId: "u",
+      fetch: async (url, init) => { seen = { url: String(url), init: init ?? {} }; return res(200, { status: "open", stale: false, outcome: "cashout", equity: 1.5, payoutCoins: 14, buffer: 0.9 }); },
+    });
+    const m = await api.markRound("R1");
+    expect(seen!.url).toBe("http://x/v1/round/R1/mark");
+    expect(seen!.init.method).toBe("GET");
+    expect(m.equity).toBe(1.5);
+    expect(m.payoutCoins).toBe(14);
+  });
+
   it("maps a fetch throw to a network ApiError", async () => {
     const api = createApi({ baseUrl: "http://x", userId: "u", fetch: async () => { throw new Error("offline"); } });
     await expect(api.me()).rejects.toMatchObject({ code: "network" });

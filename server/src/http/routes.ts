@@ -130,6 +130,18 @@ export function registerRoutes(server: FastifyInstance, deps: RouteDeps): void {
     return round;
   });
 
+  // live "mark": current equity/payout from the server feed — what the client displays so the
+  // shown × equals what it settles for. Read-only.
+  server.get("/v1/round/:id/mark", { preHandler: requireUser }, async (req, reply) => {
+    const id = (req.params as { id: string }).id;
+    try {
+      return await deps.rounds.mark(req.userId!, id);
+    } catch (e: any) {
+      if (e instanceof RoundNotFoundError) return reply.code(404).send({ error: "round_not_found" });
+      throw e;
+    }
+  });
+
   if (deps.devEndpoints) {
     server.post("/v1/dev/grant-coins", { preHandler: requireUser }, async (req, reply) => {
       const parsed = GrantCoins.safeParse(req.body);
