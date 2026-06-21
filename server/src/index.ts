@@ -6,6 +6,7 @@ import { makeLedger } from "./services/ledger.js";
 import { makeInventory } from "./services/inventory.js";
 import { makeRounds } from "./services/rounds.js";
 import { makeHermesFeed } from "./feed/hermes.js";
+import { makePrivyAuth } from "./auth/privy.js";
 
 async function main(): Promise<void> {
   if (!env.DATABASE_URL) throw new Error("DATABASE_URL is required to start the server");
@@ -30,6 +31,7 @@ async function main(): Promise<void> {
   });
   feed.start();
   const rounds = makeRounds({ db, ledger, feed });
+  const privyAuth = makePrivyAuth(env);
 
   const server = buildServer({
     users: makeUsers(db),
@@ -41,6 +43,8 @@ async function main(): Promise<void> {
     signupFaucet: env.SIGNUP_FAUCET,
     startBalance: env.START_BALANCE,
     corsOrigins: env.CORS_ORIGINS.split(",").map((s) => s.trim()),
+    devAuth: env.DEV_AUTH && env.NODE_ENV !== "production",
+    privyAuth,
   });
 
   const addr = await server.listen({ port: env.PORT, host: "0.0.0.0" });

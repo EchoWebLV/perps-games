@@ -19,7 +19,7 @@ export interface TestCtx {
 }
 
 /** fresh in-memory pglite DB with migrations applied + services wired (stub feed) */
-export async function makeTestDb(opts: { signupFaucet?: boolean; startBalance?: number; corsOrigins?: string[] } = {}): Promise<TestCtx> {
+export async function makeTestDb(opts: { signupFaucet?: boolean; startBalance?: number; corsOrigins?: string[]; devAuth?: boolean; privyAuth?: import("../auth/privy.js").PrivyAuth | null } = {}): Promise<TestCtx> {
   const raw = createDb(); // pglite
   await raw.runMigrations();
   const db = raw.db;
@@ -36,6 +36,8 @@ export async function makeTestDb(opts: { signupFaucet?: boolean; startBalance?: 
     signupFaucet: opts.signupFaucet ?? false,
     startBalance: opts.startBalance ?? 100,
     corsOrigins: opts.corsOrigins ?? ["http://localhost:3000"],
+    devAuth: opts.devAuth ?? true,
+    privyAuth: opts.privyAuth ?? null,
   });
 
   return { raw, db, users, ledger, inventory, rounds, feed, server, close: () => raw.close() };

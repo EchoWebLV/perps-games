@@ -17,6 +17,8 @@ export interface RouteDeps {
   devEndpoints: boolean;
   signupFaucet: boolean;   // env-gated soft-coin seeding
   startBalance: number;    // coins to seed on first sight
+  devAuth: boolean;
+  privyAuth: import("../auth/privy.js").PrivyAuth | null;
 }
 
 const GrantCoins = z.object({ amount: z.number().int().positive() });
@@ -40,7 +42,7 @@ const RoundActionBody = z
 const CloseRound = z.object({ roundId: z.string().uuid(), reason: z.enum(["cashout", "expire"]).default("cashout") });
 
 export function registerRoutes(server: FastifyInstance, deps: RouteDeps): void {
-  const requireUser = makeRequireUser(deps.users);
+  const requireUser = makeRequireUser({ users: deps.users, devAuth: deps.devAuth, privyAuth: deps.privyAuth });
 
   server.get("/v1/balance", { preHandler: requireUser }, async (req) => {
     return { balance: await deps.ledger.balance(req.userId!) };
