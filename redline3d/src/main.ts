@@ -1,3 +1,6 @@
+import { Buffer } from "buffer";
+// @ts-ignore assign the browser global some Solana deps read at runtime
+globalThis.Buffer = globalThis.Buffer || Buffer;
 import * as THREE from "three";
 import { createScene } from "./render/scene";
 import { createWorld } from "./render/world";

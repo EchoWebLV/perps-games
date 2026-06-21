@@ -1,9 +1,11 @@
 import { defineConfig } from "vite";
 import { fileURLToPath } from "node:url";
+import { nodePolyfills } from "vite-plugin-node-polyfills";
 
 const engineSrc = fileURLToPath(new URL("../packages/engine/src", import.meta.url));
 
 export default defineConfig({
+  plugins: [nodePolyfills({ globals: { Buffer: true, global: true, process: true } })],
   // serve dev on :3000 (and expose on LAN so a phone can hit http://<your-ip>:3000).
   // allowedHosts:true lets an ngrok/cloudflare tunnel (random https host) through
   // Vite's host check — needed to install the PWA on the Seeker over HTTPS.
