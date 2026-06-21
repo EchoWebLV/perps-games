@@ -9,6 +9,12 @@ declare module "fastify" {
   }
 }
 
+// A dev name must be a tight identifier: 1-64 chars of [a-zA-Z0-9_-] only.
+// This both rejects garbage AND structurally forbids a ':' — so a forged
+// `dev:${name}` external id can never collide with the `privy:did:privy:...`
+// namespace. The real client sends `web-<uuid>` which this allows.
+const DEV_NAME_RE = /^[a-zA-Z0-9_-]{1,64}$/;
+
 export interface RequireUserDeps {
   users: Users;
   devAuth: boolean;             // honor x-dev-user only when true
@@ -21,7 +27,10 @@ export function makeRequireUser(deps: RequireUserDeps) {
     const auth = req.headers["authorization"];
     const bearer = typeof auth === "string" && auth.startsWith("Bearer ") ? auth.slice(7) : null;
 
-    if (bearer && deps.privyAuth) {
+    if (bearer) {
+      // A presented Bearer must NEVER fall through to the weaker dev path: if
+      // there is no Privy backend to verify it, reject outright (fail closed).
+      if (!deps.privyAuth) { await reply.code(401).send({ error: "no_auth_backend" }); return; }
       let did: string;
       try { did = await deps.privyAuth.verifyAccessToken(bearer); }
       catch (e) {
@@ -41,7 +50,12 @@ export function makeRequireUser(deps: RequireUserDeps) {
     if (deps.devAuth) {
       const dev = req.headers["x-dev-user"];
       const name = Array.isArray(dev) ? dev[0] : dev;
-      if (name) { req.userId = (await deps.users.upsertByExternalId(`dev:${name}`)).id; return; }
+      // Validate before minting: a malformed name (too long, empty, or with a
+      // disallowed char like ':') falls through to the final 401 — never a user.
+      if (name && DEV_NAME_RE.test(name)) {
+        req.userId = (await deps.users.upsertByExternalId(`dev:${name}`)).id;
+        return;
+      }
     }
 
     await reply.code(401).send({ error: "unauthorized" });

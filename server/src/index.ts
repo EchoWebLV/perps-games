@@ -32,6 +32,11 @@ async function main(): Promise<void> {
   feed.start();
   const rounds = makeRounds({ db, ledger, feed });
   const privyAuth = makePrivyAuth(env);
+  // fail loud: production must verify real users — never boot with auth disabled
+  if (env.NODE_ENV === "production" && !privyAuth)
+    throw new Error(
+      "FATAL: production requires Privy keys (PRIVY_APP_ID/PRIVY_APP_SECRET) — refusing to start with auth disabled",
+    );
 
   const server = buildServer({
     users: makeUsers(db),
