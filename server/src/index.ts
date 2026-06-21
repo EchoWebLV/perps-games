@@ -21,7 +21,13 @@ async function main(): Promise<void> {
   const db = raw.db;
 
   const ledger = makeLedger(db);
-  const feed = makeHermesFeed({ assets: ["BTC", "ETH", "SOL"] });
+  // poll rate + HALT tolerance are tunable: the public Hermes REST endpoint can
+  // rate-limit a tight 500ms poll, so a too-small stale window flaps into feed_halt.
+  const feed = makeHermesFeed({
+    assets: ["BTC", "ETH", "SOL"],
+    pollMs: Number(process.env.FEED_POLL_MS) || undefined,
+    staleMs: Number(process.env.FEED_STALE_MS) || undefined,
+  });
   feed.start();
   const rounds = makeRounds({ db, ledger, feed });
 
