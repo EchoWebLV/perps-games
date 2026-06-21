@@ -47,4 +47,14 @@ describe("createApi", () => {
     await expect(api.me()).rejects.toMatchObject({ code: "network" });
     await expect(api.me()).rejects.toBeInstanceOf(ApiError);
   });
+
+  it("attaches the auth provider's headers to every request", async () => {
+    const calls: any[] = [];
+    const fakeFetch = async (url: string, init: any) => { calls.push({ url, init }); return new Response(JSON.stringify({ balance: 1 }), { status: 200 }); };
+    const auth = { ready: async () => {}, userId: () => "u", authHeaders: async () => ({ authorization: "Bearer XYZ" }) };
+    const api = createApi({ fetch: fakeFetch as any, baseUrl: "http://x", auth });
+    await api.me();
+    expect(calls[0].init.headers.authorization).toBe("Bearer XYZ");
+    expect(calls[0].init.headers["x-dev-user"]).toBeUndefined();
+  });
 });

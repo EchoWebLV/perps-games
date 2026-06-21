@@ -1,4 +1,5 @@
 import { getDevUserId } from "./identity";
+import type { AuthProvider } from "./auth";
 
 export type Asset = "BTC" | "ETH" | "SOL";
 export type Dir = 1 | -1;
@@ -36,19 +37,21 @@ export interface Api {
   markRound(roundId: string): Promise<MarkResult>;
 }
 
-export interface ApiOpts { fetch?: typeof fetch; baseUrl?: string; userId?: string; }
+export interface ApiOpts { fetch?: typeof fetch; baseUrl?: string; auth?: Pick<AuthProvider, "authHeaders">; userId?: string; }
 
 export function createApi(opts: ApiOpts = {}): Api {
   const doFetch = opts.fetch ?? globalThis.fetch.bind(globalThis);
   const baseUrl = (opts.baseUrl ?? (import.meta.env?.VITE_API_BASE as string) ?? "http://localhost:8080").replace(/\/$/, "");
-  const userId = opts.userId ?? getDevUserId();
+  // back-compat: if no auth provider, fall back to the dev header (existing behavior)
+  const headers = async (): Promise<Record<string, string>> =>
+    opts.auth ? await opts.auth.authHeaders() : { "x-dev-user": opts.userId ?? getDevUserId() };
 
   async function call<T>(method: "GET" | "POST", path: string, body?: unknown): Promise<T> {
     let r: Response;
     try {
       r = await doFetch(baseUrl + path, {
         method,
-        headers: { "x-dev-user": userId, "content-type": "application/json" },
+        headers: { ...(await headers()), "content-type": "application/json" },
         body: body === undefined ? undefined : JSON.stringify(body),
       });
     } catch {
