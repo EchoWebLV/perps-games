@@ -1,4 +1,5 @@
 import { qrMatrix, qrSvg } from "./qr";
+import { shortWallet } from "./auth-ui";
 
 /**
  * Wallet page — a full-screen synthwave overlay opened from the balance chip.
@@ -21,6 +22,8 @@ export interface WalletOpts {
   balance: () => number;
   /** credit `usd` USDC to the balance (sim deposit today, fiat on-ramp later) */
   onBuy: (usd: number) => void;
+  /** sign the player out — when omitted (dev/guest) the account row stays hidden */
+  onLogout?: () => void;
 }
 
 const AMOUNTS = [10, 25, 50, 100, 250];
@@ -122,6 +125,18 @@ function injectStyles() {
       color:var(--cyan);background:rgba(39,231,255,.12);border:1px solid rgba(39,231,255,.38);transition:.13s}
     .wlt-copy:hover{background:rgba(39,231,255,.2)}
     .wlt-copy.done{color:#04130d;background:linear-gradient(180deg,#5ff0c0,#15c78c);border-color:transparent}
+
+    /* Account row — signed-in address + log out (hidden for dev/guest) */
+    .wlt-acct{display:flex;align-items:center;gap:10px;padding:11px 12px;border-radius:11px;
+      background:rgba(7,5,18,.6);border:1px solid rgba(132,150,224,.2)}
+    .wlt-acct-info{flex:1;min-width:0;display:flex;flex-direction:column;gap:3px}
+    .wlt-acct-lbl{font:700 8.5px/1 'Chakra Petch',ui-monospace,monospace;letter-spacing:.14em;text-transform:uppercase;color:var(--mut)}
+    .wlt-acct-addr{font:600 13px/1 'Chakra Petch',ui-monospace,monospace;letter-spacing:.03em;color:var(--ink);
+      overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+    .wlt-logout{flex:0 0 auto;border:0;cursor:pointer;border-radius:8px;padding:8px 12px;
+      font:700 11px/1 'Chakra Petch',ui-monospace,monospace;letter-spacing:.06em;text-transform:uppercase;
+      color:rgba(255,209,102,.9);background:rgba(255,209,102,.1);border:1px solid rgba(255,209,102,.35);transition:.13s}
+    .wlt-logout:hover{background:rgba(255,209,102,.18)}
   `;
   document.head.appendChild(s);
 }
@@ -139,6 +154,18 @@ export function createWallet(parent: HTMLElement, opts: WalletOpts): Wallet {
   const panel = document.createElement("div");
   panel.className = "panel wlt-panel";
   const qr = qrSvg(qrMatrix(opts.address, "M"), { dark: "#0a0820", light: "#ffffff", margin: 3 });
+  // Account row renders only when we have a real signed-in address AND a logout path
+  // (dev/guest has neither → the panel looks/behaves exactly as before).
+  const showAcct = !!opts.address && !!opts.onLogout;
+  const acctHtml = showAcct
+    ? `<div class="wlt-acct">
+         <div class="wlt-acct-info">
+           <span class="wlt-acct-lbl">Account</span>
+           <span class="wlt-acct-addr" title="${opts.address}">${shortWallet(opts.address)}</span>
+         </div>
+         <button class="wlt-logout" id="wltLogout">Log out</button>
+       </div>`
+    : "";
   panel.innerHTML =
     `<div class="wlt-head"><span class="lbl">wallet</span><button class="wlt-x" data-act="close" aria-label="Close">✕</button></div>` +
     `<div class="wlt-hero"><div class="wlt-hero-glow"></div>
@@ -160,7 +187,8 @@ export function createWallet(parent: HTMLElement, opts: WalletOpts): Wallet {
        <div class="wlt-net">${usdcCoin(15)} USDC · Solana network</div>
        <div class="wlt-addr"><span title="${opts.address}">${shortAddr(opts.address)}</span><button class="wlt-copy" id="wltCopy">${svg(ICONS.copy, 13)}Copy</button></div>
        <div class="wlt-note wlt-warn">Send only USDC (SPL) on Solana to this address.</div>
-     </div>`;
+     </div>` +
+    acctHtml;
 
   const q = <T extends HTMLElement>(s: string) => panel.querySelector(s) as T;
   const balEl = q("#wltBal"), usdcEl = q("#wltUsdc"), buyBtn = q<HTMLButtonElement>("#wltBuy"), copyBtn = q<HTMLButtonElement>("#wltCopy");
@@ -219,6 +247,10 @@ export function createWallet(parent: HTMLElement, opts: WalletOpts): Wallet {
     if (t === overlay || t.closest("[data-act='close']")) setOpen(false);
   };
   addEventListener("keydown", (e) => { if (e.key === "Escape" && overlay.style.display !== "none") setOpen(false); });
+
+  // Log out — present only for a signed-in account (see acctHtml above)
+  const logoutBtn = panel.querySelector<HTMLButtonElement>("#wltLogout");
+  if (logoutBtn) logoutBtn.onclick = () => { setOpen(false); opts.onLogout?.(); };
 
   overlay.appendChild(panel);
   parent.appendChild(overlay);
