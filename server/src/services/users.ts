@@ -21,6 +21,10 @@ export function makeUsers(db: any) {
       const rows = await db.select().from(users).where(eq(users.id, id)).limit(1);
       return rows[0];
     },
+    async setWalletPublicKey(id: string, address: string): Promise<User> {
+      const rows = await db.update(users).set({ walletPublicKey: address }).where(eq(users.id, id)).returning();
+      return rows[0];
+    },
   };
 }
 
