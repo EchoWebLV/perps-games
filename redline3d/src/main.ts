@@ -85,8 +85,12 @@ let balance = 0;                   // server-owned; seeded by api.me()
 let connected = false;
 
 // Live "mark": the SERVER's current equity for the open round. The displayed × / buffer / payout
-// and the terminal (liq/cap/time) are driven by this so what you see == what you settle for. The
-// local engine stays only for the smooth car visual + a pre-mark fallback.
+// and the terminal (liq/cap/time) are driven by this so what you see == what you settle for.
+// SAMPLE-AND-HOLD: the mark refreshes ~once a second and the display holds it rock-steady between
+// reveals, so the × is a readable number you can tap — not a 5Hz flicker that's unreadable at high
+// leverage. You settle at the held value; you can only be liquidated AT a reveal, never mid-hold.
+// The local engine stays only for the smooth car visual + the ~RTT pre-first-mark gap.
+const MARK_HOLD_MS = 1000; // sample-and-hold reveal interval
 let serverMark: MarkResult | null = null;
 let marking = false;
 let lastMarkMs = 0;
@@ -454,7 +458,7 @@ function frame() {
 
   if (engine.getPhase() === "live") {
     const nowMs = Date.now();
-    if (nowMs - lastMarkMs > 200) { lastMarkMs = nowMs; void pollMark(); } // poll the server mark ~5Hz
+    if (nowMs - lastMarkMs > MARK_HOLD_MS) { lastMarkMs = nowMs; void pollMark(); } // sample-and-hold: reveal the mark ~1×/s
     // read-only snapshot (never auto-settles) = the pre-mark fallback; the SERVER mark is authoritative
     const snap = engine.snapshot(roundPrice, nowMs);
     const m = serverMark;

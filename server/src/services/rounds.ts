@@ -32,7 +32,7 @@ export function makeRounds(deps: RoundsDeps) {
   // The last price/ts the server SHOWED the client via mark(), per open round. close() settles at
   // this (when fresh) so "what you see == what you settle for" — not a newer feed tick. Cleared on
   // close. (Abandoned rounds leave a stale entry until the 1.4 settler; bounded by active rounds.)
-  const MARK_FRESH_MS = 1500;
+  const MARK_FRESH_MS = 2500; // ≥ the client's ~1s sample-and-hold + network latency, so close still settles at the shown mark
   const lastMark = new Map<string, { exitRaw: number; exitTsUs: number; atMs: number }>();
 
   function validateOpen(p: OpenInput): void {
