@@ -17,7 +17,6 @@ import { RoundEngine } from "./core/round";
 import { createApi, type MarkResult } from "./core/api";
 import { createDevAuth } from "./core/auth-dev";
 import { createPrivyAuth } from "./core/auth-privy";
-import { createAuthGate } from "./ui/auth-ui";
 import type { AuthProvider } from "./core/auth";
 import { usd } from "./core/money";
 import { createRoundSync, clampInt } from "./core/round-sync";
@@ -76,10 +75,11 @@ const auth: AuthProvider = usePrivy
   ? createPrivyAuth(import.meta.env.VITE_PRIVY_APP_ID as string)
   : createDevAuth();
 const api = createApi({ auth });
-// Mount on <body>, NOT hudRoot: createHud() does `parent.innerHTML = …`, which would wipe a gate
-// appended to #hud. The gate is a fixed full-screen overlay, so body is the correct host anyway.
-const authGate = createAuthGate(document.body);
-if (auth.login) authGate.onLogin(() => auth.login!());
+// Sign-in is gated on INTENT, not at boot. Logged-out visitors see the 3D preview and can toggle
+// music/menu freely; pressing GO or the lobby button opens the sign-in. `signedIn` flips true once
+// the session loads (privy: after login · dev: immediately).
+let signedIn = false;
+function triggerSignIn() { if (auth.login) auth.login(); } // privy: open the login modal · dev: no-op
 const roundSync = createRoundSync({ api, clock: { now: () => performance.now() }, store: { get: (k) => { try { return localStorage.getItem(k); } catch { return null; } }, set: (k, v) => { try { localStorage.setItem(k, v); } catch {} } } });
 let balance = 0;                   // server-owned; seeded by api.me()
 let connected = false;
@@ -146,13 +146,16 @@ const walletUI = createWallet(hudRoot, {
 });
 hud.onWallet(() => { if (engine.getPhase() !== "live") walletUI.open(); });
 
-// boot: seed the server-owned balance and settle any dangling round before play
-async function boot() {
+// Session init: seed the server-owned balance + settle any dangling round. Runs once the user is
+// authenticated — privy: after the login modal completes; dev: immediately (dev ready() resolves at
+// once, so guests still auto-load). Logged-out visitors never hit the server until they sign in.
+async function initSession() {
+  if (signedIn) return;
   try {
-    if (usePrivy) { authGate.show(); await auth.ready(); authGate.hide(); } // login required at boot
     const me = await api.me();
     balance = me.balance;
     connected = true;
+    signedIn = true;
     hud.setBalance(balance);
     if (me.openRoundId) await roundSync.recover(me.openRoundId);
     const refreshed = await api.me();
@@ -162,7 +165,7 @@ async function boot() {
     hud.setStatus("Can't reach the server — reconnecting…");
   }
 }
-void boot();
+void auth.ready().then(initSession);
 
 // car picker — swap the GLB model live + apply the card's special ability
 let ability: CarAbility | undefined;
@@ -248,7 +251,11 @@ function exitLobby(selected?: Asset) {
   }
 }
 
-const mapBtn = createMapButton(hudRoot, () => { if (mode === "race") enterLobby(); });
+const mapBtn = createMapButton(hudRoot, () => {
+  if (mode !== "race") return;
+  if (!signedIn) { triggerSignIn(); return; } // the lobby requires sign-in
+  enterLobby();
+});
 const lobbyHud = createLobbyHud(hudRoot, () => exitLobby());
 
 // throttle = the accelerator: gas revs it up, brake slows it, release coasts down SLOWLY
@@ -344,6 +351,7 @@ async function settleVia(reason: "cashout" | "expire", localSnap: Snapshot) {
 controls.onLaunch(async () => {
   if (mode === "lobby") return; // Space/Enter in the lot must not launch a round behind the scene
   audio.resume(); radio.resume(); // unlock audio + radio if GO! is the first interaction
+  if (!signedIn) { triggerSignIn(); return; } // GO requires sign-in — opens the login; race on the next press
   if (!connected) { hud.setStatus("Can't reach the server — reconnecting…"); return; }
   if (roundSync.isOpening() || engine.getPhase() === "live") return;  // re-entrancy guard
   const stake = controls.stake();
