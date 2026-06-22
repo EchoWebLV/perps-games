@@ -1,6 +1,10 @@
 export interface Radio {
   /** start playback if the user wants it on — call from a user gesture (autoplay) */
   resume(): void;
+  /** is the music currently switched on (user intent)? */
+  isOn(): boolean;
+  /** switch music on/off — call from a user gesture so play() isn't blocked */
+  setOn(on: boolean): void;
 }
 
 // Live synthwave stream (Nightride FM). NOTE: third-party copyrighted music —
@@ -8,7 +12,7 @@ export interface Radio {
 // paid release. Ogg plays on Android (Seeker) + Chrome.
 const STREAM = "https://stream.nightride.fm/nightride.ogg";
 
-/** A muteable synthwave radio + a small toggle button stacked above the menu. */
+/** A muteable synthwave radio. The on/off toggle lives in the menu (see carpicker). */
 export function createRadio(parent: HTMLElement): Radio {
   const audio = document.createElement("audio");
   audio.src = STREAM;
@@ -18,38 +22,13 @@ export function createRadio(parent: HTMLElement): Radio {
 
   let want = true; // user intent to play
 
-  const btn = document.createElement("button");
-  btn.type = "button";
-  btn.className = "pe panel";
-  btn.setAttribute("aria-label", "Toggle music");
-  btn.style.cssText = [
-    "position:absolute",
-    "top:144px", // top-right, tucked under the minimap, just left of the menu
-    "right:max(62px,calc(env(safe-area-inset-right) + 50px))",
-    "z-index:8",
-    "width:42px", "height:42px", "padding:0",
-    "display:grid", "place-items:center",
-    "border-radius:9px", "cursor:pointer",
-    "background:rgba(12,10,26,.74)",
-    "font:700 19px/1 'Chakra Petch',ui-monospace,monospace",
-  ].join(";");
-
-  const render = () => {
-    btn.textContent = "♫";
-    btn.style.color = want ? "var(--cyan)" : "var(--mut)";
-    btn.style.textShadow = want ? "0 0 10px rgba(39,231,255,.75)" : "none";
-    btn.style.opacity = want ? "1" : "0.5";
-  };
-  btn.onclick = () => {
-    want = !want;
-    if (want) void audio.play().catch(() => {});
-    else audio.pause();
-    render();
-  };
-  render();
-  parent.appendChild(btn);
-
   return {
     resume() { if (want) void audio.play().catch(() => {}); },
+    isOn: () => want,
+    setOn(on) {
+      want = on;
+      if (on) void audio.play().catch(() => {});
+      else audio.pause();
+    },
   };
 }

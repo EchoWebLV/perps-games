@@ -176,6 +176,8 @@ const setAbility = (a?: CarAbility) => {
   nitro.setEnabled(a === "nitro");        // Orion shows the Nitro Overdrive button
   pickups.setRainbow(a === "rainbow");    // Vaporwave: rainbow coins + value multipliers
 };
+// synthwave radio — streams on the first gesture; its on/off toggle lives in the menu (below)
+const radio = createRadio(hudRoot);
 const garage = createCarPicker(hudRoot, [
   { name: "DeLorean", url: "/models/car.glb?v=2", power: { name: "Flux Brake", desc: "freeze your P&L ~4s", icon: "clock" } },
   { name: "Cybertruck", url: "/models/cybertruck.glb", scale: 1.3, power: { name: "Exoskeleton", desc: "survive deeper drops", icon: "shield" } },
@@ -190,10 +192,10 @@ const garage = createCarPicker(hudRoot, [
   { name: "Car 7", url: "/models/7.glb", yaw: Math.PI / 2, power: { name: "New Ride", desc: "ability TBD", icon: "car" } },
   { name: "Car 8", url: "/models/8.glb", yaw: Math.PI / 2, power: { name: "New Ride", desc: "ability TBD", icon: "car" } },
   { name: "Default", url: "/models/default.glb", yaw: Math.PI / 2, power: { name: "New Ride", desc: "ability TBD", icon: "car" } },
-], (c) => { car.setModel(c.url, c.scale, c.yaw); setAbility(c.ability); }, () => upgrades.open());
-
-// synthwave radio — streams on the first gesture, toggle button stacked above the menu
-const radio = createRadio(hudRoot);
+], (c) => { car.setModel(c.url, c.scale, c.yaw); setAbility(c.ability); }, () => upgrades.open(), [
+  { label: "Music", sub: "synthwave radio", glyph: "♫", get: () => radio.isOn(), set: (on) => radio.setOn(on) },
+  { label: "SFX", sub: "engine & coins", glyph: "🔊", get: () => audio.isEnabled(), set: (on) => audio.setEnabled(on) },
+]);
 
 // ── parking-lot lobby ──────────────────────────────────────────────────────
 // the map button drops you into a giant drivable neon lot with 3 market buildings;
@@ -206,11 +208,10 @@ let drive: DriveState = { x: 0, z: LOT_BOUNDS.z - 8, heading: 0, speed: 0, steer
 let doorDwell = 0;
 let steerNorm = 0; // steering from the pointer drag (-1..1), shared with the lobby
 
-const radioBtn = hudRoot.querySelector('[aria-label="Toggle music"]') as HTMLElement | null;
 const hudPrev = new Map<HTMLElement, string>();
 function setRaceHudVisible(visible: boolean) {
   for (const child of Array.from(hudRoot.children) as HTMLElement[]) {
-    if (child === mapBtn.el || child === lobbyHud.el || child === radioBtn) continue;
+    if (child === mapBtn.el || child === lobbyHud.el) continue;
     if (!visible) { hudPrev.set(child, child.style.display); child.style.display = "none"; }
     else { const d = hudPrev.get(child); if (d !== undefined) child.style.display = d; }
   }

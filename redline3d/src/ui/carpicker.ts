@@ -141,7 +141,16 @@ function injectStyles() {
 }
 
 /** Game menu → Garage. Cars are rendered ONCE to static card art (light, no live canvas). */
-export function createCarPicker(parent: HTMLElement, cars: CarOption[], onPick: (c: CarOption) => void, onUpgrades?: () => void): Garage {
+/** A bottom-of-menu on/off row (Music, SFX, …). State is owned by the caller via get/set. */
+export interface MenuToggle {
+  label: string;
+  sub?: string;
+  glyph?: string;
+  get: () => boolean;
+  set: (on: boolean) => void;
+}
+
+export function createCarPicker(parent: HTMLElement, cars: CarOption[], onPick: (c: CarOption) => void, onUpgrades?: () => void, toggles: MenuToggle[] = []): Garage {
   injectStyles();
 
   const wrap = document.createElement("div");
@@ -167,6 +176,36 @@ export function createCarPicker(parent: HTMLElement, cars: CarOption[], onPick: 
       <button class="gmenu-item" data-act="upgrades"><span class="gmenu-ic">${icon("level", 20)}</span><span class="gmenu-tx"><b>Upgrades</b><small>tune your car</small></span><span class="gmenu-arr">${icon("chevron", 16)}</span></button>
       <button class="gmenu-item" data-go="help"><span class="gmenu-ic">${icon("help", 20)}</span><span class="gmenu-tx"><b>How to play</b><small>controls &amp; the bet</small></span><span class="gmenu-arr">${icon("chevron", 16)}</span></button>
     </div>`;
+
+  // audio on/off toggles (Music / SFX) appended at the bottom of the menu list
+  const gmenu = menuPanel.querySelector(".gmenu") as HTMLElement | null;
+  if (toggles.length && gmenu) {
+    const sep = document.createElement("div");
+    sep.textContent = "audio";
+    sep.style.cssText = "margin:8px 4px 2px;font:700 10px/1 'Chakra Petch',ui-monospace,monospace;letter-spacing:.16em;color:var(--mut)";
+    gmenu.appendChild(sep);
+    toggles.forEach((t, i) => {
+      const b = document.createElement("button");
+      b.className = "gmenu-item";
+      b.dataset.toggle = String(i);
+      b.innerHTML =
+        `<span class="gmenu-ic" style="font:700 18px/1 'Chakra Petch',ui-monospace,monospace">${t.glyph ?? "♪"}</span>` +
+        `<span class="gmenu-tx"><b>${t.label}</b>${t.sub ? `<small>${t.sub}</small>` : ""}</span>` +
+        `<span class="gmenu-sw" style="margin-left:auto;min-width:48px;text-align:center;padding:5px 9px;border-radius:999px;font:700 11px/1 'Chakra Petch',ui-monospace,monospace;letter-spacing:.1em"></span>`;
+      gmenu.appendChild(b);
+    });
+  }
+  const renderToggles = () => {
+    toggles.forEach((t, i) => {
+      const sw = menuPanel.querySelector(`[data-toggle="${i}"] .gmenu-sw`) as HTMLElement | null;
+      if (!sw) return;
+      const on = t.get();
+      sw.textContent = on ? "ON" : "OFF";
+      sw.style.background = on ? "rgba(39,231,255,.16)" : "rgba(255,255,255,.05)";
+      sw.style.color = on ? "var(--cyan)" : "var(--mut)";
+      sw.style.boxShadow = on ? "inset 0 0 10px rgba(39,231,255,.35)" : "none";
+    });
+  };
 
   const helpPanel = document.createElement("div");
   helpPanel.className = "panel gpanel";
@@ -316,6 +355,7 @@ export function createCarPicker(parent: HTMLElement, cars: CarOption[], onPick: 
     garagePanel.style.display = v === "garage" ? "flex" : "none";
     helpPanel.style.display = v === "help" ? "flex" : "none";
     if (v === "garage") { renderArt(); updateBusyUI(); }
+    if (v === "menu") renderToggles(); // reflect current Music/SFX state each time the menu shows
   };
 
   const open = () => {
@@ -337,8 +377,9 @@ export function createCarPicker(parent: HTMLElement, cars: CarOption[], onPick: 
     if (view === "menu") close(); else setView("menu");
   });
   overlay.addEventListener("click", (e) => {
-    const t = (e.target as HTMLElement).closest("[data-act],[data-go]") as HTMLElement | null;
+    const t = (e.target as HTMLElement).closest("[data-act],[data-go],[data-toggle]") as HTMLElement | null;
     if (!t) return;
+    if (t.dataset.toggle !== undefined) { const i = +t.dataset.toggle; toggles[i].set(!toggles[i].get()); renderToggles(); return; }
     if (t.dataset.act === "close") close();
     else if (t.dataset.act === "back") setView("menu");
     else if (t.dataset.act === "upgrades") { close(); onUpgrades?.(); }

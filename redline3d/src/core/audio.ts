@@ -9,9 +9,13 @@ export interface GameAudio {
   cashout(): void;
   /** loss sting — a blown-engine drop + noise burst */
   liquidate(): void;
+  /** master mute for ALL game SFX (engine drone, coins, stings). Music/radio is separate. */
+  setEnabled(on: boolean): void;
+  isEnabled(): boolean;
 }
 
 export const COIN_VOLUME = 0.1;
+const MASTER_VOL = 0.45;
 
 /**
  * Fully procedural Web Audio — no sample assets (so it's commercial-safe and adds
@@ -30,6 +34,7 @@ export function createAudio(): GameAudio {
   let ng: GainNode | null = null;          // combustion / intake noise level
   let coinPool: HTMLAudioElement[] | null = null;
   let coinI = 0;
+  let enabled = true; // SFX master switch (Music is the separate radio)
 
   // soft-clip (tanh) distortion — grit/roar
   const driveCurve = (k: number) => {
@@ -45,7 +50,7 @@ export function createAudio(): GameAudio {
     const AC: typeof AudioContext | undefined = window.AudioContext || (window as any).webkitAudioContext;
     if (!AC) return;
     const C = ctx = new AC();
-    master = C.createGain(); master.gain.value = 0.45; master.connect(C.destination);
+    master = C.createGain(); master.gain.value = enabled ? MASTER_VOL : 0; master.connect(C.destination);
     eg = C.createGain(); eg.gain.value = 0; eg.connect(master);
 
     // tone lowpass (dry path) fed by the distorted engine voices on an excitation bus
@@ -126,6 +131,7 @@ export function createAudio(): GameAudio {
       ng.gain.setTargetAtTime(active ? 0.005 + f * 0.05 : 0, now, 0.08); // combustion air
     },
     coin(count = 1) {
+      if (!enabled) return;
       ensureCoinPool();
       if (!coinPool) return;
       const n = Math.max(0, Math.floor(count));
@@ -156,5 +162,10 @@ export function createAudio(): GameAudio {
       const ng = ctx.createGain(); ng.gain.value = 0.14;
       n.connect(ng); ng.connect(master); n.start(t);
     },
+    setEnabled(on) {
+      enabled = on;
+      if (ctx && master) master.gain.setTargetAtTime(on ? MASTER_VOL : 0, ctx.currentTime, 0.02);
+    },
+    isEnabled() { return enabled; },
   };
 }
