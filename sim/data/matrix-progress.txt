@@ -1,0 +1,20 @@
+[calm/independent/100] ev=5.105% liq=0% cap=0% co=33.372% maxDD=0.023% worstTickX=1.19 ruin=0 (150000 rounds, 46ms)
+[calm/independent/500] ev=5.476% liq=1.932% cap=0% co=33.289% maxDD=0.272% worstTickX=2.38 ruin=0 (150000 rounds, 42ms)
+[calm/independent/1000] ev=6.483% liq=15.181% cap=0% co=33.373% maxDD=0.684% worstTickX=3.81 ruin=0 (150000 rounds, 38ms)
+[calm/independent/2000] ev=7.143% liq=36.732% cap=0% co=31.643% maxDD=1.386% worstTickX=6.66 ruin=0 (150000 rounds, 29ms)
+[calm/net-directional/100] ev=5.046% liq=0% cap=0% co=33.263% maxDD=0.051% worstTickX=65.89 ruin=0 (150000 rounds, 47ms)
+[calm/net-directional/500] ev=4.703% liq=1.849% cap=0% co=33.484% maxDD=0.766% worstTickX=75.57 ruin=0 (150000 rounds, 41ms)
+[calm/net-directional/1000] ev=6.279% liq=15.557% cap=0% co=33.575% maxDD=1.933% worstTickX=140.14 ruin=0 (150000 rounds, 37ms)
+[calm/net-directional/2000] ev=8.851% liq=37.282% cap=0% co=31.325% maxDD=3.776% worstTickX=236.6 ruin=0 (150000 rounds, 32ms)
+[spike/independent/100] ev=1.861% liq=20.376% cap=0% co=32.461% maxDD=1.296% worstTickX=5.42 ruin=0 (150000 rounds, 46ms)
+[spike/independent/500] ev=-49.602% liq=47.619% cap=0.009% co=33.947% maxDD=14.687% worstTickX=19.9 ruin=0 (150000 rounds, 41ms)
+[spike/independent/1000] ev=-74.089% liq=59.895% cap=0.479% co=30.493% maxDD=21.744% worstTickX=23.75 ruin=0 (150000 rounds, 33ms)
+[spike/independent/2000] ev=-92.338% liq=66.898% cap=3.25% co=26.691% maxDD=26.893% worstTickX=23.75 ruin=0 (150000 rounds, 26ms)
+[spike/net-directional/100] ev=0.447% liq=19.514% cap=0% co=32.749% maxDD=3.191% worstTickX=160.89 ruin=0 (150000 rounds, 46ms)
+[spike/net-directional/500] ev=-47.929% liq=48.26% cap=0.005% co=33.311% maxDD=17.905% worstTickX=511.29 ruin=0 (150000 rounds, 37ms)
+[spike/net-directional/1000] ev=-79.359% liq=59.889% cap=0.466% co=30.931% maxDD=27.956% worstTickX=606.34 ruin=0 (150000 rounds, 33ms)
+[spike/net-directional/2000] ev=-94.618% liq=66.925% cap=3.313% co=26.842% maxDD=33.134% worstTickX=1215.79 ruin=0.01 (150000 rounds, 31ms)
+(node:74225) [MODULE_TYPELESS_PACKAGE_JSON] Warning: Module type of file:///Users/yordanlasonov/Documents/GitHub/perps-games/sim/highlev-sim.ts is not specified and it doesn't parse as CommonJS.
+Reparsing as ES module because module syntax was detected. This incurs a performance overhead.
+To eliminate this warning, add "type": "module" to /Users/yordanlasonov/Documents/GitHub/perps-games/package.json.
+(Use `node --trace-warnings ...` to show where the warning was created)
