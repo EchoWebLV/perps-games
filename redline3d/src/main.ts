@@ -145,8 +145,7 @@ const walletUI = createWallet(hudRoot, {
   address: auth.walletPublicKey?.() || USDC_ADDRESS,
   balance: () => balance,
   onBuy: () => { hud.setStatus("Deposits open when real money goes live."); },
-  // logout shows only for a real signed-in account (dev → undefined → account row stays hidden)
-  onLogout: auth.logout ? () => { void auth.logout!(); location.reload(); } : undefined,
+  // Log out moved to the menu (settings); the wallet page is deposit-only now.
 });
 hud.onWallet(() => { if (engine.getPhase() !== "live") walletUI.open(); });
 
@@ -199,7 +198,7 @@ const garage = createCarPicker(hudRoot, [
 ], (c) => { car.setModel(c.url, c.scale, c.yaw); setAbility(c.ability); }, () => upgrades.open(), [
   { label: "Music", sub: "synthwave radio", glyph: "♫", get: () => radio.isOn(), set: (on) => radio.setOn(on) },
   { label: "SFX", sub: "engine & coins", glyph: "🔊", get: () => audio.isEnabled(), set: (on) => audio.setEnabled(on) },
-]);
+], auth.logout ? () => { void auth.logout!(); location.reload(); } : undefined); // Log out in the menu (privy only)
 
 // ── parking-lot lobby ──────────────────────────────────────────────────────
 // the map button drops you into a giant drivable neon lot with 3 market buildings;

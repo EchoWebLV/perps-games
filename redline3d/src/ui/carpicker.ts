@@ -33,6 +33,7 @@ const ICONS: Record<string, string> = {
   help: '<circle cx="12" cy="12" r="9"/><path d="M9.6 9.2a2.4 2.4 0 1 1 3.4 2.2c-.8.4-1.1.9-1.1 1.7"/><path d="M12 16.4h.01"/>',
   chevron: '<path d="M9 6l6 6-6 6"/>',
   level: '<path d="M6 13l6-6 6 6"/><path d="M6 18l6-6 6 6"/>',
+  logout: '<path d="M9 4H6a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h3"/><path d="M16 12H9"/><path d="M13 8l4 4-4 4"/>',
 };
 const icon = (id: string, size = 15) =>
   `<svg viewBox="0 0 24 24" width="${size}" height="${size}" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">${ICONS[id] || ""}</svg>`;
@@ -150,7 +151,7 @@ export interface MenuToggle {
   set: (on: boolean) => void;
 }
 
-export function createCarPicker(parent: HTMLElement, cars: CarOption[], onPick: (c: CarOption) => void, onUpgrades?: () => void, toggles: MenuToggle[] = []): Garage {
+export function createCarPicker(parent: HTMLElement, cars: CarOption[], onPick: (c: CarOption) => void, onUpgrades?: () => void, toggles: MenuToggle[] = [], onLogout?: () => void): Garage {
   injectStyles();
 
   const wrap = document.createElement("div");
@@ -195,6 +196,23 @@ export function createCarPicker(parent: HTMLElement, cars: CarOption[], onPick: 
       gmenu.appendChild(b);
     });
   }
+
+  // account section — Log out (only for a real signed-in account; dev/guest passes no onLogout)
+  if (onLogout && gmenu) {
+    const sep = document.createElement("div");
+    sep.textContent = "account";
+    sep.style.cssText = "margin:8px 4px 2px;font:700 10px/1 'Chakra Petch',ui-monospace,monospace;letter-spacing:.16em;color:var(--mut)";
+    gmenu.appendChild(sep);
+    const b = document.createElement("button");
+    b.className = "gmenu-item";
+    b.dataset.act = "logout";
+    b.innerHTML =
+      `<span class="gmenu-ic">${icon("logout", 20)}</span>` +
+      `<span class="gmenu-tx"><b>Log out</b><small>sign out of your account</small></span>` +
+      `<span class="gmenu-arr">${icon("chevron", 16)}</span>`;
+    gmenu.appendChild(b);
+  }
+
   const renderToggles = () => {
     toggles.forEach((t, i) => {
       const sw = menuPanel.querySelector(`[data-toggle="${i}"] .gmenu-sw`) as HTMLElement | null;
@@ -383,6 +401,7 @@ export function createCarPicker(parent: HTMLElement, cars: CarOption[], onPick: 
     if (t.dataset.act === "close") close();
     else if (t.dataset.act === "back") setView("menu");
     else if (t.dataset.act === "upgrades") { close(); onUpgrades?.(); }
+    else if (t.dataset.act === "logout") { close(); onLogout?.(); }
     else if (t.dataset.go) setView(t.dataset.go as View);
   });
 
