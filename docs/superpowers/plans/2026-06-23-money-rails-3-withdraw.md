@@ -195,11 +195,15 @@ describe("withdrawals.reserve", () => {
     expect((await wd.reserve(userId, 100)).status).toBe("in_flight"); // 2nd blocked by partial unique
   });
 
-  it("enforces the per-user 24h cap counting the in-flight row", async () => {
+  it("enforces the per-user 24h cap counting prior confirmed withdrawals", async () => {
     const userId = await seedFundedUser(ctx, "privy:did:privy:e", "WALLET_E", 5000);
-    // cap is 2000/24h; one 500 reserve sits in-flight, a 1600 would exceed 2000 → cap
-    expect((await wd.reserve(userId, 500)).status).toBe("ok");
-    expect((await wd.reserve(userId, 1600)).status).toBe("in_flight"); // also blocked by one-in-flight first
+    // a prior CONFIRMED 1600 withdrawal counts toward the 2000/24h cap but does NOT trip one-in-flight
+    await ctx.db.insert(withdrawals).values({
+      userId, amountCents: 1600, destWallet: "WALLET_E", status: "confirmed", privyIdempotencyKey: "withdraw:prior",
+    });
+    // a 500 reserve would bring the 24h total to 2100 > 2000 → capped, nothing debited
+    expect((await wd.reserve(userId, 500)).status).toBe("capped");
+    expect(await ctx.ledger.balance(userId, "cash")).toBe(5000);
   });
 
   it("rejects when treasury solvency precheck fails", async () => {
