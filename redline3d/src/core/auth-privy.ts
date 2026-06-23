@@ -4,6 +4,7 @@ import type { PrivySnapshot } from "./privy-island";
 /** Privy-backed AuthProvider. Lazy-imports the React island so the default build ships no React. */
 export function createPrivyAuth(appId: string): AuthProvider {
   let snap: PrivySnapshot | null = null;
+  let pendingLogin = false; // a login() pressed before the island mounts → fire it once Privy is ready
   let resolveReady!: () => void;
   const readyP = new Promise<void>((r) => (resolveReady = r));
 
@@ -11,6 +12,7 @@ export function createPrivyAuth(appId: string): AuthProvider {
     const { mountPrivy } = await import("./privy-island"); // code-split chunk
     mountPrivy(appId, (s) => {
       snap = s;
+      if (s.ready && pendingLogin && !s.authenticated) { pendingLogin = false; s.login(); } // honor an early GO press
       if (s.ready && s.authenticated) resolveReady();
     });
   })();
@@ -22,7 +24,7 @@ export function createPrivyAuth(appId: string): AuthProvider {
       const t = snap ? await snap.getAccessToken() : null; // refreshes per call
       return t ? { authorization: `Bearer ${t}` } : {};
     },
-    login: () => snap?.login(),
+    login: () => { if (snap?.ready) snap.login(); else pendingLogin = true; }, // queue if the island isn't up yet
     logout: () => snap?.logout() ?? Promise.resolve(),
     walletPublicKey: () => snap?.walletAddress ?? null,
   };

@@ -105,6 +105,24 @@ async function pollMark() {
   finally { marking = false; }
 }
 
+// Bulletproof logout. The old code did `void auth.logout(); location.reload()` — fire-and-forget, so
+// the reload won the race and Privy's session survived → "log out then GO still plays". This closes
+// the race from BOTH ends: (1) flip signedIn off instantly so GO/lobby can't start a round in the
+// window before the reload lands; (2) AWAIT Privy's logout (capped at 3s so a hang can't strand us);
+// (3) force-drop any residual Privy session from storage/cookies so the reload can't re-authenticate.
+async function doLogout() {
+  signedIn = false;
+  serverMark = null;
+  try { await Promise.race([auth.logout?.() ?? Promise.resolve(), new Promise<void>((r) => setTimeout(r, 3000))]); }
+  catch { /* clear locally regardless of a logout error */ }
+  try {
+    for (const s of [localStorage, sessionStorage])
+      for (const k of Object.keys(s)) if (/^privy/i.test(k)) s.removeItem(k);
+    document.cookie.split(";").forEach((c) => { const n = c.split("=")[0].trim(); if (/privy/i.test(n)) document.cookie = `${n}=;expires=Thu, 01 Jan 1970 00:00:00 GMT;path=/`; });
+  } catch { /* best-effort */ }
+  location.reload();
+}
+
 // price feeds — BTC / ETH / SOL (subscribe to all; the active one drives the game)
 const ASSETS = [
   { key: "BTC", lz: 1, hx: "e62df6c8b4a85fe1a67db44dc12de5db330f7ac66b72dc658afedf0f4a415b43", expo: -8 },
@@ -198,7 +216,7 @@ const garage = createCarPicker(hudRoot, [
 ], (c) => { car.setModel(c.url, c.scale, c.yaw); setAbility(c.ability); }, () => upgrades.open(), [
   { label: "Music", sub: "synthwave radio", glyph: "♫", get: () => radio.isOn(), set: (on) => radio.setOn(on) },
   { label: "SFX", sub: "engine & coins", glyph: "🔊", get: () => audio.isEnabled(), set: (on) => audio.setEnabled(on) },
-], auth.logout ? () => { void auth.logout!(); location.reload(); } : undefined); // Log out in the menu (privy only)
+], auth.logout ? doLogout : undefined); // Log out in the menu (privy only)
 
 // ── parking-lot lobby ──────────────────────────────────────────────────────
 // the map button drops you into a giant drivable neon lot with 3 market buildings;
