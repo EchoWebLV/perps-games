@@ -57,4 +57,14 @@ describe("createApi", () => {
     expect(calls[0].init.headers.authorization).toBe("Bearer XYZ");
     expect(calls[0].init.headers["x-dev-user"]).toBeUndefined();
   });
+
+  it("aborts a hung request after the timeout and surfaces a network ApiError", async () => {
+    // a fetch that never settles on its own — only the abort signal can end it (a stalled connection)
+    const hangFetch = (_url: any, init: any) =>
+      new Promise<Response>((_resolve, reject) => {
+        init.signal?.addEventListener("abort", () => reject(new DOMException("aborted", "AbortError")));
+      });
+    const api = createApi({ baseUrl: "http://x", userId: "u", fetch: hangFetch as any, timeoutMs: 10 });
+    await expect(api.me()).rejects.toMatchObject({ code: "network" });
+  });
 });

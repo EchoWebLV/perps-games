@@ -115,4 +115,87 @@ describe("round-sync session", () => {
     expect(res).toBeNull();          // surfaced as unsettled
     expect(rs.roundId()).not.toBeNull(); // stays open for 1.4 + reload recovery
   });
+
+  // Regression: bail → close couldn't settle (feed halt / lost response) leaves a stale local
+  // roundId. Without mid-session reconciliation the next GO silently no-ops on open()'s single-round
+  // guard and the UI sticks on "Launching…". reconcile() is the self-heal the GO handler calls.
+  it("reconcile() clears a stale local round the server already settled", async () => {
+    const api = fakeApi({ me: async () => ({ userId: "u", balance: 100, cars: [], openRoundId: null }) });
+    const rs = createRoundSync({ api, clock: clock(), store: store() });
+    await rs.open({ asset: "SOL", dir: 1, lev: 50, stake: 5 }); // local roundId = "R"
+    expect(rs.roundId()).toBe("R");
+    const r = await rs.reconcile();                              // server has no open round
+    expect(r).toBe("cleared");
+    expect(rs.roundId()).toBeNull();                            // safe to open a fresh round
+  });
+
+  it("reconcile() settles a still-open dangling round, then clears", async () => {
+    let closed = 0;
+    const api = fakeApi({
+      me: async () => ({ userId: "u", balance: 100, cars: [], openRoundId: "R" }),
+      closeRound: async () => { closed++; return { outcome: "expire", payoutCoins: 0, pnlCoins: 0, equity: 0.5, exitRaw: 99, balance: 100 }; },
+    });
+    const rs = createRoundSync({ api, clock: clock(), store: store() });
+    await rs.open({ asset: "SOL", dir: 1, lev: 50, stake: 5 });
+    const r = await rs.reconcile();
+    expect(closed).toBe(1);
+    expect(r).toBe("cleared");
+    expect(rs.roundId()).toBeNull();
+  });
+
+  it("reconcile() stays blocked (keeps the round) when it can't settle on a halted feed", async () => {
+    const api = fakeApi({
+      me: async () => ({ userId: "u", balance: 100, cars: [], openRoundId: "R" }),
+      closeRound: async () => { const e: any = new Error("feed_halt"); e.code = "feed_halt"; throw e; },
+    });
+    const rs = createRoundSync({ api, clock: clock(), store: store(), closeBackoffMs: [0, 0] });
+    await rs.open({ asset: "SOL", dir: 1, lev: 50, stake: 5 });
+    const r = await rs.reconcile();
+    expect(r).toBe("blocked");
+    expect(rs.roundId()).not.toBeNull();
+  });
+
+  it("reconcile() reports blocked and keeps the round when the server is unreachable", async () => {
+    const api = fakeApi({ me: async () => { throw new Error("offline"); } });
+    const rs = createRoundSync({ api, clock: clock(), store: store() });
+    await rs.open({ asset: "SOL", dir: 1, lev: 50, stake: 5 });
+    const r = await rs.reconcile();
+    expect(r).toBe("blocked");
+    expect(rs.roundId()).toBe("R");
+  });
+
+  it("recover() settles with backoff and never throws on a halted feed", async () => {
+    const api = fakeApi({ closeRound: async () => { const e: any = new Error("feed_halt"); e.code = "feed_halt"; throw e; } });
+    const rs = createRoundSync({ api, clock: clock(), store: store(), closeBackoffMs: [0, 0] });
+    await expect(rs.recover("R")).resolves.toBeUndefined();
+    expect(rs.roundId()).not.toBeNull(); // unsettled on a halt → kept for the next retry
+  });
+
+  it("settle() is single-flight: an overlapping close() no-ops instead of racing a second close", async () => {
+    // Regression (adversarial review): a backoff-parked settle from an old round must not also
+    // close/clear a round opened later. Single-flight makes the overlapping settle a no-op.
+    let closes = 0;
+    let release!: () => void;
+    const gate = new Promise<void>((r) => { release = r; });
+    const api = fakeApi({
+      closeRound: async () => { closes++; await gate; return { outcome: "cashout", payoutCoins: 7, pnlCoins: 2, equity: 1.4, exitRaw: 101, balance: 107 }; },
+    });
+    const rs = createRoundSync({ api, clock: clock(), store: store() });
+    await rs.open({ asset: "SOL", dir: 1, lev: 50, stake: 5 });
+    const p1 = rs.close("cashout");   // enters settle, parks inside closeRound on the gate
+    const p2 = rs.close("cashout");   // overlapping — must no-op, not start a 2nd close
+    release();
+    const [r1, r2] = await Promise.all([p1, p2]);
+    expect(closes).toBe(1);                                   // exactly one real close happened
+    expect([r1, r2].filter((x) => x === null).length).toBe(1); // the overlapping call no-opped
+    expect([r1, r2].filter((x) => x?.balance === 107).length).toBe(1);
+    expect(rs.roundId()).toBeNull();
+  });
+
+  it("recover() clears the local round when the server reports it already gone", async () => {
+    const api = fakeApi({ closeRound: async () => { const e: any = new Error("round_not_found"); e.code = "round_not_found"; throw e; } });
+    const rs = createRoundSync({ api, clock: clock(), store: store(), closeBackoffMs: [0, 0] });
+    await rs.recover("R");
+    expect(rs.roundId()).toBeNull();
+  });
 });

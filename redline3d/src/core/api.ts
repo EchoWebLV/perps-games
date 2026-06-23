@@ -37,32 +37,42 @@ export interface Api {
   markRound(roundId: string): Promise<MarkResult>;
 }
 
-export interface ApiOpts { fetch?: typeof fetch; baseUrl?: string; auth?: Pick<AuthProvider, "authHeaders">; userId?: string; }
+export interface ApiOpts { fetch?: typeof fetch; baseUrl?: string; auth?: Pick<AuthProvider, "authHeaders">; userId?: string; timeoutMs?: number; }
 
 export function createApi(opts: ApiOpts = {}): Api {
   const doFetch = opts.fetch ?? globalThis.fetch.bind(globalThis);
   const baseUrl = (opts.baseUrl ?? (import.meta.env?.VITE_API_BASE as string) ?? "http://localhost:8080").replace(/\/$/, "");
+  // Bound every request so a stalled connection can't hang the UI on "Launching…"/"Settling…"
+  // forever. An abort surfaces as a network ApiError, which open()/close() already handle.
+  const timeoutMs = opts.timeoutMs ?? 12_000;
   // back-compat: if no auth provider, fall back to the dev header (existing behavior)
   const headers = async (): Promise<Record<string, string>> =>
     opts.auth ? await opts.auth.authHeaders() : { "x-dev-user": opts.userId ?? getDevUserId() };
 
   async function call<T>(method: "GET" | "POST", path: string, body?: unknown): Promise<T> {
-    let r: Response;
+    const ctrl = new AbortController();
+    const timer = setTimeout(() => ctrl.abort(), timeoutMs);
     try {
-      r = await doFetch(baseUrl + path, {
-        method,
-        headers: { ...(await headers()), "content-type": "application/json" },
-        body: body === undefined ? undefined : JSON.stringify(body),
-      });
-    } catch {
-      throw new ApiError("network", 0);
+      let r: Response;
+      try {
+        r = await doFetch(baseUrl + path, {
+          method,
+          headers: { ...(await headers()), "content-type": "application/json" },
+          body: body === undefined ? undefined : JSON.stringify(body),
+          signal: ctrl.signal,
+        });
+      } catch {
+        throw new ApiError("network", 0);            // offline, or an abort (timeout) fired
+      }
+      if (!r.ok) {
+        let err: string | undefined;
+        try { err = (await r.json())?.error; } catch { /* ignore */ }
+        throw new ApiError(codeFor(r.status, err), r.status);
+      }
+      return (await r.json()) as T;
+    } finally {
+      clearTimeout(timer);                           // timer spans the body read too — a stalled body still aborts
     }
-    if (!r.ok) {
-      let err: string | undefined;
-      try { err = (await r.json())?.error; } catch { /* ignore */ }
-      throw new ApiError(codeFor(r.status, err), r.status);
-    }
-    return (await r.json()) as T;
   }
 
   return {
