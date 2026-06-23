@@ -108,6 +108,34 @@ export const depositSources = pgTable(
 );
 export type DepositSourceRow = typeof depositSources.$inferSelect;
 
+export const withdrawalStatus = pgEnum("withdrawal_status", [
+  "reserved", "awaiting_approval", "signing", "sent", "confirmed", "failed", "reversed", "needs_review",
+]);
+
+export const withdrawals = pgTable(
+  "withdrawals",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    userId: uuid("user_id").notNull().references(() => users.id),
+    amountCents: bigint("amount_cents", { mode: "number" }).notNull(),
+    destWallet: text("dest_wallet").notNull(),
+    status: withdrawalStatus("status").notNull().default("reserved"),
+    txSig: text("tx_sig"),
+    privyTxId: text("privy_tx_id"),
+    privyIdempotencyKey: text("privy_idempotency_key").notNull(),
+    reviewReason: text("review_reason"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => ({
+    userIdx: index("withdrawals_user_idx").on(t.userId),
+    oneInflight: uniqueIndex("withdrawals_one_inflight_idx")
+      .on(t.userId)
+      .where(sql`${t.status} in ('reserved','awaiting_approval','signing','sent','needs_review')`),
+  }),
+);
+export type Withdrawal = typeof withdrawals.$inferSelect;
+
 /** unlock-only car ownership. one row per owned car; cannot own the same car twice. */
 export const inventory = pgTable(
   "inventory",
