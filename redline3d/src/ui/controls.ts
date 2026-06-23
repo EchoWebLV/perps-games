@@ -41,6 +41,10 @@ export function createControls(ctrlMount: HTMLElement, goMount: HTMLElement, ped
   let d: 1 | -1 = 1, stake = 100, live = false; // stake in cents → $1.00 default
   let gasOn = false, brakeOn = false, steerL = false, steerR = false;
   let launchCb = () => {}, cashCb = () => {};
+  // anti-double-tap: when a round goes live the GO button becomes BAIL in place, so a quick second
+  // tap would instantly cash out the round you just opened. Ignore bail taps for a short beat.
+  const BAIL_LOCK_MS = 1500;
+  let cashLockUntil = 0;
   const long = q("#long"), short = q("#short"), sval = q("#sval"), go = q("#go"),
     golabel = q("#golabel"), gofill = q("#gofill"), callbox = q("#callbox");
 
@@ -62,7 +66,10 @@ export function createControls(ctrlMount: HTMLElement, goMount: HTMLElement, ped
   };
   q("#sup").onclick = () => { if (!live) { stake = Math.min(5000, stake + 25); sval.textContent = usd(stake); } }; // +$0.25 → $50 cap
   q("#sdn").onclick = () => { if (!live) { stake = Math.max(25, stake - 25); sval.textContent = usd(stake); } };   // −$0.25 → $0.25 floor
-  go.onclick = () => (live ? cashCb() : launchCb());
+  go.onclick = () => {
+    if (live) { if (performance.now() < cashLockUntil) return; cashCb(); } // bail is locked for BAIL_LOCK_MS after launch
+    else launchCb();
+  };
 
   // keyboard driving (desktop): W/↑ gas, S/↓ brake, A/D or ←/→ steer, space/enter = go.
   // Touch driving (hold-anywhere) lives on the canvas in main.ts.
@@ -101,11 +108,16 @@ export function createControls(ctrlMount: HTMLElement, goMount: HTMLElement, ped
     brake: () => brakeOn,
     steer: () => (steerR ? 1 : 0) - (steerL ? 1 : 0),
     setLive(l, label, warn) {
+      if (l && !live) cashLockUntil = performance.now() + BAIL_LOCK_MS; // just went live → lock bail for a beat
       live = l;
       golabel.textContent = label;
       // the LIVE button becomes the liquidation gauge; idle is the green GO!
       go.classList.toggle("gauge", l);
       go.classList.toggle("warn", !!(l && warn)); // red glow when losing / near liq
+      // dim + un-press the bail button during the brief post-launch lock (anti double-tap feedback)
+      const locked = l && performance.now() < cashLockUntil;
+      go.style.opacity = locked ? "0.5" : "";
+      go.style.cursor = locked ? "not-allowed" : "";
       if (!l) gofill.style.setProperty("--b", "100%"); // reset the fill for next round
       // long/short fades out for the live round (kept as a live readout in lane mode)
       refreshCall();
