@@ -25,6 +25,7 @@ async function main(): Promise<void> {
 
   let depositConfirmer: { start(): void; stop(): void } | undefined;
   let realMoney = { enabled: false, treasuryUsdcAta: null as string | null };
+  let withdrawalsSvc: import("./services/withdrawals.js").Withdrawals | undefined;
   if (env.REAL_MONEY_ENABLED) {
     const { makeRpcDepositSource } = await import("./solana/deposit-source.js");
     const { assertUsdcMint } = await import("./solana/mint-assert.js");
@@ -41,6 +42,15 @@ async function main(): Promise<void> {
       depositConfirmer.start();
     }
     realMoney = { enabled: true, treasuryUsdcAta: env.TREASURY_USDC_ATA! };
+
+    const { makeWithdrawals } = await import("./services/withdrawals.js");
+    withdrawalsSvc = makeWithdrawals(db, ledger, {
+      minCents: env.WITHDRAW_MIN_CENTS, maxCents: env.WITHDRAW_MAX_CENTS,
+      userDailyCapCents: env.WITHDRAW_USER_DAILY_CAP_CENTS, globalDailyCapCents: env.WITHDRAW_GLOBAL_DAILY_CAP_CENTS,
+      holdHours: env.WITHDRAW_HOLD_HOURS, quorumThresholdCents: env.WITHDRAW_QUORUM_THRESHOLD_CENTS,
+    }, () => source.readTreasuryBaseUnits(env.TREASURY_USDC_ATA!));
+    // withdrawProcessor stays null until the Privy signer is enabled post-Phase-0-staging
+    // (needs treasury wallet id + caip2 config). The admin-approve endpoint 404s until then.
   }
   // poll rate + HALT tolerance are tunable: the public Hermes REST endpoint can
   // rate-limit a tight 500ms poll, so a too-small stale window flaps into feed_halt.
@@ -71,6 +81,8 @@ async function main(): Promise<void> {
     devAuth: env.DEV_AUTH && env.NODE_ENV !== "production",
     privyAuth,
     realMoney,
+    withdrawals: withdrawalsSvc ?? null,
+    withdrawProcessor: null,
   });
 
   const addr = await server.listen({ port: env.PORT, host: "0.0.0.0" });

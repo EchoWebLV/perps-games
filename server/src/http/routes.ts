@@ -20,6 +20,8 @@ export interface RouteDeps {
   devAuth: boolean;
   privyAuth: import("../auth/privy.js").PrivyAuth | null;
   realMoney: { enabled: boolean; treasuryUsdcAta: string | null };
+  withdrawals: import("../services/withdrawals.js").Withdrawals | null;
+  withdrawProcessor: import("../services/withdraw-worker.js").WithdrawProcessor | null;
 }
 
 const GrantCoins = z.object({ amount: z.number().int().positive() });
@@ -83,6 +85,26 @@ export function registerRoutes(server: FastifyInstance, deps: RouteDeps): void {
       boundWallet: user?.walletPublicKey ?? null,
       note: "send USDC from your bound wallet to treasuryUsdcAta; credited after on-chain finality",
     };
+  });
+
+  const WithdrawBody = z.object({ amountCents: z.number().int().positive() });
+  server.post("/v1/withdraw", { preHandler: requireUser }, async (req, reply) => {
+    if (!deps.withdrawals) return reply.code(404).send({ error: "withdrawals_disabled" });
+    const body = WithdrawBody.safeParse(req.body);
+    if (!body.success) return reply.code(400).send({ error: "bad_request" });
+    const r = await deps.withdrawals.reserve(req.userId!, body.data.amountCents);
+    if (r.status !== "ok") return reply.code(409).send({ error: r.status });
+    return { withdrawalId: r.withdrawalId, state: r.state };
+  });
+
+  // admin-gated approval (v1 stand-in for the quorum/Intents co-signer). NEVER exposed in prod
+  // (gated on devEndpoints, which is false in production).
+  server.post("/v1/admin/withdraw/:id/approve", { preHandler: requireUser }, async (req, reply) => {
+    if (!deps.devEndpoints || !deps.withdrawProcessor) return reply.code(404).send({ error: "not_found" });
+    const id = (req.params as { id: string }).id;
+    const r = await deps.withdrawProcessor.approveAndSend(id);
+    if (r.status !== "sent") return reply.code(409).send({ error: r.status });
+    return { status: "sent" };
   });
 
   server.post("/v1/round/open", { preHandler: requireUser }, async (req, reply) => {

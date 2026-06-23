@@ -29,6 +29,7 @@ describe("makeDepositConfirmer.tick", () => {
         return untilSig === "s2" ? [] : pending;
       },
       async fetchMintInfo() { return { decimals: 6, programAddress: LEGACY_TOKEN_PROGRAM }; },
+      async readTreasuryBaseUnits() { return 0n; },
     };
     const confirmer = makeDepositConfirmer({ deposits, source, treasuryAta: ATA, pollMs: 1000 });
     await confirmer.tick();

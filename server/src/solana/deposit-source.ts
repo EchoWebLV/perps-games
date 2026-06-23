@@ -7,6 +7,8 @@ import type { MintInfo } from "./mint-assert.js";
 export interface DepositSource {
   fetchInbound(opts: { treasuryAta: string; untilSig?: string; limit?: number }): Promise<InboundTransfer[]>;
   fetchMintInfo(mint: string): Promise<MintInfo>;
+  /** Treasury USDC ATA balance in base units (for the withdraw solvency precheck). */
+  readTreasuryBaseUnits(ata: string): Promise<bigint>;
 }
 
 /** Token-balance entry as returned by getTransaction(jsonParsed).meta.{pre,post}TokenBalances. */
@@ -25,6 +27,10 @@ export function makeRpcDepositSource(rpcUrl: string): DepositSource {
       // BaseAccount carries `programAddress`; the decoded Mint carries `data.decimals`.
       const m = await fetchMint(rpc, address(mint));
       return { decimals: m.data.decimals, programAddress: m.programAddress as string };
+    },
+    async readTreasuryBaseUnits(ata) {
+      const res = await rpc.getTokenAccountBalance(address(ata), { commitment: "finalized" } as any).send();
+      return BigInt((res as any).value.amount);
     },
     async fetchInbound({ treasuryAta, untilSig, limit = 100 }) {
       const sigs = await rpc
