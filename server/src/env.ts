@@ -1,7 +1,7 @@
 import { z } from "zod";
 import "dotenv/config";
 
-const Env = z.object({
+const EnvShape = z.object({
   DATABASE_URL: z.string().min(1).optional(),
   PORT: z.coerce.number().int().positive().default(8080),
   DEV_ENDPOINTS: z
@@ -20,6 +20,24 @@ const Env = z.object({
     .optional()
     .default("true")
     .transform((v) => v !== "false"),
+  REAL_MONEY_ENABLED: z.string().optional().transform((v) => v === "true"),
+  SOLANA_RPC_URL: z.string().url().optional(),
+  SOLANA_RPC_URL_FALLBACK: z.string().url().optional(),
+  SOLANA_CLUSTER: z.enum(["mainnet-beta", "devnet"]).default("mainnet-beta"),
+  USDC_MINT: z.string().min(32).optional(),
+  TREASURY_USDC_ATA: z.string().min(32).optional(),
+  TREASURY_OWNER_PUBKEY: z.string().min(32).optional(),
+  DEPOSIT_MIN_CENTS: z.coerce.number().int().positive().default(100),
+  DEPOSIT_MAX_CENTS: z.coerce.number().int().positive().default(500),
+  DEPOSIT_POLL_MS: z.coerce.number().int().positive().default(8000),
+  RUN_CONFIRMER: z.string().optional().default("true").transform((v) => v !== "false"),
+});
+
+const Env = EnvShape.superRefine((e, ctx) => {
+  if (!e.REAL_MONEY_ENABLED) return;
+  for (const k of ["SOLANA_RPC_URL", "USDC_MINT", "TREASURY_USDC_ATA"] as const) {
+    if (!e[k]) ctx.addIssue({ code: z.ZodIssueCode.custom, path: [k], message: `${k} is required when REAL_MONEY_ENABLED=true` });
+  }
 });
 
 export type Env = z.infer<typeof Env>;
