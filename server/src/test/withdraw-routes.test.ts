@@ -28,3 +28,18 @@ describe("POST /v1/withdraw", () => {
     expect(res.json()).toEqual({ error: "capped" });
   });
 });
+
+describe("POST /v1/admin/withdraw/:id/approve", () => {
+  let ctx: TestCtx;
+  afterEach(async () => { await ctx?.close(); });
+
+  it("returns 404 when no withdrawProcessor is wired (default harness)", async () => {
+    ctx = await makeTestDb();
+    const res = await ctx.server.inject({
+      method: "POST",
+      url: "/v1/admin/withdraw/00000000-0000-0000-0000-000000000000/approve",
+      headers: { "x-dev-user": "mallory" },
+    });
+    expect(res.statusCode).toBe(404);
+  });
+});

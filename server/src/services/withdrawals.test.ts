@@ -86,4 +86,16 @@ describe("withdrawals.reserve", () => {
     await ctx.ledger.credit(u.id, "cash", 500, "deposit", "ghost");
     expect((await wd.reserve(u.id, 200)).status).toBe("no_dest");
   });
+
+  it("enforces the GLOBAL 24h cap across users", async () => {
+    const userA = await seedFundedUser(ctx, "privy:did:privy:ga", "WALLET_GA", 500);
+    const userB = await seedFundedUser(ctx, "privy:did:privy:gb", "WALLET_GB", 500);
+    // a prior confirmed withdrawal from A sits at 19,800 of the 20,000 global cap (counts globally)
+    await ctx.db.insert(withdrawals).values({
+      userId: userA, amountCents: 19800, destWallet: "WALLET_GA", status: "confirmed", privyIdempotencyKey: "withdraw:gprior",
+    });
+    // B's 300 reserve would push global to 20,100 > 20,000 → capped (B is well under the 2000 per-user cap)
+    expect((await wd.reserve(userB, 300)).status).toBe("capped");
+    expect(await ctx.ledger.balance(userB, "cash")).toBe(500); // nothing debited
+  });
 });
