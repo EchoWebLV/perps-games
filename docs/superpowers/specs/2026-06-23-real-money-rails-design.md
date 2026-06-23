@@ -198,6 +198,18 @@ Net `O ≥ L` alone under-counts exactly the crash/uncertainty cases that lose m
 - **Phase 1 — Deposit** (money-in, lower risk): seam + migration + deposit flow + confirmer + reconciliation read side. Internal wallet only.
 - **Phase 2 — Withdraw** (money-out): withdraw state machine + quorum/Intents + kill-switch + admin tooling. Tiny caps, `QUORUM_THRESHOLD=0`, internal wallet first, reconciliation alerting **live before any external user**.
 
+### 14a. Phase 0 static-findings results (2026-06-23) — STATIC HALF DONE
+
+Phase 0's **static half** is complete: every assumed capability was verified against the installed `@privy-io/node@0.22.0` types. Full doc: `docs/superpowers/specs/2026-06-23-phase0-privy-capability-findings.md`. Net: the custody core is statically sound, but **three findings change the design**:
+
+1. **(HARD, §9) Native rolling-window aggregate-spend cap is ABSENT for Solana.** Privy's `Aggregations` resource is an empty class and `AggregationMethod` is Ethereum-only. The §9 "native aggregate cap" is unmet → the 24h velocity/aggregate ceiling **must live in our own co-signer/quorum member** (server tracks cumulative spend, refuses to co-sign past the window). Per-tx amount / USDC-mint / SPL-program / recipient allowlist (constraints 1–4) **are** native Privy policy rules and stay there.
+2. **(HARD, §6.3/§9) No native `intents.authorize()`/`execute()` SDK method.** Intents supports create+poll only; the out-of-band approver **must POST its own P-256 request signature** (via `lib/authorization.ts`) to the intent's authorize route (route shape confirmed in staging item 9). Quorum-owned wallet + pending-intent create/poll are real and unchanged.
+3. **(SOFT, §5/§14) Treasury-as-fee-payer deposit sponsorship is UNVERIFIED.** No SDK param names the treasury as on-chain fee-payer for a user-authority tx; `sponsor:true` is opaque USD gas-credit billing. **This is the single gating staging test (item 1) and it blocks Plan 2 (deposit), not just withdraw.** If it fails, deposit falls back to user-pays-gas / pre-fund tiny SOL / Privy-chosen sponsor.
+
+**Library decision (confirmed):** Privy is on the **`@solana/kit` (web3.js v2)** stack. Add `@solana/kit` + `@solana-program/token` to `server/package.json`, **pin kit to one `^5.x`** shared by Privy + the SPL client (npm `overrides`/`dedupe`, exactly one copy). Do NOT add web3.js v1 / `@solana/spl-token`.
+
+**Empirical half still GATES Plan 2/3** — needs a live Privy staging app + credentials. The 12-item staging checklist is in the findings doc; **item 1 (fee-payer) is the top gate**. Statically-safe foundation work (kit libs + USDC base-unit scale module + idempotency-key util + exact-message model + policy rules 1–4 design) can proceed **now** without staging.
+
 ---
 
 ## 15. Decisions (defaults adopted 2026-06-23; revisitable before the relevant phase)
