@@ -352,8 +352,10 @@ git commit -m "feat(server): DepositSource port + @solana/kit RPC adapter (valid
 ```ts
 // server/src/services/deposits.test.ts
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
+import { eq } from "drizzle-orm";
 import { makeTestDb, type TestCtx } from "../test/harness.js";
 import { makeDeposits, type InboundTransfer } from "./deposits.js";
+import { depositSources } from "../db/schema.js";
 import { LEGACY_TOKEN_PROGRAM } from "../solana/constants.js";
 
 const USDC = "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v";
@@ -413,17 +415,22 @@ describe("deposits.recordInbound", () => {
     expect(r).toEqual({ status: "quarantine", reason: "unknown_source" });
   });
 
-  it("quarantines a funding wallet already bound to another account (sybil)", async () => {
+  it("a second deposit from the same wallet credits the same user; deposit_sources stays one row", async () => {
+    await deposits.recordInbound(transfer());                            // sig1 → +200
+    const r2 = await deposits.recordInbound(transfer({ txSig: "sig2" })); // new sig, same WALLET_A
+    expect(r2).toEqual({ status: "credited", userId, amountCents: 200 });
+    expect(await ctx.ledger.balance(userId, "cash")).toBe(400);
+    const rows = await ctx.db.select().from(depositSources).where(eq(depositSources.sourceWallet, "WALLET_A"));
+    expect(rows).toHaveLength(1); // funding wallet bound exactly once
+  });
+
+  it("quarantines if the funding wallet is already bound to ANOTHER account (sybil guard)", async () => {
     const other = await ctx.users.upsertByExternalId("privy:did:privy:b");
-    await ctx.users.setWalletPublicKey(other.id, "WALLET_B");
-    // first deposit binds WALLET_A -> userId
-    await deposits.recordInbound(transfer());
-    // WALLET_A can't then back `other`: rebind WALLET_A onto other is blocked at users level,
-    // but a forged source claiming WALLET_A for a different matched user is caught by deposit_sources.
-    // Simulate: user `other` somehow maps WALLET_A — assert deposit_sources guards it.
-    // (Direct guard test: a second user cannot be credited from WALLET_A.)
-    const dup = await deposits.recordInbound(transfer({ txSig: "s2", sourceOwner: "WALLET_A" }));
-    expect(dup.status).toBe("duplicate"); // same wallet+user is just a replay of sig handling
+    // seed an inconsistent binding: deposit_sources says WALLET_A backs `other`, but users maps it to userId
+    await ctx.db.insert(depositSources).values({ userId: other.id, sourceWallet: "WALLET_A", firstSeenTxSig: "old" });
+    const r = await deposits.recordInbound(transfer({ txSig: "syb" }));
+    expect(r).toEqual({ status: "quarantine", reason: "source_bound_other" });
+    expect(await ctx.ledger.balance(userId, "cash")).toBe(0); // nothing credited
   });
 
   it("ignores a not-yet-finalized transfer without recording it", async () => {
