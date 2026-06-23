@@ -15,7 +15,7 @@ beforeEach(async () => {
   rounds = makeRounds({ db: ctx.db, ledger: ctx.ledger, feed });
   const u = await ctx.users.upsertByExternalId("dev:alice");
   userId = u.id;
-  await ctx.ledger.credit(userId, 100, "dev_grant");
+  await ctx.ledger.credit(userId, "coin", 100, "dev_grant");
 });
 
 afterEach(async () => {
@@ -28,26 +28,26 @@ describe("rounds.open", () => {
     expect(r.status).toBe("open");
     expect(r.entryRaw).toBe(100); // server feed, not client-supplied
     expect(r.stake).toBe(10);
-    expect(await ctx.ledger.balance(userId)).toBe(90); // 100 - 10 escrowed
+    expect(await ctx.ledger.balance(userId, "coin")).toBe(90); // 100 - 10 escrowed
   });
 
   it("HALTs (no debit, no round) when the feed is unhealthy", async () => {
     feed.setHealthy("SOL", false);
     await expect(rounds.open(userId, { asset: "SOL", dir: 1, lev: 50, stake: 10 })).rejects.toBeInstanceOf(FeedHaltError);
-    expect(await ctx.ledger.balance(userId)).toBe(100);
+    expect(await ctx.ledger.balance(userId, "coin")).toBe(100);
   });
 
   it("refuses to open a round the user cannot afford", async () => {
     // drain alice to 5 coins; a valid in-bounds stake of 10 then exceeds the balance
-    await ctx.ledger.debit(userId, 95, "test_drain");
+    await ctx.ledger.debit(userId, "coin", 95, "test_drain");
     await expect(rounds.open(userId, { asset: "SOL", dir: 1, lev: 50, stake: 10 })).rejects.toThrow("insufficient balance");
-    expect(await ctx.ledger.balance(userId)).toBe(5);
+    expect(await ctx.ledger.balance(userId, "coin")).toBe(5);
   });
 
   it("allows only one open round per user", async () => {
     await rounds.open(userId, { asset: "SOL", dir: 1, lev: 50, stake: 10 });
     await expect(rounds.open(userId, { asset: "SOL", dir: 1, lev: 50, stake: 10 })).rejects.toBeInstanceOf(OpenRoundExistsError);
-    expect(await ctx.ledger.balance(userId)).toBe(90); // second debit rolled back
+    expect(await ctx.ledger.balance(userId, "coin")).toBe(90); // second debit rolled back
   });
 
   it("validates leverage and stake bounds", async () => {
@@ -57,7 +57,7 @@ describe("rounds.open", () => {
   });
 
   it("accepts a cent-denominated stake up to $50.00 (5000 coins) and rejects above it", async () => {
-    await ctx.ledger.credit(userId, 5000, "topup"); // afford a $50 stake → balance 5100
+    await ctx.ledger.credit(userId, "coin", 5000, "topup"); // afford a $50 stake → balance 5100
     const r = await rounds.open(userId, { asset: "SOL", dir: 1, lev: 50, stake: 5000 });
     expect(r.stake).toBe(5000);
     await rounds.close(userId, r.id, "cashout"); // clear the open round
@@ -108,7 +108,7 @@ describe("rounds.close", () => {
     expect(res.outcome).toBe("cashout");
     expect(res.equity).toBeCloseTo(1.5, 9);
     expect(res.payoutCoins).toBe(Math.floor(10 * 1.5 * 0.95)); // 14
-    expect(await ctx.ledger.balance(userId)).toBe(90 + 14); // -10 stake +14 payout
+    expect(await ctx.ledger.balance(userId, "coin")).toBe(90 + 14); // -10 stake +14 payout
   });
 
   it("a liquidated close pays nothing and writes no payout entry", async () => {
@@ -117,7 +117,7 @@ describe("rounds.close", () => {
     const res = await rounds.close(userId, r.id, "cashout");
     expect(res.outcome).toBe("liq");
     expect(res.payoutCoins).toBe(0);
-    expect(await ctx.ledger.balance(userId)).toBe(90); // stake forfeited, no credit
+    expect(await ctx.ledger.balance(userId, "coin")).toBe(90); // stake forfeited, no credit
   });
 
   it("settles 'time' when the cap elapsed", async () => {
@@ -144,7 +144,7 @@ describe("rounds.close", () => {
     const second = await rounds.close(userId, r.id, "cashout");
     expect(second.outcome).toBe(first.outcome);
     expect(second.payoutCoins).toBe(first.payoutCoins);
-    expect(await ctx.ledger.balance(userId)).toBe(90 + first.payoutCoins); // credited once
+    expect(await ctx.ledger.balance(userId, "coin")).toBe(90 + first.payoutCoins); // credited once
   });
 
   it("HALTs a close on a stale feed and leaves the round open", async () => {

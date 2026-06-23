@@ -52,7 +52,7 @@ export function makeRounds(deps: RoundsDeps) {
 
     await db.transaction(async (tx: any) => {
       // debitOn takes the per-user advisory lock; the open-round check below is race-free under it.
-      await ledger.debitOn(tx, userId, p.stake, "round_stake", roundId);
+      await ledger.debitOn(tx, userId, "coin", p.stake, "round_stake", roundId);
       const existing = await tx
         .select({ id: rounds.id })
         .from(rounds)
@@ -201,7 +201,7 @@ export function makeRounds(deps: RoundsDeps) {
 
       // pay winnings (skip on 0 — credit rejects 0). Idempotent on (round_payout, roundId).
       if (result.payoutCoins > 0) {
-        await ledger.creditOn(tx, userId, result.payoutCoins, "round_payout", roundId);
+        await ledger.creditOn(tx, userId, "coin", result.payoutCoins, "round_payout", roundId);
       }
       lastMark.delete(roundId); // settled — drop the shown-mark cache
 

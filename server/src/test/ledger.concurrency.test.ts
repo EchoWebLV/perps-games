@@ -18,14 +18,14 @@ describe.skipIf(!URL)("ledger overdraft guard under concurrency", () => {
     const users = makeUsers(raw.db);
     const ledger = makeLedger(raw.db);
     const userId = (await users.upsertByExternalId(`dev:race-${process.pid}-${Math.floor(performance.now())}`)).id;
-    await ledger.credit(userId, 100, "seed");
+    await ledger.credit(userId, "coin", 100, "seed");
 
     const N = 20;
     const results = await Promise.allSettled(
-      Array.from({ length: N }, () => ledger.debit(userId, 100, "round_stake")),
+      Array.from({ length: N }, () => ledger.debit(userId, "coin", 100, "round_stake")),
     );
     const ok = results.filter((r) => r.status === "fulfilled").length;
     expect(ok).toBe(1); // exactly one debit succeeds
-    expect(await ledger.balance(userId)).toBe(0); // never overdrawn
+    expect(await ledger.balance(userId, "coin")).toBe(0); // never overdrawn
   });
 });

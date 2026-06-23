@@ -1,5 +1,10 @@
-import { eq, sql } from "drizzle-orm";
+import { eq, and, sql } from "drizzle-orm";
 import { ledgerEntries } from "../db/schema.js";
+
+export type Asset = "coin" | "cash";
+
+/** reasons that move real USDC — each MUST carry a non-null ref (idempotency cannot be bypassed) */
+const CASH_REASONS = new Set(["deposit", "withdraw_reserve", "withdraw_reverse"]);
 
 function assertPositiveInt(amount: number, label: string): void {
   if (!Number.isInteger(amount) || amount <= 0) {
@@ -7,60 +12,94 @@ function assertPositiveInt(amount: number, label: string): void {
   }
 }
 
+function assertRef(reason: string, ref?: string): void {
+  if (CASH_REASONS.has(reason) && (ref == null || ref === "")) {
+    throw new Error(`reason "${reason}" requires a non-null ref (idempotency)`);
+  }
+}
+
 export function makeLedger(db: any) {
-  /** balance using a given query runner (db or an open tx) */
-  async function balanceOn(q: any, userId: string): Promise<number> {
+  /** balance for one asset bucket, using a given query runner (db or an open tx) */
+  async function balanceOn(q: any, userId: string, asset: Asset): Promise<number> {
     const rows = await q
       .select({ bal: sql<string>`coalesce(sum(${ledgerEntries.delta}), 0)` })
       .from(ledgerEntries)
-      .where(eq(ledgerEntries.userId, userId));
+      .where(and(eq(ledgerEntries.userId, userId), eq(ledgerEntries.asset, asset)));
     return Number(rows[0]?.bal ?? 0);
   }
 
-  /** lock + balance-check + append, WITHIN a caller-provided tx (atomic with sibling writes) */
-  async function debitOn(tx: any, userId: string, amount: number, reason: string, ref?: string): Promise<void> {
-    assertPositiveInt(amount, "debit amount");
-    await tx.execute(sql`select pg_advisory_xact_lock(hashtextextended(${userId}, 0))`);
-    const bal = await balanceOn(tx, userId);
-    if (bal < amount) throw new Error("insufficient balance");
-    await tx.insert(ledgerEntries).values({ userId, delta: -amount, reason, ref: ref ?? null }).onConflictDoNothing();
+  /** per-(user,asset) transaction-scoped advisory lock */
+  async function lock(tx: any, userId: string, asset: Asset): Promise<void> {
+    await tx.execute(sql`select pg_advisory_xact_lock(hashtextextended(${userId} || ':' || ${asset}, 0))`);
   }
 
-  /** append a credit WITHIN a caller-provided tx (idempotent on (reason, ref)) */
-  async function creditOn(tx: any, userId: string, amount: number, reason: string, ref?: string): Promise<void> {
+  /**
+   * lock + balance-check + append, within a caller-provided tx.
+   * Returns true if it debited, false if a (asset,reason,ref) replay was swallowed.
+   */
+  async function debitOn(tx: any, userId: string, asset: Asset, amount: number, reason: string, ref?: string): Promise<boolean> {
+    assertPositiveInt(amount, "debit amount");
+    assertRef(reason, ref);
+    await lock(tx, userId, asset);
+    const bal = await balanceOn(tx, userId, asset);
+    if (bal < amount) throw new Error("insufficient balance");
+    const rows = await tx
+      .insert(ledgerEntries)
+      .values({ userId, asset, delta: -amount, reason, ref: ref ?? null })
+      .onConflictDoNothing()
+      .returning({ id: ledgerEntries.id });
+    return rows.length > 0;
+  }
+
+  /** append a credit within a tx (idempotent on (asset,reason,ref)); true if it posted */
+  async function creditOn(tx: any, userId: string, asset: Asset, amount: number, reason: string, ref?: string): Promise<boolean> {
     assertPositiveInt(amount, "credit amount");
-    await tx.insert(ledgerEntries).values({ userId, delta: amount, reason, ref: ref ?? null }).onConflictDoNothing();
+    assertRef(reason, ref);
+    const rows = await tx
+      .insert(ledgerEntries)
+      .values({ userId, asset, delta: amount, reason, ref: ref ?? null })
+      .onConflictDoNothing()
+      .returning({ id: ledgerEntries.id });
+    return rows.length > 0;
   }
 
   return {
-    /** current balance = sum of all deltas for the user (0 if none) */
-    async balance(userId: string): Promise<number> {
-      return balanceOn(db, userId);
+    async balance(userId: string, asset: Asset): Promise<number> {
+      return balanceOn(db, userId, asset);
     },
     balanceOn,
     debitOn,
     creditOn,
 
-    /** low-level append. delta may be + or -. Prefer credit()/debit(). idempotent on (reason, ref). */
-    async post(userId: string, delta: number, reason: string, ref?: string): Promise<void> {
-      await db.insert(ledgerEntries).values({ userId, delta, reason, ref: ref ?? null }).onConflictDoNothing();
+    /** low-level append. delta may be + or -. Prefer credit()/debit(). idempotent on (asset,reason,ref). */
+    async post(userId: string, asset: Asset, delta: number, reason: string, ref?: string): Promise<boolean> {
+      assertRef(reason, ref);
+      const rows = await db
+        .insert(ledgerEntries)
+        .values({ userId, asset, delta, reason, ref: ref ?? null })
+        .onConflictDoNothing()
+        .returning({ id: ledgerEntries.id });
+      return rows.length > 0;
     },
 
-    async credit(userId: string, amount: number, reason: string, ref?: string): Promise<void> {
+    async credit(userId: string, asset: Asset, amount: number, reason: string, ref?: string): Promise<boolean> {
       assertPositiveInt(amount, "credit amount");
-      await db.insert(ledgerEntries).values({ userId, delta: amount, reason, ref: ref ?? null }).onConflictDoNothing();
+      assertRef(reason, ref);
+      const rows = await db
+        .insert(ledgerEntries)
+        .values({ userId, asset, delta: amount, reason, ref: ref ?? null })
+        .onConflictDoNothing()
+        .returning({ id: ledgerEntries.id });
+      return rows.length > 0;
     },
 
-    async canAfford(userId: string, amount: number): Promise<boolean> {
-      return (await balanceOn(db, userId)) >= amount;
+    async canAfford(userId: string, asset: Asset, amount: number): Promise<boolean> {
+      return (await balanceOn(db, userId, asset)) >= amount;
     },
 
-    /**
-     * Atomically debit `amount` coins, refusing to overdraw. Serializes concurrent
-     * balance mutations for this user with a transaction-scoped advisory lock.
-     */
-    async debit(userId: string, amount: number, reason: string, ref?: string): Promise<void> {
-      await db.transaction((tx: any) => debitOn(tx, userId, amount, reason, ref));
+    /** Atomically debit `amount` of `asset`, refusing to overdraw. Returns false on a (reason,ref) replay. */
+    async debit(userId: string, asset: Asset, amount: number, reason: string, ref?: string): Promise<boolean> {
+      return db.transaction((tx: any) => debitOn(tx, userId, asset, amount, reason, ref));
     },
   };
 }

@@ -45,7 +45,7 @@ export function registerRoutes(server: FastifyInstance, deps: RouteDeps): void {
   const requireUser = makeRequireUser({ users: deps.users, devAuth: deps.devAuth, privyAuth: deps.privyAuth });
 
   server.get("/v1/balance", { preHandler: requireUser }, async (req) => {
-    return { balance: await deps.ledger.balance(req.userId!) };
+    return { balance: await deps.ledger.balance(req.userId!, "coin") };
   });
 
   server.get("/v1/inventory", { preHandler: requireUser }, async (req) => {
@@ -57,10 +57,10 @@ export function registerRoutes(server: FastifyInstance, deps: RouteDeps): void {
     const userId = req.userId!;
     // soft-coin seeding: idempotent on (signup_faucet, userId) — safe to attempt every call
     if (deps.signupFaucet) {
-      await deps.ledger.credit(userId, deps.startBalance, "signup_faucet", userId);
+      await deps.ledger.credit(userId, "coin", deps.startBalance, "signup_faucet", userId);
     }
     const [balance, rows, openRoundId] = await Promise.all([
-      deps.ledger.balance(userId),
+      deps.ledger.balance(userId, "coin"),
       deps.inventory.list(userId),
       deps.rounds.getOpenRoundId(userId),
     ]);
@@ -116,7 +116,7 @@ export function registerRoutes(server: FastifyInstance, deps: RouteDeps): void {
         pnlCoins: res.pnlCoins,
         equity: res.equity,
         exitRaw: res.round.exitRaw,
-        balance: await deps.ledger.balance(req.userId!),
+        balance: await deps.ledger.balance(req.userId!, "coin"),
       };
     } catch (e: any) {
       if (e instanceof FeedHaltError) return reply.code(503).send({ error: "feed_halt" });
@@ -148,8 +148,8 @@ export function registerRoutes(server: FastifyInstance, deps: RouteDeps): void {
     server.post("/v1/dev/grant-coins", { preHandler: requireUser }, async (req, reply) => {
       const parsed = GrantCoins.safeParse(req.body);
       if (!parsed.success) return reply.code(400).send({ error: parsed.error.message });
-      await deps.ledger.credit(req.userId!, parsed.data.amount, "dev_grant");
-      return { balance: await deps.ledger.balance(req.userId!) };
+      await deps.ledger.credit(req.userId!, "coin", parsed.data.amount, "dev_grant");
+      return { balance: await deps.ledger.balance(req.userId!, "coin") };
     });
 
     server.post("/v1/dev/grant-car", { preHandler: requireUser }, async (req, reply) => {
