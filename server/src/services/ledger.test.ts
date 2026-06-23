@@ -30,4 +30,24 @@ describe("ledger asset seam", () => {
     expect(await ctx.ledger.balance(userId, "coin")).toBe(50);
     expect(await ctx.ledger.balance(userId, "cash")).toBe(50);
   });
+
+  it("a replayed withdraw_reserve debit is swallowed and returns false (no double-debit)", async () => {
+    await ctx.ledger.credit(userId, "cash", 1000, "deposit", "fund-1");
+    const first = await ctx.ledger.debit(userId, "cash", 300, "withdraw_reserve", "wd-42");
+    const second = await ctx.ledger.debit(userId, "cash", 300, "withdraw_reserve", "wd-42");
+    expect(first).toBe(true);
+    expect(second).toBe(false);
+    expect(await ctx.ledger.balance(userId, "cash")).toBe(700);
+  });
+
+  it("a duplicate (asset, reason, ref) credit is a no-op and returns false", async () => {
+    expect(await ctx.ledger.credit(userId, "cash", 200, "deposit", "dup-sig")).toBe(true);
+    expect(await ctx.ledger.credit(userId, "cash", 200, "deposit", "dup-sig")).toBe(false);
+    expect(await ctx.ledger.balance(userId, "cash")).toBe(200);
+  });
+
+  it("a cash-moving reason with a null ref throws (idempotency cannot be bypassed)", async () => {
+    await expect(ctx.ledger.credit(userId, "cash", 100, "deposit")).rejects.toThrow(/requires a non-null ref/);
+    await expect(ctx.ledger.debit(userId, "cash", 100, "withdraw_reserve")).rejects.toThrow(/requires a non-null ref/);
+  });
 });
