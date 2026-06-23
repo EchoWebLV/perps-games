@@ -2,5 +2,9 @@
   "name": "perps-games",
   "private": true,
   "version": "0.0.0",
-  "workspaces": ["packages/*", "server"]
+  "workspaces": ["packages/*", "server"],
+  "comment:overrides": "Pin @solana/kit to ONE 5.x copy: @privy-io/node@0.22.0 peers kit ^5.1.0; two kit instances make the branded Address/Transaction types unmergeable at the createSolanaKitSigner boundary (Phase 0 findings, §8 / spec §14a).",
+  "overrides": {
+    "@solana/kit": "5.5.1"
+  }
 }
