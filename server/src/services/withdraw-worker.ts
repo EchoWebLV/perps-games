@@ -30,7 +30,7 @@ import type { Ledger } from "./ledger.js";
 
 /** On-chain status of a sent withdrawal signature. */
 export type ChainStatus = "finalized" | "failed" | "unknown";
-export type ReadChainStatus = (txSig: string | null) => Promise<ChainStatus>;
+export type ReadChainStatus = (txSig: string) => Promise<ChainStatus>;
 
 export function makeWithdrawConfirmer(db: any, ledger: Ledger, readStatus: ReadChainStatus) {
   return {
@@ -38,7 +38,7 @@ export function makeWithdrawConfirmer(db: any, ledger: Ledger, readStatus: ReadC
     async confirm(id: string): Promise<"confirmed" | "reversed" | "needs_review" | "skip"> {
       const rows = await db.select().from(withdrawals).where(eq(withdrawals.id, id));
       const w = rows[0];
-      if (!w || w.status !== "sent") return "skip";
+      if (!w || w.status !== "sent" || !w.txSig) return "skip";
       const status = await readStatus(w.txSig);
       if (status === "finalized") {
         await db.update(withdrawals).set({ status: "confirmed", updatedAt: new Date() }).where(eq(withdrawals.id, id));

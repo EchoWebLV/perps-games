@@ -4,11 +4,14 @@ import { withdrawals } from "../db/schema.js";
 import { eq } from "drizzle-orm";
 import { makeWithdrawProcessor, makeWithdrawConfirmer } from "./withdraw-worker.js";
 
-async function seedWithdrawal(ctx: TestCtx, status: string) {
+async function seedWithdrawal(ctx: TestCtx, status: string, txSig: string | null | undefined = undefined) {
   const u = await ctx.users.upsertByExternalId("privy:did:privy:w");
   const id = crypto.randomUUID();
+  // For "sent" rows: auto-generate a sig unless caller explicitly passes null (to test the guard) or a specific string.
+  const resolvedTxSig = status === "sent" ? (txSig === undefined ? `SIG-${id}` : txSig) : (txSig ?? null);
   await ctx.db.insert(withdrawals).values({
     id, userId: u.id, amountCents: 300, destWallet: "WALLET_W", status,
+    txSig: resolvedTxSig,
     privyIdempotencyKey: `withdraw:${id}`,
   });
   return id;
@@ -74,5 +77,13 @@ describe("withdraw confirmer (never auto-reverse on inference)", () => {
     expect(await proc.confirm(id)).toBe("reversed");
     expect((await ctx.db.select().from(withdrawals).where(eq(withdrawals.id, id)))[0].status).toBe("reversed");
     expect(await ctx.ledger.balance(u, "cash")).toBe(0); // -300 reserve + +300 reverse
+  });
+
+  it("skips a malformed sent row with no txSig (guard, never calls the chain reader)", async () => {
+    let called = false;
+    const id = await seedWithdrawal(ctx, "sent", null); // force txSig null on a sent row
+    const proc = makeWithdrawConfirmer(ctx.db, ctx.ledger, async () => { called = true; return "finalized"; });
+    expect(await proc.confirm(id)).toBe("skip");
+    expect(called).toBe(false); // the guard short-circuits before readStatus
   });
 });
