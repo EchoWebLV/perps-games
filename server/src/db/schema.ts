@@ -65,6 +65,49 @@ export const ledgerEntries = pgTable(
 
 export type LedgerEntry = typeof ledgerEntries.$inferSelect;
 
+/** deposit lifecycle: a confirmed credit, or a quarantined (recorded-not-credited) inbound transfer. */
+export const depositStatus = pgEnum("deposit_status", ["credited", "quarantine"]);
+
+/** one row per observed inbound USDC transfer to the treasury ATA (idempotent on tx_sig). */
+export const deposits = pgTable(
+  "deposits",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    txSig: text("tx_sig").notNull(),
+    userId: uuid("user_id").references(() => users.id),
+    amountBaseUnits: text("amount_base_units").notNull(),
+    amountCents: bigint("amount_cents", { mode: "number" }),
+    mint: text("mint").notNull(),
+    sourceOwner: text("source_owner").notNull(),
+    destAta: text("dest_ata").notNull(),
+    slot: bigint("slot", { mode: "number" }).notNull(),
+    status: depositStatus("status").notNull(),
+    reason: text("reason"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => ({
+    txSigIdx: uniqueIndex("deposits_tx_sig_idx").on(t.txSig),
+    userIdx: index("deposits_user_idx").on(t.userId),
+  }),
+);
+export type Deposit = typeof deposits.$inferSelect;
+
+/** append-only record of confirmed funding wallets; a wallet may back at most ONE account. */
+export const depositSources = pgTable(
+  "deposit_sources",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    userId: uuid("user_id").notNull().references(() => users.id),
+    sourceWallet: text("source_wallet").notNull(),
+    firstSeenTxSig: text("first_seen_tx_sig").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => ({
+    sourceWalletIdx: uniqueIndex("deposit_sources_wallet_idx").on(t.sourceWallet),
+  }),
+);
+export type DepositSourceRow = typeof depositSources.$inferSelect;
+
 /** unlock-only car ownership. one row per owned car; cannot own the same car twice. */
 export const inventory = pgTable(
   "inventory",
