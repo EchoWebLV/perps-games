@@ -50,6 +50,13 @@
       "when": 1782229551380,
       "tag": "0006_many_shotgun",
       "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "7",
+      "when": 1782231562338,
+      "tag": "0007_wakeful_black_cat",
+      "breakpoints": true
     }
   ]
 }
