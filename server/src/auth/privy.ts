@@ -1,4 +1,5 @@
 import { PrivyClient, InvalidAuthTokenError } from "@privy-io/node";
+import { pickEmbeddedSolanaWallet } from "./privy-wallet.js";
 
 /** Identity + embedded-wallet adapter. Verified against @privy-io/node@0.22.0 (snake_case fields). */
 export interface PrivyAuth {
@@ -36,10 +37,9 @@ export function makePrivyAuth(env: PrivyEnv): PrivyAuth | null {
     },
     async fetchSolanaWallet(did) {
       const user = await privy.users()._get(did); // underscore: Stainless reserves get()
-      const w = user.linked_accounts.find(
-        (a: any) => a.type === "wallet" && a.chain_type === "solana" && a.connector_type === "embedded",
-      ) as any;
-      return w ? (w.address as string) : null;
+      return pickEmbeddedSolanaWallet(user.linked_accounts as any, (n) =>
+        console.warn(`[multiple_embedded_solana_wallets] did=${did} count=${n}`),
+      );
     },
   };
 }
