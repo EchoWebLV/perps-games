@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { makeTestDb, type TestCtx } from "../test/harness.js";
 import { withdrawals } from "../db/schema.js";
 import { eq } from "drizzle-orm";
-import { makeWithdrawProcessor } from "./withdraw-worker.js";
+import { makeWithdrawProcessor, makeWithdrawConfirmer } from "./withdraw-worker.js";
 
 async function seedWithdrawal(ctx: TestCtx, status: string) {
   const u = await ctx.users.upsertByExternalId("privy:did:privy:w");
@@ -43,5 +43,36 @@ describe("withdraw processor (approval → signing → sent)", () => {
     await expect(proc.approveAndSend(id)).rejects.toThrow(/privy down/);
     const row = (await ctx.db.select().from(withdrawals).where(eq(withdrawals.id, id)))[0];
     expect(row.status).toBe("signing");
+  });
+});
+
+describe("withdraw confirmer (never auto-reverse on inference)", () => {
+  let ctx: TestCtx;
+  beforeEach(async () => { ctx = await makeTestDb(); });
+  afterEach(async () => { await ctx.close(); });
+
+  it("sent → confirmed on a positive finalized observation", async () => {
+    const id = await seedWithdrawal(ctx, "sent");
+    const proc = makeWithdrawConfirmer(ctx.db, ctx.ledger, async () => "finalized");
+    const r = await proc.confirm(id);
+    expect(r).toBe("confirmed");
+    expect((await ctx.db.select().from(withdrawals).where(eq(withdrawals.id, id)))[0].status).toBe("confirmed");
+  });
+
+  it("sent → needs_review on an UNKNOWN status (cash stays debited; never auto-reversed)", async () => {
+    const id = await seedWithdrawal(ctx, "sent");
+    const proc = makeWithdrawConfirmer(ctx.db, ctx.ledger, async () => "unknown");
+    expect(await proc.confirm(id)).toBe("needs_review");
+    expect((await ctx.db.select().from(withdrawals).where(eq(withdrawals.id, id)))[0].status).toBe("needs_review");
+  });
+
+  it("sent → reversed + cash re-credited ONLY on a landed-but-FAILED tx (no tokens moved)", async () => {
+    const id = await seedWithdrawal(ctx, "sent");
+    const u = (await ctx.db.select().from(withdrawals).where(eq(withdrawals.id, id)))[0].userId;
+    await ctx.ledger.post(u, "cash", -300, "withdraw_reserve", id); // mirror the reserve debit
+    const proc = makeWithdrawConfirmer(ctx.db, ctx.ledger, async () => "failed");
+    expect(await proc.confirm(id)).toBe("reversed");
+    expect((await ctx.db.select().from(withdrawals).where(eq(withdrawals.id, id)))[0].status).toBe("reversed");
+    expect(await ctx.ledger.balance(u, "cash")).toBe(0); // -300 reserve + +300 reverse
   });
 });
