@@ -36,6 +36,9 @@ export function makeUsers(db: any) {
       const existing = await db.select().from(users).where(eq(users.id, id)).limit(1);
       const cur = existing[0] as User | undefined;
       if (cur && cur.walletPublicKey && cur.walletPublicKey !== address) {
+        // TODO(alerting): route [wallet_rebind_attempt] to the real alert sink (spec §12).
+        // A rebind attempt on a real-money payout destination must page, not just log — a bare
+        // console.warn must not be the only signal in a real-money deployment.
         console.warn(`[wallet_rebind_attempt] user=${id} existing=${cur.walletPublicKey} attempted=${address}`);
       }
       return cur as User;

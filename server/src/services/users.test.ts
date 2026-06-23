@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, afterEach } from "vitest";
+import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { makeTestDb, type TestCtx } from "../test/harness.js";
 
 describe("users.setWalletPublicKey", () => {
@@ -28,5 +28,21 @@ describe("users.setWalletPublicKey", () => {
     await ctx.users.setWalletPublicKey(u.id, "WalletSame");
     const again = await ctx.users.setWalletPublicKey(u.id, "WalletSame");
     expect(again.walletPublicKey).toBe("WalletSame");
+  });
+
+  it("alerts exactly once on a DIFFERENT-address rebind, never on first-bind or same-address", async () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    try {
+      const u = await ctx.users.upsertByExternalId("privy:did:privy:alert");
+      await ctx.users.setWalletPublicKey(u.id, "WalletFirst"); // first bind → no alert
+      expect(warn).not.toHaveBeenCalled();
+      await ctx.users.setWalletPublicKey(u.id, "WalletFirst"); // same address → no alert (no fatigue)
+      expect(warn).not.toHaveBeenCalled();
+      await ctx.users.setWalletPublicKey(u.id, "WalletEvil"); // different address → alert once
+      expect(warn).toHaveBeenCalledTimes(1);
+      expect(String(warn.mock.calls[0][0])).toMatch(/\[wallet_rebind_attempt\]/);
+    } finally {
+      warn.mockRestore();
+    }
   });
 });
