@@ -9,6 +9,7 @@ import {
   integer,
   doublePrecision,
   pgEnum,
+  check,
 } from "drizzle-orm/pg-core";
 import { sql } from "drizzle-orm";
 
@@ -29,6 +30,9 @@ export const users = pgTable(
 
 export type User = typeof users.$inferSelect;
 
+/** ledger asset: soft play-money (faucet, never withdrawable) vs USDC-backed real money */
+export const ledgerAsset = pgEnum("ledger_asset", ["coin", "cash"]);
+
 /** append-only money ledger. balance = sum(delta). amounts are INTEGER coins. */
 export const ledgerEntries = pgTable(
   "ledger_entries",
@@ -39,6 +43,8 @@ export const ledgerEntries = pgTable(
       .references(() => users.id),
     /** signed integer coins: credit > 0, debit < 0 */
     delta: bigint("delta", { mode: "number" }).notNull(),
+    /** which money bucket. 'coin' = soft play money; 'cash' = USDC-backed, withdrawable. */
+    asset: ledgerAsset("asset").notNull().default("coin"),
     /** why this entry exists, e.g. "dev_grant" | "round_stake" | "round_payout" */
     reason: text("reason").notNull(),
     /** optional trace/idempotency reference (round id, crate id, deposit tx, ...) */
@@ -47,8 +53,13 @@ export const ledgerEntries = pgTable(
   },
   (t) => ({
     userIdx: index("ledger_user_idx").on(t.userId),
-    // idempotency: a (reason, ref) pair posts at most once (ref is optional).
-    idemIdx: uniqueIndex("ledger_idem_idx").on(t.reason, t.ref).where(sql`${t.ref} is not null`),
+    // idempotency: a (asset, reason, ref) triple posts at most once (ref optional).
+    idemIdx: uniqueIndex("ledger_idem_idx").on(t.asset, t.reason, t.ref).where(sql`${t.ref} is not null`),
+    // cash-moving reasons MUST carry a ref (else one on-chain transfer could credit twice).
+    cashRefChk: check(
+      "ledger_cash_ref_chk",
+      sql`${t.ref} is not null or ${t.reason} not in ('deposit','withdraw_reserve','withdraw_reverse')`,
+    ),
   }),
 );
 
