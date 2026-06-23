@@ -19,6 +19,7 @@ export interface RouteDeps {
   startBalance: number;    // coins to seed on first sight
   devAuth: boolean;
   privyAuth: import("../auth/privy.js").PrivyAuth | null;
+  realMoney: { enabled: boolean; treasuryUsdcAta: string | null };
 }
 
 const GrantCoins = z.object({ amount: z.number().int().positive() });
@@ -69,6 +70,18 @@ export function registerRoutes(server: FastifyInstance, deps: RouteDeps): void {
       balance,
       cars: rows.map((r) => ({ carId: r.carId, acquiredAt: r.acquiredAt })),
       openRoundId,
+    };
+  });
+
+  server.get("/v1/deposit/address", { preHandler: requireUser }, async (req, reply) => {
+    if (!deps.realMoney.enabled || !deps.realMoney.treasuryUsdcAta) {
+      return reply.code(404).send({ error: "deposits_disabled" });
+    }
+    const user = await deps.users.get(req.userId!);
+    return {
+      treasuryUsdcAta: deps.realMoney.treasuryUsdcAta,
+      boundWallet: user?.walletPublicKey ?? null,
+      note: "send USDC from your bound wallet to treasuryUsdcAta; credited after on-chain finality",
     };
   });
 

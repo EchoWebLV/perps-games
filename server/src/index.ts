@@ -22,6 +22,26 @@ async function main(): Promise<void> {
   const db = raw.db;
 
   const ledger = makeLedger(db);
+
+  let depositConfirmer: { start(): void; stop(): void } | undefined;
+  let realMoney = { enabled: false, treasuryUsdcAta: null as string | null };
+  if (env.REAL_MONEY_ENABLED) {
+    const { makeRpcDepositSource } = await import("./solana/deposit-source.js");
+    const { assertUsdcMint } = await import("./solana/mint-assert.js");
+    const { makeDeposits } = await import("./services/deposits.js");
+    const { makeDepositConfirmer } = await import("./services/deposit-worker.js");
+    const source = makeRpcDepositSource(env.SOLANA_RPC_URL!);
+    await assertUsdcMint((m) => source.fetchMintInfo(m), env.USDC_MINT!); // refuse to boot on a bad mint
+    const deposits = makeDeposits(db, ledger, {
+      usdcMint: env.USDC_MINT!, treasuryAta: env.TREASURY_USDC_ATA!,
+      minCents: env.DEPOSIT_MIN_CENTS, maxCents: env.DEPOSIT_MAX_CENTS,
+    });
+    if (env.RUN_CONFIRMER) {
+      depositConfirmer = makeDepositConfirmer({ deposits, source, treasuryAta: env.TREASURY_USDC_ATA!, pollMs: env.DEPOSIT_POLL_MS });
+      depositConfirmer.start();
+    }
+    realMoney = { enabled: true, treasuryUsdcAta: env.TREASURY_USDC_ATA! };
+  }
   // poll rate + HALT tolerance are tunable: the public Hermes REST endpoint can
   // rate-limit a tight 500ms poll, so a too-small stale window flaps into feed_halt.
   const feed = makeHermesFeed({
@@ -50,6 +70,7 @@ async function main(): Promise<void> {
     corsOrigins: env.CORS_ORIGINS.split(",").map((s) => s.trim()),
     devAuth: env.DEV_AUTH && env.NODE_ENV !== "production",
     privyAuth,
+    realMoney,
   });
 
   const addr = await server.listen({ port: env.PORT, host: "0.0.0.0" });
