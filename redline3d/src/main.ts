@@ -90,10 +90,14 @@ let connected = false;
 // reveals, so the × is a readable number you can tap — not a 5Hz flicker that's unreadable at high
 // leverage. You settle at the held value; you can only be liquidated AT a reveal, never mid-hold.
 // The local engine stays only for the smooth car visual + the ~RTT pre-first-mark gap.
-const MARK_HOLD_MS = 1000; // sample-and-hold reveal interval
+const MARK_HOLD_MS = 400; // server-mark poll interval — faster = fresher settle reference + snappier ×
 let serverMark: MarkResult | null = null;
 let marking = false;
 let lastMarkMs = 0;
+// Eased live multiplier. The displayed × glides each frame toward the SERVER mark — the exact value
+// close() settles at — so "what you see" == "what you get". Eased only so it ramps instead of hard-
+// stepping on each feed update; NOT the local-engine prediction, which diverges from the settle.
+let dispEq = 1;
 async function pollMark() {
   const id = roundSync.roundId();
   if (!id || marking) return;
@@ -348,7 +352,7 @@ async function settleVia(reason: "cashout" | "expire", localSnap: Snapshot) {
   const res = await roundSync.close(reason);
   settling = false;
   // reset UI regardless of outcome
-  throttle = 34; game.equity = 1; serverMark = null; chase.setDriving(false);
+  throttle = 34; game.equity = 1; dispEq = 1; serverMark = null; chase.setDriving(false);
   garage.setBusy(false); mapBtn.setVisible(true); upgrades.setBusy(false);
   walletUI.setBusy(false);
   hud.setTimer(CONFIG.MAXSEC, false);
@@ -375,7 +379,19 @@ controls.onLaunch(async () => {
   audio.resume(); radio.resume(); // unlock audio + radio if GO! is the first interaction
   if (!signedIn) { triggerSignIn(); return; } // GO requires sign-in — opens the login; race on the next press
   if (!connected) { hud.setStatus("Can't reach the server — reconnecting…"); return; }
-  if (roundSync.isOpening() || engine.getPhase() === "live") return;  // re-entrancy guard
+  if (settling || roundSync.isOpening() || engine.getPhase() === "live") return; // re-entrancy: don't race an in-flight settle
+
+  // Self-heal a dangling round before opening a new one. A bail whose close couldn't settle
+  // (halted feed / dropped response) leaves a stale local round that the single-round guard would
+  // silently reject — stranding the UI on "Launching…". reconcile() asks the server what's true and
+  // settles or clears it, so ONE GO press recovers the old round AND launches the next.
+  if (roundSync.roundId()) {
+    hud.setStatus("Wrapping up your last round…");
+    const r = await roundSync.reconcile();
+    if (r === "blocked") { controls.setLive(false, "GO!"); hud.setStatus("Last round still settling — try again in a moment."); return; }
+    try { const me = await api.me(); balance = me.balance; hud.setBalance(balance); walletUI.setBalance(balance); } catch { /* keep the displayed balance */ }
+  }
+
   const stake = controls.stake();
   if (balance < stake) { hud.setStatus("Not enough balance — lower your stake."); return; }
   const lev = clampInt(game.lev, 10, 1000);                          // parity: send the clamped value
@@ -384,18 +400,24 @@ controls.onLaunch(async () => {
   try { out = await roundSync.open({ asset: asset as "BTC"|"ETH"|"SOL", dir: controls.dir(), lev, stake }); }
   catch (e: any) {
     const code = e?.code;
-    hud.setStatus(code === "insufficient_balance" ? "Not enough balance — lower your stake."
-      : code === "feed_halt" ? "Feed is down — try again in a moment."
-      : code === "round_already_open" ? "You have a round in progress — it'll settle shortly."
-      : "Can't reach the server — try again.");
+    if (code === "round_already_open") {
+      // the server holds a round this client lost track of — recover it, then the user retries
+      try { const me = await api.me(); if (me.openRoundId) await roundSync.recover(me.openRoundId); } catch { /* retry next press */ }
+      hud.setStatus(roundSync.roundId() ? "Last round still settling — try again in a moment." : "Ready — press GO again.");
+    } else {
+      hud.setStatus(code === "insufficient_balance" ? "Not enough balance — lower your stake."
+        : code === "feed_halt" ? "Feed is down — try again in a moment."
+        : "Can't reach the server — try again.");
+    }
+    controls.setLive(false, "GO!");                                  // never strand the button mid-launch
     return;
   }
-  if (!out) return;
+  if (!out) { controls.setLive(false, "GO!"); hud.setStatus("Couldn't start the round — try again."); return; }
   round.entryPx = out.entryRaw;
   round.dir = controls.dir();
   roundStartMs = out.entryTsUs / 1000;                               // parity: server clock
   engine.launch({ dir: controls.dir(), lev, stake, entryRaw: out.entryRaw, startMs: roundStartMs });
-  serverMark = null; lastMarkMs = 0; // fresh mark for the new round
+  serverMark = null; lastMarkMs = 0; dispEq = 1; // fresh mark + display for the new round
   chase.setDriving(true); // smooth transition from the idle orbit into the chase cam
   controls.setLive(true, "CASH OUT");
   garage.setBusy(true); mapBtn.setVisible(false); upgrades.setBusy(true); walletUI.setBusy(true);
@@ -476,24 +498,28 @@ function frame() {
   if (engine.getPhase() === "live") {
     const nowMs = Date.now();
     if (nowMs - lastMarkMs > MARK_HOLD_MS) { lastMarkMs = nowMs; void pollMark(); } // sample-and-hold: reveal the mark ~1×/s
-    // read-only snapshot (never auto-settles) = the pre-mark fallback; the SERVER mark is authoritative
-    const snap = engine.snapshot(roundPrice, nowMs);
     const m = serverMark;
     const serverTerminal = m ? (m.outcome === "liq" || m.outcome === "cap" || m.outcome === "time") : false;
     const timeUp = (nowMs - roundStartMs) / 1000 >= CONFIG.MAXSEC; // backstop if marks lag at the cap
     if (serverTerminal || timeUp) {
       void settleVia("expire", engine.cashout(roundPrice, nowMs)); // server settles authoritatively
     } else {
-      const eq = m ? m.equity : snap.equity;
-      const buf = m ? m.buffer : snap.buffer;
-      const payC = m ? m.payoutCoins : Math.floor(snap.payout);
-      game.equity = eq;
-      hud.setMultiplier(eq, "live");
-      controls.setBuffer(buf);              // the bail button IS the liquidation bar
+      // SEE == SETTLE: the live ×, payout and liq-buffer track the SERVER mark — the exact value
+      // close() settles a cashout at (it settles at the last mark the client was shown). The × is
+      // EASED toward it so it ramps instead of hard-stepping on each feed update; the payout/buffer
+      // and the win/lose colour read the RAW mark so the money number is always truthful. The local
+      // engine is only the car visual + the pre-first-mark fallback (before any mark has landed).
+      const fb = engine.snapshot(roundPrice, nowMs);  // fallback until the first server mark lands
+      const trueEq = m ? m.equity : fb.equity;        // the value you will actually settle for
+      const k = 1 - Math.exp(-dt / 0.09);             // fps-independent ease; locks onto each mark well within 1s
+      dispEq += (trueEq - dispEq) * k;
+      game.equity = dispEq;
+      hud.setMultiplier(Math.max(0, dispEq), "live");
+      controls.setBuffer(Math.max(0, Math.min(1, m ? m.buffer : fb.buffer))); // the bail button IS the liquidation bar
       hud.setTimer(CONFIG.MAXSEC - (nowMs - roundStartMs) / 1000, true);
-      car.setEquity("live", eq);
-      const win = eq >= 1;
-      controls.setLive(true, `${win ? "CASH OUT" : "BAIL"} ${usd(payC)}`, !win);
+      car.setEquity("live", Math.max(0, dispEq));
+      const payC = m ? m.payoutCoins : Math.floor(fb.payout);
+      controls.setLive(true, `${trueEq >= 1 ? "CASH OUT" : "BAIL"} ${usd(payC)}`, trueEq < 1);
     }
   } else {
     car.setEquity("idle", 1);
