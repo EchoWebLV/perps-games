@@ -14,4 +14,19 @@ describe("users.setWalletPublicKey", () => {
     const reread = await ctx.users.get(u.id);
     expect(reread!.walletPublicKey).toBe("So1anaAddr111");
   });
+
+  it("is set-once: a second bind to a DIFFERENT address is ignored", async () => {
+    const u = await ctx.users.upsertByExternalId("privy:did:privy:xyz");
+    await ctx.users.setWalletPublicKey(u.id, "WalletAAA");
+    const after = await ctx.users.setWalletPublicKey(u.id, "WalletBBB");
+    expect(after.walletPublicKey).toBe("WalletAAA");
+    expect((await ctx.users.get(u.id))!.walletPublicKey).toBe("WalletAAA");
+  });
+
+  it("is idempotent: re-binding the SAME address is a no-op", async () => {
+    const u = await ctx.users.upsertByExternalId("privy:did:privy:qqq");
+    await ctx.users.setWalletPublicKey(u.id, "WalletSame");
+    const again = await ctx.users.setWalletPublicKey(u.id, "WalletSame");
+    expect(again.walletPublicKey).toBe("WalletSame");
+  });
 });

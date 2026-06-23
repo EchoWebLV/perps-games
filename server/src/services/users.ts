@@ -1,4 +1,4 @@
-import { eq } from "drizzle-orm";
+import { eq, and, isNull } from "drizzle-orm";
 import { users, type User } from "../db/schema.js";
 
 export function makeUsers(db: any) {
@@ -21,9 +21,24 @@ export function makeUsers(db: any) {
       const rows = await db.select().from(users).where(eq(users.id, id)).limit(1);
       return rows[0];
     },
+    /**
+     * Bind the user's payout wallet — SET-ONCE. Only writes when currently null.
+     * A second bind to a different address is a rebind attempt: ignored + alerted (returns the
+     * existing row unchanged). Re-binding the same address is a harmless no-op.
+     */
     async setWalletPublicKey(id: string, address: string): Promise<User> {
-      const rows = await db.update(users).set({ walletPublicKey: address }).where(eq(users.id, id)).returning();
-      return rows[0];
+      const rows = await db
+        .update(users)
+        .set({ walletPublicKey: address })
+        .where(and(eq(users.id, id), isNull(users.walletPublicKey)))
+        .returning();
+      if (rows[0]) return rows[0];
+      const existing = await db.select().from(users).where(eq(users.id, id)).limit(1);
+      const cur = existing[0] as User | undefined;
+      if (cur && cur.walletPublicKey && cur.walletPublicKey !== address) {
+        console.warn(`[wallet_rebind_attempt] user=${id} existing=${cur.walletPublicKey} attempted=${address}`);
+      }
+      return cur as User;
     },
   };
 }
