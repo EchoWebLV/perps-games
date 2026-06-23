@@ -200,12 +200,12 @@ Net `O ≥ L` alone under-counts exactly the crash/uncertainty cases that lose m
 
 ---
 
-## 15. Open decisions (need user sign-off at spec review)
+## 15. Decisions (defaults adopted 2026-06-23; revisitable before the relevant phase)
 
-1. **Anti-rinse policy (§10):** play-through ratio vs deposit-hold-before-withdraw vs both — and the v1 KYC/OFAC/SAR posture. *Recommended:* a short deposit hold (e.g. funds withdrawable only after N hours) **and** a minimal play-through, plus OFAC screen of the bound wallet; full KYC deferred until caps lift but the decision documented.
-2. **ATA-creation rent (§9):** treasury-sponsored (better UX, griefable) vs user-borne (removes amplifier). *Recommended:* treasury-sponsored at tiny caps + rent alert; revisit at scale.
-3. **Independent approver infra (§6/§9):** where the off-host quorum/approver key lives (separate Railway service? KMS? a second cloud?). Needs an owner.
-4. **Two-RPC providers (§5/§8):** which two independent mainnet RPCs (Helius / Triton / QuickNode).
+1. **Anti-rinse policy (§10): DECIDED** — a short deposit **hold** (funds withdrawable only after N hours, `WITHDRAW_HOLD_HOURS`) **and** a minimal **play-through** requirement, plus an **OFAC screen** of the bound wallet. Full KYC **deferred** until caps lift, but the threshold/posture is documented now. (This is the load-bearing product+legal call; flagged as revisitable if the user wants freer cash-out.)
+2. **ATA-creation rent (§9): DECIDED** — **treasury-sponsored** at tiny caps + cumulative-rent alert; revisit (shift to user-borne) at scale if griefed.
+3. **Independent approver infra (§6/§9): OPEN — resolve before Phase 2.** Where the off-host quorum/approver key lives (separate service / KMS / second cloud). Needs a named owner; does not block Phase 0/1.
+4. **Two-RPC providers (§5/§8): OPEN — resolve before Phase 1 confirmer.** Pick two independent mainnet RPCs (Helius / Triton / QuickNode).
 
 ---
 
