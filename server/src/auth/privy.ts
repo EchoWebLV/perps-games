@@ -38,6 +38,9 @@ export function makePrivyAuth(env: PrivyEnv): PrivyAuth | null {
     async fetchSolanaWallet(did) {
       const user = await privy.users()._get(did); // underscore: Stainless reserves get()
       return pickEmbeddedSolanaWallet(user.linked_accounts as any, (n) =>
+        // TODO(alerting): route [multiple_embedded_solana_wallets] to the real alert sink
+        // (spec §12), as with wallet_rebind_attempt — a bare console.warn must not be the
+        // only signal for an ambiguous real-money payout identity in a real-money deployment.
         console.warn(`[multiple_embedded_solana_wallets] did=${did} count=${n}`),
       );
     },

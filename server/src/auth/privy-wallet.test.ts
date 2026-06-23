@@ -20,14 +20,21 @@ describe("pickEmbeddedSolanaWallet", () => {
     expect(pickEmbeddedSolanaWallet(accts as any)).toBe("EmbSol");
   });
 
-  it("is deterministic across >1 embedded solana wallets (earliest-verified wins) and alerts", () => {
-    let alerted = 0;
-    const picked = pickEmbeddedSolanaWallet([emb("Bbb", 200), emb("Aaa", 100)] as any, () => { alerted++; });
-    expect(picked).toBe("Aaa");
-    expect(alerted).toBe(1);
+  it("does NOT alert when there is exactly one embedded solana wallet", () => {
+    const calls: number[] = [];
+    expect(pickEmbeddedSolanaWallet([emb("OnlyOne", 100)] as any, (n) => calls.push(n))).toBe("OnlyOne");
+    expect(calls).toEqual([]);
   });
 
-  it("falls back to address order when timestamps are equal/absent", () => {
+  it("is deterministic across >1 embedded solana wallets (earliest-verified wins) and alerts with the count", () => {
+    const calls: number[] = [];
+    const picked = pickEmbeddedSolanaWallet([emb("Bbb", 200), emb("Aaa", 100)] as any, (n) => calls.push(n));
+    expect(picked).toBe("Aaa");
+    expect(calls).toEqual([2]); // fired exactly once, with the true count
+  });
+
+  it("falls back to address order when timestamps are equal/absent (input-order-independent)", () => {
     expect(pickEmbeddedSolanaWallet([emb("Zzz"), emb("Aaa")] as any)).toBe("Aaa");
+    expect(pickEmbeddedSolanaWallet([emb("Aaa"), emb("Zzz")] as any)).toBe("Aaa");
   });
 });
