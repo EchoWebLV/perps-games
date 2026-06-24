@@ -10,6 +10,7 @@ export interface CloseResult { outcome: string; payoutCoins: number; pnlCoins: n
 /** live read-only mark: the server's CURRENT equity for an open round (what the client displays) */
 export interface MarkResult { status: "open" | "settled"; stale: boolean; outcome: string | null; equity: number; payoutCoins: number; buffer: number; }
 export interface WalletBalanceResult { wallet: string | null; balance: number; }
+export interface PlayPaymentConfirmResult { status: "credited" | "duplicate" | "pending" | "rejected"; balance: number; amountCents?: number; reason?: string; }
 
 export type ApiErrorCode =
   | "unauthorized" | "insufficient_balance" | "round_already_open" | "round_not_open"
@@ -40,6 +41,8 @@ export interface Api {
   depositBuild(amountCents: number): Promise<{ txBase64: string }>;
   /** build the USDC payment tx for one play (Privy wallet → vault) */
   playPaymentBuild(amountCents: number): Promise<{ txBase64: string }>;
+  /** verify and credit the exact play payment signature returned by Privy */
+  playPaymentConfirm(txSig: string): Promise<PlayPaymentConfirmResult>;
   /** on-chain USDC currently sitting in the user's Privy wallet */
   walletBalance(): Promise<WalletBalanceResult>;
 }
@@ -90,6 +93,7 @@ export function createApi(opts: ApiOpts = {}): Api {
     markRound: (id) => call<MarkResult>("GET", `/v1/round/${id}/mark`),
     depositBuild: (amountCents) => call<{ txBase64: string }>("POST", "/v1/deposit/build", { amountCents }),
     playPaymentBuild: (amountCents) => call<{ txBase64: string }>("POST", "/v1/play/payment/build", { amountCents }),
+    playPaymentConfirm: (txSig) => call<PlayPaymentConfirmResult>("POST", "/v1/play/payment/confirm", { txSig }),
     walletBalance: () => call<WalletBalanceResult>("GET", "/v1/wallet/usdc-balance"),
   };
 }

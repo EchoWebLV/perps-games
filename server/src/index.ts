@@ -31,6 +31,7 @@ async function main(): Promise<void> {
   let depositConfirmer: { start(): void; stop(): void } | undefined;
   let realMoney = { enabled: false, treasuryUsdcAta: null as string | null };
   let depositTxBuilder: DepositTxBuilder | null = null;
+  let playPaymentConfirmer: import("./services/play-payments.js").PlayPaymentConfirmer | null = null;
   let walletBalanceReader: import("./services/wallet-balance.js").WalletBalanceReader | null = null;
   let withdrawalsSvc: import("./services/withdrawals.js").Withdrawals | undefined;
   let payoutSigner: import("./solana/withdraw-signer.js").WithdrawSigner | null = null;
@@ -39,6 +40,7 @@ async function main(): Promise<void> {
     const { assertUsdcMint } = await import("./solana/mint-assert.js");
     const { makeDeposits } = await import("./services/deposits.js");
     const { makeDepositConfirmer } = await import("./services/deposit-worker.js");
+    const { makePlayPaymentConfirmer } = await import("./services/play-payments.js");
     const { makeRpcWalletBalanceReader } = await import("./services/wallet-balance.js");
     const source = makeRpcDepositSource(env.SOLANA_RPC_URL!);
     await assertUsdcMint((m) => source.fetchMintInfo(m), env.USDC_MINT!); // refuse to boot on a bad mint
@@ -50,6 +52,7 @@ async function main(): Promise<void> {
       depositConfirmer = makeDepositConfirmer({ deposits, source, treasuryAta: env.TREASURY_USDC_ATA!, pollMs: env.DEPOSIT_POLL_MS });
       depositConfirmer.start();
     }
+    playPaymentConfirmer = makePlayPaymentConfirmer({ deposits, source, treasuryAta: env.TREASURY_USDC_ATA! });
     realMoney = { enabled: true, treasuryUsdcAta: env.TREASURY_USDC_ATA! };
 
     let signFeePayerTx: ((txBase64: string) => Promise<string>) | undefined;
@@ -127,6 +130,7 @@ async function main(): Promise<void> {
     privyAuth,
     realMoney,
     depositTxBuilder,
+    playPaymentConfirmer,
     walletBalanceReader,
     depositMinCents: env.DEPOSIT_MIN_CENTS,
     depositMaxCents: env.DEPOSIT_MAX_CENTS,

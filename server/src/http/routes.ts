@@ -22,6 +22,7 @@ export interface RouteDeps {
   privyAuth: import("../auth/privy.js").PrivyAuth | null;
   realMoney: { enabled: boolean; treasuryUsdcAta: string | null };
   depositTxBuilder: import("../services/deposit-tx.js").DepositTxBuilder | null;
+  playPaymentConfirmer: import("../services/play-payments.js").PlayPaymentConfirmer | null;
   walletBalanceReader: import("../services/wallet-balance.js").WalletBalanceReader | null;
   depositMinCents: number;
   depositMaxCents: number;
@@ -39,6 +40,8 @@ const OpenRound = z.object({
   lev: z.number().int().min(10).max(1000),
   stake: z.number().int().min(1).max(5000), // cents: 1¢ floor … $50.00 cap
 });
+const PLAY_PAYMENT_MIN_CENTS = 1;
+const PLAY_PAYMENT_MAX_CENTS = 5000;
 const RoundActionBody = z
   .object({
     roundId: z.string().uuid(),
@@ -94,11 +97,12 @@ export function registerRoutes(server: FastifyInstance, deps: RouteDeps): void {
   });
 
   const DepositBuildBody = z.object({ amountCents: z.number().int().positive() });
-  const buildUserToVaultTx = async (req: any, reply: any, disabledError: string) => {
+  const PlayPaymentConfirmBody = z.object({ txSig: z.string().min(1) });
+  const buildUserToVaultTx = async (req: any, reply: any, disabledError: string, minCents: number, maxCents: number) => {
     if (!deps.depositTxBuilder) return reply.code(404).send({ error: disabledError });
     const body = DepositBuildBody.safeParse(req.body);
     if (!body.success) return reply.code(400).send({ error: "bad_request" });
-    if (body.data.amountCents < deps.depositMinCents || body.data.amountCents > deps.depositMaxCents)
+    if (body.data.amountCents < minCents || body.data.amountCents > maxCents)
       return reply.code(400).send({ error: "amount_out_of_bounds" });
     const user = await deps.users.get(req.userId!);
     if (!user?.walletPublicKey) return reply.code(409).send({ error: "no_bound_wallet" });
@@ -106,11 +110,19 @@ export function registerRoutes(server: FastifyInstance, deps: RouteDeps): void {
     return { txBase64 };
   };
   server.post("/v1/deposit/build", { preHandler: requireUser }, async (req, reply) => {
-    return buildUserToVaultTx(req, reply, "deposits_disabled");
+    return buildUserToVaultTx(req, reply, "deposits_disabled", deps.depositMinCents, deps.depositMaxCents);
   });
 
   server.post("/v1/play/payment/build", { preHandler: requireUser }, async (req, reply) => {
-    return buildUserToVaultTx(req, reply, "play_payments_disabled");
+    return buildUserToVaultTx(req, reply, "play_payments_disabled", PLAY_PAYMENT_MIN_CENTS, PLAY_PAYMENT_MAX_CENTS);
+  });
+
+  server.post("/v1/play/payment/confirm", { preHandler: requireUser }, async (req, reply) => {
+    if (!deps.playPaymentConfirmer) return reply.code(404).send({ error: "play_payment_confirm_disabled" });
+    const body = PlayPaymentConfirmBody.safeParse(req.body);
+    if (!body.success) return reply.code(400).send({ error: "bad_request" });
+    const out = await deps.playPaymentConfirmer.confirm(body.data.txSig);
+    return { ...out, balance: await deps.ledger.balance(req.userId!, deps.stakeAsset) };
   });
 
   server.get("/v1/wallet/usdc-balance", { preHandler: requireUser }, async (req, reply) => {

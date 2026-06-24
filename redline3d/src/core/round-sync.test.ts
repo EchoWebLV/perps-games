@@ -78,6 +78,7 @@ function fakeApi(over: Partial<Api> = {}): Api {
     markRound: async () => ({ status: "open", stale: false, outcome: "cashout", equity: 1.4, payoutCoins: 7, buffer: 1 }),
     depositBuild: async () => ({ txBase64: "" }),
     playPaymentBuild: async () => ({ txBase64: "" }),
+    playPaymentConfirm: async () => ({ status: "credited", balance: 0 }),
     walletBalance: async () => ({ wallet: null, balance: 0 }),
     ...over,
   };

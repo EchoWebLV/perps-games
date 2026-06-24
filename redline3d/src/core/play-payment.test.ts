@@ -20,6 +20,23 @@ describe("ensurePlayPayment", () => {
     expect(balance).toBe(100);
   });
 
+  it("returns immediately when payment confirmation already reports the credited server balance", async () => {
+    const pollServerBalance = vi.fn(async () => 0);
+
+    const balance = await ensurePlayPayment({
+      walletBalance: 150,
+      currentServerBalance: 50,
+      playAmount: 25,
+      pay: async () => 75,
+      pollServerBalance,
+      delay: async () => {},
+      maxPolls: 3,
+    });
+
+    expect(balance).toBe(75);
+    expect(pollServerBalance).not.toHaveBeenCalled();
+  });
+
   it("rejects before building a transaction when the Privy wallet does not cover the play amount", async () => {
     const pay = vi.fn(async () => {});
 

@@ -424,8 +424,17 @@ controls.onLaunch(async () => {
         playAmount,
         pay: async (amountCents) => {
           const { txBase64 } = await api.playPaymentBuild(amountCents);
-          await auth.signAndSend(txBase64);
-          try { walletBalance = (await api.walletBalance()).balance; syncDisplayedBalance(); walletUI.setBalance(balance); } catch { /* keep last wallet read */ }
+          const txSig = await auth.signAndSend(txBase64);
+          hud.setStatus("Confirming payment on Solana...");
+          for (let i = 0; i < 12; i++) {
+            const confirmed = await api.playPaymentConfirm(txSig);
+            serverBalance = confirmed.balance;
+            try { walletBalance = (await api.walletBalance()).balance; syncDisplayedBalance(); walletUI.setBalance(balance); } catch { /* keep last wallet read */ }
+            if (confirmed.status === "credited" || confirmed.status === "duplicate") return confirmed.balance;
+            if (confirmed.status === "rejected") throw new Error(`play_payment_rejected:${confirmed.reason ?? "unknown"}`);
+            await new Promise<void>((r) => setTimeout(r, 1500));
+          }
+          throw new PlayPaymentConfirmationError();
         },
         pollServerBalance: async () => {
           const me = await api.me();

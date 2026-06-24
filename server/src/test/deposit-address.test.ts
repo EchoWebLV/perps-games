@@ -79,4 +79,53 @@ describe("POST /v1/play/payment/build", () => {
     expect(res.statusCode).toBe(200);
     expect(res.json()).toEqual({ txBase64: "tx-play" });
   });
+
+  it("allows a $0.25 play payment even when deposits require a $1.00 minimum", async () => {
+    ctx = await makeTestDb({
+      depositMinCents: 100,
+      depositTxBuilder: {
+        async buildForUser(wallet, amountCents) {
+          expect(wallet).toBe("WalletAAA");
+          expect(amountCents).toBe(25);
+          return { txBase64: "tx-play-quarter" };
+        },
+      },
+    });
+    const user = await ctx.users.upsertByExternalId("dev:mallory");
+    await ctx.users.setWalletPublicKey(user.id, "WalletAAA");
+
+    const res = await ctx.server.inject({ method: "POST", url: "/v1/play/payment/build", headers: H, payload: { amountCents: 25 } });
+
+    expect(res.statusCode).toBe(200);
+    expect(res.json()).toEqual({ txBase64: "tx-play-quarter" });
+  });
+});
+
+describe("POST /v1/play/payment/confirm", () => {
+  let ctx: TestCtx;
+  afterEach(async () => { await ctx?.close(); });
+
+  it("confirms the exact sent payment signature and returns the credited cash balance", async () => {
+    ctx = await makeTestDb({
+      stakeAsset: "cash",
+      playPaymentConfirmer: {
+        async confirm(txSig: string) {
+          expect(txSig).toBe("sig-play-123");
+          const user = await ctx.users.upsertByExternalId("dev:mallory");
+          await ctx.ledger.credit(user.id, "cash", 25, "deposit", txSig);
+          return { status: "credited" };
+        },
+      },
+    });
+
+    const res = await ctx.server.inject({
+      method: "POST",
+      url: "/v1/play/payment/confirm",
+      headers: H,
+      payload: { txSig: "sig-play-123" },
+    });
+
+    expect(res.statusCode).toBe(200);
+    expect(res.json()).toEqual({ status: "credited", balance: 25 });
+  });
 });

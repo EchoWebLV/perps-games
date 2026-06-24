@@ -16,7 +16,7 @@ export interface EnsurePlayPaymentOpts {
   walletBalance: number | null;
   currentServerBalance?: number;
   playAmount: number;
-  pay: (amountCents: number) => Promise<void>;
+  pay: (amountCents: number) => Promise<number | void>;
   pollServerBalance: () => Promise<number>;
   maxPolls?: number;
   pollMs?: number;
@@ -29,7 +29,8 @@ export async function ensurePlayPayment(opts: EnsurePlayPaymentOpts): Promise<nu
   }
 
   const requiredServerBalance = (opts.currentServerBalance ?? 0) + opts.playAmount;
-  await opts.pay(opts.playAmount);
+  const confirmedBalance = await opts.pay(opts.playAmount);
+  if (typeof confirmedBalance === "number" && confirmedBalance >= requiredServerBalance) return confirmedBalance;
 
   const delay = opts.delay ?? ((ms: number) => new Promise<void>((r) => setTimeout(r, ms)));
   const maxPolls = opts.maxPolls ?? 10;
