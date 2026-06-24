@@ -50,4 +50,19 @@ describe("ledger asset seam", () => {
     await expect(ctx.ledger.credit(userId, "cash", 100, "deposit")).rejects.toThrow(/requires a non-null ref/);
     await expect(ctx.ledger.debit(userId, "cash", 100, "withdraw_reserve")).rejects.toThrow(/requires a non-null ref/);
   });
+
+  it("postOn appends a signed delta within a tx, allows a negative balance, and is idempotent", async () => {
+    // the house counterparty pays a win it isn't funded for → balance goes red, but the append must NOT block
+    const first = await ctx.db.transaction((tx: any) =>
+      ctx.ledger.postOn(tx, userId, "cash", -250, "round_payout_house", "round-1"),
+    );
+    expect(first).toBe(true);
+    expect(await ctx.ledger.balance(userId, "cash")).toBe(-250); // allowed to go negative
+
+    const replay = await ctx.db.transaction((tx: any) =>
+      ctx.ledger.postOn(tx, userId, "cash", -250, "round_payout_house", "round-1"),
+    );
+    expect(replay).toBe(false); // (asset, reason, ref) replay swallowed
+    expect(await ctx.ledger.balance(userId, "cash")).toBe(-250); // no double-post
+  });
 });

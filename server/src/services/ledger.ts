@@ -51,6 +51,22 @@ export function makeLedger(db: any) {
     return rows.length > 0;
   }
 
+  /**
+   * Raw signed append within a caller-provided tx. `delta` may be + or - and is NOT
+   * balance-checked — the balance is allowed to go negative (used for the house counterparty,
+   * whose bankroll legitimately runs red when under-capitalized). No advisory lock is taken:
+   * a pure append has no read-modify-write to serialize. Idempotent on (asset, reason, ref).
+   */
+  async function postOn(tx: any, userId: string, asset: Asset, delta: number, reason: string, ref?: string): Promise<boolean> {
+    assertRef(reason, ref);
+    const rows = await tx
+      .insert(ledgerEntries)
+      .values({ userId, asset, delta, reason, ref: ref ?? null })
+      .onConflictDoNothing()
+      .returning({ id: ledgerEntries.id });
+    return rows.length > 0;
+  }
+
   /** append a credit within a tx (idempotent on (asset,reason,ref)); true if it posted */
   async function creditOn(tx: any, userId: string, asset: Asset, amount: number, reason: string, ref?: string): Promise<boolean> {
     assertPositiveInt(amount, "credit amount");
@@ -70,16 +86,11 @@ export function makeLedger(db: any) {
     balanceOn,
     debitOn,
     creditOn,
+    postOn,
 
     /** low-level append. delta may be + or -. Prefer credit()/debit(). idempotent on (asset,reason,ref). */
     async post(userId: string, asset: Asset, delta: number, reason: string, ref?: string): Promise<boolean> {
-      assertRef(reason, ref);
-      const rows = await db
-        .insert(ledgerEntries)
-        .values({ userId, asset, delta, reason, ref: ref ?? null })
-        .onConflictDoNothing()
-        .returning({ id: ledgerEntries.id });
-      return rows.length > 0;
+      return db.transaction((tx: any) => postOn(tx, userId, asset, delta, reason, ref));
     },
 
     async credit(userId: string, asset: Asset, amount: number, reason: string, ref?: string): Promise<boolean> {
