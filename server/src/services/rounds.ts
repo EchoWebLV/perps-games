@@ -17,6 +17,10 @@ export interface RoundsDeps {
   db: any;
   ledger: Ledger;
   feed: PriceFeed;
+  /** the reserved house counterparty (system:house) the round P&L flows to/from. */
+  houseUserId: string;
+  /** ledger asset rounds stake + pay out in — "coin" soft play money / "cash" real USDC-backed; default "coin". */
+  stakeAsset?: "coin" | "cash";
   /** injectable wall clock (ms) for the mark-freshness window; defaults to Date.now */
   nowMs?: () => number;
 }
@@ -27,7 +31,8 @@ const MIN_STAKE = 1;
 const MAX_STAKE = 5000;
 
 export function makeRounds(deps: RoundsDeps) {
-  const { db, ledger, feed } = deps;
+  const { db, ledger, feed, houseUserId } = deps;
+  const stakeAsset = deps.stakeAsset ?? "coin";
   const now = deps.nowMs ?? (() => Date.now());
   // The last price/ts the server SHOWED the client via mark(), per open round. close() settles at
   // this (when fresh) so "what you see == what you settle for" — not a newer feed tick. Cleared on
@@ -52,7 +57,7 @@ export function makeRounds(deps: RoundsDeps) {
 
     await db.transaction(async (tx: any) => {
       // debitOn takes the per-user advisory lock; the open-round check below is race-free under it.
-      await ledger.debitOn(tx, userId, "coin", p.stake, "round_stake", roundId);
+      await ledger.debitOn(tx, userId, stakeAsset, p.stake, "round_stake", roundId);
       const existing = await tx
         .select({ id: rounds.id })
         .from(rounds)
@@ -74,6 +79,9 @@ export function makeRounds(deps: RoundsDeps) {
         entryTsUs,
         status: "open",
       });
+      // conserved: the stake escrows into the house bankroll (own reason — the idem index is
+      // (asset,reason,ref) without userId, so it must not collide with the player's round_stake leg).
+      await ledger.creditOn(tx, houseUserId, stakeAsset, p.stake, "round_stake_house", roundId);
     });
 
     const row = await db.select().from(rounds).where(eq(rounds.id, roundId)).limit(1);
@@ -201,7 +209,10 @@ export function makeRounds(deps: RoundsDeps) {
 
       // pay winnings (skip on 0 — credit rejects 0). Idempotent on (round_payout, roundId).
       if (result.payoutCoins > 0) {
-        await ledger.creditOn(tx, userId, "coin", result.payoutCoins, "round_payout", roundId);
+        await ledger.creditOn(tx, userId, stakeAsset, result.payoutCoins, "round_payout", roundId);
+        // house pays the win from its bankroll — raw post so a short bankroll runs NEGATIVE rather than
+        // blocking the player's payout (under-capitalization is surfaced, not prevented).
+        await ledger.postOn(tx, houseUserId, stakeAsset, -result.payoutCoins, "round_payout_house", roundId);
       }
       lastMark.delete(roundId); // settled — drop the shown-mark cache
 

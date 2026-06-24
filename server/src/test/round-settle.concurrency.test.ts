@@ -3,6 +3,7 @@ import { createDb, type Db } from "../db/client.js";
 import { makeUsers } from "../services/users.js";
 import { makeLedger } from "../services/ledger.js";
 import { makeRounds, type Rounds } from "../services/rounds.js";
+import { ensureHouseUserId } from "../services/house.js";
 import { makeStubFeed, type StubFeed } from "../feed/stub.js";
 
 const URL = process.env.TEST_DATABASE_URL;
@@ -20,7 +21,8 @@ describe.skipIf(!URL)("concurrent double-close settles exactly once", () => {
     const users = makeUsers(raw.db);
     ledger = makeLedger(raw.db);
     feed = makeStubFeed({ SOL: { price: 100, tsUs: 1_000_000 } });
-    rounds = makeRounds({ db: raw.db, ledger, feed });
+    const houseUserId = await ensureHouseUserId(users);
+    rounds = makeRounds({ db: raw.db, ledger, feed, houseUserId });
     const u = await users.upsertByExternalId(`dev:conc-${Date.now()}`);
     userId = u.id;
     await ledger.credit(userId, "coin", 100, "dev_grant");

@@ -12,7 +12,7 @@ let userId: string;
 beforeEach(async () => {
   ctx = await makeTestDb();
   feed = makeStubFeed({ SOL: { price: 100, tsUs: 1_000_000 } });
-  rounds = makeRounds({ db: ctx.db, ledger: ctx.ledger, feed });
+  rounds = makeRounds({ db: ctx.db, ledger: ctx.ledger, feed, houseUserId: ctx.houseUserId });
   const u = await ctx.users.upsertByExternalId("dev:alice");
   userId = u.id;
   await ctx.ledger.credit(userId, "coin", 100, "dev_grant");
@@ -62,6 +62,45 @@ describe("rounds.open", () => {
     expect(r.stake).toBe(5000);
     await rounds.close(userId, r.id, "cashout"); // clear the open round
     await expect(rounds.open(userId, { asset: "SOL", dir: 1, lev: 50, stake: 5001 })).rejects.toThrow(); // > $50 cap
+  });
+});
+
+describe("real-money staking (stakeAsset: 'cash')", () => {
+  it("stakes + pays out in cash, leaving the soft-coin balance untouched", async () => {
+    const cashRounds = makeRounds({ db: ctx.db, ledger: ctx.ledger, feed, stakeAsset: "cash", houseUserId: ctx.houseUserId });
+    await ctx.ledger.credit(userId, "cash", 100, "deposit_confirmed", "seed-1"); // cash entries require a ref
+    const r = await cashRounds.open(userId, { asset: "SOL", dir: 1, lev: 50, stake: 10 });
+    expect(await ctx.ledger.balance(userId, "cash")).toBe(90);  // 10 staked FROM cash
+    expect(await ctx.ledger.balance(userId, "coin")).toBe(100); // soft coin untouched
+    const res = await cashRounds.close(userId, r.id, "cashout");
+    expect(await ctx.ledger.balance(userId, "cash")).toBe(90 + res.payoutCoins); // payout credited TO cash
+    expect(await ctx.ledger.balance(userId, "coin")).toBe(100); // still untouched
+  });
+
+  it("is conserved: the round moves cash between the player and the house, minting/burning nothing", async () => {
+    const cashRounds = makeRounds({ db: ctx.db, ledger: ctx.ledger, feed, stakeAsset: "cash", houseUserId: ctx.houseUserId });
+    await ctx.ledger.credit(userId, "cash", 100, "deposit", "seed-conserve");
+    const total = (await ctx.ledger.balance(userId, "cash")) + (await ctx.ledger.balance(ctx.houseUserId, "cash")); // 100 + 0
+    const r = await cashRounds.open(userId, { asset: "SOL", dir: 1, lev: 50, stake: 10 });
+    expect(await ctx.ledger.balance(ctx.houseUserId, "cash")).toBe(10); // stake escrowed INTO the house
+    expect(await ctx.ledger.balance(userId, "cash")).toBe(90);
+    const res = await cashRounds.close(userId, r.id, "cashout");
+    const player = await ctx.ledger.balance(userId, "cash");
+    const house = await ctx.ledger.balance(ctx.houseUserId, "cash");
+    expect(player).toBe(90 + res.payoutCoins);       // player gets the payout
+    expect(house).toBe(10 - res.payoutCoins);         // house pays it from the escrowed stake
+    expect(player + house).toBe(total);               // total cash unchanged — conserved
+  });
+
+  it("pays a winning round in full even when the house bankroll is short (it runs negative)", async () => {
+    const cashRounds = makeRounds({ db: ctx.db, ledger: ctx.ledger, feed, stakeAsset: "cash", houseUserId: ctx.houseUserId });
+    await ctx.ledger.credit(userId, "cash", 100, "deposit", "seed-win"); // house starts at 0 — no bankroll
+    const r = await cashRounds.open(userId, { asset: "SOL", dir: 1, lev: 10, stake: 10 });
+    feed.set("SOL", { price: 105, tsUs: 5_000_000 }); // +5% * 10x → eq 1.5 → payout 14 (> the $0.10 stake)
+    const res = await cashRounds.close(userId, r.id, "cashout");
+    expect(res.payoutCoins).toBe(14);
+    expect(await ctx.ledger.balance(userId, "cash")).toBe(104);         // 100 - 10 + 14, paid in full
+    expect(await ctx.ledger.balance(ctx.houseUserId, "cash")).toBe(-4); // 0 + 10 - 14, bankroll underwater
   });
 });
 
@@ -185,7 +224,7 @@ describe("close settles at the last shown mark (see == get)", () => {
 
   it("falls back to a fresh read when the last mark is stale", async () => {
     let t = 1000;
-    const rounds2 = makeRounds({ db: ctx.db, ledger: ctx.ledger, feed, nowMs: () => t });
+    const rounds2 = makeRounds({ db: ctx.db, ledger: ctx.ledger, feed, nowMs: () => t, houseUserId: ctx.houseUserId });
     const r = await rounds2.open(userId, { asset: "SOL", dir: 1, lev: 10, stake: 10 });
     feed.set("SOL", { price: 105, tsUs: 5_000_000 });
     await rounds2.mark(userId, r.id);                   // mark recorded at t=1000

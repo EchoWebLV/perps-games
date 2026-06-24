@@ -5,6 +5,7 @@ import { makeUsers } from "./services/users.js";
 import { makeLedger } from "./services/ledger.js";
 import { makeInventory } from "./services/inventory.js";
 import { makeRounds } from "./services/rounds.js";
+import { ensureHouseUserId } from "./services/house.js";
 import { makeHermesFeed } from "./feed/hermes.js";
 import { makePrivyAuth } from "./auth/privy.js";
 
@@ -22,6 +23,9 @@ async function main(): Promise<void> {
   const db = raw.db;
 
   const ledger = makeLedger(db);
+  const users = makeUsers(db);
+  // the house counterparty round P&L flows to/from (provisioned once, idempotent).
+  const houseUserId = await ensureHouseUserId(users);
 
   let depositConfirmer: { start(): void; stop(): void } | undefined;
   let realMoney = { enabled: false, treasuryUsdcAta: null as string | null };
@@ -60,7 +64,9 @@ async function main(): Promise<void> {
     staleMs: Number(process.env.FEED_STALE_MS) || undefined,
   });
   feed.start();
-  const rounds = makeRounds({ db, ledger, feed });
+  // Real money ON => rounds stake + pay out in real USDC-backed `cash`; OFF => soft `coin`.
+  const stakeAsset = env.REAL_MONEY_ENABLED ? ("cash" as const) : ("coin" as const);
+  const rounds = makeRounds({ db, ledger, feed, stakeAsset, houseUserId });
   const privyAuth = makePrivyAuth(env);
   // fail loud: production must verify real users — never boot with auth disabled
   if (env.NODE_ENV === "production" && !privyAuth)
@@ -69,11 +75,12 @@ async function main(): Promise<void> {
     );
 
   const server = buildServer({
-    users: makeUsers(db),
+    users,
     ledger,
     inventory: makeInventory(db),
     rounds,
     feed,
+    stakeAsset,
     devEndpoints: env.DEV_ENDPOINTS && env.NODE_ENV !== "production",
     signupFaucet: env.SIGNUP_FAUCET,
     startBalance: env.START_BALANCE,

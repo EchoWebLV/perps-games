@@ -3,6 +3,7 @@ import { makeUsers, type Users } from "../services/users.js";
 import { makeLedger, type Ledger } from "../services/ledger.js";
 import { makeInventory, type Inventory } from "../services/inventory.js";
 import { makeRounds, type Rounds } from "../services/rounds.js";
+import { ensureHouseUserId } from "../services/house.js";
 import { makeStubFeed, type StubFeed } from "../feed/stub.js";
 import { buildServer } from "../http/server.js";
 
@@ -14,12 +15,13 @@ export interface TestCtx {
   inventory: Inventory;
   rounds: Rounds;
   feed: StubFeed;
+  houseUserId: string;
   server: ReturnType<typeof buildServer>;
   close(): Promise<void>;
 }
 
 /** fresh in-memory pglite DB with migrations applied + services wired (stub feed) */
-export async function makeTestDb(opts: { signupFaucet?: boolean; startBalance?: number; corsOrigins?: string[]; devAuth?: boolean; privyAuth?: import("../auth/privy.js").PrivyAuth | null; realMoney?: { enabled: boolean; treasuryUsdcAta: string | null }; withdrawals?: any; withdrawProcessor?: any } = {}): Promise<TestCtx> {
+export async function makeTestDb(opts: { signupFaucet?: boolean; startBalance?: number; corsOrigins?: string[]; devAuth?: boolean; privyAuth?: import("../auth/privy.js").PrivyAuth | null; realMoney?: { enabled: boolean; treasuryUsdcAta: string | null }; withdrawals?: any; withdrawProcessor?: any; stakeAsset?: "coin" | "cash" } = {}): Promise<TestCtx> {
   const raw = createDb(); // pglite
   await raw.runMigrations();
   const db = raw.db;
@@ -28,10 +30,13 @@ export async function makeTestDb(opts: { signupFaucet?: boolean; startBalance?: 
   const ledger = makeLedger(db);
   const inventory = makeInventory(db);
   const feed = makeStubFeed();
-  const rounds = makeRounds({ db, ledger, feed });
+  const stakeAsset = opts.stakeAsset ?? "coin";
+  const houseUserId = await ensureHouseUserId(users);
+  const rounds = makeRounds({ db, ledger, feed, stakeAsset, houseUserId });
 
   const server = buildServer({
     users, ledger, inventory, rounds, feed,
+    stakeAsset,
     devEndpoints: true,
     signupFaucet: opts.signupFaucet ?? false,
     startBalance: opts.startBalance ?? 100,
@@ -43,5 +48,5 @@ export async function makeTestDb(opts: { signupFaucet?: boolean; startBalance?: 
     withdrawProcessor: opts.withdrawProcessor ?? null,
   });
 
-  return { raw, db, users, ledger, inventory, rounds, feed, server, close: () => raw.close() };
+  return { raw, db, users, ledger, inventory, rounds, feed, houseUserId, server, close: () => raw.close() };
 }
