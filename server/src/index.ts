@@ -8,6 +8,7 @@ import { makeRounds } from "./services/rounds.js";
 import { ensureHouseUserId } from "./services/house.js";
 import { makeHermesFeed } from "./feed/hermes.js";
 import { makePrivyAuth } from "./auth/privy.js";
+import { makeDepositTxBuilder, makeRpcBlockhash, type DepositTxBuilder } from "./services/deposit-tx.js";
 
 async function main(): Promise<void> {
   if (!env.DATABASE_URL) throw new Error("DATABASE_URL is required to start the server");
@@ -29,6 +30,7 @@ async function main(): Promise<void> {
 
   let depositConfirmer: { start(): void; stop(): void } | undefined;
   let realMoney = { enabled: false, treasuryUsdcAta: null as string | null };
+  let depositTxBuilder: DepositTxBuilder | null = null;
   let withdrawalsSvc: import("./services/withdrawals.js").Withdrawals | undefined;
   if (env.REAL_MONEY_ENABLED) {
     const { makeRpcDepositSource } = await import("./solana/deposit-source.js");
@@ -46,6 +48,13 @@ async function main(): Promise<void> {
       depositConfirmer.start();
     }
     realMoney = { enabled: true, treasuryUsdcAta: env.TREASURY_USDC_ATA! };
+
+    // unsigned "deposit to game" tx builder (user wallet → treasury ATA); client signs the bytes.
+    depositTxBuilder = makeDepositTxBuilder({
+      usdcMint: env.USDC_MINT!,
+      treasuryUsdcAta: env.TREASURY_USDC_ATA!,
+      getLatestBlockhash: makeRpcBlockhash(env.SOLANA_RPC_URL!),
+    });
 
     const { makeWithdrawals } = await import("./services/withdrawals.js");
     withdrawalsSvc = makeWithdrawals(db, ledger, {
@@ -88,6 +97,9 @@ async function main(): Promise<void> {
     devAuth: env.DEV_AUTH && env.NODE_ENV !== "production",
     privyAuth,
     realMoney,
+    depositTxBuilder,
+    depositMinCents: env.DEPOSIT_MIN_CENTS,
+    depositMaxCents: env.DEPOSIT_MAX_CENTS,
     withdrawals: withdrawalsSvc ?? null,
     withdrawProcessor: null,
   });

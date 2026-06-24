@@ -21,6 +21,9 @@ export interface RouteDeps {
   devAuth: boolean;
   privyAuth: import("../auth/privy.js").PrivyAuth | null;
   realMoney: { enabled: boolean; treasuryUsdcAta: string | null };
+  depositTxBuilder: import("../services/deposit-tx.js").DepositTxBuilder | null;
+  depositMinCents: number;
+  depositMaxCents: number;
   withdrawals: import("../services/withdrawals.js").Withdrawals | null;
   withdrawProcessor: import("../services/withdraw-worker.js").WithdrawProcessor | null;
 }
@@ -86,6 +89,19 @@ export function registerRoutes(server: FastifyInstance, deps: RouteDeps): void {
       boundWallet: user?.walletPublicKey ?? null,
       note: "send USDC from your bound wallet to treasuryUsdcAta; credited after on-chain finality",
     };
+  });
+
+  const DepositBuildBody = z.object({ amountCents: z.number().int().positive() });
+  server.post("/v1/deposit/build", { preHandler: requireUser }, async (req, reply) => {
+    if (!deps.depositTxBuilder) return reply.code(404).send({ error: "deposits_disabled" });
+    const body = DepositBuildBody.safeParse(req.body);
+    if (!body.success) return reply.code(400).send({ error: "bad_request" });
+    if (body.data.amountCents < deps.depositMinCents || body.data.amountCents > deps.depositMaxCents)
+      return reply.code(400).send({ error: "amount_out_of_bounds" });
+    const user = await deps.users.get(req.userId!);
+    if (!user?.walletPublicKey) return reply.code(409).send({ error: "no_bound_wallet" });
+    const { txBase64 } = await deps.depositTxBuilder.buildForUser(user.walletPublicKey, body.data.amountCents);
+    return { txBase64 };
   });
 
   const WithdrawBody = z.object({ amountCents: z.number().int().positive() });

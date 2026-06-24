@@ -21,7 +21,7 @@ export interface TestCtx {
 }
 
 /** fresh in-memory pglite DB with migrations applied + services wired (stub feed) */
-export async function makeTestDb(opts: { signupFaucet?: boolean; startBalance?: number; corsOrigins?: string[]; devAuth?: boolean; privyAuth?: import("../auth/privy.js").PrivyAuth | null; realMoney?: { enabled: boolean; treasuryUsdcAta: string | null }; withdrawals?: any; withdrawProcessor?: any; stakeAsset?: "coin" | "cash" } = {}): Promise<TestCtx> {
+export async function makeTestDb(opts: { signupFaucet?: boolean; startBalance?: number; corsOrigins?: string[]; devAuth?: boolean; privyAuth?: import("../auth/privy.js").PrivyAuth | null; realMoney?: { enabled: boolean; treasuryUsdcAta: string | null }; depositTxBuilder?: import("../services/deposit-tx.js").DepositTxBuilder | null; withdrawals?: any; withdrawProcessor?: any; stakeAsset?: "coin" | "cash" } = {}): Promise<TestCtx> {
   const raw = createDb(); // pglite
   await raw.runMigrations();
   const db = raw.db;
@@ -44,6 +44,9 @@ export async function makeTestDb(opts: { signupFaucet?: boolean; startBalance?: 
     devAuth: opts.devAuth ?? true,
     privyAuth: opts.privyAuth ?? null,
     realMoney: opts.realMoney ?? { enabled: false, treasuryUsdcAta: null },
+    depositTxBuilder: opts.depositTxBuilder ?? null,
+    depositMinCents: 10,
+    depositMaxCents: 10000,
     withdrawals: opts.withdrawals ?? null,
     withdrawProcessor: opts.withdrawProcessor ?? null,
   });
