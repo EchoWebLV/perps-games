@@ -21,6 +21,7 @@ import type { AuthProvider } from "./core/auth";
 import { usd } from "./core/money";
 import { createRoundSync, clampInt } from "./core/round-sync";
 import { ensurePlayPayment, InsufficientWalletBalanceError, PlayPaymentConfirmationError } from "./core/play-payment";
+import { settleWithTimeout } from "./core/signing-timeout";
 import { displayCashBalance } from "./core/wallet-balance-model";
 import { niceLev, tToLev } from "./core/leverage";
 import { liqPriceOf } from "./core/economics";
@@ -76,6 +77,14 @@ const usePrivy = (import.meta.env?.VITE_AUTH as string) === "privy";
 const auth: AuthProvider = usePrivy
   ? createPrivyAuth(import.meta.env.VITE_PRIVY_APP_ID as string)
   : createDevAuth();
+
+class PaymentSigningTimeoutError extends Error {
+  constructor() {
+    super("payment_signing_timeout");
+    this.name = "PaymentSigningTimeoutError";
+  }
+}
+
 const api = createApi({ auth });
 // Sign-in is gated on INTENT, not at boot. Logged-out visitors see the 3D preview and can toggle
 // music/menu freely; pressing GO or the lobby button opens the sign-in. `signedIn` flips true once
@@ -89,9 +98,32 @@ let walletBalance: number | null = null; // on-chain USDC in the embedded Privy 
 let connected = false;
 let paymentInFlight = false;
 const syncDisplayedBalance = () => {
-  balance = displayCashBalance({ walletBalance, fallbackBalance: serverBalance });
+  const fallbackBalance = auth.walletPublicKey?.() ? balance : serverBalance;
+  balance = displayCashBalance({ walletBalance, fallbackBalance });
   hud.setBalance(balance);
 };
+
+async function refreshWalletBalance(): Promise<void> {
+  if (!auth.walletPublicKey?.()) {
+    walletBalance = null;
+    return;
+  }
+  walletBalance = (await api.walletBalance()).balance;
+}
+
+async function refreshWalletBalanceEventually(minBalance?: number): Promise<void> {
+  let lastError: unknown = null;
+  for (let i = 0; i < 8; i++) {
+    try {
+      await refreshWalletBalance();
+      if (minBalance == null || walletBalance == null || walletBalance >= minBalance) return;
+    } catch (e) {
+      lastError = e;
+    }
+    await new Promise<void>((r) => setTimeout(r, 1500));
+  }
+  if (lastError) throw lastError;
+}
 
 // Live "mark": the SERVER's current equity for the open round. The displayed × / buffer / payout
 // and the terminal (liq/cap/time) are driven by this so what you see == what you settle for.
@@ -177,10 +209,9 @@ const walletUI = createWallet(hudRoot, {
   walletBalance: () => walletBalance,
   onBuy: () => { hud.setStatus("Use Receive to add USDC to your Privy wallet."); },
   onWalletPoll: async () => {
-    const r = await api.walletBalance();
-    walletBalance = r.balance;
+    await refreshWalletBalance();
     syncDisplayedBalance();
-    return r.balance;
+    return walletBalance ?? balance;
   },
   // Log out moved to the menu (settings); the wallet page is deposit-only now.
 });
@@ -196,12 +227,13 @@ async function initSession() {
     serverBalance = me.balance;
     connected = true;
     signedIn = true;
-    syncDisplayedBalance();
-    try { walletBalance = (await api.walletBalance()).balance; } catch { walletBalance = null; }
+    try { await refreshWalletBalance(); } catch { walletBalance = null; }
     syncDisplayedBalance(); walletUI.setBalance(balance);
     if (me.openRoundId) await roundSync.recover(me.openRoundId);
     const refreshed = await api.me();
-    serverBalance = refreshed.balance; syncDisplayedBalance(); walletUI.setBalance(balance);
+    serverBalance = refreshed.balance;
+    try { await refreshWalletBalance(); } catch { /* keep the last wallet read */ }
+    syncDisplayedBalance(); walletUI.setBalance(balance);
   } catch {
     connected = false;
     hud.setStatus("Can't reach the server. Reconnecting...");
@@ -378,8 +410,9 @@ async function settleVia(reason: "cashout" | "expire", localSnap: Snapshot) {
     hud.setStatus("Round will settle shortly. Feed interruption.");
     return;
   }
+  const minWalletBalance = walletBalance != null && res.payoutCoins > 0 ? walletBalance + res.payoutCoins : undefined;
   serverBalance = res.balance;
-  try { walletBalance = (await api.walletBalance()).balance; } catch { /* keep last wallet read */ }
+  try { await refreshWalletBalanceEventually(minWalletBalance); } catch { /* keep last wallet read */ }
   syncDisplayedBalance(); walletUI.setBalance(balance);
   controls.setLive(false, "GO!");
   hud.setMultiplier(res.equity, res.outcome === "liq" ? "liquidated" : "settled");
@@ -408,7 +441,12 @@ controls.onLaunch(async () => {
     hud.setStatus("Wrapping up your last round…");
     const r = await roundSync.reconcile();
     if (r === "blocked") { controls.setLive(false, "GO!"); hud.setStatus("Last round still settling. Try again in a moment."); return; }
-    try { const me = await api.me(); serverBalance = me.balance; syncDisplayedBalance(); walletUI.setBalance(balance); } catch { /* keep the displayed balance */ }
+    try {
+      const me = await api.me();
+      serverBalance = me.balance;
+      try { await refreshWalletBalance(); } catch { /* keep the last wallet read */ }
+      syncDisplayedBalance(); walletUI.setBalance(balance);
+    } catch { /* keep the displayed balance */ }
   }
 
   const playAmount = controls.playAmount();
@@ -424,22 +462,45 @@ controls.onLaunch(async () => {
         playAmount,
         pay: async (amountCents) => {
           const { txBase64 } = await api.playPaymentBuild(amountCents);
-          const txSig = await auth.signAndSend(txBase64);
-          hud.setStatus("Confirming payment on Solana...");
-          for (let i = 0; i < 12; i++) {
-            const confirmed = await api.playPaymentConfirm(txSig);
-            serverBalance = confirmed.balance;
-            try { walletBalance = (await api.walletBalance()).balance; syncDisplayedBalance(); walletUI.setBalance(balance); } catch { /* keep last wallet read */ }
-            if (confirmed.status === "credited" || confirmed.status === "duplicate") return confirmed.balance;
-            if (confirmed.status === "rejected") throw new Error(`play_payment_rejected:${confirmed.reason ?? "unknown"}`);
-            await new Promise<void>((r) => setTimeout(r, 1500));
-          }
-          throw new PlayPaymentConfirmationError();
+          hud.setStatus("Approve the payment in Privy...");
+          const sent = await settleWithTimeout(auth.signAndSendTransaction(txBase64), 45_000, undefined, () => {
+            hud.setStatus("Checking Solana for the payment...");
+          });
+
+          const confirmPayment = async (txSig: string): Promise<number> => {
+            hud.setStatus("Confirming payment on Solana...");
+            for (let i = 0; i < 12; i++) {
+              const confirmed = await api.playPaymentConfirm(txSig);
+              serverBalance = confirmed.balance;
+              try { await refreshWalletBalance(); syncDisplayedBalance(); walletUI.setBalance(balance); } catch { /* keep last wallet read */ }
+              if (confirmed.status === "credited" || confirmed.status === "duplicate") return confirmed.balance;
+              if (confirmed.status === "rejected") throw new Error(`play_payment_rejected:${confirmed.reason ?? "unknown"}`);
+              await new Promise<void>((r) => setTimeout(r, 1500));
+            }
+            throw new PlayPaymentConfirmationError();
+          };
+
+          const recoverPayment = async (): Promise<number> => {
+            hud.setStatus("Checking Solana for the payment...");
+            for (let i = 0; i < 16; i++) {
+              const recovered = await api.playPaymentRecover(amountCents);
+              serverBalance = recovered.balance;
+              try { await refreshWalletBalance(); syncDisplayedBalance(); walletUI.setBalance(balance); } catch { /* keep last wallet read */ }
+              if (recovered.status === "credited" || recovered.status === "duplicate") return recovered.balance;
+              if (recovered.status === "rejected") throw new Error(`play_payment_rejected:${recovered.reason ?? "unknown"}`);
+              await new Promise<void>((r) => setTimeout(r, 1500));
+            }
+            throw new PaymentSigningTimeoutError();
+          };
+
+          if (sent.status === "resolved") return confirmPayment(sent.value);
+          if (sent.status === "rejected") console.warn("[privy_payment_signature_missing]", sent.error);
+          return recoverPayment();
         },
         pollServerBalance: async () => {
           const me = await api.me();
           serverBalance = me.balance;
-          try { walletBalance = (await api.walletBalance()).balance; } catch { /* keep last wallet read */ }
+          try { await refreshWalletBalance(); } catch { /* keep last wallet read */ }
           syncDisplayedBalance(); walletUI.setBalance(balance);
           return serverBalance;
         },
@@ -451,6 +512,8 @@ controls.onLaunch(async () => {
       console.error("[play_payment_failed]", e);
       const msg = e instanceof InsufficientWalletBalanceError
         ? "Not enough USDC in your Privy wallet."
+        : e instanceof PaymentSigningTimeoutError
+          ? "Payment was not found on Solana. If you approved it, press GO again shortly."
         : e instanceof PlayPaymentConfirmationError
           ? "Payment sent. Waiting for confirmation. Press GO again shortly."
           : "Payment not approved. Add USDC to your Privy wallet or try again.";

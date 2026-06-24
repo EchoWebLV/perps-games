@@ -1,5 +1,4 @@
 import { address, createSolanaRpc } from "@solana/kit";
-import { findAssociatedTokenPda } from "@solana-program/token";
 import { baseUnitsToCents } from "../money/usdc.js";
 import { LEGACY_TOKEN_PROGRAM } from "../solana/constants.js";
 
@@ -15,13 +14,18 @@ export function makeRpcWalletBalanceReader(rpcUrl: string, usdcMint: string): Wa
 
   return {
     async balanceCents(walletPublicKey) {
-      const [ata] = await findAssociatedTokenPda({ owner: address(walletPublicKey), mint, tokenProgram });
-      try {
-        const res = await rpc.getTokenAccountBalance(ata, { commitment: "finalized" } as any).send();
-        return Number(baseUnitsToCents(BigInt((res as any).value.amount)));
-      } catch {
-        return 0;
+      const res = await rpc.getTokenAccountsByOwner(
+        address(walletPublicKey),
+        { mint },
+        { commitment: "finalized", encoding: "jsonParsed" } as any,
+      ).send();
+      const accounts = (res as any).value ?? [];
+      let total = 0n;
+      for (const account of accounts) {
+        const amount = account?.account?.data?.parsed?.info?.tokenAmount?.amount;
+        if (typeof amount === "string") total += BigInt(amount);
       }
+      return Number(baseUnitsToCents(total));
     },
   };
 }

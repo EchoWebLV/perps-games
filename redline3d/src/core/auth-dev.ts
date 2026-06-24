@@ -8,6 +8,7 @@ export function createDevAuth(store?: KvStore): AuthProvider {
     userId: () => id,
     async authHeaders() { return { "x-dev-user": id }; },
     walletPublicKey: () => null,
-    async signAndSend(): Promise<string> { throw new Error("signing requires a Privy wallet"); },
+    async signTransaction(): Promise<string> { throw new Error("signing requires a Privy wallet"); },
+    async signAndSendTransaction(): Promise<string> { throw new Error("signing requires a Privy wallet"); },
   };
 }

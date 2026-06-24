@@ -5,6 +5,8 @@ export interface AuthProvider {
   login?(): void;
   logout?(): Promise<void>;
   walletPublicKey?(): string | null;
-  /** sign + broadcast a server-built tx (base64); resolves to the signature string. privy-only. */
-  signAndSend(txBase64: string): Promise<string>;
+  /** sign a server-built tx (base64); resolves to the signed wire tx base64. privy-only. */
+  signTransaction(txBase64: string): Promise<string>;
+  /** sign + send a server-built tx (base64); resolves to the Solana signature string. privy-only. */
+  signAndSendTransaction(txBase64: string): Promise<string>;
 }

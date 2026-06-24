@@ -1,32 +1,42 @@
 import type { PrivyClient } from "@privy-io/node";
-import { address, createSolanaRpc, type BlockhashLifetimeConstraint } from "@solana/kit";
+import {
+  address,
+  createSolanaRpc,
+  type Base64EncodedWireTransaction,
+  type BlockhashLifetimeConstraint,
+} from "@solana/kit";
 import { findAssociatedTokenPda } from "@solana-program/token";
 import { centsToBaseUnits, USDC_DECIMALS } from "../money/usdc.js";
 import { buildUnsignedTransferCheckedWireTx } from "./transfer-tx.js";
 import { LEGACY_TOKEN_PROGRAM } from "./constants.js";
 
 export interface SignResult { txSig: string; privyTxId: string | null; }
-/** Signs+sends a USDC transfer from the treasury to a destination, exactly-once via the idempotency key. */
+/** Signs+sends a USDC transfer from the treasury to a destination. */
 export interface WithdrawSigner {
   signAndSend(input: { destWallet: string; amountCents: number; idempotencyKey: string }): Promise<SignResult>;
 }
 
-/**
- * Real Privy-backed signer. STAGING-GATED: the Privy signAndSendTransaction behavior is validated by the
- * Phase-0 staging checklist (items 1-6) before this runs against real funds. The body is a guarded stub —
- * it CANNOT be correctly finalized until staging confirms the fee-payer / byte / hash semantics. The state
- * machine (withdraw-worker.ts) is fully tested against a FAKE signer, so this stub blocks nothing.
- */
 export function makePrivyWithdrawSigner(deps: {
   privy: PrivyClient; treasuryWalletId: string; treasuryUsdcAta: string; treasuryOwner: string;
-  usdcMint: string; caip2: string; rpcUrl: string; getLatestBlockhash?: () => Promise<BlockhashLifetimeConstraint>;
+  usdcMint: string; rpcUrl: string; getLatestBlockhash?: () => Promise<BlockhashLifetimeConstraint>;
+  sendSignedTransaction?: (signedTxBase64: string) => Promise<string>;
 }): WithdrawSigner {
+  const rpc = createSolanaRpc(deps.rpcUrl);
   const mint = address(deps.usdcMint);
   const source = address(deps.treasuryUsdcAta);
   const treasuryOwner = address(deps.treasuryOwner);
   const tokenProgram = address(LEGACY_TOKEN_PROGRAM);
+  const sendSignedTransaction = deps.sendSignedTransaction ?? (async (signedTxBase64) => {
+    const txSig = await rpc
+      .sendTransaction(signedTxBase64 as Base64EncodedWireTransaction, {
+        encoding: "base64",
+        maxRetries: 3n,
+        preflightCommitment: "confirmed",
+      })
+      .send();
+    return String(txSig);
+  });
   const getLatestBlockhash = deps.getLatestBlockhash ?? (() => {
-    const rpc = createSolanaRpc(deps.rpcUrl);
     return async () => {
       const { value } = await rpc.getLatestBlockhash().send();
       return { blockhash: value.blockhash, lastValidBlockHeight: value.lastValidBlockHeight };
@@ -47,14 +57,14 @@ export function makePrivyWithdrawSigner(deps: {
         decimals: USDC_DECIMALS,
         lifetime: await getLatestBlockhash(),
       });
-      const res = await (deps.privy.wallets().solana() as any).signAndSendTransaction(deps.treasuryWalletId, {
+      const res = await (deps.privy.wallets().solana() as any).signTransaction(deps.treasuryWalletId, {
         transaction: txBase64,
-        caip2: deps.caip2,
         idempotency_key: idempotencyKey,
       });
-      const txSig = res?.hash ?? res?.data?.hash;
-      if (!txSig) throw new Error("privy_sign_and_send_missing_hash");
-      return { txSig, privyTxId: res?.transaction_id ?? res?.data?.transaction_id ?? null };
+      const signedTx = res?.signed_transaction ?? res?.data?.signed_transaction;
+      if (!signedTx) throw new Error("privy_sign_transaction_missing_signed_transaction");
+      const txSig = await sendSignedTransaction(signedTx);
+      return { txSig, privyTxId: null };
     },
   };
 }

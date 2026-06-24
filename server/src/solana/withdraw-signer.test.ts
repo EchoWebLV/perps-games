@@ -12,30 +12,32 @@ const FIXED_LIFETIME: BlockhashLifetimeConstraint = {
 };
 
 describe("makePrivyWithdrawSigner", () => {
-  it("asks Privy to sign and send a treasury to user USDC transfer", async () => {
-    const signAndSendTransaction = vi.fn(async (_walletId: string, _input: any) => ({ hash: "sig-payout", transaction_id: "privy-payout" }));
-    const privy = { wallets: () => ({ solana: () => ({ signAndSendTransaction }) }) };
+  it("asks Privy to sign and broadcasts a treasury to user USDC transfer", async () => {
+    const signTransaction = vi.fn(async (_walletId: string, _input: any) => ({ signed_transaction: "signed-payout-tx" }));
+    const sendSignedTransaction = vi.fn(async (_signedTxBase64: string) => "sig-payout");
+    const privy = { wallets: () => ({ solana: () => ({ signTransaction }) }) };
     const signer = makePrivyWithdrawSigner({
       privy: privy as any,
       treasuryWalletId: "treasury-wallet-id",
       treasuryUsdcAta: TREASURY_ATA,
       treasuryOwner: TREASURY_OWNER,
       usdcMint: USDC_MINT,
-      caip2: "solana:devnet",
       rpcUrl: "https://rpc.example",
       getLatestBlockhash: async () => FIXED_LIFETIME,
+      sendSignedTransaction,
     });
 
     const res = await signer.signAndSend({ destWallet: WALLET_A, amountCents: 14, idempotencyKey: "round-payout:r1" });
 
-    expect(res).toEqual({ txSig: "sig-payout", privyTxId: "privy-payout" });
-    expect(signAndSendTransaction).toHaveBeenCalledOnce();
-    const call = signAndSendTransaction.mock.calls[0]!;
+    expect(res).toEqual({ txSig: "sig-payout", privyTxId: null });
+    expect(signTransaction).toHaveBeenCalledOnce();
+    const call = signTransaction.mock.calls[0]!;
     expect(call[0]).toBe("treasury-wallet-id");
     expect(call[1]).toMatchObject({
-      caip2: "solana:devnet",
       idempotency_key: "round-payout:r1",
     });
+    expect(call[1]).not.toHaveProperty("caip2");
     expect(call[1].transaction).toMatch(/^[A-Za-z0-9+/=]+$/);
+    expect(sendSignedTransaction).toHaveBeenCalledWith("signed-payout-tx");
   });
 });

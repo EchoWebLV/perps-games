@@ -19,7 +19,7 @@ import { LEGACY_TOKEN_PROGRAM } from "../solana/constants.js";
 import { centsToBaseUnits, USDC_DECIMALS } from "../money/usdc.js";
 
 export interface DepositTxBuilder {
-  buildForUser(userWallet: string, amountCents: number): Promise<{ txBase64: string }>;
+  buildForUser(userWallet: string, amountCents: number, opts?: { feePayer?: "treasury" | "user" }): Promise<{ txBase64: string }>;
 }
 
 export interface DepositTxDeps {
@@ -41,11 +41,12 @@ export function makeDepositTxBuilder(deps: DepositTxDeps): DepositTxBuilder {
   const destination = address(deps.treasuryUsdcAta);
   const tokenProgram = address(LEGACY_TOKEN_PROGRAM);
   return {
-    async buildForUser(userWallet, amountCents) {
+    async buildForUser(userWallet, amountCents, opts) {
       const owner = address(userWallet);
       const [sourceAta] = await findAssociatedTokenPda({ owner, mint, tokenProgram });
       const lifetime = await deps.getLatestBlockhash();
-      const feePayer = deps.treasuryOwner ? address(deps.treasuryOwner) : owner;
+      const useTreasuryFeePayer = opts?.feePayer !== "user" && deps.treasuryOwner;
+      const feePayer = useTreasuryFeePayer ? address(deps.treasuryOwner!) : owner;
       const unsignedTx = buildUnsignedTransferCheckedWireTx({
         source: sourceAta,
         mint,
@@ -56,7 +57,7 @@ export function makeDepositTxBuilder(deps: DepositTxDeps): DepositTxBuilder {
         decimals: USDC_DECIMALS,
         lifetime,
       });
-      const txBase64 = deps.signFeePayerTx ? await deps.signFeePayerTx(unsignedTx) : unsignedTx;
+      const txBase64 = useTreasuryFeePayer && deps.signFeePayerTx ? await deps.signFeePayerTx(unsignedTx) : unsignedTx;
       return { txBase64 };
     },
   };

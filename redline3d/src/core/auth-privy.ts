@@ -29,9 +29,13 @@ export function createPrivyAuth(appId: string): AuthProvider {
     login: () => { if (snap?.ready) snap.login(); else pendingLogin = true; }, // queue if the island isn't up yet
     logout: () => snap?.logout() ?? Promise.resolve(),
     walletPublicKey: () => snap?.walletAddress ?? null,
-    async signAndSend(txBase64: string): Promise<string> {
+    async signTransaction(txBase64: string): Promise<string> {
       if (!snap) throw new Error("no wallet");
-      return snap.signAndSend(txBase64); // uses the latest snapshot's live Privy hooks
+      return snap.signTransaction(txBase64); // uses the latest snapshot's live Privy hooks
+    },
+    async signAndSendTransaction(txBase64: string): Promise<string> {
+      if (!snap) throw new Error("no wallet");
+      return snap.signAndSendTransaction(txBase64); // uses the latest snapshot's live Privy hooks
     },
   };
 }

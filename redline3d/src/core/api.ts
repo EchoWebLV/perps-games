@@ -11,6 +11,7 @@ export interface CloseResult { outcome: string; payoutCoins: number; pnlCoins: n
 export interface MarkResult { status: "open" | "settled"; stale: boolean; outcome: string | null; equity: number; payoutCoins: number; buffer: number; }
 export interface WalletBalanceResult { wallet: string | null; balance: number; }
 export interface PlayPaymentConfirmResult { status: "credited" | "duplicate" | "pending" | "rejected"; balance: number; amountCents?: number; reason?: string; }
+export interface PlayPaymentSendResult { txSig: string; }
 
 export type ApiErrorCode =
   | "unauthorized" | "insufficient_balance" | "round_already_open" | "round_not_open"
@@ -41,8 +42,12 @@ export interface Api {
   depositBuild(amountCents: number): Promise<{ txBase64: string }>;
   /** build the USDC payment tx for one play (Privy wallet → vault) */
   playPaymentBuild(amountCents: number): Promise<{ txBase64: string }>;
+  /** broadcast a Privy-signed play payment tx through the server RPC */
+  playPaymentSend(signedTxBase64: string): Promise<PlayPaymentSendResult>;
   /** verify and credit the exact play payment signature returned by Privy */
   playPaymentConfirm(txSig: string): Promise<PlayPaymentConfirmResult>;
+  /** recover a payment that landed even though Privy did not return the signature */
+  playPaymentRecover(amountCents: number): Promise<PlayPaymentConfirmResult>;
   /** on-chain USDC currently sitting in the user's Privy wallet */
   walletBalance(): Promise<WalletBalanceResult>;
 }
@@ -93,7 +98,9 @@ export function createApi(opts: ApiOpts = {}): Api {
     markRound: (id) => call<MarkResult>("GET", `/v1/round/${id}/mark`),
     depositBuild: (amountCents) => call<{ txBase64: string }>("POST", "/v1/deposit/build", { amountCents }),
     playPaymentBuild: (amountCents) => call<{ txBase64: string }>("POST", "/v1/play/payment/build", { amountCents }),
+    playPaymentSend: (signedTxBase64) => call<PlayPaymentSendResult>("POST", "/v1/play/payment/send", { signedTxBase64 }),
     playPaymentConfirm: (txSig) => call<PlayPaymentConfirmResult>("POST", "/v1/play/payment/confirm", { txSig }),
+    playPaymentRecover: (amountCents) => call<PlayPaymentConfirmResult>("POST", "/v1/play/payment/recover", { amountCents }),
     walletBalance: () => call<WalletBalanceResult>("GET", "/v1/wallet/usdc-balance"),
   };
 }

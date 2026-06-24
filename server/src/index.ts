@@ -9,6 +9,7 @@ import { ensureHouseUserId } from "./services/house.js";
 import { makeHermesFeed } from "./feed/hermes.js";
 import { makePrivyAuth } from "./auth/privy.js";
 import { makeDepositTxBuilder, makeRpcBlockhash, type DepositTxBuilder } from "./services/deposit-tx.js";
+import { PLAY_PAYMENT_MAX_CENTS, PLAY_PAYMENT_MIN_CENTS } from "./services/play-payments.js";
 
 async function main(): Promise<void> {
   if (!env.DATABASE_URL) throw new Error("DATABASE_URL is required to start the server");
@@ -31,6 +32,7 @@ async function main(): Promise<void> {
   let depositConfirmer: { start(): void; stop(): void } | undefined;
   let realMoney = { enabled: false, treasuryUsdcAta: null as string | null };
   let depositTxBuilder: DepositTxBuilder | null = null;
+  let playPaymentBroadcaster: import("./services/play-payment-broadcaster.js").PlayPaymentBroadcaster | null = null;
   let playPaymentConfirmer: import("./services/play-payments.js").PlayPaymentConfirmer | null = null;
   let walletBalanceReader: import("./services/wallet-balance.js").WalletBalanceReader | null = null;
   let withdrawalsSvc: import("./services/withdrawals.js").Withdrawals | undefined;
@@ -40,19 +42,21 @@ async function main(): Promise<void> {
     const { assertUsdcMint } = await import("./solana/mint-assert.js");
     const { makeDeposits } = await import("./services/deposits.js");
     const { makeDepositConfirmer } = await import("./services/deposit-worker.js");
+    const { makeRpcPlayPaymentBroadcaster } = await import("./services/play-payment-broadcaster.js");
     const { makePlayPaymentConfirmer } = await import("./services/play-payments.js");
     const { makeRpcWalletBalanceReader } = await import("./services/wallet-balance.js");
     const source = makeRpcDepositSource(env.SOLANA_RPC_URL!);
     await assertUsdcMint((m) => source.fetchMintInfo(m), env.USDC_MINT!); // refuse to boot on a bad mint
     const deposits = makeDeposits(db, ledger, {
       usdcMint: env.USDC_MINT!, treasuryAta: env.TREASURY_USDC_ATA!,
-      minCents: env.DEPOSIT_MIN_CENTS, maxCents: env.DEPOSIT_MAX_CENTS,
+      minCents: PLAY_PAYMENT_MIN_CENTS, maxCents: Math.max(env.DEPOSIT_MAX_CENTS, PLAY_PAYMENT_MAX_CENTS),
     });
     if (env.RUN_CONFIRMER) {
       depositConfirmer = makeDepositConfirmer({ deposits, source, treasuryAta: env.TREASURY_USDC_ATA!, pollMs: env.DEPOSIT_POLL_MS });
       depositConfirmer.start();
     }
     playPaymentConfirmer = makePlayPaymentConfirmer({ deposits, source, treasuryAta: env.TREASURY_USDC_ATA! });
+    playPaymentBroadcaster = makeRpcPlayPaymentBroadcaster(env.SOLANA_RPC_URL!);
     realMoney = { enabled: true, treasuryUsdcAta: env.TREASURY_USDC_ATA! };
 
     let signFeePayerTx: ((txBase64: string) => Promise<string>) | undefined;
@@ -70,7 +74,6 @@ async function main(): Promise<void> {
         treasuryUsdcAta: env.TREASURY_USDC_ATA!,
         treasuryOwner: env.TREASURY_OWNER_PUBKEY,
         usdcMint: env.USDC_MINT!,
-        caip2: env.SOLANA_CLUSTER === "devnet" ? "solana:devnet" : "solana:mainnet",
         rpcUrl: env.SOLANA_RPC_URL!,
       });
     } else {
@@ -130,6 +133,7 @@ async function main(): Promise<void> {
     privyAuth,
     realMoney,
     depositTxBuilder,
+    playPaymentBroadcaster,
     playPaymentConfirmer,
     walletBalanceReader,
     depositMinCents: env.DEPOSIT_MIN_CENTS,
