@@ -5,4 +5,6 @@ export interface AuthProvider {
   login?(): void;
   logout?(): Promise<void>;
   walletPublicKey?(): string | null;
+  /** sign + broadcast a server-built tx (base64); resolves to the signature string. privy-only. */
+  signAndSend(txBase64: string): Promise<string>;
 }

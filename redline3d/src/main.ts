@@ -87,6 +87,7 @@ let balance = 0;                   // displayed cash balance, sourced from Privy
 let serverBalance = 0;             // hidden round-accounting balance used by the existing server engine
 let walletBalance: number | null = null; // on-chain USDC in the embedded Privy wallet
 let connected = false;
+let paymentInFlight = false;
 const syncDisplayedBalance = () => {
   balance = displayCashBalance({ walletBalance, fallbackBalance: serverBalance });
   hud.setBalance(balance);
@@ -397,7 +398,7 @@ controls.onLaunch(async () => {
   audio.resume(); radio.resume(); // unlock audio + radio if GO! is the first interaction
   if (!signedIn) { triggerSignIn(); return; } // GO requires sign-in — opens the login; race on the next press
   if (!connected) { hud.setStatus("Can't reach the server. Reconnecting..."); return; }
-  if (settling || roundSync.isOpening() || engine.getPhase() === "live") return; // re-entrancy: don't race an in-flight settle
+  if (paymentInFlight || settling || roundSync.isOpening() || engine.getPhase() === "live") return; // re-entrancy: don't race an in-flight settle/payment
 
   // Self-heal a dangling round before opening a new one. A bail whose close couldn't settle
   // (halted feed / dropped response) leaves a stale local round that the single-round guard would
@@ -412,8 +413,9 @@ controls.onLaunch(async () => {
 
   const playAmount = controls.playAmount();
   if (auth.walletPublicKey?.()) {
+    paymentInFlight = true;
     try {
-      controls.setLive(true, "PAYING...");
+      controls.setLive(false, "PAYING...");
       hud.setStatus(`Paying ${usd(playAmount)} from Privy wallet...`);
       const currentServerBalance = serverBalance;
       serverBalance = await ensurePlayPayment({
@@ -437,6 +439,7 @@ controls.onLaunch(async () => {
       walletUI.setBalance(balance);
     } catch (e) {
       controls.setLive(false, "GO!");
+      console.error("[play_payment_failed]", e);
       const msg = e instanceof InsufficientWalletBalanceError
         ? "Not enough USDC in your Privy wallet."
         : e instanceof PlayPaymentConfirmationError
@@ -444,6 +447,8 @@ controls.onLaunch(async () => {
           : "Payment not approved. Add USDC to your Privy wallet or try again.";
       hud.setStatus(msg);
       return;
+    } finally {
+      paymentInFlight = false;
     }
   }
   if (!auth.walletPublicKey?.() && serverBalance < playAmount) { hud.setStatus("Not enough balance. Lower your play amount."); return; }
