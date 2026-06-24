@@ -49,10 +49,25 @@ async function main(): Promise<void> {
     }
     realMoney = { enabled: true, treasuryUsdcAta: env.TREASURY_USDC_ATA! };
 
-    // unsigned "deposit to game" tx builder (user wallet → treasury ATA); client signs the bytes.
+    let signFeePayerTx: ((txBase64: string) => Promise<string>) | undefined;
+    if (env.TREASURY_WALLET_ID && env.TREASURY_OWNER_PUBKEY && env.PRIVY_APP_ID && env.PRIVY_APP_SECRET) {
+      const { PrivyClient } = await import("@privy-io/node");
+      const treasuryPrivy = new PrivyClient({ appId: env.PRIVY_APP_ID, appSecret: env.PRIVY_APP_SECRET });
+      signFeePayerTx = async (txBase64) => {
+        const res = await treasuryPrivy.wallets().solana().signTransaction(env.TREASURY_WALLET_ID!, { transaction: txBase64 });
+        return res.signed_transaction;
+      };
+    } else {
+      console.warn("[deposit_sponsorship_disabled] falling back to user-paid Solana fees");
+    }
+
+    // "deposit to game" tx builder (user wallet → treasury ATA). With the Privy treasury
+    // signer configured, the server pre-signs the fee-payer slot so users need no SOL.
     depositTxBuilder = makeDepositTxBuilder({
       usdcMint: env.USDC_MINT!,
       treasuryUsdcAta: env.TREASURY_USDC_ATA!,
+      treasuryOwner: signFeePayerTx ? env.TREASURY_OWNER_PUBKEY : undefined,
+      signFeePayerTx,
       getLatestBlockhash: makeRpcBlockhash(env.SOLANA_RPC_URL!),
     });
 

@@ -5,8 +5,9 @@
  * The server authors the full transaction message from server-trusted config (mint, treasury
  * destination) plus the user's bound wallet, and reserves the user's signature slot (authority +
  * fee payer). The client signs the exact returned bytes — the server controls 100% of the message.
- * For a deposit BOTH the source-ATA authority and the fee payer are the user's own wallet, so the
- * compiled tx has a single signer slot (the user).
+ * Default/fallback deposits use the user's wallet as both source authority and fee payer.
+ * Sponsored deposits use the treasury owner as fee payer, pre-sign that slot server-side, then
+ * return the partially signed tx for the user's wallet to sign as source authority.
  *
  * The recent-blockhash lifetime is injected (`getLatestBlockhash`) so production fetches it from
  * the Solana RPC while tests pin a fixed blockhash for determinism.
@@ -24,6 +25,13 @@ export interface DepositTxBuilder {
 export interface DepositTxDeps {
   usdcMint: string;
   treasuryUsdcAta: string;
+  /**
+   * Optional sponsorship path. When set, the server builds the deposit tx with the
+   * treasury owner as fee payer, asks Privy to sign that fee-payer slot, and returns
+   * the partially signed tx for the user's wallet to sign+broadcast.
+   */
+  treasuryOwner?: string;
+  signFeePayerTx?: (txBase64: string) => Promise<string>;
   /** server-fetched recent blockhash lifetime (injectable for tests) */
   getLatestBlockhash: () => Promise<BlockhashLifetimeConstraint>;
 }
@@ -37,16 +45,18 @@ export function makeDepositTxBuilder(deps: DepositTxDeps): DepositTxBuilder {
       const owner = address(userWallet);
       const [sourceAta] = await findAssociatedTokenPda({ owner, mint, tokenProgram });
       const lifetime = await deps.getLatestBlockhash();
-      const txBase64 = buildUnsignedTransferCheckedWireTx({
+      const feePayer = deps.treasuryOwner ? address(deps.treasuryOwner) : owner;
+      const unsignedTx = buildUnsignedTransferCheckedWireTx({
         source: sourceAta,
         mint,
         destination,
         authority: owner, // user owns the source ATA (signer slot)
-        feePayer: owner, // user pays the SOL network fee — single signer
+        feePayer,
         amount: centsToBaseUnits(BigInt(amountCents)),
         decimals: USDC_DECIMALS,
         lifetime,
       });
+      const txBase64 = deps.signFeePayerTx ? await deps.signFeePayerTx(unsignedTx) : unsignedTx;
       return { txBase64 };
     },
   };

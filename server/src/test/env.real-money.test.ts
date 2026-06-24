@@ -21,8 +21,12 @@ describe("real-money env gating", () => {
       SOLANA_RPC_URL: "https://rpc.example/devnet",
       USDC_MINT: "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
       TREASURY_USDC_ATA: "9wFF1111111111111111111111111111111111111111",
+      TREASURY_WALLET_ID: "wallet_123",
+      TREASURY_OWNER_PUBKEY: "53RbWfEX4iyikHQbySdyuNoL1eDmgm8V35s9XLSJ3g5r",
     } as any);
     expect(e.REAL_MONEY_ENABLED).toBe(true);
     expect(e.SOLANA_CLUSTER).toBe("mainnet-beta");
+    expect(e.TREASURY_WALLET_ID).toBe("wallet_123");
+    expect(e.TREASURY_OWNER_PUBKEY).toBe("53RbWfEX4iyikHQbySdyuNoL1eDmgm8V35s9XLSJ3g5r");
   });
 });

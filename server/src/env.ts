@@ -26,6 +26,7 @@ const EnvShape = z.object({
   SOLANA_CLUSTER: z.enum(["mainnet-beta", "devnet"]).default("mainnet-beta"),
   USDC_MINT: z.string().min(32).optional(),
   TREASURY_USDC_ATA: z.string().min(32).optional(),
+  TREASURY_WALLET_ID: z.string().min(1).optional(),
   TREASURY_OWNER_PUBKEY: z.string().min(32).optional(),
   DEPOSIT_MIN_CENTS: z.coerce.number().int().positive().default(100),
   DEPOSIT_MAX_CENTS: z.coerce.number().int().positive().default(500),
