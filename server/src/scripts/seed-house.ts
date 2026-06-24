@@ -7,7 +7,7 @@ import "dotenv/config";
 import { createDb } from "../db/client.js";
 import { makeLedger } from "../services/ledger.js";
 import { makeUsers } from "../services/users.js";
-import { ensureHouseUserId, HOUSE_EXTERNAL_ID } from "../services/house.js";
+import { ensureHouseUserId, seedHouseFromAccount, HOUSE_EXTERNAL_ID } from "../services/house.js";
 
 async function main(): Promise<void> {
   const [fromExt, centsStr] = process.argv.slice(2);
@@ -26,15 +26,19 @@ async function main(): Promise<void> {
   const houseUserId = await ensureHouseUserId(users);
   if (from.id === houseUserId) { console.error("✗ from and house are the same account"); await raw.close(); process.exit(2); }
 
-  // idempotent per (source account): re-running with the same <fromExternalId> is swallowed.
+  // idempotent per (source account): re-running with the same <fromExternalId> is a no-op.
+  // Both legs post atomically in one tx (see seedHouseFromAccount) — a crash can't burn one side.
   const ref = `house-seed-${from.id.slice(0, 8)}`;
-  const debited = await ledger.debit(from.id, "cash", cents, "house_seed", `${ref}-out`);
-  if (!debited) {
-    console.error(`✗ ${fromExt} has insufficient cash for ${cents}c, or this source was already seeded`);
+  const outcome = await seedHouseFromAccount(raw.db, ledger, from.id, houseUserId, cents, ref).catch((e) => {
+    console.error(`✗ ${e?.message === "insufficient balance" ? `${fromExt} has insufficient cash for ${cents}c` : e?.message}`);
+    return null;
+  });
+  if (outcome === null) { await raw.close(); process.exit(3); }
+  if (outcome === "noop") {
+    console.error(`✗ ${fromExt} was already seeded (idempotent no-op) — nothing moved`);
     await raw.close();
     process.exit(3);
   }
-  await ledger.credit(houseUserId, "cash", cents, "house_seed", `${ref}-in`);
 
   console.log(`re-labeled ${cents}c cash as house bankroll: ${fromExt} → ${HOUSE_EXTERNAL_ID}`);
   console.log(`  ${fromExt} cash : ${await ledger.balance(from.id, "cash")}`);
