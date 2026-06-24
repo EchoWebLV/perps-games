@@ -19,7 +19,7 @@ export const users = pgTable(
     id: uuid("id").primaryKey().defaultRandom(),
     /** stable external identity. dev stub: "dev:<name>". Privy (1.3): the Privy DID. */
     externalId: text("external_id").notNull(),
-    /** Privy embedded Solana address, captured at first login (null for dev/guest). Metadata until F. */
+    /** Verified Privy embedded Solana address synced from Bearer auth (null for dev/guest). */
     walletPublicKey: text("wallet_public_key"),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   },

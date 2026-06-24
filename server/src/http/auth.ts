@@ -14,6 +14,7 @@ declare module "fastify" {
 // `dev:${name}` external id can never collide with the `privy:did:privy:...`
 // namespace. The real client sends `web-<uuid>` which this allows.
 const DEV_NAME_RE = /^[a-zA-Z0-9_-]{1,64}$/;
+const SOLANA_ADDRESS_RE = /^[1-9A-HJ-NP-Za-km-z]{32,44}$/;
 
 export interface RequireUserDeps {
   users: Users;
@@ -38,10 +39,13 @@ export function makeRequireUser(deps: RequireUserDeps) {
         throw e;
       }
       const user = await deps.users.upsertByExternalId(`privy:${did}`);
-      // capture the embedded Solana address once (first sight), then it's cached on the row
-      if (!user.walletPublicKey) {
-        const addr = await deps.privyAuth.fetchSolanaWallet(did);
-        if (addr) { await deps.users.setWalletPublicKey(user.id, addr); }
+      const preferredHeader = req.headers["x-privy-wallet"];
+      const preferred = typeof preferredHeader === "string" && SOLANA_ADDRESS_RE.test(preferredHeader)
+        ? preferredHeader
+        : null;
+      const addr = await deps.privyAuth.fetchSolanaWallet(did, preferred);
+      if (addr && user.walletPublicKey !== addr) {
+        await deps.users.syncVerifiedWalletPublicKey(user.id, addr);
       }
       req.userId = user.id;
       return;

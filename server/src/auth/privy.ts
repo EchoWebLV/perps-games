@@ -6,7 +6,7 @@ export interface PrivyAuth {
   /** verify a Bearer access-token JWT → the Privy DID (throws AuthError on invalid/expired) */
   verifyAccessToken(token: string): Promise<string>;
   /** the user's embedded Solana address, or null if none yet */
-  fetchSolanaWallet(did: string): Promise<string | null>;
+  fetchSolanaWallet(did: string, preferredAddress?: string | null): Promise<string | null>;
 }
 
 export class AuthError extends Error {}
@@ -35,13 +35,16 @@ export function makePrivyAuth(env: PrivyEnv): PrivyAuth | null {
         throw e;
       }
     },
-    async fetchSolanaWallet(did) {
+    async fetchSolanaWallet(did, preferredAddress) {
       const user = await privy.users()._get(did); // underscore: Stainless reserves get()
-      return pickEmbeddedSolanaWallet(user.linked_accounts as any, (n) =>
-        // TODO(alerting): route [multiple_embedded_solana_wallets] to the real alert sink
-        // (spec §12), as with wallet_rebind_attempt — a bare console.warn must not be the
-        // only signal for an ambiguous real-money payout identity in a real-money deployment.
-        console.warn(`[multiple_embedded_solana_wallets] did=${did} count=${n}`),
+      return pickEmbeddedSolanaWallet(
+        user.linked_accounts as any,
+        (n) =>
+          // TODO(alerting): route [multiple_embedded_solana_wallets] to the real alert sink
+          // (spec §12), as with wallet_rebind_attempt — a bare console.warn must not be the
+          // only signal for an ambiguous real-money payout identity in a real-money deployment.
+          console.warn(`[multiple_embedded_solana_wallets] did=${did} count=${n}`),
+        preferredAddress,
       );
     },
   };

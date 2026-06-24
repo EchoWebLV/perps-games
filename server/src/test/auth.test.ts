@@ -5,11 +5,15 @@ import { makeRequireUser } from "../http/auth.js";
 import type { PrivyAuth } from "../auth/privy.js";
 import { AuthError } from "../auth/privy.js";
 
-function fakePrivy(): PrivyAuth & { fetchCalls: number } {
+function fakePrivy(wallets: string[] = ["So1anaAddr111"]): PrivyAuth & { fetchCalls: number } {
   const o = {
     fetchCalls: 0,
     async verifyAccessToken(t: string) { if (t === "good") return "did:privy:abc"; throw new AuthError("bad"); },
-    async fetchSolanaWallet(_did: string) { o.fetchCalls++; return "So1anaAddr111"; },
+    async fetchSolanaWallet(_did: string, preferred?: string | null) {
+      o.fetchCalls++;
+      if (preferred && wallets.includes(preferred)) return preferred;
+      return wallets[Math.min(o.fetchCalls - 1, wallets.length - 1)];
+    },
   };
   return o;
 }
@@ -46,7 +50,7 @@ describe("requireUser", () => {
     expect(r.statusCode).toBe(401); await a.close();
   });
 
-  it("valid Privy Bearer → privy:<did> user, captures the wallet once", async () => {
+  it("valid Privy Bearer → privy:<did> user, captures the wallet", async () => {
     const privy = fakePrivy();
     const a = app({ privyAuth: privy });
     const r1 = await a.inject({ method: "GET", url: "/who", headers: { authorization: "Bearer good" } });
@@ -54,9 +58,37 @@ describe("requireUser", () => {
     const user = await ctx.users.get(r1.json().userId);
     expect(user!.externalId).toBe("privy:did:privy:abc");
     expect(user!.walletPublicKey).toBe("So1anaAddr111");
-    // second request does NOT re-fetch the wallet (already stored)
-    await a.inject({ method: "GET", url: "/who", headers: { authorization: "Bearer good" } });
     expect(privy.fetchCalls).toBe(1);
+    await a.close();
+  });
+
+  it("syncs a changed verified Privy embedded wallet instead of using a stale cached wallet", async () => {
+    const privy = fakePrivy(["WalletOld", "WalletCurrent"]);
+    const a = app({ privyAuth: privy });
+    const r1 = await a.inject({ method: "GET", url: "/who", headers: { authorization: "Bearer good" } });
+    expect((await ctx.users.get(r1.json().userId))!.walletPublicKey).toBe("WalletOld");
+
+    await a.inject({ method: "GET", url: "/who", headers: { authorization: "Bearer good" } });
+
+    expect((await ctx.users.get(r1.json().userId))!.walletPublicKey).toBe("WalletCurrent");
+    expect(privy.fetchCalls).toBe(2);
+    await a.close();
+  });
+
+  it("prefers the client-selected Privy wallet when it is verified on the Privy user", async () => {
+    const oldWallet = "GfVcyD4kkTrj4bKc3wxW7hCgT7uxK1z6tWb5tWnVy8aF";
+    const currentWallet = "ANcAfmuuko7VzC8vUZnn7bbg12BxyC9JNLCCJKQmbKf4";
+    const privy = fakePrivy([oldWallet, currentWallet]);
+    const a = app({ privyAuth: privy });
+
+    const r = await a.inject({
+      method: "GET",
+      url: "/who",
+      headers: { authorization: "Bearer good", "x-privy-wallet": currentWallet },
+    });
+
+    expect(r.statusCode).toBe(200);
+    expect((await ctx.users.get(r.json().userId))!.walletPublicKey).toBe(currentWallet);
     await a.close();
   });
 

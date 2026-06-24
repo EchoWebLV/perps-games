@@ -33,6 +33,16 @@ describe("pickEmbeddedSolanaWallet", () => {
     expect(calls).toEqual([2]); // fired exactly once, with the true count
   });
 
+  it("prefers the client-selected embedded wallet when Privy confirms it belongs to the user", () => {
+    const picked = pickEmbeddedSolanaWallet([emb("OldWallet", 100), emb("CurrentWallet", 200)] as any, undefined, "CurrentWallet");
+    expect(picked).toBe("CurrentWallet");
+  });
+
+  it("ignores a preferred wallet that is not one of the user's embedded wallets", () => {
+    const picked = pickEmbeddedSolanaWallet([emb("OldWallet", 100), emb("CurrentWallet", 200)] as any, undefined, "InjectedWallet");
+    expect(picked).toBe("OldWallet");
+  });
+
   it("falls back to address order when timestamps are equal/absent (input-order-independent)", () => {
     expect(pickEmbeddedSolanaWallet([emb("Zzz"), emb("Aaa")] as any)).toBe("Aaa");
     expect(pickEmbeddedSolanaWallet([emb("Aaa"), emb("Zzz")] as any)).toBe("Aaa");

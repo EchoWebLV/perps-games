@@ -22,7 +22,9 @@ export function createPrivyAuth(appId: string): AuthProvider {
     userId: () => snap?.did ?? "privy", // display-only; the server derives identity from the Bearer token
     async authHeaders(): Promise<Record<string, string>> {
       const t = snap ? await snap.getAccessToken() : null; // refreshes per call
-      return t ? { authorization: `Bearer ${t}` } : {};
+      if (!t) return {};
+      const wallet = snap?.walletAddress;
+      return wallet ? { authorization: `Bearer ${t}`, "x-privy-wallet": wallet } : { authorization: `Bearer ${t}` };
     },
     login: () => { if (snap?.ready) snap.login(); else pendingLogin = true; }, // queue if the island isn't up yet
     logout: () => snap?.logout() ?? Promise.resolve(),
