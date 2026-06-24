@@ -22,6 +22,7 @@ export interface RouteDeps {
   privyAuth: import("../auth/privy.js").PrivyAuth | null;
   realMoney: { enabled: boolean; treasuryUsdcAta: string | null };
   depositTxBuilder: import("../services/deposit-tx.js").DepositTxBuilder | null;
+  walletBalanceReader: import("../services/wallet-balance.js").WalletBalanceReader | null;
   depositMinCents: number;
   depositMaxCents: number;
   withdrawals: import("../services/withdrawals.js").Withdrawals | null;
@@ -102,6 +103,13 @@ export function registerRoutes(server: FastifyInstance, deps: RouteDeps): void {
     if (!user?.walletPublicKey) return reply.code(409).send({ error: "no_bound_wallet" });
     const { txBase64 } = await deps.depositTxBuilder.buildForUser(user.walletPublicKey, body.data.amountCents);
     return { txBase64 };
+  });
+
+  server.get("/v1/wallet/usdc-balance", { preHandler: requireUser }, async (req, reply) => {
+    if (!deps.walletBalanceReader) return reply.code(404).send({ error: "wallet_balance_disabled" });
+    const user = await deps.users.get(req.userId!);
+    if (!user?.walletPublicKey) return { wallet: null, balance: 0 };
+    return { wallet: user.walletPublicKey, balance: await deps.walletBalanceReader.balanceCents(user.walletPublicKey) };
   });
 
   const WithdrawBody = z.object({ amountCents: z.number().int().positive() });

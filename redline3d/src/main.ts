@@ -20,6 +20,7 @@ import { createPrivyAuth } from "./core/auth-privy";
 import type { AuthProvider } from "./core/auth";
 import { usd } from "./core/money";
 import { createRoundSync, clampInt } from "./core/round-sync";
+import { ensureStakeBalance, StakeWalletError } from "./core/stake-wallet";
 import { niceLev, tToLev } from "./core/leverage";
 import { liqPriceOf } from "./core/economics";
 import { createUpgrades } from "./ui/upgrades";
@@ -82,6 +83,7 @@ let signedIn = false;
 function triggerSignIn() { if (auth.login) auth.login(); } // privy: open the login modal · dev: no-op
 const roundSync = createRoundSync({ api, clock: { now: () => performance.now() }, store: { get: (k) => { try { return localStorage.getItem(k); } catch { return null; } }, set: (k, v) => { try { localStorage.setItem(k, v); } catch {} } } });
 let balance = 0;                   // server-owned; seeded by api.me()
+let walletBalance: number | null = null; // on-chain USDC in the embedded Privy wallet
 let connected = false;
 
 // Live "mark": the SERVER's current equity for the open round. The displayed × / buffer / payout
@@ -158,15 +160,25 @@ hud.setBalance(balance);
 const upgrades = createUpgrades(hudRoot, { onCoins: (n) => coins.set(n), onApply: () => tach.rebuild(), economicEffects: false });
 coins.set(upgrades.coins(), false); // no pulse on the persisted balance at load
 
-// wallet page (opened by tapping the balance chip) — buy USDC + show the deposit QR.
-// Placeholder deposit address; the real one comes from the backend wallet later.
-const USDC_ADDRESS = "4Nd1mYpVxKfBnW9sRtQ2zJhG7cUaEo3LpXyZ6vTbKmHd";
+// wallet page (opened by tapping the balance chip) — shows the player's deposit QR.
 const walletUI = createWallet(hudRoot, {
-  // privy: the captured embedded Solana wallet (also the deposit target + drives the account row);
-  // dev/guest: walletPublicKey() is null → fall back to the placeholder so the deposit QR is unchanged.
-  address: auth.walletPublicKey?.() || USDC_ADDRESS,
+  // privy: the captured embedded Solana wallet (deposit target + drives the account row).
+  // dev/guest: NO real wallet → empty string. The Receive tab then shows a "sign in" notice and
+  // renders NO QR/address — NEVER a placeholder, so real USDC can't be sent into a dead address.
+  address: () => auth.walletPublicKey?.() ?? "",
   balance: () => balance,
+  walletBalance: () => walletBalance,
   onBuy: () => { hud.setStatus("Deposits open when real money goes live."); },
+  // real-money deposit: server builds an unsigned USDC transfer (user → treasury), the embedded
+  // Privy wallet signs + broadcasts. We do NOT credit here — the server confirmer does, and the
+  // wallet UI polls onPoll() for the credited balance.
+  onDeposit: async (cents: number) => {
+    const { txBase64 } = await api.depositBuild(cents);
+    const sig = await auth.signAndSend(txBase64); // user approves in Privy, broadcasts
+    return sig;
+  },
+  onPoll: async () => { const b = (await api.me()).balance; balance = b; hud.setBalance(balance); return b; },
+  onWalletPoll: async () => { const r = await api.walletBalance(); walletBalance = r.balance; return r.balance; },
   // Log out moved to the menu (settings); the wallet page is deposit-only now.
 });
 hud.onWallet(() => { if (engine.getPhase() !== "live") walletUI.open(); });
@@ -182,12 +194,13 @@ async function initSession() {
     connected = true;
     signedIn = true;
     hud.setBalance(balance);
+    try { walletBalance = (await api.walletBalance()).balance; } catch { walletBalance = null; }
     if (me.openRoundId) await roundSync.recover(me.openRoundId);
     const refreshed = await api.me();
     balance = refreshed.balance; hud.setBalance(balance);
   } catch {
     connected = false;
-    hud.setStatus("Can't reach the server — reconnecting…");
+    hud.setStatus("Can't reach the server. Reconnecting...");
   }
 }
 void auth.ready().then(initSession);
@@ -358,7 +371,7 @@ async function settleVia(reason: "cashout" | "expire", localSnap: Snapshot) {
   hud.setTimer(CONFIG.MAXSEC, false);
   if (!res) { // feed-halt / gave up -> the round will settle via 1.4
     controls.setLive(false, "GO!");
-    hud.setStatus("Round will settle shortly — feed interruption.");
+    hud.setStatus("Round will settle shortly. Feed interruption.");
     return;
   }
   balance = res.balance; hud.setBalance(balance); walletUI.setBalance(balance);
@@ -368,7 +381,7 @@ async function settleVia(reason: "cashout" | "expire", localSnap: Snapshot) {
     hud.setStatus(`💥 Liquidated. Lost your stake.`);
     fx.liquidate(); audio.liquidate(); navigator.vibrate?.([30, 40, 30, 40, 90]);
   } else {
-    hud.setStatus(`Settled at ×${res.equity.toFixed(2)} — banked ${usd(res.payoutCoins)}.`);
+    hud.setStatus(`Settled at ×${res.equity.toFixed(2)}. Banked ${usd(res.payoutCoins)}.`);
     fx.confetti(); audio.cashout(); navigator.vibrate?.(35);
   }
   void localSnap; // local prediction already animated the ride; server result is authoritative
@@ -378,7 +391,7 @@ controls.onLaunch(async () => {
   if (mode === "lobby") return; // Space/Enter in the lot must not launch a round behind the scene
   audio.resume(); radio.resume(); // unlock audio + radio if GO! is the first interaction
   if (!signedIn) { triggerSignIn(); return; } // GO requires sign-in — opens the login; race on the next press
-  if (!connected) { hud.setStatus("Can't reach the server — reconnecting…"); return; }
+  if (!connected) { hud.setStatus("Can't reach the server. Reconnecting..."); return; }
   if (settling || roundSync.isOpening() || engine.getPhase() === "live") return; // re-entrancy: don't race an in-flight settle
 
   // Self-heal a dangling round before opening a new one. A bail whose close couldn't settle
@@ -388,12 +401,43 @@ controls.onLaunch(async () => {
   if (roundSync.roundId()) {
     hud.setStatus("Wrapping up your last round…");
     const r = await roundSync.reconcile();
-    if (r === "blocked") { controls.setLive(false, "GO!"); hud.setStatus("Last round still settling — try again in a moment."); return; }
+    if (r === "blocked") { controls.setLive(false, "GO!"); hud.setStatus("Last round still settling. Try again in a moment."); return; }
     try { const me = await api.me(); balance = me.balance; hud.setBalance(balance); walletUI.setBalance(balance); } catch { /* keep the displayed balance */ }
   }
 
   const stake = controls.stake();
-  if (balance < stake) { hud.setStatus("Not enough balance — lower your stake."); return; }
+  if (balance < stake && auth.walletPublicKey?.()) {
+    try {
+      controls.setLive(true, "STAKING...");
+      hud.setStatus(`Approve ${usd(stake - balance)} stake in Privy...`);
+      balance = await ensureStakeBalance({
+        currentBalance: balance,
+        stake,
+        deposit: async (amountCents) => {
+          const { txBase64 } = await api.depositBuild(amountCents);
+          await auth.signAndSend(txBase64);
+        },
+        pollBalance: async () => {
+          const me = await api.me();
+          balance = me.balance;
+          hud.setBalance(balance);
+          walletUI.setBalance(balance);
+          try { walletBalance = (await api.walletBalance()).balance; } catch { walletBalance = null; }
+          return balance;
+        },
+      });
+      hud.setBalance(balance);
+      walletUI.setBalance(balance);
+    } catch (e) {
+      controls.setLive(false, "GO!");
+      const msg = e instanceof StakeWalletError
+        ? "Stake sent. Waiting for confirmation. Press GO again shortly."
+        : "Stake not approved. Add USDC to your Privy wallet or try again.";
+      hud.setStatus(msg);
+      return;
+    }
+  }
+  if (balance < stake) { hud.setStatus("Not enough balance. Lower your stake."); return; }
   const lev = clampInt(game.lev, 10, 1000);                          // parity: send the clamped value
   hud.setStatus("Launching…");
   let out;
@@ -403,16 +447,16 @@ controls.onLaunch(async () => {
     if (code === "round_already_open") {
       // the server holds a round this client lost track of — recover it, then the user retries
       try { const me = await api.me(); if (me.openRoundId) await roundSync.recover(me.openRoundId); } catch { /* retry next press */ }
-      hud.setStatus(roundSync.roundId() ? "Last round still settling — try again in a moment." : "Ready — press GO again.");
+      hud.setStatus(roundSync.roundId() ? "Last round still settling. Try again in a moment." : "Ready. Press GO again.");
     } else {
-      hud.setStatus(code === "insufficient_balance" ? "Not enough balance — lower your stake."
-        : code === "feed_halt" ? "Feed is down — try again in a moment."
-        : "Can't reach the server — try again.");
+      hud.setStatus(code === "insufficient_balance" ? "Not enough balance. Lower your stake."
+        : code === "feed_halt" ? "Feed is down. Try again in a moment."
+        : "Can't reach the server. Try again.");
     }
     controls.setLive(false, "GO!");                                  // never strand the button mid-launch
     return;
   }
-  if (!out) { controls.setLive(false, "GO!"); hud.setStatus("Couldn't start the round — try again."); return; }
+  if (!out) { controls.setLive(false, "GO!"); hud.setStatus("Couldn't start the round. Try again."); return; }
   round.entryPx = out.entryRaw;
   round.dir = controls.dir();
   roundStartMs = out.entryTsUs / 1000;                               // parity: server clock

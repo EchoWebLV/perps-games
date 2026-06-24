@@ -9,6 +9,7 @@ export interface OpenResult { roundId: string; asset: Asset; dir: Dir; lev: numb
 export interface CloseResult { outcome: string; payoutCoins: number; pnlCoins: number; equity: number; exitRaw: number; balance: number; }
 /** live read-only mark: the server's CURRENT equity for an open round (what the client displays) */
 export interface MarkResult { status: "open" | "settled"; stale: boolean; outcome: string | null; equity: number; payoutCoins: number; buffer: number; }
+export interface WalletBalanceResult { wallet: string | null; balance: number; }
 
 export type ApiErrorCode =
   | "unauthorized" | "insufficient_balance" | "round_already_open" | "round_not_open"
@@ -35,6 +36,10 @@ export interface Api {
   roundAction(p: { roundId: string; actionId: string; kind: "flip" | "lever"; dir?: Dir; lev?: number }): Promise<void>;
   closeRound(p: { roundId: string; reason: "cashout" | "expire" }): Promise<CloseResult>;
   markRound(roundId: string): Promise<MarkResult>;
+  /** build an unsigned USDC deposit tx (user wallet → treasury) for the client to sign + broadcast */
+  depositBuild(amountCents: number): Promise<{ txBase64: string }>;
+  /** on-chain USDC currently sitting in the user's Privy wallet */
+  walletBalance(): Promise<WalletBalanceResult>;
 }
 
 export interface ApiOpts { fetch?: typeof fetch; baseUrl?: string; auth?: Pick<AuthProvider, "authHeaders">; userId?: string; timeoutMs?: number; }
@@ -81,5 +86,7 @@ export function createApi(opts: ApiOpts = {}): Api {
     roundAction: (p) => call<void>("POST", "/v1/round/action", p),
     closeRound: (p) => call<CloseResult>("POST", "/v1/round/close", p),
     markRound: (id) => call<MarkResult>("GET", `/v1/round/${id}/mark`),
+    depositBuild: (amountCents) => call<{ txBase64: string }>("POST", "/v1/deposit/build", { amountCents }),
+    walletBalance: () => call<WalletBalanceResult>("GET", "/v1/wallet/usdc-balance"),
   };
 }

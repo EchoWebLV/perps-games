@@ -31,12 +31,14 @@ async function main(): Promise<void> {
   let depositConfirmer: { start(): void; stop(): void } | undefined;
   let realMoney = { enabled: false, treasuryUsdcAta: null as string | null };
   let depositTxBuilder: DepositTxBuilder | null = null;
+  let walletBalanceReader: import("./services/wallet-balance.js").WalletBalanceReader | null = null;
   let withdrawalsSvc: import("./services/withdrawals.js").Withdrawals | undefined;
   if (env.REAL_MONEY_ENABLED) {
     const { makeRpcDepositSource } = await import("./solana/deposit-source.js");
     const { assertUsdcMint } = await import("./solana/mint-assert.js");
     const { makeDeposits } = await import("./services/deposits.js");
     const { makeDepositConfirmer } = await import("./services/deposit-worker.js");
+    const { makeRpcWalletBalanceReader } = await import("./services/wallet-balance.js");
     const source = makeRpcDepositSource(env.SOLANA_RPC_URL!);
     await assertUsdcMint((m) => source.fetchMintInfo(m), env.USDC_MINT!); // refuse to boot on a bad mint
     const deposits = makeDeposits(db, ledger, {
@@ -70,6 +72,7 @@ async function main(): Promise<void> {
       signFeePayerTx,
       getLatestBlockhash: makeRpcBlockhash(env.SOLANA_RPC_URL!),
     });
+    walletBalanceReader = makeRpcWalletBalanceReader(env.SOLANA_RPC_URL!, env.USDC_MINT!);
 
     const { makeWithdrawals } = await import("./services/withdrawals.js");
     withdrawalsSvc = makeWithdrawals(db, ledger, {
@@ -113,6 +116,7 @@ async function main(): Promise<void> {
     privyAuth,
     realMoney,
     depositTxBuilder,
+    walletBalanceReader,
     depositMinCents: env.DEPOSIT_MIN_CENTS,
     depositMaxCents: env.DEPOSIT_MAX_CENTS,
     withdrawals: withdrawalsSvc ?? null,

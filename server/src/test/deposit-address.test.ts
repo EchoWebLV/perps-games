@@ -24,3 +24,28 @@ describe("GET /v1/deposit/address", () => {
     expect(body.boundWallet).toBeNull();
   });
 });
+
+describe("GET /v1/wallet/usdc-balance", () => {
+  let ctx: TestCtx;
+  afterEach(async () => { await ctx?.close(); });
+
+  it("returns 404 when wallet balance reads are disabled", async () => {
+    ctx = await makeTestDb();
+    const res = await ctx.server.inject({ method: "GET", url: "/v1/wallet/usdc-balance", headers: H });
+    expect(res.statusCode).toBe(404);
+    expect(res.json()).toEqual({ error: "wallet_balance_disabled" });
+  });
+
+  it("returns the bound Privy wallet USDC balance", async () => {
+    ctx = await makeTestDb({
+      walletBalanceReader: { async balanceCents(wallet) { return wallet === "WalletAAA" ? 100 : 0; } },
+    });
+    const user = await ctx.users.upsertByExternalId("dev:mallory");
+    await ctx.users.setWalletPublicKey(user.id, "WalletAAA");
+
+    const res = await ctx.server.inject({ method: "GET", url: "/v1/wallet/usdc-balance", headers: H });
+
+    expect(res.statusCode).toBe(200);
+    expect(res.json()).toEqual({ wallet: "WalletAAA", balance: 100 });
+  });
+});
