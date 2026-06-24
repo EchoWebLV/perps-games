@@ -6,7 +6,7 @@ export interface Controls {
   setDir(d: 1 | -1): void;
   /** Clown Car: keep the call box visible during a live round so it reads out the live direction */
   setLaneMode(on: boolean): void;
-  stake(): number;
+  playAmount(): number;
   gas(): boolean;
   brake(): boolean;
   steer(): number; // -1 left, 0, 1 right
@@ -27,7 +27,7 @@ export function createControls(ctrlMount: HTMLElement, goMount: HTMLElement, ped
         <div id="long" class="seg long on">▲ Long</div>
         <div id="short" class="seg short">▼ Short</div>
       </div></div>
-    <div style="${seg}"><span class="lbl" style="${lab}">stake</span>
+    <div style="${seg}"><span class="lbl" style="${lab}">play amount</span>
       <div style="display:flex;align-items:center;gap:7px">
         <div id="sdn" class="step">−</div>
         <div id="sval" class="num" style="flex:1;text-align:center;font-size:16px">$1.00</div>
@@ -38,7 +38,7 @@ export function createControls(ctrlMount: HTMLElement, goMount: HTMLElement, ped
   goMount.innerHTML = `<button id="go" class="cta"><span id="gofill"></span><span id="golabel">GO!</span></button>`;
 
   const q = (s: string) => (ctrlMount.querySelector(s) || goMount.querySelector(s) || pedalMount.querySelector(s)) as HTMLElement;
-  let d: 1 | -1 = 1, stake = 100, live = false; // stake in cents → $1.00 default
+  let d: 1 | -1 = 1, playAmount = 100, live = false; // cents → $1.00 default
   let gasOn = false, brakeOn = false, steerL = false, steerR = false;
   let launchCb = () => {}, cashCb = () => {};
   // anti-double-tap: when a round goes live the GO button becomes BAIL in place, so a quick second
@@ -64,8 +64,8 @@ export function createControls(ctrlMount: HTMLElement, goMount: HTMLElement, ped
     callbox.style.opacity = !live || laneMode ? "1" : "0";
     callbox.style.pointerEvents = live ? "none" : "auto";
   };
-  q("#sup").onclick = () => { if (!live) { stake = Math.min(5000, stake + 25); sval.textContent = usd(stake); } }; // +$0.25 → $50 cap
-  q("#sdn").onclick = () => { if (!live) { stake = Math.max(25, stake - 25); sval.textContent = usd(stake); } };   // −$0.25 → $0.25 floor
+  q("#sup").onclick = () => { if (!live) { playAmount = Math.min(5000, playAmount + 25); sval.textContent = usd(playAmount); } }; // +$0.25 → $50 cap
+  q("#sdn").onclick = () => { if (!live) { playAmount = Math.max(25, playAmount - 25); sval.textContent = usd(playAmount); } };   // -$0.25 → $0.25 floor
   go.onclick = () => {
     if (live) { if (performance.now() < cashLockUntil) return; cashCb(); } // bail is locked for BAIL_LOCK_MS after launch
     else launchCb();
@@ -103,7 +103,7 @@ export function createControls(ctrlMount: HTMLElement, goMount: HTMLElement, ped
     dir: () => d,
     setDir: applyDir,
     setLaneMode(on: boolean) { laneMode = on; refreshCall(); },
-    stake: () => stake,
+    playAmount: () => playAmount,
     gas: () => gasOn,
     brake: () => brakeOn,
     steer: () => (steerR ? 1 : 0) - (steerL ? 1 : 0),

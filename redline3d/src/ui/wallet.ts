@@ -3,12 +3,12 @@ import { shortWallet } from "./auth-ui";
 
 /**
  * Wallet page — a full-screen synthwave overlay opened from the balance chip.
- *   • USDC balance hero
- *   • Buy USDC (add funds) — preset amounts → credit
- *   • Receive — deposit-address QR + copy
+ *   • Privy wallet USDC balance hero
+ *   • Buy USDC placeholder
+ *   • Receive — Privy wallet QR + copy
  *
- * The balance and the credit path run through callbacks so main owns the actual
- * Settlement; the address is supplied by the caller (a backend wallet later).
+ * The balance and wallet address run through callbacks so main owns auth and
+ * on-chain reads.
  */
 export interface Wallet {
   open(): void;
@@ -28,11 +28,6 @@ export interface WalletOpts {
   onBuy: (usd: number) => void;
   /** sign the player out — when omitted (dev/guest) the account row stays hidden */
   onLogout?: () => void;
-  /** real deposit: build + sign + broadcast a USDC transfer for `cents`; resolves to the signature.
-   *  Does NOT credit — the server confirmer does; the UI polls onPoll() for the credited balance. */
-  onDeposit?: (cents: number) => Promise<string>;
-  /** re-fetch the server balance (cents). Used to poll for the credited deposit after broadcast. */
-  onPoll?: () => Promise<number>;
   /** re-fetch the on-chain Privy wallet USDC balance, in cents */
   onWalletPoll?: () => Promise<number>;
 }
@@ -136,31 +131,6 @@ function injectStyles() {
       color:var(--cyan);background:rgba(39,231,255,.12);border:1px solid rgba(39,231,255,.38);transition:.13s}
     .wlt-copy:hover{background:rgba(39,231,255,.2)}
     .wlt-copy.done{color:#04130d;background:linear-gradient(180deg,#5ff0c0,#15c78c);border-color:transparent}
-    .wlt-wallet-bal{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:10px 12px;border-radius:10px;
-      background:rgba(18,14,40,.58);border:1px solid rgba(132,150,224,.2)}
-    .wlt-wallet-bal span{font:700 9px/1 'Chakra Petch',ui-monospace,monospace;letter-spacing:.14em;text-transform:uppercase;color:var(--mut)}
-    .wlt-wallet-bal strong{font:800 14px/1 'Chakra Petch',ui-monospace,monospace;color:var(--ink);font-variant-numeric:tabular-nums}
-
-    /* Deposit-to-game block — real USDC transfer (user wallet → treasury) */
-    .wlt-dep{display:flex;flex-direction:column;gap:10px;padding:12px;border-radius:12px;
-      background:rgba(7,5,18,.6);border:1px solid rgba(132,150,224,.22)}
-    .wlt-dep-lbl{font:700 9px/1 'Chakra Petch',ui-monospace,monospace;letter-spacing:.14em;text-transform:uppercase;color:var(--mut)}
-    .wlt-dep-row{display:flex;align-items:center;gap:8px}
-    .wlt-dep-amt{flex:1;min-width:0;display:flex;align-items:center;gap:4px;padding:10px 12px;border-radius:10px;
-      background:rgba(18,14,40,.72);border:1.5px solid rgba(132,150,224,.24)}
-    .wlt-dep-amt .cur{font:800 16px/1 'Chakra Petch',ui-monospace,monospace;color:rgba(216,222,255,.7)}
-    .wlt-dep-amt input{flex:1;min-width:0;border:0;outline:0;background:transparent;
-      font:800 18px/1 'Chakra Petch',ui-monospace,monospace;font-variant-numeric:tabular-nums;color:var(--ink)}
-    .wlt-dep-btn{flex:0 0 auto;border:0;cursor:pointer;border-radius:10px;padding:12px 16px;
-      font:800 13px/1 'Chakra Petch',ui-monospace,monospace;letter-spacing:.06em;text-transform:uppercase;color:#04101a;
-      background:linear-gradient(180deg,#5fe3ff,#2775ca);box-shadow:0 6px 16px rgba(39,118,202,.35);transition:transform .06s ease,filter .15s,opacity .15s}
-    .wlt-dep-btn:active{transform:translateY(1px)}
-    .wlt-dep-btn:disabled{cursor:default;opacity:.55;filter:grayscale(.3)}
-    .wlt-dep-btn.ok{background:linear-gradient(180deg,#5ff0c0,#15c78c)}
-    .wlt-dep-status{font:600 10.5px/1.4 'Chakra Petch',ui-monospace,monospace;letter-spacing:.02em;color:rgba(216,222,255,.6);min-height:14px}
-    .wlt-dep-status.err{color:rgba(255,107,107,.9)}
-    .wlt-dep-status.ok{color:rgba(46,230,166,.9)}
-
     /* Account row — signed-in address + log out (hidden for dev/guest) */
     .wlt-acct{display:flex;align-items:center;gap:10px;padding:11px 12px;border-radius:11px;
       background:rgba(7,5,18,.6);border:1px solid rgba(132,150,224,.2)}
@@ -191,9 +161,9 @@ export function createWallet(parent: HTMLElement, opts: WalletOpts): Wallet {
   panel.innerHTML =
     `<div class="wlt-head"><span class="lbl">wallet</span><button class="wlt-x" data-act="close" aria-label="Close">✕</button></div>` +
     `<div class="wlt-hero"><div class="wlt-hero-glow"></div>
-       <div class="wlt-hero-top">${usdcCoin(22)}<span class="wlt-hero-lbl">Playable balance</span></div>
+       <div class="wlt-hero-top">${usdcCoin(22)}<span class="wlt-hero-lbl">Privy wallet balance</span></div>
        <div class="wlt-bal"><span class="wlt-bal-cur">$</span><span id="wltBal">0.00</span></div>
-       <div class="wlt-hero-sub"><span id="wltUsdc">0.00</span> USDC staked in game vault</div>
+       <div class="wlt-hero-sub"><span id="wltUsdc">0.00</span> USDC · Solana</div>
      </div>` +
     `<div class="wlt-seg">
        <button class="wlt-tab on" data-tab="buy">${svg(ICONS.plus, 15)}Buy</button>
@@ -202,7 +172,7 @@ export function createWallet(parent: HTMLElement, opts: WalletOpts): Wallet {
     `<div class="wlt-view" data-view="buy">
        <div class="wlt-amts">${AMOUNTS.map((a) => `<button class="wlt-amt" data-amt="${a}">$${a}<small>USDC</small></button>`).join("")}</div>
        <button class="wlt-cta" id="wltBuy">Buy USDC</button>
-       <div class="wlt-note">Demo deposit. Funds are added instantly to your balance.</div>
+       <div class="wlt-note">Use Receive to add USDC to your Privy wallet.</div>
      </div>` +
     // recv view + account row are filled live by renderAddressUI() on each open — the deposit
     // address only exists AFTER login, so it must be read fresh, never snapshotted at build time.
@@ -230,20 +200,10 @@ export function createWallet(parent: HTMLElement, opts: WalletOpts): Wallet {
   };
   renderAmount();
 
-  const walletBalanceText = (cents: number | null | undefined) =>
-    cents == null ? "Checking..." : `$${fmt(cents / 100)} USDC`;
-  const renderWalletBalance = (recv: HTMLElement, cents = opts.walletBalance?.()) => {
-    const el = recv.querySelector<HTMLElement>("#wltWalletBal");
-    if (el) el.textContent = walletBalanceText(cents);
-  };
-  const refreshWalletBalance = async (recv: HTMLElement) => {
-    if (!opts.onWalletPoll) { renderWalletBalance(recv); return; }
-    renderWalletBalance(recv);
-    try { renderWalletBalance(recv, await opts.onWalletPoll()); }
-    catch {
-      const el = recv.querySelector<HTMLElement>("#wltWalletBal");
-      if (el) el.textContent = "Unavailable";
-    }
+  const refreshBalance = async () => {
+    if (!opts.onWalletPoll) return;
+    try { await opts.onWalletPoll(); renderBalance(); }
+    catch { /* keep the last displayed balance */ }
   };
 
   amtBtns.forEach((b) => (b.onclick = () => { amount = Number(b.dataset.amt); renderAmount(); }));
@@ -264,52 +224,6 @@ export function createWallet(parent: HTMLElement, opts: WalletOpts): Wallet {
     okTimer = window.setTimeout(() => { buyBtn.classList.remove("ok"); renderAmount(); }, 1500);
   };
 
-  // Wire the "Deposit to game" controls inside a freshly-rendered Receive view: parse dollars→cents,
-  // build+sign+broadcast via onDeposit, then poll onPoll() until the credited balance lands.
-  const wireDeposit = (recv: HTMLElement) => {
-    if (!opts.onDeposit) return;
-    const amtInput = recv.querySelector<HTMLInputElement>("#wltDepAmt");
-    const depBtn = recv.querySelector<HTMLButtonElement>("#wltDepBtn");
-    const status = recv.querySelector<HTMLElement>("#wltDepStatus");
-    if (!amtInput || !depBtn || !status) return;
-    const setStatus = (msg: string, kind?: "err" | "ok") => {
-      status.textContent = msg;
-      status.classList.toggle("err", kind === "err");
-      status.classList.toggle("ok", kind === "ok");
-    };
-    depBtn.onclick = async () => {
-      const dollars = parseFloat(amtInput.value);
-      if (!Number.isFinite(dollars) || dollars < 0.1) { setStatus("Enter at least $0.10.", "err"); return; }
-      const cents = Math.round(dollars * 100);
-      depBtn.disabled = true; depBtn.classList.remove("ok");
-      try {
-        setStatus("Building…");
-        const before = opts.balance();
-        setStatus("Approve in Privy…");
-        await opts.onDeposit!(cents);
-        void opts.onWalletPoll?.().then((b) => renderWalletBalance(recv, b)).catch(() => {});
-        setStatus("Confirming…");
-        // poll for the server-confirmer credit (~3s × 10 ≈ 30s)
-        let credited = false;
-        if (opts.onPoll) {
-          for (let i = 0; i < 10; i++) {
-            await new Promise((r) => setTimeout(r, 3000));
-            let bal: number;
-            try { bal = await opts.onPoll(); } catch { continue; }
-            if (bal > before) { renderBalance(true); credited = true; break; }
-          }
-        }
-        if (credited) { depBtn.classList.add("ok"); setStatus("✓ Deposited", "ok"); }
-        else setStatus("Sent. Balance will update shortly.", "ok");
-      } catch (e) {
-        const msg = e instanceof Error ? e.message : "Deposit failed.";
-        setStatus(msg, "err");
-      } finally {
-        depBtn.disabled = false;
-      }
-    };
-  };
-
   // Re-render the Receive QR/address + the account row from the LIVE address on every open.
   // A real address only exists after login, so a build-time snapshot would never appear. Empty
   // address → no QR, no sendable address, just a "sign in first" notice (no funds into the void).
@@ -318,25 +232,11 @@ export function createWallet(parent: HTMLElement, opts: WalletOpts): Wallet {
     const recv = q<HTMLElement>('.wlt-view[data-view="recv"]');
     if (addr) {
       const qr = qrSvg(qrMatrix(addr, "M"), { dark: "#0a0820", light: "#ffffff", margin: 3 });
-      // "Deposit to game" — only when a real signer is wired (privy). Sends USDC from the user's
-      // wallet to the treasury; the server confirmer credits the balance, which we poll for below.
-      const depBlock = opts.onDeposit
-        ? `<div class="wlt-dep">
-             <div class="wlt-dep-lbl">Stake to game now</div>
-             <div class="wlt-dep-row">
-               <label class="wlt-dep-amt"><span class="cur">$</span><input id="wltDepAmt" type="number" inputmode="decimal" value="1.00" min="0.10" step="0.10" /></label>
-               <button class="wlt-dep-btn" id="wltDepBtn">Stake</button>
-             </div>
-             <div class="wlt-dep-status" id="wltDepStatus"></div>
-           </div>`
-        : "";
       recv.innerHTML =
         `<div class="wlt-qr-wrap"><div class="wlt-qr">${qr}</div></div>` +
         `<div class="wlt-net">${usdcCoin(15)} USDC · Solana network</div>` +
         `<div class="wlt-addr"><span title="${addr}">${shortAddr(addr)}</span><button class="wlt-copy" id="wltCopy">${svg(ICONS.copy, 13)}Copy</button></div>` +
-        `<div class="wlt-wallet-bal"><span>Privy wallet</span><strong id="wltWalletBal">${walletBalanceText(opts.walletBalance?.())}</strong></div>` +
-        depBlock +
-        `<div class="wlt-note wlt-warn">This QR is your Privy wallet. Send only USDC (SPL) on Solana. Press GO to stake from this wallet into the game vault.</div>`;
+        `<div class="wlt-note wlt-warn">This QR is your Privy wallet. Send only USDC (SPL) on Solana. Press GO to pay from this wallet and play.</div>`;
       const copyBtn = recv.querySelector<HTMLButtonElement>("#wltCopy");
       if (copyBtn) {
         let copyTimer = 0;
@@ -348,8 +248,7 @@ export function createWallet(parent: HTMLElement, opts: WalletOpts): Wallet {
           copyTimer = window.setTimeout(() => { copyBtn.classList.remove("done"); copyBtn.innerHTML = `${svg(ICONS.copy, 13)}Copy`; }, 1400);
         };
       }
-      wireDeposit(recv);
-      void refreshWalletBalance(recv);
+      void refreshBalance();
     } else {
       recv.innerHTML = `<div class="wlt-note wlt-warn">No deposit address yet. Sign in with your wallet to get your personal deposit address. Do not send any funds until it appears here.</div>`;
     }
@@ -368,7 +267,7 @@ export function createWallet(parent: HTMLElement, opts: WalletOpts): Wallet {
 
   const setOpen = (open: boolean) => {
     overlay.style.display = open ? "flex" : "none";
-    if (open) { renderBalance(); renderAddressUI(); showTab("buy"); }
+    if (open) { renderBalance(); renderAddressUI(); showTab("buy"); void refreshBalance(); }
   };
   overlay.onclick = (e) => {
     const t = e.target as HTMLElement;

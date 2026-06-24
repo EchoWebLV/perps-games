@@ -33,6 +33,7 @@ async function main(): Promise<void> {
   let depositTxBuilder: DepositTxBuilder | null = null;
   let walletBalanceReader: import("./services/wallet-balance.js").WalletBalanceReader | null = null;
   let withdrawalsSvc: import("./services/withdrawals.js").Withdrawals | undefined;
+  let payoutSigner: import("./solana/withdraw-signer.js").WithdrawSigner | null = null;
   if (env.REAL_MONEY_ENABLED) {
     const { makeRpcDepositSource } = await import("./solana/deposit-source.js");
     const { assertUsdcMint } = await import("./solana/mint-assert.js");
@@ -59,8 +60,18 @@ async function main(): Promise<void> {
         const res = await treasuryPrivy.wallets().solana().signTransaction(env.TREASURY_WALLET_ID!, { transaction: txBase64 });
         return res.signed_transaction;
       };
+      const { makePrivyWithdrawSigner } = await import("./solana/withdraw-signer.js");
+      payoutSigner = makePrivyWithdrawSigner({
+        privy: treasuryPrivy,
+        treasuryWalletId: env.TREASURY_WALLET_ID,
+        treasuryUsdcAta: env.TREASURY_USDC_ATA!,
+        treasuryOwner: env.TREASURY_OWNER_PUBKEY,
+        usdcMint: env.USDC_MINT!,
+        caip2: env.SOLANA_CLUSTER === "devnet" ? "solana:devnet" : "solana:mainnet",
+        rpcUrl: env.SOLANA_RPC_URL!,
+      });
     } else {
-      console.warn("[deposit_sponsorship_disabled] falling back to user-paid Solana fees");
+      console.warn("[treasury_signer_disabled] falling back to user-paid Solana fees and ledger-only payouts");
     }
 
     // "deposit to game" tx builder (user wallet → treasury ATA). With the Privy treasury
@@ -121,6 +132,7 @@ async function main(): Promise<void> {
     depositMaxCents: env.DEPOSIT_MAX_CENTS,
     withdrawals: withdrawalsSvc ?? null,
     withdrawProcessor: null,
+    payoutSigner,
   });
 
   const addr = await server.listen({ port: env.PORT, host: "0.0.0.0" });

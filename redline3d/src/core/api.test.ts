@@ -42,6 +42,21 @@ describe("createApi", () => {
     expect(m.payoutCoins).toBe(14);
   });
 
+  it("builds a play payment transaction through the play endpoint", async () => {
+    let seen: { url: string; init: RequestInit } | null = null;
+    const api = createApi({
+      baseUrl: "http://x", userId: "u",
+      fetch: async (url, init) => { seen = { url: String(url), init: init ?? {} }; return res(200, { txBase64: "tx-play" }); },
+    });
+
+    const out = await api.playPaymentBuild(100);
+
+    expect(out.txBase64).toBe("tx-play");
+    expect(seen!.url).toBe("http://x/v1/play/payment/build");
+    expect(seen!.init.method).toBe("POST");
+    expect(JSON.parse(String(seen!.init.body))).toEqual({ amountCents: 100 });
+  });
+
   it("maps a fetch throw to a network ApiError", async () => {
     const api = createApi({ baseUrl: "http://x", userId: "u", fetch: async () => { throw new Error("offline"); } });
     await expect(api.me()).rejects.toMatchObject({ code: "network" });

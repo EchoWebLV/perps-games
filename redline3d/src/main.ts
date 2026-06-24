@@ -20,7 +20,8 @@ import { createPrivyAuth } from "./core/auth-privy";
 import type { AuthProvider } from "./core/auth";
 import { usd } from "./core/money";
 import { createRoundSync, clampInt } from "./core/round-sync";
-import { ensureStakeBalance, StakeWalletError } from "./core/stake-wallet";
+import { ensurePlayPayment, InsufficientWalletBalanceError, PlayPaymentConfirmationError } from "./core/play-payment";
+import { displayCashBalance } from "./core/wallet-balance-model";
 import { niceLev, tToLev } from "./core/leverage";
 import { liqPriceOf } from "./core/economics";
 import { createUpgrades } from "./ui/upgrades";
@@ -82,9 +83,14 @@ const api = createApi({ auth });
 let signedIn = false;
 function triggerSignIn() { if (auth.login) auth.login(); } // privy: open the login modal · dev: no-op
 const roundSync = createRoundSync({ api, clock: { now: () => performance.now() }, store: { get: (k) => { try { return localStorage.getItem(k); } catch { return null; } }, set: (k, v) => { try { localStorage.setItem(k, v); } catch {} } } });
-let balance = 0;                   // server-owned; seeded by api.me()
+let balance = 0;                   // displayed cash balance, sourced from Privy wallet when available
+let serverBalance = 0;             // hidden round-accounting balance used by the existing server engine
 let walletBalance: number | null = null; // on-chain USDC in the embedded Privy wallet
 let connected = false;
+const syncDisplayedBalance = () => {
+  balance = displayCashBalance({ walletBalance, fallbackBalance: serverBalance });
+  hud.setBalance(balance);
+};
 
 // Live "mark": the SERVER's current equity for the open round. The displayed × / buffer / payout
 // and the terminal (liq/cap/time) are driven by this so what you see == what you settle for.
@@ -168,17 +174,13 @@ const walletUI = createWallet(hudRoot, {
   address: () => auth.walletPublicKey?.() ?? "",
   balance: () => balance,
   walletBalance: () => walletBalance,
-  onBuy: () => { hud.setStatus("Deposits open when real money goes live."); },
-  // real-money deposit: server builds an unsigned USDC transfer (user → treasury), the embedded
-  // Privy wallet signs + broadcasts. We do NOT credit here — the server confirmer does, and the
-  // wallet UI polls onPoll() for the credited balance.
-  onDeposit: async (cents: number) => {
-    const { txBase64 } = await api.depositBuild(cents);
-    const sig = await auth.signAndSend(txBase64); // user approves in Privy, broadcasts
-    return sig;
+  onBuy: () => { hud.setStatus("Use Receive to add USDC to your Privy wallet."); },
+  onWalletPoll: async () => {
+    const r = await api.walletBalance();
+    walletBalance = r.balance;
+    syncDisplayedBalance();
+    return r.balance;
   },
-  onPoll: async () => { const b = (await api.me()).balance; balance = b; hud.setBalance(balance); return b; },
-  onWalletPoll: async () => { const r = await api.walletBalance(); walletBalance = r.balance; return r.balance; },
   // Log out moved to the menu (settings); the wallet page is deposit-only now.
 });
 hud.onWallet(() => { if (engine.getPhase() !== "live") walletUI.open(); });
@@ -190,14 +192,15 @@ async function initSession() {
   if (signedIn) return;
   try {
     const me = await api.me();
-    balance = me.balance;
+    serverBalance = me.balance;
     connected = true;
     signedIn = true;
-    hud.setBalance(balance);
+    syncDisplayedBalance();
     try { walletBalance = (await api.walletBalance()).balance; } catch { walletBalance = null; }
+    syncDisplayedBalance(); walletUI.setBalance(balance);
     if (me.openRoundId) await roundSync.recover(me.openRoundId);
     const refreshed = await api.me();
-    balance = refreshed.balance; hud.setBalance(balance);
+    serverBalance = refreshed.balance; syncDisplayedBalance(); walletUI.setBalance(balance);
   } catch {
     connected = false;
     hud.setStatus("Can't reach the server. Reconnecting...");
@@ -221,7 +224,7 @@ const garage = createCarPicker(hudRoot, [
   { name: "Cybertruck", url: "/models/cybertruck.glb", scale: 1.3, power: { name: "Exoskeleton", desc: "survive deeper drops", icon: "shield" } },
   { name: "Orion", url: "/models/orion.glb", yaw: -Math.PI / 2, ability: "nitro", power: { name: "Nitro Overdrive", desc: "2× leverage · 3s", icon: "flame" } },
   { name: "Vaporwave", url: "/models/vaporwave.glb", ability: "rainbow", power: { name: "Rainbow Coins", desc: "×2 ×3 ×5 coin drops", icon: "magnet" } },
-  { name: "Flintstone", url: "/models/flinstone.glb", scale: 0.7, power: { name: "Stone-Age Airbag", desc: "keep stake on liq", icon: "chute" } },
+  { name: "Flintstone", url: "/models/flinstone.glb", scale: 0.7, power: { name: "Stone-Age Airbag", desc: "keep play amount on liq", icon: "chute" } },
   { name: "Clown Car", url: "/models/clowncar.glb", yaw: Math.PI / 2, ability: "laneBet", power: { name: "Lane Bet", desc: "steer = LONG / SHORT", icon: "swap" } },
   // newly-added models — same pack as the Clown Car (length-on-X, no wheel nodes) → yaw +π/2.
   // placeholder names, no ability yet. If any one model faces backwards, it needs +π instead.
@@ -374,11 +377,13 @@ async function settleVia(reason: "cashout" | "expire", localSnap: Snapshot) {
     hud.setStatus("Round will settle shortly. Feed interruption.");
     return;
   }
-  balance = res.balance; hud.setBalance(balance); walletUI.setBalance(balance);
+  serverBalance = res.balance;
+  try { walletBalance = (await api.walletBalance()).balance; } catch { /* keep last wallet read */ }
+  syncDisplayedBalance(); walletUI.setBalance(balance);
   controls.setLive(false, "GO!");
   hud.setMultiplier(res.equity, res.outcome === "liq" ? "liquidated" : "settled");
   if (res.outcome === "liq") {
-    hud.setStatus(`💥 Liquidated. Lost your stake.`);
+    hud.setStatus(`💥 Liquidated. Lost the play amount.`);
     fx.liquidate(); audio.liquidate(); navigator.vibrate?.([30, 40, 30, 40, 90]);
   } else {
     hud.setStatus(`Settled at ×${res.equity.toFixed(2)}. Banked ${usd(res.payoutCoins)}.`);
@@ -402,46 +407,50 @@ controls.onLaunch(async () => {
     hud.setStatus("Wrapping up your last round…");
     const r = await roundSync.reconcile();
     if (r === "blocked") { controls.setLive(false, "GO!"); hud.setStatus("Last round still settling. Try again in a moment."); return; }
-    try { const me = await api.me(); balance = me.balance; hud.setBalance(balance); walletUI.setBalance(balance); } catch { /* keep the displayed balance */ }
+    try { const me = await api.me(); serverBalance = me.balance; syncDisplayedBalance(); walletUI.setBalance(balance); } catch { /* keep the displayed balance */ }
   }
 
-  const stake = controls.stake();
-  if (balance < stake && auth.walletPublicKey?.()) {
+  const playAmount = controls.playAmount();
+  if (auth.walletPublicKey?.()) {
     try {
-      controls.setLive(true, "STAKING...");
-      hud.setStatus(`Approve ${usd(stake - balance)} stake in Privy...`);
-      balance = await ensureStakeBalance({
-        currentBalance: balance,
-        stake,
-        deposit: async (amountCents) => {
-          const { txBase64 } = await api.depositBuild(amountCents);
+      controls.setLive(true, "PAYING...");
+      hud.setStatus(`Paying ${usd(playAmount)} from Privy wallet...`);
+      const currentServerBalance = serverBalance;
+      serverBalance = await ensurePlayPayment({
+        walletBalance,
+        currentServerBalance,
+        playAmount,
+        pay: async (amountCents) => {
+          const { txBase64 } = await api.playPaymentBuild(amountCents);
           await auth.signAndSend(txBase64);
+          try { walletBalance = (await api.walletBalance()).balance; syncDisplayedBalance(); walletUI.setBalance(balance); } catch { /* keep last wallet read */ }
         },
-        pollBalance: async () => {
+        pollServerBalance: async () => {
           const me = await api.me();
-          balance = me.balance;
-          hud.setBalance(balance);
-          walletUI.setBalance(balance);
-          try { walletBalance = (await api.walletBalance()).balance; } catch { walletBalance = null; }
-          return balance;
+          serverBalance = me.balance;
+          try { walletBalance = (await api.walletBalance()).balance; } catch { /* keep last wallet read */ }
+          syncDisplayedBalance(); walletUI.setBalance(balance);
+          return serverBalance;
         },
       });
-      hud.setBalance(balance);
+      syncDisplayedBalance();
       walletUI.setBalance(balance);
     } catch (e) {
       controls.setLive(false, "GO!");
-      const msg = e instanceof StakeWalletError
-        ? "Stake sent. Waiting for confirmation. Press GO again shortly."
-        : "Stake not approved. Add USDC to your Privy wallet or try again.";
+      const msg = e instanceof InsufficientWalletBalanceError
+        ? "Not enough USDC in your Privy wallet."
+        : e instanceof PlayPaymentConfirmationError
+          ? "Payment sent. Waiting for confirmation. Press GO again shortly."
+          : "Payment not approved. Add USDC to your Privy wallet or try again.";
       hud.setStatus(msg);
       return;
     }
   }
-  if (balance < stake) { hud.setStatus("Not enough balance. Lower your stake."); return; }
+  if (!auth.walletPublicKey?.() && serverBalance < playAmount) { hud.setStatus("Not enough balance. Lower your play amount."); return; }
   const lev = clampInt(game.lev, 10, 1000);                          // parity: send the clamped value
   hud.setStatus("Launching…");
   let out;
-  try { out = await roundSync.open({ asset: asset as "BTC"|"ETH"|"SOL", dir: controls.dir(), lev, stake }); }
+  try { out = await roundSync.open({ asset: asset as "BTC"|"ETH"|"SOL", dir: controls.dir(), lev, stake: playAmount }); }
   catch (e: any) {
     const code = e?.code;
     if (code === "round_already_open") {
@@ -449,7 +458,7 @@ controls.onLaunch(async () => {
       try { const me = await api.me(); if (me.openRoundId) await roundSync.recover(me.openRoundId); } catch { /* retry next press */ }
       hud.setStatus(roundSync.roundId() ? "Last round still settling. Try again in a moment." : "Ready. Press GO again.");
     } else {
-      hud.setStatus(code === "insufficient_balance" ? "Not enough balance. Lower your stake."
+      hud.setStatus(code === "insufficient_balance" ? "Payment is still confirming. Try again shortly."
         : code === "feed_halt" ? "Feed is down. Try again in a moment."
         : "Can't reach the server. Try again.");
     }
@@ -460,7 +469,7 @@ controls.onLaunch(async () => {
   round.entryPx = out.entryRaw;
   round.dir = controls.dir();
   roundStartMs = out.entryTsUs / 1000;                               // parity: server clock
-  engine.launch({ dir: controls.dir(), lev, stake, entryRaw: out.entryRaw, startMs: roundStartMs });
+  engine.launch({ dir: controls.dir(), lev, stake: playAmount, entryRaw: out.entryRaw, startMs: roundStartMs });
   serverMark = null; lastMarkMs = 0; dispEq = 1; // fresh mark + display for the new round
   chase.setDriving(true); // smooth transition from the idle orbit into the chase cam
   controls.setLive(true, "CASH OUT");

@@ -27,6 +27,7 @@ export interface RouteDeps {
   depositMaxCents: number;
   withdrawals: import("../services/withdrawals.js").Withdrawals | null;
   withdrawProcessor: import("../services/withdraw-worker.js").WithdrawProcessor | null;
+  payoutSigner: import("../solana/withdraw-signer.js").WithdrawSigner | null;
 }
 
 const GrantCoins = z.object({ amount: z.number().int().positive() });
@@ -93,8 +94,8 @@ export function registerRoutes(server: FastifyInstance, deps: RouteDeps): void {
   });
 
   const DepositBuildBody = z.object({ amountCents: z.number().int().positive() });
-  server.post("/v1/deposit/build", { preHandler: requireUser }, async (req, reply) => {
-    if (!deps.depositTxBuilder) return reply.code(404).send({ error: "deposits_disabled" });
+  const buildUserToVaultTx = async (req: any, reply: any, disabledError: string) => {
+    if (!deps.depositTxBuilder) return reply.code(404).send({ error: disabledError });
     const body = DepositBuildBody.safeParse(req.body);
     if (!body.success) return reply.code(400).send({ error: "bad_request" });
     if (body.data.amountCents < deps.depositMinCents || body.data.amountCents > deps.depositMaxCents)
@@ -103,6 +104,13 @@ export function registerRoutes(server: FastifyInstance, deps: RouteDeps): void {
     if (!user?.walletPublicKey) return reply.code(409).send({ error: "no_bound_wallet" });
     const { txBase64 } = await deps.depositTxBuilder.buildForUser(user.walletPublicKey, body.data.amountCents);
     return { txBase64 };
+  };
+  server.post("/v1/deposit/build", { preHandler: requireUser }, async (req, reply) => {
+    return buildUserToVaultTx(req, reply, "deposits_disabled");
+  });
+
+  server.post("/v1/play/payment/build", { preHandler: requireUser }, async (req, reply) => {
+    return buildUserToVaultTx(req, reply, "play_payments_disabled");
   });
 
   server.get("/v1/wallet/usdc-balance", { preHandler: requireUser }, async (req, reply) => {
@@ -170,12 +178,29 @@ export function registerRoutes(server: FastifyInstance, deps: RouteDeps): void {
     if (!p.success) return reply.code(400).send({ error: p.error.message });
     try {
       const res = await deps.rounds.close(req.userId!, p.data.roundId, p.data.reason);
+      let payoutTxSig: string | null = null;
+      let payoutPrivyTxId: string | null = null;
+      if (deps.stakeAsset === "cash" && deps.payoutSigner && res.payoutCoins > 0) {
+        const user = await deps.users.get(req.userId!);
+        if (user?.walletPublicKey) {
+          const sent = await deps.payoutSigner.signAndSend({
+            destWallet: user.walletPublicKey,
+            amountCents: res.payoutCoins,
+            idempotencyKey: `round-payout:${res.round.id}`,
+          });
+          payoutTxSig = sent.txSig;
+          payoutPrivyTxId = sent.privyTxId;
+          await deps.ledger.post(req.userId!, "cash", -res.payoutCoins, "round_payout_sent", res.round.id);
+        }
+      }
       return {
         outcome: res.outcome,
         payoutCoins: res.payoutCoins,
         pnlCoins: res.pnlCoins,
         equity: res.equity,
         exitRaw: res.round.exitRaw,
+        payoutTxSig,
+        payoutPrivyTxId,
         balance: await deps.ledger.balance(req.userId!, deps.stakeAsset),
       };
     } catch (e: any) {

@@ -38,6 +38,8 @@ export interface Api {
   markRound(roundId: string): Promise<MarkResult>;
   /** build an unsigned USDC deposit tx (user wallet → treasury) for the client to sign + broadcast */
   depositBuild(amountCents: number): Promise<{ txBase64: string }>;
+  /** build the USDC payment tx for one play (Privy wallet → vault) */
+  playPaymentBuild(amountCents: number): Promise<{ txBase64: string }>;
   /** on-chain USDC currently sitting in the user's Privy wallet */
   walletBalance(): Promise<WalletBalanceResult>;
 }
@@ -87,6 +89,7 @@ export function createApi(opts: ApiOpts = {}): Api {
     closeRound: (p) => call<CloseResult>("POST", "/v1/round/close", p),
     markRound: (id) => call<MarkResult>("GET", `/v1/round/${id}/mark`),
     depositBuild: (amountCents) => call<{ txBase64: string }>("POST", "/v1/deposit/build", { amountCents }),
+    playPaymentBuild: (amountCents) => call<{ txBase64: string }>("POST", "/v1/play/payment/build", { amountCents }),
     walletBalance: () => call<WalletBalanceResult>("GET", "/v1/wallet/usdc-balance"),
   };
 }

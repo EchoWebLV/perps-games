@@ -49,3 +49,34 @@ describe("GET /v1/wallet/usdc-balance", () => {
     expect(res.json()).toEqual({ wallet: "WalletAAA", balance: 100 });
   });
 });
+
+describe("POST /v1/play/payment/build", () => {
+  let ctx: TestCtx;
+  afterEach(async () => { await ctx?.close(); });
+
+  it("returns 404 when play payments are disabled", async () => {
+    ctx = await makeTestDb();
+    const res = await ctx.server.inject({ method: "POST", url: "/v1/play/payment/build", headers: H, payload: { amountCents: 100 } });
+    expect(res.statusCode).toBe(404);
+    expect(res.json()).toEqual({ error: "play_payments_disabled" });
+  });
+
+  it("builds a user wallet to vault payment transaction", async () => {
+    ctx = await makeTestDb({
+      depositTxBuilder: {
+        async buildForUser(wallet, amountCents) {
+          expect(wallet).toBe("WalletAAA");
+          expect(amountCents).toBe(100);
+          return { txBase64: "tx-play" };
+        },
+      },
+    });
+    const user = await ctx.users.upsertByExternalId("dev:mallory");
+    await ctx.users.setWalletPublicKey(user.id, "WalletAAA");
+
+    const res = await ctx.server.inject({ method: "POST", url: "/v1/play/payment/build", headers: H, payload: { amountCents: 100 } });
+
+    expect(res.statusCode).toBe(200);
+    expect(res.json()).toEqual({ txBase64: "tx-play" });
+  });
+});
