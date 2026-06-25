@@ -9,7 +9,6 @@ import { ensureHouseUserId } from "./services/house.js";
 import { makeHermesFeed } from "./feed/hermes.js";
 import { makePrivyAuth } from "./auth/privy.js";
 import { makeDepositTxBuilder, makeRpcBlockhash, type DepositTxBuilder } from "./services/deposit-tx.js";
-import { PLAY_PAYMENT_MAX_CENTS, PLAY_PAYMENT_MIN_CENTS } from "./services/play-payments.js";
 
 async function main(): Promise<void> {
   if (!env.DATABASE_URL) throw new Error("DATABASE_URL is required to start the server");
@@ -32,9 +31,6 @@ async function main(): Promise<void> {
   let depositConfirmer: { start(): void; stop(): void } | undefined;
   let realMoney = { enabled: false, treasuryUsdcAta: null as string | null };
   let depositTxBuilder: DepositTxBuilder | null = null;
-  let playPaymentBroadcaster: import("./services/play-payment-broadcaster.js").PlayPaymentBroadcaster | null = null;
-  let playPaymentCharger: import("./services/play-payment-charger.js").PlayPaymentCharger | null = null;
-  let playPaymentConfirmer: import("./services/play-payments.js").PlayPaymentConfirmer | null = null;
   let walletBalanceReader: import("./services/wallet-balance.js").WalletBalanceReader | null = null;
   let withdrawalsSvc: import("./services/withdrawals.js").Withdrawals | undefined;
   let payoutSigner: import("./solana/withdraw-signer.js").WithdrawSigner | null = null;
@@ -43,21 +39,17 @@ async function main(): Promise<void> {
     const { assertUsdcMint } = await import("./solana/mint-assert.js");
     const { makeDeposits } = await import("./services/deposits.js");
     const { makeDepositConfirmer } = await import("./services/deposit-worker.js");
-    const { makeRpcPlayPaymentBroadcaster } = await import("./services/play-payment-broadcaster.js");
-    const { makePlayPaymentConfirmer } = await import("./services/play-payments.js");
     const { makeRpcWalletBalanceReader } = await import("./services/wallet-balance.js");
     const source = makeRpcDepositSource(env.SOLANA_RPC_URL!);
     await assertUsdcMint((m) => source.fetchMintInfo(m), env.USDC_MINT!); // refuse to boot on a bad mint
     const deposits = makeDeposits(db, ledger, {
       usdcMint: env.USDC_MINT!, treasuryAta: env.TREASURY_USDC_ATA!,
-      minCents: PLAY_PAYMENT_MIN_CENTS, maxCents: Math.max(env.DEPOSIT_MAX_CENTS, PLAY_PAYMENT_MAX_CENTS),
+      minCents: env.DEPOSIT_MIN_CENTS, maxCents: env.DEPOSIT_MAX_CENTS,
     });
     if (env.RUN_CONFIRMER) {
       depositConfirmer = makeDepositConfirmer({ deposits, source, treasuryAta: env.TREASURY_USDC_ATA!, pollMs: env.DEPOSIT_POLL_MS });
       depositConfirmer.start();
     }
-    playPaymentConfirmer = makePlayPaymentConfirmer({ deposits, source, treasuryAta: env.TREASURY_USDC_ATA! });
-    playPaymentBroadcaster = makeRpcPlayPaymentBroadcaster(env.SOLANA_RPC_URL!);
     realMoney = { enabled: true, treasuryUsdcAta: env.TREASURY_USDC_ATA! };
 
     let privyClient: import("@privy-io/node").PrivyClient | null = null;
@@ -93,27 +85,6 @@ async function main(): Promise<void> {
       signFeePayerTx,
       getLatestBlockhash: makeRpcBlockhash(env.SOLANA_RPC_URL!),
     });
-    if (privyClient) {
-      const { makePlayPaymentCharger } = await import("./services/play-payment-charger.js");
-      const policyIds = (env.PRIVY_PLAY_SIGNER_POLICY_IDS ?? "")
-        .split(",")
-        .map((s) => s.trim())
-        .filter(Boolean);
-      const signer = env.PRIVY_PLAY_SIGNER_ID
-        ? { signerId: env.PRIVY_PLAY_SIGNER_ID, ...(policyIds.length > 0 ? { policyIds } : {}) }
-        : undefined;
-      playPaymentCharger = makePlayPaymentCharger({
-        privy: privyClient,
-        privyAppId: env.PRIVY_APP_ID,
-        privyApiUrl: process.env.PRIVY_API_BASE_URL,
-        signer,
-        authorizationPrivateKeys: env.PRIVY_PLAY_SIGNER_PRIVATE_KEY ? [env.PRIVY_PLAY_SIGNER_PRIVATE_KEY] : undefined,
-        depositTxBuilder,
-        broadcaster: playPaymentBroadcaster,
-      });
-    } else {
-      console.warn("[play_payment_charger_disabled] Privy keys are missing; falling back to client wallet prompts");
-    }
     walletBalanceReader = makeRpcWalletBalanceReader(env.SOLANA_RPC_URL!, env.USDC_MINT!);
 
     const { makeWithdrawals } = await import("./services/withdrawals.js");
@@ -158,9 +129,6 @@ async function main(): Promise<void> {
     privyAuth,
     realMoney,
     depositTxBuilder,
-    playPaymentBroadcaster,
-    playPaymentCharger,
-    playPaymentConfirmer,
     walletBalanceReader,
     depositMinCents: env.DEPOSIT_MIN_CENTS,
     depositMaxCents: env.DEPOSIT_MAX_CENTS,

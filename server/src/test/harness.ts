@@ -21,7 +21,7 @@ export interface TestCtx {
 }
 
 /** fresh in-memory pglite DB with migrations applied + services wired (stub feed) */
-export async function makeTestDb(opts: { signupFaucet?: boolean; startBalance?: number; corsOrigins?: string[]; devAuth?: boolean; privyAuth?: import("../auth/privy.js").PrivyAuth | null; realMoney?: { enabled: boolean; treasuryUsdcAta: string | null }; depositTxBuilder?: import("../services/deposit-tx.js").DepositTxBuilder | null; playPaymentBroadcaster?: import("../services/play-payment-broadcaster.js").PlayPaymentBroadcaster | null; playPaymentCharger?: import("../services/play-payment-charger.js").PlayPaymentCharger | null; playPaymentConfirmer?: any; walletBalanceReader?: import("../services/wallet-balance.js").WalletBalanceReader | null; depositMinCents?: number; depositMaxCents?: number; withdrawals?: any; withdrawProcessor?: any; payoutSigner?: import("../solana/withdraw-signer.js").WithdrawSigner | null; stakeAsset?: "coin" | "cash" } = {}): Promise<TestCtx> {
+export async function makeTestDb(opts: { signupFaucet?: boolean; startBalance?: number; corsOrigins?: string[]; devAuth?: boolean; privyAuth?: import("../auth/privy.js").PrivyAuth | null; realMoney?: { enabled: boolean; treasuryUsdcAta: string | null }; depositTxBuilder?: import("../services/deposit-tx.js").DepositTxBuilder | null; walletBalanceReader?: import("../services/wallet-balance.js").WalletBalanceReader | null; depositMinCents?: number; depositMaxCents?: number; withdrawals?: any; withdrawProcessor?: any; payoutSigner?: import("../solana/withdraw-signer.js").WithdrawSigner | null; stakeAsset?: "coin" | "cash" } = {}): Promise<TestCtx> {
   const raw = createDb(); // pglite
   await raw.runMigrations();
   const db = raw.db;
@@ -45,9 +45,6 @@ export async function makeTestDb(opts: { signupFaucet?: boolean; startBalance?: 
     privyAuth: opts.privyAuth ?? null,
     realMoney: opts.realMoney ?? { enabled: false, treasuryUsdcAta: null },
     depositTxBuilder: opts.depositTxBuilder ?? null,
-    playPaymentBroadcaster: opts.playPaymentBroadcaster ?? null,
-    playPaymentCharger: opts.playPaymentCharger ?? null,
-    playPaymentConfirmer: opts.playPaymentConfirmer ?? null,
     walletBalanceReader: opts.walletBalanceReader ?? null,
     depositMinCents: opts.depositMinCents ?? 10,
     depositMaxCents: opts.depositMaxCents ?? 10000,
