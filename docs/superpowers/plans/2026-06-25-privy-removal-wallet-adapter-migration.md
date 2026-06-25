@@ -1094,6 +1094,7 @@ git commit -m "feat(server): add signed wallet binding"
 - Create: `server/src/services/signed-tx-broadcaster.ts`
 - Create: `server/src/services/signed-tx-broadcaster.test.ts`
 - Modify: `server/src/env.ts`
+- Modify: `server/src/test/env.test.ts`
 - Modify: `server/src/index.ts`
 - Modify: `server/src/services/deposit-tx.ts`
 - Modify: `server/src/services/deposit-tx.test.ts`
@@ -1103,6 +1104,8 @@ git commit -m "feat(server): add signed wallet binding"
 **Interfaces:**
 - Consumes: base64 wire transaction from `depositTxBuilder`.
 - Produces: `makeFeePayerSigner(secret).signFeePayerTx(txBase64): Promise<string>` that signs only the configured fee-payer slot.
+
+**Task boundary:** This task removes Privy from server fee-payer signing and deposit broadcast. It may leave Privy package/files until Task 10. Keep `TREASURY_OWNER_PUBKEY` only as a safety check proving the fee-payer wallet is not the treasury token authority; do not use the treasury owner as the fee payer.
 
 - [ ] **Step 1: Create failing fee-payer signer tests**
 
@@ -1231,6 +1234,8 @@ In real-money `superRefine`, add:
     });
   }
 ```
+
+In `server/src/test/env.test.ts`, add focused coverage that `FEE_PAYER_SECRET` and `FEE_PAYER_OWNER_PUBKEY` must be set together when real money is enabled, and that both set together parse successfully.
 
 - [ ] **Step 5: Wire fee-payer signer in `server/src/index.ts`**
 
