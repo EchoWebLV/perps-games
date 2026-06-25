@@ -3,9 +3,9 @@ import { shortWallet } from "./auth-ui";
 
 /**
  * Wallet page — a full-screen synthwave overlay opened from the balance chip.
- *   • Privy wallet USDC balance hero
+ *   • Connected wallet USDC balance hero
  *   • Buy USDC placeholder
- *   • Receive — Privy wallet QR + copy
+ *   • Receive — connected wallet QR + copy
  *
  * The balance and wallet address run through callbacks so main owns auth and
  * on-chain reads.
@@ -22,15 +22,16 @@ export interface WalletOpts {
    *  after login. Returns "" when there is no real wallet yet (dev/guest, or pre-login). */
   address: () => string;
   balance: () => number;
-  /** on-chain USDC currently held by the embedded Privy wallet, in cents */
+  /** on-chain USDC currently held by the connected wallet, in cents */
   walletBalance?: () => number | null;
+  onConnectWallet?: () => Promise<void>;
   /** credit `usd` USDC to the balance (sim deposit today, fiat on-ramp later) */
   onBuy: (usd: number) => void;
   /** sign the player out — when omitted (dev/guest) the account row stays hidden */
   onLogout?: () => void;
-  /** re-fetch the on-chain Privy wallet USDC balance, in cents */
+  /** re-fetch the on-chain connected-wallet USDC balance, in cents */
   onWalletPoll?: () => Promise<number>;
-  /** Sweep the whole Privy-wallet USDC into the in-game play balance. Resolves when credited. */
+  /** Sweep the whole connected-wallet USDC into the in-game play balance. Resolves when credited. */
   onAddToPlay?: () => Promise<void>;
 }
 
@@ -163,7 +164,7 @@ export function createWallet(parent: HTMLElement, opts: WalletOpts): Wallet {
   panel.innerHTML =
     `<div class="wlt-head"><span class="lbl">wallet</span><button class="wlt-x" data-act="close" aria-label="Close">✕</button></div>` +
     `<div class="wlt-hero"><div class="wlt-hero-glow"></div>
-       <div class="wlt-hero-top">${usdcCoin(22)}<span class="wlt-hero-lbl">Privy wallet balance</span></div>
+       <div class="wlt-hero-top">${usdcCoin(22)}<span class="wlt-hero-lbl">Connected wallet balance</span></div>
        <div class="wlt-bal"><span class="wlt-bal-cur">$</span><span id="wltBal">0.00</span></div>
        <div class="wlt-hero-sub"><span id="wltUsdc">0.00</span> USDC · Solana</div>
      </div>` +
@@ -172,11 +173,12 @@ export function createWallet(parent: HTMLElement, opts: WalletOpts): Wallet {
        <button class="wlt-tab" data-tab="recv">${svg(ICONS.qr, 15)}Receive</button>
      </div>` +
     `<div class="wlt-view" data-view="buy">
+       <div id="wltBuyConnect"></div>
        <button class="wlt-cta ok" id="wltAddPlay">Add to play balance</button>
        <div class="wlt-note" id="wltAddNote">Move your wallet USDC into your play balance — then GO is instant.</div>
        <div class="wlt-amts">${AMOUNTS.map((a) => `<button class="wlt-amt" data-amt="${a}">$${a}<small>USDC</small></button>`).join("")}</div>
        <button class="wlt-cta" id="wltBuy">Buy USDC</button>
-       <div class="wlt-note">Use Receive to add USDC to your Privy wallet.</div>
+       <div class="wlt-note">Use Receive to add USDC to your connected wallet.</div>
      </div>` +
     // recv view + account row are filled live by renderAddressUI() on each open — the deposit
     // address only exists AFTER login, so it must be read fresh, never snapshotted at build time.
@@ -228,6 +230,45 @@ export function createWallet(parent: HTMLElement, opts: WalletOpts): Wallet {
     okTimer = window.setTimeout(() => { buyBtn.classList.remove("ok"); renderAmount(); }, 1500);
   };
 
+  const renderConnectButtons = () => {
+    const addr = opts.address();
+    const buyConnect = q<HTMLElement>("#wltBuyConnect");
+    const amtWrap = q<HTMLElement>(".wlt-amts");
+
+    buyConnect.innerHTML = addr ? "" : `<button class="wlt-cta wlt-connect">Connect wallet</button>`;
+    addPlayBtn.disabled = !addr;
+    buyBtn.disabled = !addr;
+    addPlayBtn.style.display = addr ? "" : "none";
+    addNote.textContent = addr
+      ? "Move your wallet USDC into your play balance — then GO is instant."
+      : "Connect a wallet to add USDC to play.";
+    amtWrap.style.display = addr ? "" : "none";
+    buyBtn.style.display = addr ? "" : "none";
+
+    const connectButtons = panel.querySelectorAll<HTMLButtonElement>(".wlt-connect");
+    for (const connectBtn of connectButtons) {
+      connectBtn.onclick = async () => {
+        if (!opts.onConnectWallet) return;
+        connectBtn.disabled = true;
+        connectBtn.textContent = "Connecting...";
+        try {
+          await opts.onConnectWallet();
+          renderAddressUI();
+          renderConnectButtons();
+          renderBalance();
+        } catch {
+          connectBtn.textContent = "Connect failed";
+          window.setTimeout(() => {
+            connectBtn.textContent = "Connect wallet";
+            connectBtn.disabled = false;
+          }, 1400);
+          return;
+        }
+        connectBtn.disabled = false;
+      };
+    }
+  };
+
   const addPlayBtn = q<HTMLButtonElement>("#wltAddPlay");
   const addNote = q<HTMLElement>("#wltAddNote");
   let adding = false;
@@ -253,9 +294,9 @@ export function createWallet(parent: HTMLElement, opts: WalletOpts): Wallet {
     }
   };
 
-  // Re-render the Receive QR/address + the account row from the LIVE address on every open.
+  // Re-render the Receive QR/address + the account row from the live address on every open.
   // A real address only exists after login, so a build-time snapshot would never appear. Empty
-  // address → no QR, no sendable address, just a "sign in first" notice (no funds into the void).
+  // address → no QR, no sendable address, just a connect prompt.
   const renderAddressUI = () => {
     const addr = opts.address();
     const recv = q<HTMLElement>('.wlt-view[data-view="recv"]');
@@ -265,7 +306,7 @@ export function createWallet(parent: HTMLElement, opts: WalletOpts): Wallet {
         `<div class="wlt-qr-wrap"><div class="wlt-qr">${qr}</div></div>` +
         `<div class="wlt-net">${usdcCoin(15)} USDC · Solana network</div>` +
         `<div class="wlt-addr"><span title="${addr}">${shortAddr(addr)}</span><button class="wlt-copy" id="wltCopy">${svg(ICONS.copy, 13)}Copy</button></div>` +
-        `<div class="wlt-note wlt-warn">This QR is your Privy wallet. Send only USDC (SPL) on Solana. Press GO to pay from this wallet and play.</div>`;
+        `<div class="wlt-note wlt-warn">This QR is your connected wallet. Send only USDC (SPL) on Solana. Add to play balance when the funds arrive.</div>`;
       const copyBtn = recv.querySelector<HTMLButtonElement>("#wltCopy");
       if (copyBtn) {
         let copyTimer = 0;
@@ -279,7 +320,9 @@ export function createWallet(parent: HTMLElement, opts: WalletOpts): Wallet {
       }
       void refreshBalance();
     } else {
-      recv.innerHTML = `<div class="wlt-note wlt-warn">No deposit address yet. Sign in with your wallet to get your personal deposit address. Do not send any funds until it appears here.</div>`;
+      recv.innerHTML =
+        `<button class="wlt-cta wlt-connect">Connect wallet</button>` +
+        `<div class="wlt-note wlt-warn">Connect a wallet to get your personal deposit address.</div>`;
     }
     const acct = q<HTMLElement>("#wltAcct");
     if (addr && opts.onLogout) {
@@ -296,7 +339,13 @@ export function createWallet(parent: HTMLElement, opts: WalletOpts): Wallet {
 
   const setOpen = (open: boolean) => {
     overlay.style.display = open ? "flex" : "none";
-    if (open) { renderBalance(); renderAddressUI(); showTab("buy"); void refreshBalance(); }
+    if (open) {
+      renderBalance();
+      renderAddressUI();
+      renderConnectButtons();
+      showTab("buy");
+      void refreshBalance();
+    }
   };
   overlay.onclick = (e) => {
     const t = e.target as HTMLElement;

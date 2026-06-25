@@ -115,4 +115,13 @@ describe("wallet loader", () => {
     expect(createMobileWalletPort).toHaveBeenCalledTimes(1);
     expect(createWalletStandardPort).not.toHaveBeenCalled();
   });
+
+  it("keeps wallet SDKs behind dynamic imports", async () => {
+    const fs = await import("node:fs/promises");
+    const main = await fs.readFile(new URL("../main.ts", import.meta.url), "utf8");
+
+    expect(main).not.toContain("@wallet-standard/app");
+    expect(main).not.toContain("@solana-mobile/wallet-adapter-mobile");
+    expect(main).toContain("loadSolanaWalletPort");
+  });
 });

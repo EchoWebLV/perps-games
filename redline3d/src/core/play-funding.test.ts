@@ -28,6 +28,25 @@ describe("sweepToPlayBalance", () => {
     expect(newBalance).toBe(500);
   });
 
+  it("passes deposit objects through to the signing step", async () => {
+    const deposit = { txBase64: "txb64", depositIntent: "di_123" };
+    const buildDepositTx = vi.fn(async () => deposit);
+    const signAndSend = vi.fn(async () => "sig123");
+
+    const newBalance = await sweepToPlayBalance({
+      walletBalanceCents: 500,
+      startingServerBalance: 0,
+      buildDepositTx,
+      signAndSend,
+      pollServerBalance: async () => 500,
+      delay: async () => {},
+    });
+
+    expect(buildDepositTx).toHaveBeenCalledWith(500);
+    expect(signAndSend).toHaveBeenCalledWith(deposit);
+    expect(newBalance).toBe(500);
+  });
+
   it("adds the swept amount on top of an existing in-game balance", async () => {
     const newBalance = await sweepToPlayBalance({
       walletBalanceCents: 300,
