@@ -73,4 +73,33 @@ describe("createSessionAuth", () => {
     expect(store.get("redline.session:token")).toBeUndefined();
     expect(store.get("redline.session:user")).toBeUndefined();
   });
+
+  it("retries session creation after a transient failure", async () => {
+    const store = new Map<string, string>();
+    const storage: Pick<Storage, "getItem" | "setItem" | "removeItem"> = {
+      getItem: (k) => store.get(k) ?? null,
+      setItem: (k, v) => {
+        store.set(k, v);
+      },
+      removeItem: (k) => {
+        store.delete(k);
+      },
+    };
+    const fetch = vi
+      .fn()
+      .mockResolvedValueOnce(new Response("", { status: 500 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ token: "tok", userId: "u1" }), { status: 200 }));
+    const auth = createSessionAuth({
+      baseUrl: "http://api",
+      fetch: fetch as any,
+      storage,
+    });
+
+    await expect(auth.ready()).rejects.toThrow("session_create_failed");
+    await expect(auth.ready()).resolves.toBeUndefined();
+
+    expect(await auth.authHeaders()).toEqual({ authorization: "Bearer tok" });
+    expect(auth.userId()).toBe("u1");
+    expect(fetch).toHaveBeenCalledTimes(2);
+  });
 });

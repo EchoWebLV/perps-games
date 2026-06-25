@@ -28,16 +28,25 @@ export function createSessionAuth(opts: SessionAuthOpts = {}): AuthProvider {
     storage.setItem(USER_KEY, uid);
   }
 
+  function startInit() {
+    if (!init) {
+      init = ensure().catch((err) => {
+        init = null;
+        throw err;
+      });
+    }
+    return init;
+  }
+
   return {
     ready() {
-      init ??= ensure();
-      return init;
+      return startInit();
     },
     userId() {
       return uid;
     },
     async authHeaders() {
-      await (init ??= ensure());
+      await startInit();
       return { authorization: `Bearer ${token}` };
     },
     async logout() {
