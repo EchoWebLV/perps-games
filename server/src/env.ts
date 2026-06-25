@@ -30,6 +30,8 @@ const EnvShape = z.object({
   SOLANA_CLUSTER: z.enum(["mainnet-beta", "devnet"]).default("mainnet-beta"),
   USDC_MINT: z.string().min(32).optional(),
   TREASURY_USDC_ATA: z.string().min(32).optional(),
+  FEE_PAYER_SECRET: z.string().min(1).optional(),
+  FEE_PAYER_OWNER_PUBKEY: z.string().min(32).optional(),
   TREASURY_WALLET_ID: z.string().min(1).optional(),
   TREASURY_OWNER_PUBKEY: z.string().min(32).optional(),
   DEPOSIT_MIN_CENTS: z.coerce.number().int().positive().default(100),
@@ -61,6 +63,13 @@ const Env = EnvShape.superRefine((e, ctx) => {
       code: z.ZodIssueCode.custom,
       path: ["PRIVY_PLAY_SIGNER_ID"],
       message: "PRIVY_PLAY_SIGNER_ID and PRIVY_PLAY_SIGNER_PRIVATE_KEY must be set together",
+    });
+  }
+  if (!!e.FEE_PAYER_SECRET !== !!e.FEE_PAYER_OWNER_PUBKEY) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ["FEE_PAYER_SECRET"],
+      message: "FEE_PAYER_SECRET and FEE_PAYER_OWNER_PUBKEY must be set together",
     });
   }
 });

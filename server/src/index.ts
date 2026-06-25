@@ -10,6 +10,7 @@ import { makeHermesFeed } from "./feed/hermes.js";
 import { makeSessionAuth } from "./auth/session.js";
 import { createWalletBinding } from "./auth/wallet-binding.js";
 import { makeDepositTxBuilder, makeRpcBlockhash, type DepositTxBuilder } from "./services/deposit-tx.js";
+import { makeDepositIntents } from "./services/deposit-intents.js";
 
 async function main(): Promise<void> {
   if (!env.DATABASE_URL) throw new Error("DATABASE_URL is required to start the server");
@@ -33,6 +34,7 @@ async function main(): Promise<void> {
   let realMoney = { enabled: false, treasuryUsdcAta: null as string | null };
   let depositTxBuilder: DepositTxBuilder | null = null;
   let walletBalanceReader: import("./services/wallet-balance.js").WalletBalanceReader | null = null;
+  let signedTxBroadcaster: import("./services/signed-tx-broadcaster.js").SignedTxBroadcaster | null = null;
   let withdrawalsSvc: import("./services/withdrawals.js").Withdrawals | undefined;
   let payoutSigner: import("./solana/withdraw-signer.js").WithdrawSigner | null = null;
   if (env.REAL_MONEY_ENABLED) {
@@ -41,6 +43,7 @@ async function main(): Promise<void> {
     const { makeDeposits } = await import("./services/deposits.js");
     const { makeDepositConfirmer } = await import("./services/deposit-worker.js");
     const { makeRpcWalletBalanceReader } = await import("./services/wallet-balance.js");
+    const { makeRpcSignedTxBroadcaster } = await import("./services/signed-tx-broadcaster.js");
     const source = makeRpcDepositSource(env.SOLANA_RPC_URL!);
     await assertUsdcMint((m) => source.fetchMintInfo(m), env.USDC_MINT!); // refuse to boot on a bad mint
     const deposits = makeDeposits(db, ledger, {
@@ -52,37 +55,29 @@ async function main(): Promise<void> {
       depositConfirmer.start();
     }
     realMoney = { enabled: true, treasuryUsdcAta: env.TREASURY_USDC_ATA! };
+    signedTxBroadcaster = makeRpcSignedTxBroadcaster(env.SOLANA_RPC_URL!);
 
-    let privyClient: import("@privy-io/node").PrivyClient | null = null;
-    if (env.PRIVY_APP_ID && env.PRIVY_APP_SECRET) {
-      const { PrivyClient } = await import("@privy-io/node");
-      privyClient = new PrivyClient({ appId: env.PRIVY_APP_ID, appSecret: env.PRIVY_APP_SECRET });
-    }
     let signFeePayerTx: ((txBase64: string) => Promise<string>) | undefined;
-    if (env.TREASURY_WALLET_ID && env.TREASURY_OWNER_PUBKEY && privyClient) {
-      signFeePayerTx = async (txBase64) => {
-        const res = await privyClient!.wallets().solana().signTransaction(env.TREASURY_WALLET_ID!, { transaction: txBase64 });
-        return res.signed_transaction;
-      };
-      const { makePrivyWithdrawSigner } = await import("./solana/withdraw-signer.js");
-      payoutSigner = makePrivyWithdrawSigner({
-        privy: privyClient,
-        treasuryWalletId: env.TREASURY_WALLET_ID,
-        treasuryUsdcAta: env.TREASURY_USDC_ATA!,
-        treasuryOwner: env.TREASURY_OWNER_PUBKEY,
-        usdcMint: env.USDC_MINT!,
-        rpcUrl: env.SOLANA_RPC_URL!,
-      });
+    let feePayerOwner = env.FEE_PAYER_OWNER_PUBKEY;
+    if (env.FEE_PAYER_SECRET && env.FEE_PAYER_OWNER_PUBKEY) {
+      const { makeFeePayerSigner } = await import("./solana/fee-payer-signer.js");
+      const signer = await makeFeePayerSigner(env.FEE_PAYER_SECRET);
+      if (signer.address !== env.FEE_PAYER_OWNER_PUBKEY) {
+        throw new Error("FEE_PAYER_OWNER_PUBKEY does not match FEE_PAYER_SECRET");
+      }
+      if (env.TREASURY_OWNER_PUBKEY && env.FEE_PAYER_OWNER_PUBKEY === env.TREASURY_OWNER_PUBKEY) {
+        throw new Error("fee payer must not be the treasury token authority");
+      }
+      signFeePayerTx = signer.signFeePayerTx;
     } else {
-      console.warn("[treasury_signer_disabled] falling back to user-paid Solana fees and ledger-only payouts");
+      feePayerOwner = undefined;
+      console.warn("[fee_payer_disabled] falling back to user-paid Solana fees");
     }
 
-    // "deposit to game" tx builder (user wallet → treasury ATA). With the Privy treasury
-    // signer configured, the server pre-signs the fee-payer slot so users need no SOL.
     depositTxBuilder = makeDepositTxBuilder({
       usdcMint: env.USDC_MINT!,
       treasuryUsdcAta: env.TREASURY_USDC_ATA!,
-      treasuryOwner: signFeePayerTx ? env.TREASURY_OWNER_PUBKEY : undefined,
+      treasuryOwner: signFeePayerTx ? feePayerOwner : undefined,
       signFeePayerTx,
       getLatestBlockhash: makeRpcBlockhash(env.SOLANA_RPC_URL!),
     });
@@ -94,8 +89,8 @@ async function main(): Promise<void> {
       userDailyCapCents: env.WITHDRAW_USER_DAILY_CAP_CENTS, globalDailyCapCents: env.WITHDRAW_GLOBAL_DAILY_CAP_CENTS,
       holdHours: env.WITHDRAW_HOLD_HOURS, quorumThresholdCents: env.WITHDRAW_QUORUM_THRESHOLD_CENTS,
     }, () => source.readTreasuryBaseUnits(env.TREASURY_USDC_ATA!));
-    // withdrawProcessor stays null until the Privy signer is enabled post-Phase-0-staging
-    // (needs treasury wallet id + caip2 config). The admin-approve endpoint 404s until then.
+    // withdrawProcessor stays null until the payout signer is reintroduced in a later task.
+    // The admin-approve endpoint 404s until then.
   }
   // poll rate + HALT tolerance are tunable: the public Hermes REST endpoint can
   // rate-limit a tight 500ms poll, so a too-small stale window flaps into feed_halt.
@@ -115,6 +110,9 @@ async function main(): Promise<void> {
   const walletBinding = createWalletBinding({
     secret: env.SESSION_SECRET ?? "development-session-secret-change-before-production",
   });
+  const depositIntents = makeDepositIntents({
+    secret: env.SESSION_SECRET ?? "development-session-secret-change-before-production",
+  });
 
   const server = buildServer({
     users,
@@ -130,8 +128,10 @@ async function main(): Promise<void> {
     devAuth: env.DEV_AUTH && env.NODE_ENV !== "production",
     sessionAuth,
     walletBinding,
+    depositIntents,
     realMoney,
     depositTxBuilder,
+    signedTxBroadcaster,
     walletBalanceReader,
     depositMinCents: env.DEPOSIT_MIN_CENTS,
     depositMaxCents: env.DEPOSIT_MAX_CENTS,

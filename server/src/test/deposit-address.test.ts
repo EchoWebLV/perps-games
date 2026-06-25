@@ -129,7 +129,11 @@ describe("POST /v1/deposit/build", () => {
     });
 
     expect(res.statusCode).toBe(200);
-    expect(res.json()).toEqual({ txBase64: "tx-deposit" });
+    expect(res.json()).toEqual({
+      txBase64: "tx-deposit",
+      depositIntent: expect.stringMatching(/^intent:[0-9a-f-]+:WalletAAA:100:tx-deposit$/),
+      expiresAt: new Date(60_000).toISOString(),
+    });
   });
 
   it("enforces the configured deposit bounds", async () => {
@@ -174,6 +178,138 @@ describe("POST /v1/deposit/build", () => {
 
     expect(res.statusCode).toBe(409);
     expect(res.json()).toEqual({ error: "no_bound_wallet" });
+  });
+});
+
+describe("POST /v1/deposit/send", () => {
+  let ctx: TestCtx;
+
+  afterEach(async () => {
+    await ctx?.close();
+  });
+
+  it("returns 404 when signed deposit broadcasts are disabled", async () => {
+    ctx = await makeTestDb();
+
+    const res = await ctx.server.inject({
+      method: "POST",
+      url: "/v1/deposit/send",
+      headers: H,
+      payload: { depositIntent: "intent", signedTxBase64: "signed-tx" },
+    });
+
+    expect(res.statusCode).toBe(404);
+    expect(res.json()).toEqual({ error: "deposit_send_disabled" });
+  });
+
+  it("broadcasts a fully signed deposit transaction for the authenticated user", async () => {
+    let expectedUserId = "";
+    ctx = await makeTestDb({
+      signedTxBroadcaster: {
+        async broadcastSignedDeposit(input) {
+          expect(input).toEqual({
+            expectedTxBase64: "tx-deposit",
+            signedTxBase64: "signed-tx",
+          });
+          return { txSig: "sig-123" };
+        },
+      },
+      depositIntents: {
+        create() {
+          return { depositIntent: "unused", expiresAt: new Date(60_000).toISOString() };
+        },
+        verify() {
+          return {
+            userId: expectedUserId,
+            wallet: "WalletAAA",
+            amountCents: 100,
+            txBase64: "tx-deposit",
+          };
+        },
+      },
+    });
+    const user = await ctx.users.upsertByExternalId("dev:mallory");
+    expectedUserId = user.id;
+    await ctx.users.setWalletPublicKey(user.id, "WalletAAA");
+
+    const res = await ctx.server.inject({
+      method: "POST",
+      url: "/v1/deposit/send",
+      headers: H,
+      payload: { depositIntent: "intent-123", signedTxBase64: "signed-tx" },
+    });
+
+    expect(res.statusCode).toBe(200);
+    expect(res.json()).toEqual({ txSig: "sig-123" });
+  });
+
+  it("rejects a deposit intent for another user", async () => {
+    ctx = await makeTestDb({
+      signedTxBroadcaster: {
+        async broadcastSignedDeposit() {
+          throw new Error("should not broadcast");
+        },
+      },
+      depositIntents: {
+        create() {
+          return { depositIntent: "unused", expiresAt: new Date(60_000).toISOString() };
+        },
+        verify() {
+          return {
+            userId: "dev:alice",
+            wallet: "WalletAAA",
+            amountCents: 100,
+            txBase64: "tx-deposit",
+          };
+        },
+      },
+    });
+
+    const res = await ctx.server.inject({
+      method: "POST",
+      url: "/v1/deposit/send",
+      headers: H,
+      payload: { depositIntent: "intent-123", signedTxBase64: "signed-tx" },
+    });
+
+    expect(res.statusCode).toBe(401);
+    expect(res.json()).toEqual({ error: "invalid_deposit_intent" });
+  });
+
+  it("maps signed transaction validation failures to 400 responses", async () => {
+    let expectedUserId = "";
+    ctx = await makeTestDb({
+      signedTxBroadcaster: {
+        async broadcastSignedDeposit() {
+          throw new Error("signed_transaction_message_mismatch");
+        },
+      },
+      depositIntents: {
+        create() {
+          return { depositIntent: "unused", expiresAt: new Date(60_000).toISOString() };
+        },
+        verify() {
+          return {
+            userId: expectedUserId,
+            wallet: "WalletAAA",
+            amountCents: 100,
+            txBase64: "tx-deposit",
+          };
+        },
+      },
+    });
+    const user = await ctx.users.upsertByExternalId("dev:mallory");
+    expectedUserId = user.id;
+
+    const res = await ctx.server.inject({
+      method: "POST",
+      url: "/v1/deposit/send",
+      headers: H,
+      payload: { depositIntent: "intent-123", signedTxBase64: "signed-tx" },
+    });
+
+    expect(res.statusCode).toBe(400);
+    expect(res.json()).toEqual({ error: "signed_transaction_message_mismatch" });
   });
 });
 

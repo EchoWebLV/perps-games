@@ -21,8 +21,10 @@ export interface RouteDeps {
   devAuth: boolean;
   sessionAuth: import("../auth/session.js").SessionAuth;
   walletBinding: import("../auth/wallet-binding.js").WalletBinding;
+  depositIntents: import("../services/deposit-intents.js").DepositIntents;
   realMoney: { enabled: boolean; treasuryUsdcAta: string | null };
   depositTxBuilder: import("../services/deposit-tx.js").DepositTxBuilder | null;
+  signedTxBroadcaster: import("../services/signed-tx-broadcaster.js").SignedTxBroadcaster | null;
   walletBalanceReader: import("../services/wallet-balance.js").WalletBalanceReader | null;
   depositMinCents: number;
   depositMaxCents: number;
@@ -37,6 +39,10 @@ const WalletBindChallengeBody = z.object({ wallet: z.string().min(32).max(44) })
 const WalletBindBody = z.object({
   challenge: z.string().min(1),
   signatureBase58: z.string().min(1),
+});
+const DepositSendBody = z.object({
+  depositIntent: z.string().min(1),
+  signedTxBase64: z.string().min(1),
 });
 
 const OpenRound = z.object({
@@ -112,9 +118,36 @@ export function registerRoutes(server: FastifyInstance, deps: RouteDeps): void {
     const user = await deps.users.get(req.userId!);
     if (!user?.walletPublicKey) return reply.code(409).send({ error: "no_bound_wallet" });
     const { txBase64 } = await deps.depositTxBuilder.buildForUser(user.walletPublicKey, body.data.amountCents);
-    return { txBase64 };
+    const intent = deps.depositIntents.create({
+      userId: req.userId!,
+      wallet: user.walletPublicKey,
+      amountCents: body.data.amountCents,
+      txBase64,
+    });
+    return { txBase64, depositIntent: intent.depositIntent, expiresAt: intent.expiresAt };
   };
   server.post("/v1/deposit/build", { preHandler: requireUser }, buildDepositTx);
+  server.post("/v1/deposit/send", { preHandler: requireUser }, async (req, reply) => {
+    if (!deps.signedTxBroadcaster) return reply.code(404).send({ error: "deposit_send_disabled" });
+    const body = DepositSendBody.safeParse(req.body);
+    if (!body.success) return reply.code(400).send({ error: "bad_request" });
+    const intent = deps.depositIntents.verify(body.data.depositIntent);
+    if (!intent || intent.userId !== req.userId!) return reply.code(401).send({ error: "invalid_deposit_intent" });
+    try {
+      return await deps.signedTxBroadcaster.broadcastSignedDeposit({
+        expectedTxBase64: intent.txBase64,
+        signedTxBase64: body.data.signedTxBase64,
+      });
+    } catch (e) {
+      if (e instanceof Error && e.message === "signed_transaction_message_mismatch") {
+        return reply.code(400).send({ error: "signed_transaction_message_mismatch" });
+      }
+      if (e instanceof Error && e.message === "signed_transaction_missing_existing_signature") {
+        return reply.code(400).send({ error: "signed_transaction_missing_existing_signature" });
+      }
+      throw e;
+    }
+  });
 
   server.post("/v1/wallet/bind-challenge", { preHandler: requireUser }, async (req, reply) => {
     const body = WalletBindChallengeBody.safeParse(req.body);
