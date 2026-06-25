@@ -73,13 +73,12 @@ export function createControls(ctrlMount: HTMLElement, goMount: HTMLElement, ped
 
   // keyboard driving (desktop): W/↑ gas, S/↓ brake, A/D or ←/→ steer, space/enter = go.
   // Touch driving (hold-anywhere) lives on the canvas in main.ts.
-  // Don't hijack keys while the user is typing (the Privy login modal, or any input field) —
-  // otherwise w/a/s/d/space get eaten by driving + GO and you can't type your email to sign in.
+  // Don't hijack keys while the user is typing in an input field.
   const typingElsewhere = (e: KeyboardEvent): boolean => {
     const cands = [e.target as HTMLElement | null, document.activeElement as HTMLElement | null];
     return cands.some((el) => !!el && (
       el.tagName === "INPUT" || el.tagName === "TEXTAREA" || el.tagName === "SELECT" ||
-      el.isContentEditable === true || !!el.closest?.("#privy-root")
+      el.isContentEditable === true
     ));
   };
   addEventListener("keydown", (e) => {

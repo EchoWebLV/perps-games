@@ -11,7 +11,7 @@ export const browserStore: KvStore = {
 
 const KEY = "redline.devuser.v1";
 
-/** stable per-browser dev identity sent as `x-dev-user` (Privy replaces this in 1.3) */
+/** Stable per-browser dev identity sent as `x-dev-user`. */
 export function getDevUserId(store: KvStore = browserStore): string {
   let id = store.get(KEY);
   if (!id) {

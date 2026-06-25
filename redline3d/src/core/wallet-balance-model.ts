@@ -4,7 +4,7 @@ export interface DisplayCashBalanceInput {
   inGameBalance: number;
 }
 
-// The player's money lives in two pockets: their on-chain Privy wallet and the
+// The player's money lives in two pockets: their on-chain wallet and the
 // in-game ledger (charged from the wallet on play, paid back to it on cash-out).
 // Show the SUM so neither pocket can hide funds — e.g. a recovered deposit that
 // sits in the ledger must still be visible even while the wallet reads near-zero.
