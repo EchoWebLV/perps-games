@@ -235,4 +235,20 @@ describe("createWallet", () => {
     expect(writeText).toHaveBeenCalledWith("Wallet1111111111111111111111111111111111");
     expect(copyBtn?.innerHTML).toContain("Copied");
   });
+
+  it("shows the connected wallet balance in the hero and play balance separately", () => {
+    const parent = new FakeElement("div");
+    const wallet = createWallet(parent as unknown as HTMLElement, {
+      address: () => "Wallet1111111111111111111111111111111111",
+      balance: () => 17500,
+      walletBalance: () => 10000,
+      onBuy: () => {},
+    });
+
+    wallet.open();
+
+    const overlay = parent.children[0];
+    expect(overlay.querySelector<FakeElement>("#wltBal")?.textContent).toBe("100.00");
+    expect(overlay.querySelector<FakeElement>("#wltPlayBal")?.textContent).toBe("75.00");
+  });
 });

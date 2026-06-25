@@ -37,8 +37,19 @@ describe("parseEnv auth flags", () => {
       TREASURY_USDC_ATA: "9wFF1111111111111111111111111111111111111111",
       FEE_PAYER_SECRET: "c2VjcmV0",
       FEE_PAYER_OWNER_PUBKEY: "53RbWfEX4iyikHQbySdyuNoL1eDmgm8V35s9XLSJ3g5r",
+      TREASURY_OWNER_PUBKEY: "8k3DWhLVU9esPZgCZKpN17XAdBCASGXykheGMGdXpcdu",
     });
     expect(e.FEE_PAYER_SECRET).toBe("c2VjcmV0");
     expect(e.FEE_PAYER_OWNER_PUBKEY).toBe("53RbWfEX4iyikHQbySdyuNoL1eDmgm8V35s9XLSJ3g5r");
+  });
+  it("requires TREASURY_OWNER_PUBKEY when fee sponsorship is configured", () => {
+    expect(() => parseEnv({
+      REAL_MONEY_ENABLED: "true",
+      SOLANA_RPC_URL: "https://rpc.example/devnet",
+      USDC_MINT: "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
+      TREASURY_USDC_ATA: "9wFF1111111111111111111111111111111111111111",
+      FEE_PAYER_SECRET: "c2VjcmV0",
+      FEE_PAYER_OWNER_PUBKEY: "53RbWfEX4iyikHQbySdyuNoL1eDmgm8V35s9XLSJ3g5r",
+    })).toThrowError(/TREASURY_OWNER_PUBKEY is required when fee sponsorship is configured/);
   });
 });

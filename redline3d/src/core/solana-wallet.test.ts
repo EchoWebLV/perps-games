@@ -65,7 +65,7 @@ describe("wallet loader", () => {
     const { loadSolanaWalletPort } = await import("./solana-wallet");
     const port = await loadSolanaWalletPort("auto");
 
-    expect(port).toEqual({ kind: "mobile-wallet-adapter" });
+    expect(port).toMatchObject({ kind: "mobile-wallet-adapter" });
     expect(createMobileWalletPort).toHaveBeenCalledTimes(1);
   });
 
@@ -91,6 +91,75 @@ describe("wallet loader", () => {
     expect(port).toEqual({ kind: "web-standard" });
     expect(createMobileWalletPort).toHaveBeenCalledTimes(1);
     expect(createWalletStandardPort).toHaveBeenCalledTimes(1);
+  });
+
+  it("falls back to the web port in auto mode when mobile connect cannot find a wallet", async () => {
+    const mobilePort = {
+      kind: "mobile-wallet-adapter",
+      connect: vi.fn(async () => {
+        throw new Error("wallet not found");
+      }),
+      disconnect: vi.fn(async () => {}),
+      currentAddress: vi.fn(() => null),
+      signMessage: vi.fn(),
+      signTransaction: vi.fn(),
+    };
+    const webPort = {
+      kind: "web-standard",
+      connect: vi.fn(async () => ({ address: "WebWallet11111111111111111111111111111111" })),
+      disconnect: vi.fn(async () => {}),
+      currentAddress: vi.fn(() => null),
+      signMessage: vi.fn(),
+      signTransaction: vi.fn(),
+    };
+    const createMobileWalletPort = vi.fn(() => mobilePort);
+    const createWalletStandardPort = vi.fn(() => webPort);
+
+    vi.doMock("./wallet-standard-port", () => ({ createWalletStandardPort }));
+    vi.doMock("./mobile-wallet-port", () => ({ createMobileWalletPort }));
+    vi.stubGlobal("navigator", {
+      userAgent: "Mozilla/5.0 Android Seeker",
+    });
+    vi.stubGlobal("Capacitor", {
+      isNativePlatform: () => true,
+    });
+
+    const { loadSolanaWalletPort } = await import("./solana-wallet");
+    const port = await loadSolanaWalletPort("auto");
+
+    await expect(port.connect()).resolves.toEqual({ address: "WebWallet11111111111111111111111111111111" });
+    expect(mobilePort.connect).toHaveBeenCalledTimes(1);
+    expect(createWalletStandardPort).toHaveBeenCalledTimes(1);
+    expect(webPort.connect).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not fall back for explicit seeker connect failures", async () => {
+    const mobilePort = {
+      kind: "mobile-wallet-adapter",
+      connect: vi.fn(async () => {
+        throw new Error("wallet not found");
+      }),
+      disconnect: vi.fn(async () => {}),
+      currentAddress: vi.fn(() => null),
+      signMessage: vi.fn(),
+      signTransaction: vi.fn(),
+    };
+    const createWalletStandardPort = vi.fn(() => ({ kind: "web-standard" }));
+
+    vi.doMock("./wallet-standard-port", () => ({ createWalletStandardPort }));
+    vi.doMock("./mobile-wallet-port", () => ({ createMobileWalletPort: vi.fn(() => mobilePort) }));
+    vi.stubGlobal("navigator", {
+      userAgent: "Mozilla/5.0 Android Seeker",
+    });
+    vi.stubGlobal("Capacitor", {
+      isNativePlatform: () => true,
+    });
+
+    const { loadSolanaWalletPort } = await import("./solana-wallet");
+    const port = await loadSolanaWalletPort("seeker");
+
+    await expect(port.connect()).rejects.toThrow("wallet not found");
+    expect(createWalletStandardPort).not.toHaveBeenCalled();
   });
 
   it("propagates mobile loading failures for seeker targets", async () => {

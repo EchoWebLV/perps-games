@@ -50,13 +50,70 @@ async function loadWalletStandardPort(): Promise<SolanaWalletPort> {
   return createWalletStandardPort();
 }
 
+function isMobileWalletUnavailableError(error: unknown): boolean {
+  if (!(error instanceof Error)) return false;
+
+  const text = `${error.name} ${error.message}`.toLowerCase();
+  if (/reject|denied|cancel/.test(text)) return false;
+
+  return (
+    /wallet.*not.*found/.test(text) ||
+    /not.*found.*wallet/.test(text) ||
+    /wallet.*unavailable/.test(text) ||
+    /unavailable.*wallet/.test(text) ||
+    /no.*wallet/.test(text)
+  );
+}
+
+function withAutoWebFallback(mobilePort: SolanaWalletPort): SolanaWalletPort {
+  let activePort = mobilePort;
+
+  const loadWebPort = async () => {
+    activePort = await loadWalletStandardPort();
+    return activePort;
+  };
+
+  return {
+    kind: mobilePort.kind,
+    async connect() {
+      try {
+        return await activePort.connect();
+      } catch (error) {
+        if (!isMobileWalletUnavailableError(error)) throw error;
+
+        return (await loadWebPort()).connect();
+      }
+    },
+    disconnect() {
+      return activePort.disconnect();
+    },
+    currentAddress() {
+      return activePort.currentAddress();
+    },
+    signMessage(message) {
+      return activePort.signMessage(message);
+    },
+    signTransaction(txBase64) {
+      return activePort.signTransaction(txBase64);
+    },
+    signAndSendTransaction(txBase64) {
+      if (!activePort.signAndSendTransaction) {
+        throw new Error("wallet_sign_and_send_transaction_unsupported");
+      }
+
+      return activePort.signAndSendTransaction(txBase64);
+    },
+  };
+}
+
 export async function loadSolanaWalletPort(target: WalletTarget = "auto"): Promise<SolanaWalletPort> {
   const resolvedTarget = chooseWalletTarget(target);
 
   if (resolvedTarget === "seeker") {
     try {
       const { createMobileWalletPort } = await import("./mobile-wallet-port");
-      return createMobileWalletPort();
+      const mobilePort = createMobileWalletPort();
+      return target === "auto" ? withAutoWebFallback(mobilePort) : mobilePort;
     } catch (error) {
       if (target === "auto") {
         return loadWalletStandardPort();

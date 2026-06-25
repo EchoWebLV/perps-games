@@ -85,6 +85,7 @@ function injectStyles() {
     .wlt-bal.bump{animation:wltBump .5s cubic-bezier(.2,.8,.3,1)}
     @keyframes wltBump{0%{transform:scale(1)}30%{transform:scale(1.09);text-shadow:0 0 30px rgba(46,230,166,.8)}100%{transform:scale(1)}}
     .wlt-hero-sub{margin-top:6px;font:600 11px/1 'Chakra Petch',ui-monospace,monospace;letter-spacing:.04em;color:rgba(216,222,255,.62)}
+    .wlt-play-bal{margin-top:8px;font:700 10px/1.2 'Chakra Petch',ui-monospace,monospace;text-transform:uppercase;letter-spacing:.12em;color:rgba(95,240,192,.74)}
 
     /* Buy / Receive segmented control */
     .wlt-seg{display:flex;gap:6px;padding:4px;border-radius:12px;background:rgba(7,5,18,.6);border:1px solid rgba(132,150,224,.2)}
@@ -164,9 +165,10 @@ export function createWallet(parent: HTMLElement, opts: WalletOpts): Wallet {
   panel.innerHTML =
     `<div class="wlt-head"><span class="lbl">wallet</span><button class="wlt-x" data-act="close" aria-label="Close">✕</button></div>` +
     `<div class="wlt-hero"><div class="wlt-hero-glow"></div>
-       <div class="wlt-hero-top">${usdcCoin(22)}<span class="wlt-hero-lbl">Connected wallet balance</span></div>
+       <div class="wlt-hero-top">${usdcCoin(22)}<span class="wlt-hero-lbl" id="wltHeroLbl">Connected wallet balance</span></div>
        <div class="wlt-bal"><span class="wlt-bal-cur">$</span><span id="wltBal">0.00</span></div>
        <div class="wlt-hero-sub"><span id="wltUsdc">0.00</span> USDC · Solana</div>
+       <div class="wlt-play-bal" id="wltPlayRow">Play balance $<span id="wltPlayBal">0.00</span></div>
      </div>` +
     `<div class="wlt-seg">
        <button class="wlt-tab on" data-tab="buy">${svg(ICONS.plus, 15)}Buy</button>
@@ -187,6 +189,7 @@ export function createWallet(parent: HTMLElement, opts: WalletOpts): Wallet {
 
   const q = <T extends HTMLElement>(s: string) => panel.querySelector(s) as T;
   const balEl = q("#wltBal"), usdcEl = q("#wltUsdc"), buyBtn = q<HTMLButtonElement>("#wltBuy");
+  const heroLbl = q("#wltHeroLbl"), playRow = q("#wltPlayRow"), playBalEl = q("#wltPlayBal");
   const views = Array.from(panel.querySelectorAll<HTMLElement>(".wlt-view"));
   const tabs = Array.from(panel.querySelectorAll<HTMLElement>(".wlt-tab"));
   const amtBtns = Array.from(panel.querySelectorAll<HTMLElement>(".wlt-amt"));
@@ -195,9 +198,17 @@ export function createWallet(parent: HTMLElement, opts: WalletOpts): Wallet {
   let busy = false;
 
   const renderBalance = (bump = false) => {
-    const b = opts.balance() / 100; // balance is in cents (1 coin = $0.01)
-    balEl.textContent = fmt(b);
-    usdcEl.textContent = fmt(b);
+    const totalCents = opts.balance();
+    const walletCents = opts.address() ? opts.walletBalance?.() ?? null : null;
+    const hasWalletBalance = walletCents != null;
+    const heroCents = hasWalletBalance ? walletCents : totalCents;
+    const playCents = hasWalletBalance ? Math.max(0, totalCents - walletCents) : 0;
+    const hero = heroCents / 100; // balance is in cents (1 coin = $0.01)
+    heroLbl.textContent = hasWalletBalance ? "Connected wallet balance" : "Available balance";
+    balEl.textContent = fmt(hero);
+    usdcEl.textContent = fmt(hero);
+    playRow.hidden = !hasWalletBalance;
+    playBalEl.textContent = fmt(playCents / 100);
     if (bump) { balEl.parentElement!.classList.remove("bump"); void balEl.offsetWidth; balEl.parentElement!.classList.add("bump"); }
   };
   const renderAmount = () => {

@@ -21,6 +21,21 @@ interface TokenBal {
   uiTokenAmount: { amount: string };
 }
 
+interface ParsedTokenIx {
+  program?: string;
+  programId?: string;
+  parsed?: {
+    type?: string;
+    info?: {
+      source?: string;
+      destination?: string;
+      mint?: string;
+      amount?: string;
+      tokenAmount?: { amount?: string };
+    };
+  };
+}
+
 async function withRpcTimeout<T>(promise: Promise<T>, ms = 10_000): Promise<T> {
   let timer: ReturnType<typeof setTimeout> | undefined;
   try {
@@ -35,42 +50,98 @@ async function withRpcTimeout<T>(promise: Promise<T>, ms = 10_000): Promise<T> {
   }
 }
 
+function accountKeysFromTransaction(tx: any): string[] {
+  return ((tx.transaction?.message?.accountKeys ?? []) as any[]).map((k) =>
+    typeof k === "string" ? k : k.pubkey,
+  );
+}
+
+function parsedInstructionsFromTransaction(tx: any): ParsedTokenIx[] {
+  const topLevel = (tx.transaction?.message?.instructions ?? []) as ParsedTokenIx[];
+  const inner = ((tx.meta?.innerInstructions ?? []) as Array<{ instructions?: ParsedTokenIx[] }>)
+    .flatMap((group) => group.instructions ?? []);
+  return [...topLevel, ...inner];
+}
+
+function tokenInstructionAmount(info: NonNullable<NonNullable<ParsedTokenIx["parsed"]>["info"]> | undefined): bigint | null {
+  const raw = info?.tokenAmount?.amount ?? info?.amount;
+  if (raw == null) return null;
+  try {
+    return BigInt(raw);
+  } catch {
+    return null;
+  }
+}
+
+function findTreasuryTransferInstruction(
+  tx: any,
+  treasuryAta: string,
+  mint: string,
+  tokenProgram: string | undefined,
+  amountBaseUnits: bigint,
+): { source: string; programId: string } | null {
+  for (const ix of parsedInstructionsFromTransaction(tx)) {
+    const type = ix.parsed?.type;
+    const info = ix.parsed?.info;
+    if (ix.program && ix.program !== "spl-token") continue;
+    if (type !== "transfer" && type !== "transferChecked") continue;
+    if (!info?.source || info.destination !== treasuryAta) continue;
+    if (info.mint && info.mint !== mint) continue;
+
+    const amount = tokenInstructionAmount(info);
+    if (amount !== amountBaseUnits) continue;
+    if (tokenProgram && ix.programId && ix.programId !== tokenProgram) continue;
+
+    return { source: info.source, programId: ix.programId ?? tokenProgram ?? "" };
+  }
+
+  return null;
+}
+
+export function inboundFromTransaction(txSig: string, slot: number, tx: any, treasuryAta: string): InboundTransfer | null {
+  if (tx.meta?.err) return null;
+  const pre = (tx.meta?.preTokenBalances ?? []) as TokenBal[];
+  const post = (tx.meta?.postTokenBalances ?? []) as TokenBal[];
+  const keys = accountKeysFromTransaction(tx);
+  const ataIndex = keys.indexOf(treasuryAta);
+  if (ataIndex < 0) return null;
+  const preBal = pre.find((b) => b.accountIndex === ataIndex);
+  const postBal = post.find((b) => b.accountIndex === ataIndex);
+  if (!postBal) return null;
+  const delta = BigInt(postBal.uiTokenAmount.amount) - BigInt(preBal?.uiTokenAmount.amount ?? "0");
+  if (delta <= 0n) return null;
+
+  const treasuryTransfer = findTreasuryTransferInstruction(tx, treasuryAta, postBal.mint, postBal.programId, delta);
+  if (!treasuryTransfer) return null;
+
+  const sourceIndex = keys.indexOf(treasuryTransfer.source);
+  if (sourceIndex < 0) return null;
+  const sourcePre = pre.find((b) => b.accountIndex === sourceIndex);
+  const sourcePost = post.find((b) => b.accountIndex === sourceIndex);
+  if (!sourcePre || !sourcePost) return null;
+  if (sourcePre.mint !== postBal.mint || sourcePost.mint !== postBal.mint) return null;
+
+  const tokenProgram = treasuryTransfer.programId || postBal.programId || sourcePre.programId || "";
+  if (postBal.programId && tokenProgram !== postBal.programId) return null;
+  if (sourcePre.programId && tokenProgram !== sourcePre.programId) return null;
+
+  const sourceDelta = BigInt(sourcePre.uiTokenAmount.amount) - BigInt(sourcePost.uiTokenAmount.amount);
+  if (sourceDelta < delta) return null;
+
+  return {
+    txSig,
+    slot,
+    finalized: true,
+    mint: postBal.mint,
+    tokenProgram,
+    destAta: treasuryAta,
+    sourceOwner: sourcePre.owner ?? "",
+    amountBaseUnits: delta,
+  };
+}
+
 export function makeRpcDepositSource(rpcUrl: string): DepositSource {
   const rpc = createSolanaRpc(rpcUrl);
-
-  function inboundFromTransaction(txSig: string, slot: number, tx: any, treasuryAta: string): InboundTransfer | null {
-    const pre = (tx.meta?.preTokenBalances ?? []) as TokenBal[];
-    const post = (tx.meta?.postTokenBalances ?? []) as TokenBal[];
-    // jsonParsed accountKeys are ParsedAccount objects ({ pubkey }); tolerate raw strings too.
-    const keys: string[] = (tx.transaction.message.accountKeys as any[]).map((k) =>
-      typeof k === "string" ? k : k.pubkey,
-    );
-    const ataIndex = keys.indexOf(treasuryAta);
-    if (ataIndex < 0) return null;
-    const preBal = pre.find((b) => b.accountIndex === ataIndex);
-    const postBal = post.find((b) => b.accountIndex === ataIndex);
-    if (!postBal) return null;
-    const delta = BigInt(postBal.uiTokenAmount.amount) - BigInt(preBal?.uiTokenAmount.amount ?? "0");
-    if (delta <= 0n) return null;
-    const source = pre.find((b) => {
-      const matchPost = post.find((p) => p.accountIndex === b.accountIndex);
-      return (
-        b.accountIndex !== ataIndex &&
-        matchPost !== undefined &&
-        BigInt(matchPost.uiTokenAmount.amount) < BigInt(b.uiTokenAmount.amount)
-      );
-    });
-    return {
-      txSig,
-      slot,
-      finalized: true,
-      mint: postBal.mint,
-      tokenProgram: postBal.programId ?? "",
-      destAta: treasuryAta,
-      sourceOwner: source?.owner ?? "",
-      amountBaseUnits: delta,
-    };
-  }
 
   return {
     async fetchMintInfo(mint) {

@@ -58,6 +58,13 @@ const Env = EnvShape.superRefine((e, ctx) => {
       message: "FEE_PAYER_SECRET and FEE_PAYER_OWNER_PUBKEY must be set together",
     });
   }
+  if (e.FEE_PAYER_SECRET && e.FEE_PAYER_OWNER_PUBKEY && !e.TREASURY_OWNER_PUBKEY) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ["TREASURY_OWNER_PUBKEY"],
+      message: "TREASURY_OWNER_PUBKEY is required when fee sponsorship is configured",
+    });
+  }
 });
 
 export type Env = z.infer<typeof Env>;

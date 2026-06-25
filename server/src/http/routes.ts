@@ -145,6 +145,9 @@ export function registerRoutes(server: FastifyInstance, deps: RouteDeps): void {
       if (e instanceof Error && e.message === "signed_transaction_missing_existing_signature") {
         return reply.code(400).send({ error: "signed_transaction_missing_existing_signature" });
       }
+      if (e instanceof Error && e.message === "signed_transaction_existing_signature_mismatch") {
+        return reply.code(400).send({ error: "signed_transaction_existing_signature_mismatch" });
+      }
       throw e;
     }
   });

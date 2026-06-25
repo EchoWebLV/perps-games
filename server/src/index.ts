@@ -66,7 +66,7 @@ async function main(): Promise<void> {
       if (signer.address !== env.FEE_PAYER_OWNER_PUBKEY) {
         throw new Error("FEE_PAYER_OWNER_PUBKEY does not match FEE_PAYER_SECRET");
       }
-      if (env.TREASURY_OWNER_PUBKEY && env.FEE_PAYER_OWNER_PUBKEY === env.TREASURY_OWNER_PUBKEY) {
+      if (env.FEE_PAYER_OWNER_PUBKEY === env.TREASURY_OWNER_PUBKEY) {
         throw new Error("fee payer must not be the treasury token authority");
       }
       signFeePayerTx = signer.signFeePayerTx;

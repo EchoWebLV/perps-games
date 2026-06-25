@@ -19,8 +19,15 @@ export function makeSignedTxBroadcaster(sendTransaction: (txBase64: string) => P
         throw new Error("signed_transaction_message_mismatch");
       }
       for (const address of Object.keys(expected.signatures) as Array<keyof typeof expected.signatures>) {
-        if (expected.signatures[address] && !signed.signatures[address]) {
+        const expectedSignature = expected.signatures[address];
+        if (!expectedSignature) continue;
+
+        const signedSignature = signed.signatures[address];
+        if (!signedSignature) {
           throw new Error("signed_transaction_missing_existing_signature");
+        }
+        if (Buffer.compare(Buffer.from(expectedSignature), Buffer.from(signedSignature)) !== 0) {
+          throw new Error("signed_transaction_existing_signature_mismatch");
         }
       }
       assertIsFullySignedTransaction(signed);
