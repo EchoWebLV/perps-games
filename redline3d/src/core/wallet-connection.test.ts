@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 import {
   ensureWalletConnection,
   hydrateBoundWallet,
+  isRecoverableWalletBalanceError,
   submitDeposit,
   WalletMismatchError,
 } from "./wallet-connection";
@@ -45,6 +46,19 @@ describe("hydrateBoundWallet", () => {
       boundWalletAddress: "",
       walletBalance: null,
     });
+  });
+});
+
+describe("isRecoverableWalletBalanceError", () => {
+  it("treats disabled, unavailable, and network balance reads as non-fatal after binding", () => {
+    expect(isRecoverableWalletBalanceError({ status: 404, bodyError: "wallet_balance_disabled" })).toBe(true);
+    expect(isRecoverableWalletBalanceError({ status: 503, bodyError: "wallet_balance_unavailable" })).toBe(true);
+    expect(isRecoverableWalletBalanceError({ code: "network" })).toBe(true);
+  });
+
+  it("does not hide wallet mismatch or auth failures", () => {
+    expect(isRecoverableWalletBalanceError(new WalletMismatchError())).toBe(false);
+    expect(isRecoverableWalletBalanceError({ status: 401, bodyError: "unauthorized" })).toBe(false);
   });
 });
 

@@ -45,7 +45,7 @@ import { entranceHit, LOT_BOUNDS, type BuildingKind } from "./core/lobby-layout"
 import { createWalletPortPreloader, loadSolanaWalletPort, type SolanaWalletPort } from "./core/solana-wallet";
 import { connectAndBindWallet } from "./core/wallet-binding";
 import { sweepToPlayBalance } from "./core/play-funding";
-import { ensureWalletConnection, hydrateBoundWallet, submitDeposit } from "./core/wallet-connection";
+import { ensureWalletConnection, hydrateBoundWallet, isRecoverableWalletBalanceError, submitDeposit } from "./core/wallet-connection";
 
 const canvas = document.getElementById("gl") as HTMLCanvasElement;
 const hudRoot = document.getElementById("hud") as HTMLElement;
@@ -144,7 +144,12 @@ async function ensureWalletConnected(): Promise<SolanaWalletPort> {
   walletPort = ensured.walletPort;
   connectedWalletAddress = ensured.connectedWalletAddress;
   boundWalletAddress = ensured.boundWalletAddress;
-  await refreshWalletBalance();
+  try {
+    await refreshWalletBalance();
+  } catch (error) {
+    if (!isRecoverableWalletBalanceError(error)) throw error;
+    walletBalance = null;
+  }
   syncDisplayedBalance();
   walletUI.setBalance(balance);
   return ensured.walletPort;

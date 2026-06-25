@@ -9,6 +9,15 @@ export class WalletMismatchError extends Error {
   }
 }
 
+export function isRecoverableWalletBalanceError(error: unknown): boolean {
+  if (error instanceof WalletMismatchError) return false;
+
+  const details = error as { code?: unknown; bodyError?: unknown; status?: unknown };
+  if (details.code === "network") return true;
+  if (details.bodyError === "wallet_balance_disabled" || details.bodyError === "wallet_balance_unavailable") return true;
+  return details.status === 404 || details.status === 503;
+}
+
 export interface HydratedBoundWallet {
   boundWalletAddress: string;
   walletBalance: number | null;
