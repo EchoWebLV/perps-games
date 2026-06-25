@@ -37,6 +37,8 @@ const EnvShape = z.object({
   WITHDRAW_GLOBAL_DAILY_CAP_CENTS: z.coerce.number().int().positive().default(20000),
   WITHDRAW_HOLD_HOURS: z.coerce.number().int().nonnegative().default(24),
   WITHDRAW_QUORUM_THRESHOLD_CENTS: z.coerce.number().int().nonnegative().default(0),
+  TREASURY_SECRET: z.string().min(1).optional(),
+  WITHDRAW_POLL_MS: z.coerce.number().int().positive().default(4000),
 });
 
 const Env = EnvShape.superRefine((e, ctx) => {
