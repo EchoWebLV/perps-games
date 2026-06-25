@@ -1,5 +1,5 @@
 import { address, createSolanaRpc } from "@solana/kit";
-import { baseUnitsToCents } from "../money/usdc.js";
+import { baseUnitsToCentsFloor } from "../money/usdc.js";
 import { LEGACY_TOKEN_PROGRAM } from "../solana/constants.js";
 
 export interface WalletBalanceReader {
@@ -25,7 +25,9 @@ export function makeRpcWalletBalanceReader(rpcUrl: string, usdcMint: string): Wa
         const amount = account?.account?.data?.parsed?.info?.tokenAmount?.amount;
         if (typeof amount === "string") total += BigInt(amount);
       }
-      return Number(baseUnitsToCents(total));
+      // Display read: a wallet may hold sub-cent dust (e.g. 9.4508 USDC) — floor it.
+      // Throwing here (strict baseUnitsToCents) surfaced as a 503 and blocked deposits.
+      return Number(baseUnitsToCentsFloor(total));
     },
   };
 }

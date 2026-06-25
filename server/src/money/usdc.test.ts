@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { BASE_UNITS_PER_CENT, USDC_DECIMALS, centsToBaseUnits, baseUnitsToCents } from "./usdc.js";
+import { BASE_UNITS_PER_CENT, USDC_DECIMALS, centsToBaseUnits, baseUnitsToCents, baseUnitsToCentsFloor } from "./usdc.js";
 
 describe("usdc scale", () => {
   it("pins the USDC decimals + base-units-per-cent constants", () => {
@@ -25,6 +25,16 @@ describe("usdc scale", () => {
     expect(() => baseUnitsToCents(10_001n)).toThrow(/dust|whole number of cents/i);
     expect(() => baseUnitsToCents(1n)).toThrow(/dust|whole number of cents/i);
     expect(() => baseUnitsToCents(9_999n)).toThrow(/dust|whole number of cents/i);
+  });
+
+  it("FLOORS sub-cent dust for display reads — never throws (real wallet balance, e.g. 9.4508 USDC)", () => {
+    // 9.4508 USDC = 9_450_800 base units → 945 cents ($9.45), dust floored (stays on-chain).
+    expect(baseUnitsToCentsFloor(9_450_800n)).toBe(945n);
+    expect(baseUnitsToCentsFloor(10_001n)).toBe(1n);
+    expect(baseUnitsToCentsFloor(9_999n)).toBe(0n);
+    expect(baseUnitsToCentsFloor(0n)).toBe(0n);
+    // exact whole cents still convert exactly
+    expect(baseUnitsToCentsFloor(centsToBaseUnits(12_345n))).toBe(12_345n);
   });
 
   it("does not use Number anywhere (huge values survive exactly past 2^53)", () => {

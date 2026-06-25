@@ -33,3 +33,16 @@ export function baseUnitsToCents(baseUnits: bigint): bigint {
   }
   return baseUnits / BASE_UNITS_PER_CENT;
 }
+
+/**
+ * USDC base units → cents, FLOORING sub-cent dust — for **display / balance reads only**.
+ * A wallet can legitimately hold any fractional amount (e.g. 9.4508 USDC = 9_450_800 base
+ * units), so a read must not throw on dust the way the strict {@link baseUnitsToCents} does.
+ * The dust is not lost: it stays on-chain in the wallet, and deposits/withdrawals still move
+ * whole cents via {@link centsToBaseUnits}. NEVER use this on a deposit/withdraw accounting
+ * delta — there, a non-whole-cent amount is a mismatch that must fail loudly (spec §5).
+ * Balances are non-negative, so BigInt truncation == floor.
+ */
+export function baseUnitsToCentsFloor(baseUnits: bigint): bigint {
+  return baseUnits / BASE_UNITS_PER_CENT;
+}
