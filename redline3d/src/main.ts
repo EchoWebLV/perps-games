@@ -132,7 +132,14 @@ async function ensureWalletConnected(): Promise<SolanaWalletPort> {
     connectedWalletAddress,
     boundWalletAddress,
     loadWalletPort: () => walletPort ?? walletPortPreloader.requireReady(),
-    connectAndBindWallet: (port) => connectAndBindWallet({ port, api }),
+    connectAndBindWallet: async (port) => {
+      const bound = await connectAndBindWallet({ port, api });
+      if (bound.session) {
+        auth.adoptSession?.(bound.session);
+        signedIn = true;
+      }
+      return bound;
+    },
   });
   walletPort = ensured.walletPort;
   connectedWalletAddress = ensured.connectedWalletAddress;

@@ -264,6 +264,29 @@ describe("createWallet", () => {
     expect(connectButtons[0].textContent).toBe("Wallet loading");
   });
 
+  it("uses API body errors when mapping wallet connect failures", async () => {
+    const parent = new FakeElement("div");
+    const onConnectWallet = vi.fn(async () => {
+      throw { name: "ApiError", message: "round_already_open", bodyError: "wallet_already_bound" };
+    });
+
+    const wallet = createWallet(parent as unknown as HTMLElement, {
+      address: () => "",
+      balance: () => 0,
+      onConnectWallet,
+      onBuy: () => {},
+    });
+
+    wallet.open();
+
+    const overlay = parent.children[0];
+    const connectButtons = overlay.querySelectorAll<FakeElement>(".wlt-connect");
+
+    await connectButtons[0].onclick?.(undefined);
+
+    expect(connectButtons[0].textContent).toBe("Wallet already linked");
+  });
+
   it("copies the connected wallet address from Receive", async () => {
     const parent = new FakeElement("div");
     const writeText = vi.fn(async () => {});

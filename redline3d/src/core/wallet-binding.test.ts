@@ -19,7 +19,11 @@ describe("connectAndBindWallet", () => {
         wallet: "Wallet1111111111111111111111111111111111",
         expiresAt: "x",
       })),
-      bindWallet: vi.fn(async () => ({ wallet: "Wallet1111111111111111111111111111111111" })),
+      bindWallet: vi.fn(async () => ({
+        wallet: "Wallet1111111111111111111111111111111111",
+        token: "wallet-token",
+        userId: "wallet-user",
+      })),
     };
 
     const out = await connectAndBindWallet({ port, api: api as any });
@@ -27,6 +31,7 @@ describe("connectAndBindWallet", () => {
     expect(out).toEqual({
       address: "Wallet1111111111111111111111111111111111",
       label: "Phantom",
+      session: { token: "wallet-token", userId: "wallet-user" },
     });
     expect(api.bindWalletChallenge).toHaveBeenCalledWith("Wallet1111111111111111111111111111111111");
     expect(port.signMessage).toHaveBeenCalledWith(new TextEncoder().encode("message"));

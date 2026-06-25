@@ -20,4 +20,20 @@ describe("CORS", () => {
     expect(res.headers["access-control-allow-origin"]).toBe("http://localhost:3000");
     expect(String(res.headers["access-control-allow-headers"]).toLowerCase()).toContain("x-dev-user");
   });
+
+  it("allows both localhost and 127.0.0.1 in the default dev origin list", async () => {
+    ctx = await makeTestDb({ corsOrigins: ["http://localhost:3000", "http://127.0.0.1:3000"] });
+
+    const res = await ctx.server.inject({
+      method: "OPTIONS",
+      url: "/v1/session",
+      headers: {
+        origin: "http://127.0.0.1:3000",
+        "access-control-request-method": "POST",
+      },
+    });
+
+    expect(res.statusCode).toBeLessThan(300);
+    expect(res.headers["access-control-allow-origin"]).toBe("http://127.0.0.1:3000");
+  });
 });

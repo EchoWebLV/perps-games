@@ -177,7 +177,10 @@ export function registerRoutes(server: FastifyInstance, deps: RouteDeps): void {
       return { wallet: user.walletPublicKey };
     } catch (e) {
       if (e instanceof Error && e.message === "wallet_already_bound") {
-        return reply.code(409).send({ error: "wallet_already_bound" });
+        const owner = await deps.users.getByWalletPublicKey(verified.wallet);
+        if (!owner) return reply.code(409).send({ error: "wallet_already_bound" });
+        const session = await deps.sessionAuth.issueForUser(owner.id);
+        return { wallet: owner.walletPublicKey, ...session };
       }
       throw e;
     }

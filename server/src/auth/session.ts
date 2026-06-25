@@ -3,6 +3,7 @@ import type { Users } from "../services/users.js";
 
 export interface SessionAuth {
   issueAnonymous(): Promise<{ token: string; userId: string }>;
+  issueForUser(userId: string): Promise<{ token: string; userId: string }>;
   verifyToken(token: string): Promise<string | null>;
 }
 
@@ -26,13 +27,17 @@ export function makeSessionAuth(deps: SessionAuthDeps): SessionAuth {
   if (deps.secret.length < 32) throw new Error("SESSION_SECRET must be at least 32 characters");
   const now = deps.now ?? Date.now;
   const ttlMs = deps.ttlMs ?? 1000 * 60 * 60 * 24 * 30;
+  const issueForUser = async (userId: string) => {
+    const payload = b64url(JSON.stringify({ sub: userId, exp: now() + ttlMs }));
+    return { token: `v1.${payload}.${sign(deps.secret, payload)}`, userId };
+  };
 
   return {
     async issueAnonymous() {
       const user = await deps.users.upsertByExternalId(`anon:${randomUUID()}`);
-      const payload = b64url(JSON.stringify({ sub: user.id, exp: now() + ttlMs }));
-      return { token: `v1.${payload}.${sign(deps.secret, payload)}`, userId: user.id };
+      return issueForUser(user.id);
     },
+    issueForUser,
     async verifyToken(token) {
       const parts = token.split(".");
       if (parts.length !== 3 || parts[0] !== "v1") return null;

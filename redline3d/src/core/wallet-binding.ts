@@ -39,5 +39,9 @@ export async function connectAndBindWallet(input: {
     challenge: challenge.challenge,
     signatureBase58: base58Encode(signature),
   });
-  return { address: bound.wallet, label: connected.label };
+  return {
+    address: bound.wallet,
+    label: connected.label,
+    session: bound.token && bound.userId ? { token: bound.token, userId: bound.userId } : undefined,
+  };
 }

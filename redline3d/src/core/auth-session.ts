@@ -49,6 +49,13 @@ export function createSessionAuth(opts: SessionAuthOpts = {}): AuthProvider {
       await startInit();
       return { authorization: `Bearer ${token}` };
     },
+    adoptSession(session) {
+      token = session.token;
+      uid = session.userId;
+      init = Promise.resolve();
+      storage.setItem(TOKEN_KEY, token);
+      storage.setItem(USER_KEY, uid);
+    },
     async logout() {
       storage.removeItem(TOKEN_KEY);
       storage.removeItem(USER_KEY);

@@ -37,7 +37,11 @@ export interface Api {
   closeRound(p: { roundId: string; reason: "cashout" | "expire" }): Promise<CloseResult>;
   markRound(roundId: string): Promise<MarkResult>;
   bindWalletChallenge(wallet: string): Promise<{ challenge: string; message: string; wallet: string; expiresAt: string }>;
-  bindWallet(input: { challenge: string; signatureBase58: string }): Promise<{ wallet: string }>;
+  bindWallet(input: { challenge: string; signatureBase58: string }): Promise<{
+    wallet: string;
+    token?: string;
+    userId?: string;
+  }>;
   /** build an unsigned USDC deposit tx (connected wallet → treasury) for the client to sign + broadcast */
   depositBuild(amountCents: number): Promise<{ txBase64: string; depositIntent: string; expiresAt: string }>;
   depositSend(input: { depositIntent: string; signedTxBase64: string }): Promise<{ txSig: string }>;

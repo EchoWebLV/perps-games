@@ -475,7 +475,7 @@ describe("POST /v1/wallet/bind*", () => {
     expect(tamperedSignatureRes.json()).toEqual({ error: "invalid_wallet_signature" });
   });
 
-  it("returns wallet_already_bound when a second user claims an existing wallet", async () => {
+  it("issues the existing wallet owner's session when a second session proves wallet ownership", async () => {
     const secretKey = ed.utils.randomSecretKey();
     const publicKey = await ed.getPublicKeyAsync(secretKey);
     const wallet = bs58.encode(publicKey);
@@ -499,6 +499,12 @@ describe("POST /v1/wallet/bind*", () => {
       payload: { challenge: aliceChallenge.json().challenge, signatureBase58 },
     });
     expect(aliceBind.statusCode).toBe(200);
+    const aliceMe = await ctx.server.inject({
+      method: "GET",
+      url: "/v1/me",
+      headers: { "x-dev-user": "alice" },
+    });
+    expect(aliceMe.statusCode).toBe(200);
 
     const bobChallenge = await ctx.server.inject({
       method: "POST",
@@ -517,8 +523,18 @@ describe("POST /v1/wallet/bind*", () => {
       headers: { "x-dev-user": "bob" },
       payload: { challenge: bobChallenge.json().challenge, signatureBase58: bobSignatureBase58 },
     });
-    expect(bobBind.statusCode).toBe(409);
-    expect(bobBind.json()).toEqual({ error: "wallet_already_bound" });
+    expect(bobBind.statusCode).toBe(200);
+    expect(bobBind.json()).toMatchObject({ wallet });
+    expect(bobBind.json().token).toEqual(expect.any(String));
+    expect(bobBind.json().userId).toEqual(expect.any(String));
+
+    const recoveredMe = await ctx.server.inject({
+      method: "GET",
+      url: "/v1/me",
+      headers: { authorization: `Bearer ${bobBind.json().token}` },
+    });
+    expect(recoveredMe.statusCode).toBe(200);
+    expect(recoveredMe.json().userId).toBe(aliceMe.json().userId);
   });
 });
 

@@ -74,6 +74,34 @@ describe("createSessionAuth", () => {
     expect(store.get("redline.session:user")).toBeUndefined();
   });
 
+  it("adopts a wallet-recovered session", async () => {
+    const store = new Map<string, string>([
+      ["redline.session:token", "anon-token"],
+      ["redline.session:user", "anon-user"],
+    ]);
+    const storage: Pick<Storage, "getItem" | "setItem" | "removeItem"> = {
+      getItem: (k) => store.get(k) ?? null,
+      setItem: (k, v) => {
+        store.set(k, v);
+      },
+      removeItem: (k) => {
+        store.delete(k);
+      },
+    };
+    const auth = createSessionAuth({
+      baseUrl: "http://api",
+      fetch: vi.fn() as any,
+      storage,
+    });
+
+    auth.adoptSession?.({ token: "wallet-token", userId: "wallet-user" });
+
+    expect(auth.userId()).toBe("wallet-user");
+    expect(await auth.authHeaders()).toEqual({ authorization: "Bearer wallet-token" });
+    expect(store.get("redline.session:token")).toBe("wallet-token");
+    expect(store.get("redline.session:user")).toBe("wallet-user");
+  });
+
   it("retries session creation after a transient failure", async () => {
     const store = new Map<string, string>();
     const storage: Pick<Storage, "getItem" | "setItem" | "removeItem"> = {
