@@ -11,6 +11,7 @@ import { makeSessionAuth } from "./auth/session.js";
 import { createWalletBinding } from "./auth/wallet-binding.js";
 import { makeDepositTxBuilder, makeRpcBlockhash, type DepositTxBuilder } from "./services/deposit-tx.js";
 import { makeDepositIntents } from "./services/deposit-intents.js";
+import type { WithdrawSigner } from "./services/withdraw-worker.js";
 
 async function main(): Promise<void> {
   if (!env.DATABASE_URL) throw new Error("DATABASE_URL is required to start the server");
@@ -36,7 +37,7 @@ async function main(): Promise<void> {
   let walletBalanceReader: import("./services/wallet-balance.js").WalletBalanceReader | null = null;
   let signedTxBroadcaster: import("./services/signed-tx-broadcaster.js").SignedTxBroadcaster | null = null;
   let withdrawalsSvc: import("./services/withdrawals.js").Withdrawals | undefined;
-  let payoutSigner: import("./solana/withdraw-signer.js").WithdrawSigner | null = null;
+  let payoutSigner: WithdrawSigner | null = null;
   if (env.REAL_MONEY_ENABLED) {
     const { makeRpcDepositSource } = await import("./solana/deposit-source.js");
     const { assertUsdcMint } = await import("./solana/mint-assert.js");

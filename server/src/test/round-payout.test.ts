@@ -15,7 +15,7 @@ describe("round close direct payout", () => {
       payoutSigner: {
         async signAndSend(input) {
           sent.push(input);
-          return { txSig: "sig-payout", privyTxId: "privy-payout" };
+          return { txSig: "sig-payout", providerTxId: "provider-payout" };
         },
       },
     });

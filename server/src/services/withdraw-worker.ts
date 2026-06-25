@@ -1,11 +1,18 @@
 import { and, eq } from "drizzle-orm";
 import { withdrawals } from "../db/schema.js";
 import { withdrawIdempotencyKey } from "../money/idempotency.js";
-import type { WithdrawSigner } from "../solana/withdraw-signer.js";
+
+export interface WithdrawSigner {
+  signAndSend(input: {
+    destWallet: string;
+    amountCents: number;
+    idempotencyKey: string;
+  }): Promise<{ txSig: string; providerTxId: string | null }>;
+}
 
 export function makeWithdrawProcessor(db: any, signer: WithdrawSigner) {
   return {
-    /** Admin-gated: awaiting_approval → signing → (Privy send) → sent. Idempotency key makes the send exactly-once. */
+    /** Admin-gated: awaiting_approval -> signing -> send -> sent. Idempotency key makes the send exactly-once. */
     async approveAndSend(id: string): Promise<{ status: "sent" | "not_approvable" }> {
       const claimed = await db.update(withdrawals)
         .set({ status: "signing", updatedAt: new Date() })
@@ -17,7 +24,7 @@ export function makeWithdrawProcessor(db: any, signer: WithdrawSigner) {
         destWallet: w.destWallet, amountCents: w.amountCents, idempotencyKey: withdrawIdempotencyKey(w.id),
       });
       await db.update(withdrawals)
-        .set({ status: "sent", txSig: res.txSig, privyTxId: res.privyTxId, updatedAt: new Date() })
+        .set({ status: "sent", txSig: res.txSig, privyTxId: res.providerTxId, updatedAt: new Date() })
         .where(eq(withdrawals.id, id));
       return { status: "sent" };
     },
@@ -34,7 +41,7 @@ export type ReadChainStatus = (txSig: string) => Promise<ChainStatus>;
 
 export function makeWithdrawConfirmer(db: any, ledger: Ledger, readStatus: ReadChainStatus) {
   return {
-    /** From `sent`, the ONLY auto-transitions: → confirmed (finalized) | → reversed (landed-but-failed) | → needs_review (unknown). */
+    /** From `sent`, the only auto-transitions: -> confirmed (finalized) | -> reversed (landed-but-failed) | -> needs_review (unknown). */
     async confirm(id: string): Promise<"confirmed" | "reversed" | "needs_review" | "skip"> {
       const rows = await db.select().from(withdrawals).where(eq(withdrawals.id, id));
       const w = rows[0];

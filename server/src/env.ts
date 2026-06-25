@@ -13,12 +13,6 @@ const EnvShape = z.object({
   CORS_ORIGINS: z.string().optional().default("http://localhost:3000"),
   START_BALANCE: z.coerce.number().int().nonnegative().default(10000), // cents → $100.00 faucet
   SESSION_SECRET: z.string().min(32).optional(),
-  PRIVY_APP_ID: z.string().optional(),
-  PRIVY_APP_SECRET: z.string().optional(),
-  PRIVY_PLAY_SIGNER_ID: z.string().min(1).optional(),
-  PRIVY_PLAY_SIGNER_PRIVATE_KEY: z.string().min(1).optional(),
-  PRIVY_PLAY_SIGNER_POLICY_IDS: z.string().optional(),
-  PRIVY_VERIFICATION_KEY: z.string().optional(), // SPKI PEM → offline JWT verify
   DEV_AUTH: z
     .string()
     .optional()
@@ -32,7 +26,6 @@ const EnvShape = z.object({
   TREASURY_USDC_ATA: z.string().min(32).optional(),
   FEE_PAYER_SECRET: z.string().min(1).optional(),
   FEE_PAYER_OWNER_PUBKEY: z.string().min(32).optional(),
-  TREASURY_WALLET_ID: z.string().min(1).optional(),
   TREASURY_OWNER_PUBKEY: z.string().min(32).optional(),
   DEPOSIT_MIN_CENTS: z.coerce.number().int().positive().default(100),
   DEPOSIT_MAX_CENTS: z.coerce.number().int().positive().default(500),
@@ -57,13 +50,6 @@ const Env = EnvShape.superRefine((e, ctx) => {
   if (!e.REAL_MONEY_ENABLED) return;
   for (const k of ["SOLANA_RPC_URL", "USDC_MINT", "TREASURY_USDC_ATA"] as const) {
     if (!e[k]) ctx.addIssue({ code: z.ZodIssueCode.custom, path: [k], message: `${k} is required when REAL_MONEY_ENABLED=true` });
-  }
-  if (!!e.PRIVY_PLAY_SIGNER_ID !== !!e.PRIVY_PLAY_SIGNER_PRIVATE_KEY) {
-    ctx.addIssue({
-      code: z.ZodIssueCode.custom,
-      path: ["PRIVY_PLAY_SIGNER_ID"],
-      message: "PRIVY_PLAY_SIGNER_ID and PRIVY_PLAY_SIGNER_PRIVATE_KEY must be set together",
-    });
   }
   if (!!e.FEE_PAYER_SECRET !== !!e.FEE_PAYER_OWNER_PUBKEY) {
     ctx.addIssue({

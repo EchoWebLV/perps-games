@@ -24,7 +24,7 @@ describe("withdraw processor (approval → signing → sent)", () => {
 
   it("approve() drives awaiting_approval → sent via the signer, recording txSig", async () => {
     const id = await seedWithdrawal(ctx, "awaiting_approval");
-    const signer = { async signAndSend() { return { txSig: "SIG123", privyTxId: "ptx" }; } };
+    const signer = { async signAndSend() { return { txSig: "SIG123", providerTxId: "ptx" }; } };
     const proc = makeWithdrawProcessor(ctx.db, signer);
     const r = await proc.approveAndSend(id);
     expect(r.status).toBe("sent");
@@ -36,14 +36,14 @@ describe("withdraw processor (approval → signing → sent)", () => {
 
   it("refuses to approve a withdrawal that is not awaiting_approval", async () => {
     const id = await seedWithdrawal(ctx, "sent");
-    const proc = makeWithdrawProcessor(ctx.db, { async signAndSend() { return { txSig: "x", privyTxId: null }; } });
+    const proc = makeWithdrawProcessor(ctx.db, { async signAndSend() { return { txSig: "x", providerTxId: null }; } });
     expect((await proc.approveAndSend(id)).status).toBe("not_approvable");
   });
 
   it("if the signer throws, the row stays in signing (no money left; safe to retry)", async () => {
     const id = await seedWithdrawal(ctx, "awaiting_approval");
-    const proc = makeWithdrawProcessor(ctx.db, { async signAndSend() { throw new Error("privy down"); } });
-    await expect(proc.approveAndSend(id)).rejects.toThrow(/privy down/);
+    const proc = makeWithdrawProcessor(ctx.db, { async signAndSend() { throw new Error("provider down"); } });
+    await expect(proc.approveAndSend(id)).rejects.toThrow(/provider down/);
     const row = (await ctx.db.select().from(withdrawals).where(eq(withdrawals.id, id)))[0];
     expect(row.status).toBe("signing");
   });

@@ -30,7 +30,7 @@ export interface RouteDeps {
   depositMaxCents: number;
   withdrawals: import("../services/withdrawals.js").Withdrawals | null;
   withdrawProcessor: import("../services/withdraw-worker.js").WithdrawProcessor | null;
-  payoutSigner: import("../solana/withdraw-signer.js").WithdrawSigner | null;
+  payoutSigner: import("../services/withdraw-worker.js").WithdrawSigner | null;
 }
 
 const GrantCoins = z.object({ amount: z.number().int().positive() });
@@ -252,9 +252,9 @@ export function registerRoutes(server: FastifyInstance, deps: RouteDeps): void {
       const res = await deps.rounds.close(req.userId!, p.data.roundId, p.data.reason);
       // Settle responds INSTANTLY. The winning payout is already credited in-game by
       // rounds.close (round_payout), so the balance returned here includes it. Pushing it
-      // on-chain to the player's wallet is slow (Privy sign + Solana broadcast), so we do
+      // on-chain to the player's wallet is slow, so we do
       // that in the BACKGROUND and let the client reconcile the wallet a moment later. If
-      // the send ever fails the payout just stays in-game — safe and withdrawable, never lost.
+      // the send ever fails the payout just stays in-game, safe and withdrawable, never lost.
       const balance = await deps.ledger.balance(req.userId!, deps.stakeAsset);
       if (deps.stakeAsset === "cash" && deps.payoutSigner && res.payoutCoins > 0) {
         const user = await deps.users.get(req.userId!);
@@ -281,8 +281,8 @@ export function registerRoutes(server: FastifyInstance, deps: RouteDeps): void {
         pnlCoins: res.pnlCoins,
         equity: res.equity,
         exitRaw: res.round.exitRaw,
-        payoutTxSig: null,       // payout broadcasts in the background; client doesn't wait on it
-        payoutPrivyTxId: null,
+        payoutTxSig: null, // payout broadcasts in the background; client doesn't wait on it
+        payoutProviderTxId: null,
         balance,
       };
     } catch (e: any) {

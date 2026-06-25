@@ -13,8 +13,8 @@
  * the transfer). The fee-payer becomes a signer automatically at compile time. Amounts are USDC
  * base units (see `money/usdc.ts`); `decimals` must match the on-chain mint (boot-asserted = 6).
  *
- * Built on `@solana/kit` v5 (web3.js v2) — the same stack `@privy-io/node` uses, pinned to one
- * copy so the branded `Address`/`Transaction` types unify at the Privy signing boundary.
+ * Built on `@solana/kit` v5 (web3.js v2), pinned to one copy so the branded
+ * `Address`/`Transaction` types unify at the signing boundary.
  */
 import {
   address as _address,

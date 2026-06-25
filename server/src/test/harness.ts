@@ -11,8 +11,7 @@ import { createWalletBinding, type WalletBinding } from "../auth/wallet-binding.
 import { makeDepositIntents, type DepositIntents } from "../services/deposit-intents.js";
 import type { SignedTxBroadcaster } from "../services/signed-tx-broadcaster.js";
 import type { Withdrawals } from "../services/withdrawals.js";
-import type { WithdrawProcessor } from "../services/withdraw-worker.js";
-import type { WithdrawSigner } from "../solana/withdraw-signer.js";
+import type { WithdrawProcessor, WithdrawSigner } from "../services/withdraw-worker.js";
 
 export interface TestCtx {
   raw: Db;
