@@ -5,7 +5,7 @@
  * trusted inputs, controls the message bytes, and reserves any signer slots the caller must
  * satisfy later. Used for both directions:
  *   - deposit: source = user ATA, authority = user wallet, dest = treasury ATA, feePayer = optional server fee payer
- *   - withdraw: source = treasury ATA, authority = user wallet, dest = user ATA, feePayer = optional server fee payer
+ *   - withdraw: source = treasury ATA, authority = treasury authority, dest = user ATA, feePayer = optional server fee payer
  *
  * The `authority` is reserved via {@link createNoopSigner} so the compiled tx marks it as a
  * SIGNER slot (a bare `Address` would compile to a NON-signer and the SPL program would reject
@@ -38,7 +38,7 @@ export interface TransferCheckedTxArgs {
   mint: Address;
   /** Destination token account (ATA). */
   destination: Address;
-  /** Owner or authority of the source ATA, reserved as a signer slot for the wallet signature. */
+  /** Owner or authority of the source ATA, reserved as a signer slot for later signing. */
   authority: Address;
   /** Pays the network fee. When configured, this signer is supplied by the server. */
   feePayer: Address;
@@ -71,8 +71,8 @@ export function buildTransferCheckedMessage(args: TransferCheckedTxArgs) {
 
 /**
  * Compile and base64-encode the unsigned transaction payload for later signing (§5/§6).
- * Deterministic for given args. The user wallet signs the reserved authority slot, and an
- * optional server fee payer signs its slot when configured.
+ * Deterministic for given args. The source-account authority signs the reserved authority slot,
+ * and an optional server fee payer signs its slot when configured.
  */
 export function buildUnsignedTransferCheckedWireTx(args: TransferCheckedTxArgs): string {
   return getBase64EncodedWireTransaction(compileTransaction(buildTransferCheckedMessage(args)));
