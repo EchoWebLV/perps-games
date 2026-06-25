@@ -1,17 +1,17 @@
 /**
  * Server-authored USDC `transferChecked` transaction builder (real-money rails, spec §5/§6).
  *
- * The server is the SOLE author of the transaction message (§5): it builds the full tx from
- * server-trusted inputs, controls 100% of the message bytes (Phase 0 confirmed Privy signs the
- * exact caller-supplied bytes — no blockhash/instruction param), and reserves the signature
- * slots that Privy fills later. Used for BOTH directions:
- *   - deposit: source = user ATA, authority = user wallet, dest = treasury ATA, feePayer = treasury
- *   - withdraw: source = treasury ATA, authority = treasury, dest = user ATA, feePayer = treasury
+ * The server is the sole author of the transaction message (§5): it builds the full tx from
+ * trusted inputs, controls the message bytes, and reserves any signer slots the caller must
+ * satisfy later. Used for both directions:
+ *   - deposit: source = user ATA, authority = user wallet, dest = treasury ATA, feePayer = optional server fee payer
+ *   - withdraw: source = treasury ATA, authority = user wallet, dest = user ATA, feePayer = optional server fee payer
  *
  * The `authority` is reserved via {@link createNoopSigner} so the compiled tx marks it as a
  * SIGNER slot (a bare `Address` would compile to a NON-signer and the SPL program would reject
- * the transfer). The fee-payer becomes a signer automatically at compile time. Amounts are USDC
- * base units (see `money/usdc.ts`); `decimals` must match the on-chain mint (boot-asserted = 6).
+ * the transfer). The fee payer becomes a signer automatically at compile time when one is
+ * configured. The instruction uses the legacy SPL Token program. Amounts are USDC base units
+ * (see `money/usdc.ts`); `decimals` must match the on-chain mint (boot-asserted = 6).
  *
  * Built on `@solana/kit` v5 (web3.js v2), pinned to one copy so the branded
  * `Address`/`Transaction` types unify at the signing boundary.
@@ -38,9 +38,9 @@ export interface TransferCheckedTxArgs {
   mint: Address;
   /** Destination token account (ATA). */
   destination: Address;
-  /** Owner/authority of the source ATA — reserved as a signer slot, signed later by Privy. */
+  /** Owner or authority of the source ATA, reserved as a signer slot for the wallet signature. */
   authority: Address;
-  /** Pays the network fee — reserved as a signer slot, signed later by Privy. */
+  /** Pays the network fee. When configured, this signer is supplied by the server. */
   feePayer: Address;
   /** Amount in USDC base units (use `centsToBaseUnits`). */
   amount: bigint;
@@ -56,7 +56,7 @@ export function buildTransferCheckedMessage(args: TransferCheckedTxArgs) {
     source: args.source,
     mint: args.mint,
     destination: args.destination,
-    // noop-signer reserves the authority's signer slot without a key (Privy signs it).
+    // Reserve the authority signer slot without attaching a private key at build time.
     authority: createNoopSigner(args.authority),
     amount: args.amount,
     decimals: args.decimals,
@@ -70,9 +70,9 @@ export function buildTransferCheckedMessage(args: TransferCheckedTxArgs) {
 }
 
 /**
- * Compile + base64-encode the UNSIGNED transaction for Privy's `transaction` param (§5/§6).
- * Deterministic for given args. Privy fills the reserved feePayer + authority signature slots;
- * staging item 5 validates byte-for-byte fidelity of what Privy signs.
+ * Compile and base64-encode the unsigned transaction payload for later signing (§5/§6).
+ * Deterministic for given args. The user wallet signs the reserved authority slot, and an
+ * optional server fee payer signs its slot when configured.
  */
 export function buildUnsignedTransferCheckedWireTx(args: TransferCheckedTxArgs): string {
   return getBase64EncodedWireTransaction(compileTransaction(buildTransferCheckedMessage(args)));

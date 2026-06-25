@@ -33,7 +33,13 @@ describe("round close direct payout", () => {
     // Instant settle: payout is credited in-game (balance 90 stake + 14 payout = 104) and the
     // on-chain transfer has NOT run yet, so no tx sig is returned synchronously.
     expect(res.statusCode).toBe(200);
-    expect(res.json()).toMatchObject({ payoutCoins: 14, payoutTxSig: null, balance: 104 });
+    expect(res.json()).toMatchObject({
+      payoutCoins: 14,
+      payoutTxSig: null,
+      payoutProviderTxId: null,
+      balance: 104,
+    });
+    expect(res.json()).not.toHaveProperty("payoutPrivyTxId");
 
     // The wallet transfer + its mirroring ledger debit happen in the background.
     await vi.waitFor(async () => {

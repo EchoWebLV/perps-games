@@ -8,6 +8,11 @@ describe("users.setWalletPublicKey", () => {
   beforeEach(async () => { ctx = await makeTestDb(); });
   afterEach(async () => { await ctx.close(); });
 
+  it("does not expose a wallet sync bypass helper", async () => {
+    const removedHelper = ["sync", "Verified", "Wallet", "Public", "Key"].join("");
+    expect(removedHelper in ctx.users).toBe(false);
+  });
+
   it("stores and returns the wallet address on a user", async () => {
     const u = await ctx.users.upsertByExternalId("privy:did:privy:abc");
     expect(u.walletPublicKey ?? null).toBeNull();

@@ -63,19 +63,6 @@ export function makeUsers(db: any) {
       }
       return cur as User;
     },
-    /**
-     * Sync the wallet address verified by Privy for this DID. Unlike manual source binding,
-     * this follows the authenticated embedded wallet so payment txs require the same signer
-     * the client will ask Privy to use.
-     */
-    async syncVerifiedWalletPublicKey(id: string, address: string): Promise<User> {
-      const rows = await db
-        .update(users)
-        .set({ walletPublicKey: address })
-        .where(eq(users.id, id))
-        .returning();
-      return rows[0];
-    },
   };
 }
 
