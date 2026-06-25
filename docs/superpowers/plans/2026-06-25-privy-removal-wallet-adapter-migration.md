@@ -69,6 +69,8 @@
 - `server/src/auth/wallet-binding.test.ts` - wallet proof tests.
 - `server/src/solana/fee-payer-signer.ts` - base64 wire tx partial signer for the fee-payer slot.
 - `server/src/solana/fee-payer-signer.test.ts` - fee-payer signing tests.
+- `server/src/services/deposit-intents.ts` - short-lived signed server intent for deposit broadcast.
+- `server/src/services/deposit-intents.test.ts` - deposit intent signature and expiry tests.
 - `server/src/services/signed-tx-broadcaster.ts` - validates signed deposit tx before RPC broadcast.
 - `server/src/services/signed-tx-broadcaster.test.ts` - mutation rejection tests.
 
@@ -1083,6 +1085,8 @@ git commit -m "feat(server): add signed wallet binding"
 **Files:**
 - Create: `server/src/solana/fee-payer-signer.ts`
 - Create: `server/src/solana/fee-payer-signer.test.ts`
+- Create: `server/src/services/deposit-intents.ts`
+- Create: `server/src/services/deposit-intents.test.ts`
 - Create: `server/src/services/signed-tx-broadcaster.ts`
 - Create: `server/src/services/signed-tx-broadcaster.test.ts`
 - Modify: `server/src/env.ts`
@@ -1258,7 +1262,118 @@ Then pass:
 
 to `makeDepositTxBuilder`.
 
-- [ ] **Step 6: Add signed tx broadcast service**
+- [ ] **Step 6: Add server-signed deposit intents**
+
+Create `server/src/services/deposit-intents.test.ts`:
+
+```ts
+import { describe, expect, it } from "vitest";
+import { makeDepositIntents } from "./deposit-intents.js";
+
+describe("makeDepositIntents", () => {
+  it("creates and verifies a signed deposit intent", () => {
+    const intents = makeDepositIntents({ secret: "i".repeat(32), now: () => 1000 });
+    const issued = intents.create({
+      userId: "user-1",
+      wallet: "Wallet1111111111111111111111111111111111",
+      amountCents: 250,
+      txBase64: "tx-base64",
+    });
+
+    expect(issued.depositIntent.startsWith("v1.")).toBe(true);
+    expect(intents.verify(issued.depositIntent)).toEqual({
+      userId: "user-1",
+      wallet: "Wallet1111111111111111111111111111111111",
+      amountCents: 250,
+      txBase64: "tx-base64",
+    });
+  });
+
+  it("rejects a tampered intent", () => {
+    const intents = makeDepositIntents({ secret: "i".repeat(32), now: () => 1000 });
+    const issued = intents.create({
+      userId: "user-1",
+      wallet: "Wallet1111111111111111111111111111111111",
+      amountCents: 250,
+      txBase64: "tx-base64",
+    });
+    const parts = issued.depositIntent.split(".");
+    const tampered = `${parts[0]}.${parts[1].replace(/.$/, parts[1].endsWith("a") ? "b" : "a")}.${parts[2]}`;
+    expect(intents.verify(tampered)).toBeNull();
+  });
+
+  it("rejects an expired intent", () => {
+    let now = 1000;
+    const intents = makeDepositIntents({ secret: "i".repeat(32), now: () => now, ttlMs: 10 });
+    const issued = intents.create({
+      userId: "user-1",
+      wallet: "Wallet1111111111111111111111111111111111",
+      amountCents: 250,
+      txBase64: "tx-base64",
+    });
+    now = 1011;
+    expect(intents.verify(issued.depositIntent)).toBeNull();
+  });
+});
+```
+
+Create `server/src/services/deposit-intents.ts`:
+
+```ts
+import { createHmac, timingSafeEqual } from "node:crypto";
+
+export interface DepositIntentPayload {
+  userId: string;
+  wallet: string;
+  amountCents: number;
+  txBase64: string;
+}
+
+export interface DepositIntents {
+  create(input: DepositIntentPayload): { depositIntent: string; expiresAt: string };
+  verify(depositIntent: string): DepositIntentPayload | null;
+}
+
+const enc = new TextEncoder();
+const b64url = (buf: Uint8Array | string) =>
+  Buffer.from(typeof buf === "string" ? enc.encode(buf) : buf).toString("base64url");
+const fromB64url = (s: string) => Buffer.from(s, "base64url").toString("utf8");
+
+export function makeDepositIntents(deps: { secret: string; now?: () => number; ttlMs?: number }): DepositIntents {
+  if (deps.secret.length < 32) throw new Error("deposit intent secret must be at least 32 characters");
+  const now = deps.now ?? Date.now;
+  const ttlMs = deps.ttlMs ?? 5 * 60 * 1000;
+  const sign = (payload: string) => createHmac("sha256", deps.secret).update(payload).digest("base64url");
+  return {
+    create(input) {
+      const exp = now() + ttlMs;
+      const payload = b64url(JSON.stringify({ ...input, exp }));
+      return { depositIntent: `v1.${payload}.${sign(payload)}`, expiresAt: new Date(exp).toISOString() };
+    },
+    verify(depositIntent) {
+      const parts = depositIntent.split(".");
+      if (parts.length !== 3 || parts[0] !== "v1") return null;
+      const expected = sign(parts[1]);
+      const a = Buffer.from(parts[2]);
+      const b = Buffer.from(expected);
+      if (a.length !== b.length || !timingSafeEqual(a, b)) return null;
+      let payload: DepositIntentPayload & { exp?: number };
+      try { payload = JSON.parse(fromB64url(parts[1])); }
+      catch { return null; }
+      if (!payload.userId || !payload.wallet || !payload.txBase64 || typeof payload.amountCents !== "number") return null;
+      if (typeof payload.exp !== "number" || payload.exp <= now()) return null;
+      return {
+        userId: payload.userId,
+        wallet: payload.wallet,
+        amountCents: payload.amountCents,
+        txBase64: payload.txBase64,
+      };
+    },
+  };
+}
+```
+
+- [ ] **Step 7: Add signed tx broadcast service**
 
 Create `server/src/services/signed-tx-broadcaster.ts`:
 
@@ -1301,7 +1416,7 @@ export function makeRpcSignedTxBroadcaster(rpcUrl: string): SignedTxBroadcaster 
 }
 ```
 
-- [ ] **Step 7: Add signed tx broadcast tests**
+- [ ] **Step 8: Add signed tx broadcast tests**
 
 Create `server/src/services/signed-tx-broadcaster.test.ts`:
 
@@ -1375,11 +1490,12 @@ describe("makeSignedTxBroadcaster", () => {
 });
 ```
 
-- [ ] **Step 8: Expose signed deposit broadcast route**
+- [ ] **Step 9: Expose signed deposit broadcast route**
 
 In `server/src/http/routes.ts`, add to `RouteDeps`:
 
 ```ts
+  depositIntents: import("../services/deposit-intents.js").DepositIntents;
   signedTxBroadcaster: import("../services/signed-tx-broadcaster.js").SignedTxBroadcaster | null;
 ```
 
@@ -1387,9 +1503,22 @@ Add schema:
 
 ```ts
 const DepositSendBody = z.object({
-  expectedTxBase64: z.string().min(1),
+  depositIntent: z.string().min(1),
   signedTxBase64: z.string().min(1),
 });
+```
+
+Change `buildDepositTx` so `/v1/deposit/build` returns the tx and server-signed intent:
+
+```ts
+    const { txBase64 } = await deps.depositTxBuilder.buildForUser(user.walletPublicKey, body.data.amountCents);
+    const intent = deps.depositIntents.create({
+      userId: req.userId!,
+      wallet: user.walletPublicKey,
+      amountCents: body.data.amountCents,
+      txBase64,
+    });
+    return { txBase64, depositIntent: intent.depositIntent, expiresAt: intent.expiresAt };
 ```
 
 Add route:
@@ -1399,18 +1528,37 @@ Add route:
     if (!deps.signedTxBroadcaster) return reply.code(404).send({ error: "deposit_send_disabled" });
     const body = DepositSendBody.safeParse(req.body);
     if (!body.success) return reply.code(400).send({ error: "bad_request" });
+    const intent = deps.depositIntents.verify(body.data.depositIntent);
+    if (!intent || intent.userId !== req.userId!) return reply.code(401).send({ error: "invalid_deposit_intent" });
     try {
-      return await deps.signedTxBroadcaster.broadcastSignedDeposit(body.data);
+      return await deps.signedTxBroadcaster.broadcastSignedDeposit({
+        expectedTxBase64: intent.txBase64,
+        signedTxBase64: body.data.signedTxBase64,
+      });
     } catch (e) {
       if (e instanceof Error && e.message === "signed_transaction_message_mismatch") {
         return reply.code(400).send({ error: "signed_transaction_message_mismatch" });
+      }
+      if (e instanceof Error && e.message === "signed_transaction_missing_existing_signature") {
+        return reply.code(400).send({ error: "signed_transaction_missing_existing_signature" });
       }
       throw e;
     }
   });
 ```
 
-Wire `signedTxBroadcaster` in `server/src/index.ts` when real money is enabled:
+Wire `depositIntents` and `signedTxBroadcaster` in `server/src/index.ts`:
+
+```ts
+  const { makeDepositIntents } = await import("./services/deposit-intents.js");
+  const depositIntents = makeDepositIntents({
+    secret: env.SESSION_SECRET ?? "development-session-secret-change-before-production",
+  });
+```
+
+Place that before the `buildServer` call and pass `depositIntents` to `buildServer`.
+
+Inside the real-money block:
 
 ```ts
     const { makeRpcSignedTxBroadcaster } = await import("./services/signed-tx-broadcaster.js");
@@ -1425,22 +1573,22 @@ Declare it before the real-money block as:
 
 Pass it to `buildServer`.
 
-- [ ] **Step 9: Run signer and deposit tests**
+- [ ] **Step 10: Run signer and deposit tests**
 
 Run:
 
 ```bash
-cd server && npx vitest run src/solana/fee-payer-signer.test.ts src/services/deposit-tx.test.ts src/services/signed-tx-broadcaster.test.ts src/test/deposit-address.test.ts
+cd server && npx vitest run src/solana/fee-payer-signer.test.ts src/services/deposit-intents.test.ts src/services/deposit-tx.test.ts src/services/signed-tx-broadcaster.test.ts src/test/deposit-address.test.ts
 ```
 
 Expected:
 
 ```text
-Test Files  4 passed
+Test Files  5 passed
 Tests       ... passed
 ```
 
-- [ ] **Step 10: Commit**
+- [ ] **Step 11: Commit**
 
 ```bash
 git add server/src
@@ -1599,7 +1747,8 @@ In `redline3d/src/core/api.ts`, add:
 ```ts
   bindWalletChallenge(wallet: string): Promise<{ challenge: string; message: string; wallet: string; expiresAt: string }>;
   bindWallet(input: { challenge: string; signatureBase58: string }): Promise<{ wallet: string }>;
-  depositSend(input: { expectedTxBase64: string; signedTxBase64: string }): Promise<{ txSig: string }>;
+  depositBuild(amountCents: number): Promise<{ txBase64: string; depositIntent: string; expiresAt: string }>;
+  depositSend(input: { depositIntent: string; signedTxBase64: string }): Promise<{ txSig: string }>;
 ```
 
 Add implementations:
@@ -1945,12 +2094,36 @@ git commit -m "feat(client): add solana wallet port"
 
 In `redline3d/src/core/play-funding.ts`, replace Privy wording in comments with connected wallet wording.
 
-Change `signAndSend` comment to:
+Add this type above `SweepToPlayBalanceOpts`:
 
 ```ts
-  /** sign and submit the deposit tx through the connected wallet or server broadcaster */
-  signAndSend: (txBase64: string) => Promise<string>;
+export type DepositBuildResult = string | { txBase64: string; depositIntent?: string };
 ```
+
+Change `buildDepositTx` and `signAndSend` to:
+
+```ts
+  /** build the server-authored deposit tx; server may include a signed deposit intent for broadcast */
+  buildDepositTx: (amountCents: number) => Promise<DepositBuildResult>;
+  /** sign and submit the deposit tx through the connected wallet or server broadcaster */
+  signAndSend: (deposit: DepositBuildResult) => Promise<string>;
+```
+
+Change the implementation from:
+
+```ts
+  const txBase64 = await opts.buildDepositTx(amount);
+  await opts.signAndSend(txBase64);
+```
+
+to:
+
+```ts
+  const deposit = await opts.buildDepositTx(amount);
+  await opts.signAndSend(deposit);
+```
+
+The existing tests can continue returning `"txb64"` from `buildDepositTx`; this preserves compatibility with the current unit tests while allowing the real API path to carry `{ txBase64, depositIntent }`.
 
 - [ ] **Step 2: Add wallet binding orchestrator tests**
 
@@ -2132,11 +2305,13 @@ Replace `onAddToPlay` signing:
     serverBalance = await sweepToPlayBalance({
       walletBalanceCents: walletCents,
       startingServerBalance: serverBalance,
-      buildDepositTx: async (amountCents) => (await api.depositBuild(amountCents)).txBase64,
-      signAndSend: async (txBase64) => {
+      buildDepositTx: async (amountCents) => api.depositBuild(amountCents),
+      signAndSend: async (deposit) => {
+        const txBase64 = typeof deposit === "string" ? deposit : deposit.txBase64;
         if (port.signAndSendTransaction) return port.signAndSendTransaction(txBase64);
         const signedTxBase64 = await port.signTransaction(txBase64);
-        return (await api.depositSend({ expectedTxBase64: txBase64, signedTxBase64 })).txSig;
+        if (typeof deposit === "string" || !deposit.depositIntent) throw new Error("deposit_intent_missing");
+        return (await api.depositSend({ depositIntent: deposit.depositIntent, signedTxBase64 })).txSig;
       },
       pollServerBalance: async () => {
         const me = await api.me();
