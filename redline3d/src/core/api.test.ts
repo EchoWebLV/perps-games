@@ -42,66 +42,6 @@ describe("createApi", () => {
     expect(m.payoutCoins).toBe(14);
   });
 
-  it("builds a play payment transaction through the play endpoint", async () => {
-    let seen: { url: string; init: RequestInit } | null = null;
-    const api = createApi({
-      baseUrl: "http://x", userId: "u",
-      fetch: async (url, init) => { seen = { url: String(url), init: init ?? {} }; return res(200, { txBase64: "tx-play" }); },
-    });
-
-    const out = await api.playPaymentBuild(100);
-
-    expect(out.txBase64).toBe("tx-play");
-    expect(seen!.url).toBe("http://x/v1/play/payment/build");
-    expect(seen!.init.method).toBe("POST");
-    expect(JSON.parse(String(seen!.init.body))).toEqual({ amountCents: 100 });
-  });
-
-  it("confirms a sent play payment signature through the play endpoint", async () => {
-    let seen: { url: string; init: RequestInit } | null = null;
-    const api = createApi({
-      baseUrl: "http://x", userId: "u",
-      fetch: async (url, init) => { seen = { url: String(url), init: init ?? {} }; return res(200, { status: "credited", balance: 75 }); },
-    });
-
-    const out = await api.playPaymentConfirm("sig-play-123");
-
-    expect(out).toEqual({ status: "credited", balance: 75 });
-    expect(seen!.url).toBe("http://x/v1/play/payment/confirm");
-    expect(seen!.init.method).toBe("POST");
-    expect(JSON.parse(String(seen!.init.body))).toEqual({ txSig: "sig-play-123" });
-  });
-
-  it("sends a signed play payment transaction through the play endpoint", async () => {
-    let seen: { url: string; init: RequestInit } | null = null;
-    const api = createApi({
-      baseUrl: "http://x", userId: "u",
-      fetch: async (url, init) => { seen = { url: String(url), init: init ?? {} }; return res(200, { txSig: "sig-play-123" }); },
-    });
-
-    const out = await api.playPaymentSend("signed-play-tx");
-
-    expect(out).toEqual({ txSig: "sig-play-123" });
-    expect(seen!.url).toBe("http://x/v1/play/payment/send");
-    expect(seen!.init.method).toBe("POST");
-    expect(JSON.parse(String(seen!.init.body))).toEqual({ signedTxBase64: "signed-play-tx" });
-  });
-
-  it("recovers a play payment when Privy sent it without returning a signature", async () => {
-    let seen: { url: string; init: RequestInit } | null = null;
-    const api = createApi({
-      baseUrl: "http://x", userId: "u",
-      fetch: async (url, init) => { seen = { url: String(url), init: init ?? {} }; return res(200, { status: "credited", balance: 75, amountCents: 25 }); },
-    });
-
-    const out = await api.playPaymentRecover(25);
-
-    expect(out).toEqual({ status: "credited", balance: 75, amountCents: 25 });
-    expect(seen!.url).toBe("http://x/v1/play/payment/recover");
-    expect(seen!.init.method).toBe("POST");
-    expect(JSON.parse(String(seen!.init.body))).toEqual({ amountCents: 25 });
-  });
-
   it("maps a fetch throw to a network ApiError", async () => {
     const api = createApi({ baseUrl: "http://x", userId: "u", fetch: async () => { throw new Error("offline"); } });
     await expect(api.me()).rejects.toMatchObject({ code: "network" });

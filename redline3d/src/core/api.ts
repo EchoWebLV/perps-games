@@ -10,15 +10,13 @@ export interface CloseResult { outcome: string; payoutCoins: number; pnlCoins: n
 /** live read-only mark: the server's CURRENT equity for an open round (what the client displays) */
 export interface MarkResult { status: "open" | "settled"; stale: boolean; outcome: string | null; equity: number; payoutCoins: number; buffer: number; }
 export interface WalletBalanceResult { wallet: string | null; balance: number; }
-export interface PlayPaymentConfirmResult { status: "credited" | "duplicate" | "pending" | "rejected"; balance: number; amountCents?: number; reason?: string; }
-export interface PlayPaymentSendResult { txSig: string; }
 
 export type ApiErrorCode =
   | "unauthorized" | "insufficient_balance" | "round_already_open" | "round_not_open"
   | "round_not_found" | "feed_halt" | "bad_request" | "network" | "server";
 
 export class ApiError extends Error {
-  constructor(public code: ApiErrorCode, public status: number) { super(code); this.name = "ApiError"; }
+  constructor(public code: ApiErrorCode, public status: number, public bodyError?: string) { super(code); this.name = "ApiError"; }
 }
 
 /** map an HTTP status + body.error string to a typed code */
@@ -40,14 +38,6 @@ export interface Api {
   markRound(roundId: string): Promise<MarkResult>;
   /** build an unsigned USDC deposit tx (user wallet → treasury) for the client to sign + broadcast */
   depositBuild(amountCents: number): Promise<{ txBase64: string }>;
-  /** build the USDC payment tx for one play (Privy wallet → vault) */
-  playPaymentBuild(amountCents: number): Promise<{ txBase64: string }>;
-  /** broadcast a Privy-signed play payment tx through the server RPC */
-  playPaymentSend(signedTxBase64: string): Promise<PlayPaymentSendResult>;
-  /** verify and credit the exact play payment signature returned by Privy */
-  playPaymentConfirm(txSig: string): Promise<PlayPaymentConfirmResult>;
-  /** recover a payment that landed even though Privy did not return the signature */
-  playPaymentRecover(amountCents: number): Promise<PlayPaymentConfirmResult>;
   /** on-chain USDC currently sitting in the user's Privy wallet */
   walletBalance(): Promise<WalletBalanceResult>;
 }
@@ -64,9 +54,9 @@ export function createApi(opts: ApiOpts = {}): Api {
   const headers = async (): Promise<Record<string, string>> =>
     opts.auth ? await opts.auth.authHeaders() : { "x-dev-user": opts.userId ?? getDevUserId() };
 
-  async function call<T>(method: "GET" | "POST", path: string, body?: unknown): Promise<T> {
+  async function call<T>(method: "GET" | "POST", path: string, body?: unknown, timeoutOverrideMs?: number): Promise<T> {
     const ctrl = new AbortController();
-    const timer = setTimeout(() => ctrl.abort(), timeoutMs);
+    const timer = setTimeout(() => ctrl.abort(), timeoutOverrideMs ?? timeoutMs);
     try {
       let r: Response;
       try {
@@ -82,7 +72,7 @@ export function createApi(opts: ApiOpts = {}): Api {
       if (!r.ok) {
         let err: string | undefined;
         try { err = (await r.json())?.error; } catch { /* ignore */ }
-        throw new ApiError(codeFor(r.status, err), r.status);
+        throw new ApiError(codeFor(r.status, err), r.status, err);
       }
       return (await r.json()) as T;
     } finally {
@@ -97,10 +87,6 @@ export function createApi(opts: ApiOpts = {}): Api {
     closeRound: (p) => call<CloseResult>("POST", "/v1/round/close", p),
     markRound: (id) => call<MarkResult>("GET", `/v1/round/${id}/mark`),
     depositBuild: (amountCents) => call<{ txBase64: string }>("POST", "/v1/deposit/build", { amountCents }),
-    playPaymentBuild: (amountCents) => call<{ txBase64: string }>("POST", "/v1/play/payment/build", { amountCents }),
-    playPaymentSend: (signedTxBase64) => call<PlayPaymentSendResult>("POST", "/v1/play/payment/send", { signedTxBase64 }),
-    playPaymentConfirm: (txSig) => call<PlayPaymentConfirmResult>("POST", "/v1/play/payment/confirm", { txSig }),
-    playPaymentRecover: (amountCents) => call<PlayPaymentConfirmResult>("POST", "/v1/play/payment/recover", { amountCents }),
     walletBalance: () => call<WalletBalanceResult>("GET", "/v1/wallet/usdc-balance"),
   };
 }
