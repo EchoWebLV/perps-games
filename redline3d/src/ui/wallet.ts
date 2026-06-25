@@ -30,6 +30,8 @@ export interface WalletOpts {
   onLogout?: () => void;
   /** re-fetch the on-chain Privy wallet USDC balance, in cents */
   onWalletPoll?: () => Promise<number>;
+  /** Sweep the whole Privy-wallet USDC into the in-game play balance. Resolves when credited. */
+  onAddToPlay?: () => Promise<void>;
 }
 
 const AMOUNTS = [10, 25, 50, 100, 250];
@@ -170,6 +172,8 @@ export function createWallet(parent: HTMLElement, opts: WalletOpts): Wallet {
        <button class="wlt-tab" data-tab="recv">${svg(ICONS.qr, 15)}Receive</button>
      </div>` +
     `<div class="wlt-view" data-view="buy">
+       <button class="wlt-cta ok" id="wltAddPlay">Add to play balance</button>
+       <div class="wlt-note" id="wltAddNote">Move your wallet USDC into your play balance — then GO is instant.</div>
        <div class="wlt-amts">${AMOUNTS.map((a) => `<button class="wlt-amt" data-amt="${a}">$${a}<small>USDC</small></button>`).join("")}</div>
        <button class="wlt-cta" id="wltBuy">Buy USDC</button>
        <div class="wlt-note">Use Receive to add USDC to your Privy wallet.</div>
@@ -222,6 +226,31 @@ export function createWallet(parent: HTMLElement, opts: WalletOpts): Wallet {
     buyBtn.textContent = `✓ +$${amount} USDC`;
     clearTimeout(okTimer);
     okTimer = window.setTimeout(() => { buyBtn.classList.remove("ok"); renderAmount(); }, 1500);
+  };
+
+  const addPlayBtn = q<HTMLButtonElement>("#wltAddPlay");
+  const addNote = q<HTMLElement>("#wltAddNote");
+  let adding = false;
+  addPlayBtn.onclick = async () => {
+    if (adding || !opts.onAddToPlay) return;
+    adding = true;
+    addPlayBtn.disabled = true;
+    const original = addPlayBtn.textContent;
+    addPlayBtn.textContent = "Adding…";
+    addNote.textContent = "Funds on the way — they'll appear shortly.";
+    try {
+      await opts.onAddToPlay();
+      renderBalance(true);
+      addPlayBtn.textContent = "✓ Added to play balance";
+      addNote.textContent = "Ready — press GO to race.";
+    } catch {
+      addPlayBtn.textContent = original ?? "Add to play balance";
+      addNote.textContent = "Couldn't add funds. Make sure your wallet holds USDC, then try again.";
+    } finally {
+      adding = false;
+      addPlayBtn.disabled = false;
+      window.setTimeout(() => { if (!adding) addPlayBtn.textContent = "Add to play balance"; }, 2000);
+    }
   };
 
   // Re-render the Receive QR/address + the account row from the LIVE address on every open.
