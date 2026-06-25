@@ -33,6 +33,7 @@ export async function connectAndBindWallet(input: {
 }) {
   const connected = await input.port.connect();
   const challenge = await input.api.bindWalletChallenge(connected.address);
+  if (challenge.wallet !== connected.address) throw new Error("wallet_mismatch");
   const signature = await input.port.signMessage(new TextEncoder().encode(challenge.message));
   const bound = await input.api.bindWallet({
     challenge: challenge.challenge,

@@ -45,6 +45,7 @@ import { entranceHit, LOT_BOUNDS, type BuildingKind } from "./core/lobby-layout"
 import { loadSolanaWalletPort, type SolanaWalletPort } from "./core/solana-wallet";
 import { connectAndBindWallet } from "./core/wallet-binding";
 import { sweepToPlayBalance } from "./core/play-funding";
+import { ensureWalletConnection, hydrateBoundWallet, submitDeposit } from "./core/wallet-connection";
 
 const canvas = document.getElementById("gl") as HTMLCanvasElement;
 const hudRoot = document.getElementById("hud") as HTMLElement;
@@ -87,6 +88,7 @@ let serverBalance = 0;             // hidden round-accounting balance used by th
 let walletBalance: number | null = null; // on-chain USDC in the connected wallet; null until we have a bound wallet
 let walletPort: SolanaWalletPort | null = null;
 let connected = false;
+let boundWalletAddress = "";
 let connectedWalletAddress = "";
 const syncDisplayedBalance = () => {
   // corner balance = on-chain wallet + in-game ledger, so a recovered/stuck deposit
@@ -96,12 +98,16 @@ const syncDisplayedBalance = () => {
 };
 
 async function refreshWalletBalance(): Promise<void> {
-  if (!connectedWalletAddress) {
+  if (!boundWalletAddress) {
     walletBalance = null;
     return;
   }
-  const res = await api.walletBalance();
-  walletBalance = res.wallet === connectedWalletAddress ? res.balance : 0;
+  const res = await hydrateBoundWallet({ walletBalance: () => api.walletBalance() });
+  boundWalletAddress = res.boundWalletAddress;
+  walletBalance = res.walletBalance;
+  if (connectedWalletAddress && boundWalletAddress && connectedWalletAddress !== boundWalletAddress) {
+    throw new Error("wallet_mismatch");
+  }
 }
 
 async function refreshWalletBalanceEventually(minBalance?: number): Promise<void> {
@@ -119,14 +125,20 @@ async function refreshWalletBalanceEventually(minBalance?: number): Promise<void
 }
 
 async function ensureWalletConnected(): Promise<SolanaWalletPort> {
-  if (walletPort && connectedWalletAddress) return walletPort;
-  walletPort ??= await loadSolanaWalletPort("auto");
-  const bound = await connectAndBindWallet({ port: walletPort, api });
-  connectedWalletAddress = bound.address;
+  const ensured = await ensureWalletConnection({
+    walletPort,
+    connectedWalletAddress,
+    boundWalletAddress,
+    loadWalletPort: () => loadSolanaWalletPort("auto"),
+    connectAndBindWallet: (port) => connectAndBindWallet({ port, api }),
+  });
+  walletPort = ensured.walletPort;
+  connectedWalletAddress = ensured.connectedWalletAddress;
+  boundWalletAddress = ensured.boundWalletAddress;
   await refreshWalletBalance();
   syncDisplayedBalance();
   walletUI.setBalance(balance);
-  return walletPort;
+  return ensured.walletPort;
 }
 
 // Live "mark": the SERVER's current equity for the open round. The displayed × / buffer / payout
@@ -199,7 +211,7 @@ coins.set(upgrades.coins(), false); // no pulse on the persisted balance at load
 
 // wallet page (opened by tapping the balance chip) — shows the player's deposit QR.
 const walletUI = createWallet(hudRoot, {
-  address: () => connectedWalletAddress,
+  address: () => connectedWalletAddress || boundWalletAddress,
   balance: () => balance,
   walletBalance: () => walletBalance,
   onConnectWallet: async () => { await ensureWalletConnected(); },
@@ -216,13 +228,7 @@ const walletUI = createWallet(hudRoot, {
       walletBalanceCents: walletCents,
       startingServerBalance: serverBalance,
       buildDepositTx: async (amountCents) => api.depositBuild(amountCents),
-      signAndSend: async (deposit) => {
-        const txBase64 = typeof deposit === "string" ? deposit : deposit.txBase64;
-        if (port.signAndSendTransaction) return port.signAndSendTransaction(txBase64);
-        const signedTxBase64 = await port.signTransaction(txBase64);
-        if (typeof deposit === "string" || !deposit.depositIntent) throw new Error("deposit_intent_missing");
-        return (await api.depositSend({ depositIntent: deposit.depositIntent, signedTxBase64 })).txSig;
-      },
+      signAndSend: async (deposit) => submitDeposit({ port, deposit, api }),
       pollServerBalance: async () => {
         const me = await api.me();
         serverBalance = me.balance;
@@ -248,7 +254,13 @@ async function initSession() {
     serverBalance = me.balance;
     connected = true;
     signedIn = true;
-    try { await refreshWalletBalance(); } catch { walletBalance = null; }
+    try {
+      const hydrated = await hydrateBoundWallet({ walletBalance: () => api.walletBalance() });
+      boundWalletAddress = hydrated.boundWalletAddress;
+      walletBalance = hydrated.walletBalance;
+    } catch {
+      walletBalance = null;
+    }
     syncDisplayedBalance(); walletUI.setBalance(balance);
     if (me.openRoundId) await roundSync.recover(me.openRoundId);
     const refreshed = await api.me();
