@@ -6,6 +6,7 @@ import { AuthError } from "../auth/privy.js";
 declare module "fastify" {
   interface FastifyRequest {
     userId?: string;
+    privyAccessToken?: string;
   }
 }
 
@@ -48,6 +49,7 @@ export function makeRequireUser(deps: RequireUserDeps) {
         await deps.users.syncVerifiedWalletPublicKey(user.id, addr);
       }
       req.userId = user.id;
+      req.privyAccessToken = bearer;
       return;
     }
 

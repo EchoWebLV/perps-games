@@ -14,6 +14,9 @@ const EnvShape = z.object({
   START_BALANCE: z.coerce.number().int().nonnegative().default(10000), // cents → $100.00 faucet
   PRIVY_APP_ID: z.string().optional(),
   PRIVY_APP_SECRET: z.string().optional(),
+  PRIVY_PLAY_SIGNER_ID: z.string().min(1).optional(),
+  PRIVY_PLAY_SIGNER_PRIVATE_KEY: z.string().min(1).optional(),
+  PRIVY_PLAY_SIGNER_POLICY_IDS: z.string().optional(),
   PRIVY_VERIFICATION_KEY: z.string().optional(), // SPKI PEM → offline JWT verify
   DEV_AUTH: z
     .string()
@@ -44,6 +47,13 @@ const Env = EnvShape.superRefine((e, ctx) => {
   if (!e.REAL_MONEY_ENABLED) return;
   for (const k of ["SOLANA_RPC_URL", "USDC_MINT", "TREASURY_USDC_ATA"] as const) {
     if (!e[k]) ctx.addIssue({ code: z.ZodIssueCode.custom, path: [k], message: `${k} is required when REAL_MONEY_ENABLED=true` });
+  }
+  if (!!e.PRIVY_PLAY_SIGNER_ID !== !!e.PRIVY_PLAY_SIGNER_PRIVATE_KEY) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ["PRIVY_PLAY_SIGNER_ID"],
+      message: "PRIVY_PLAY_SIGNER_ID and PRIVY_PLAY_SIGNER_PRIVATE_KEY must be set together",
+    });
   }
 });
 

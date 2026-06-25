@@ -99,7 +99,7 @@ function injectStyles() {
 
 export function createUpgrades(
   parent: HTMLElement,
-  opts: { onCoins?: (n: number) => void; onApply?: () => void; economicEffects?: boolean } = {},
+  opts: { onCoins?: (n: number) => void; onApply?: () => void; economicEffects?: boolean; onClose?: () => void } = {},
 ): Upgrades {
   injectStyles();
   const saved = loadSaved();
@@ -179,6 +179,7 @@ export function createUpgrades(
   const setOpen = (open: boolean) => {
     overlay.style.display = open ? "flex" : "none";
     if (open) render();
+    else opts.onClose?.();
   };
   (panel.querySelector(".upg-x") as HTMLElement).onclick = () => setOpen(false);
   overlay.onclick = (e) => { if (e.target === overlay) setOpen(false); };

@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { makeTestDb, type TestCtx } from "./harness.js";
 
 const H = { "x-dev-user": "alice", "content-type": "application/json" };
@@ -7,7 +7,7 @@ describe("round close direct payout", () => {
   let ctx: TestCtx;
   afterEach(async () => { await ctx?.close(); });
 
-  it("sends a winning cash payout from the vault to the user's wallet and clears the ledger credit", async () => {
+  it("settles instantly (payout credited in-game) then sends it to the wallet in the background", async () => {
     const sent: Array<{ destWallet: string; amountCents: number; idempotencyKey: string }> = [];
     ctx = await makeTestDb({
       stakeAsset: "cash",
@@ -30,8 +30,15 @@ describe("round close direct payout", () => {
 
     const res = await ctx.server.inject({ method: "POST", url: "/v1/round/close", headers: H, payload: { roundId, reason: "cashout" } });
 
+    // Instant settle: payout is credited in-game (balance 90 stake + 14 payout = 104) and the
+    // on-chain transfer has NOT run yet, so no tx sig is returned synchronously.
     expect(res.statusCode).toBe(200);
-    expect(res.json()).toMatchObject({ payoutCoins: 14, payoutTxSig: "sig-payout", balance: 90 });
-    expect(sent).toEqual([{ destWallet: "WalletAAA", amountCents: 14, idempotencyKey: `round-payout:${roundId}` }]);
+    expect(res.json()).toMatchObject({ payoutCoins: 14, payoutTxSig: null, balance: 104 });
+
+    // The wallet transfer + its mirroring ledger debit happen in the background.
+    await vi.waitFor(async () => {
+      expect(sent).toEqual([{ destWallet: "WalletAAA", amountCents: 14, idempotencyKey: `round-payout:${roundId}` }]);
+      expect(await ctx.ledger.balance(user.id, "cash")).toBe(90);
+    }, { timeout: 2000, interval: 20 });
   });
 });

@@ -1,3 +1,4 @@
+import { createHash, randomUUID } from "node:crypto";
 import type { FastifyInstance } from "fastify";
 import { z } from "zod";
 import type { Users } from "../services/users.js";
@@ -6,7 +7,7 @@ import type { Inventory } from "../services/inventory.js";
 import type { Rounds } from "../services/rounds.js";
 import type { PriceFeed } from "../feed/types.js";
 import { FeedHaltError, RoundNotFoundError, RoundClosedError, OpenRoundExistsError } from "../services/errors.js";
-import { PLAY_PAYMENT_MAX_CENTS, PLAY_PAYMENT_MIN_CENTS } from "../services/play-payments.js";
+import { PLAY_PAYMENT_MAX_CENTS, PLAY_PAYMENT_MIN_CENTS, type PlayPaymentConfirmResult } from "../services/play-payments.js";
 import { makeRequireUser } from "./auth.js";
 
 export interface RouteDeps {
@@ -24,6 +25,7 @@ export interface RouteDeps {
   realMoney: { enabled: boolean; treasuryUsdcAta: string | null };
   depositTxBuilder: import("../services/deposit-tx.js").DepositTxBuilder | null;
   playPaymentBroadcaster: import("../services/play-payment-broadcaster.js").PlayPaymentBroadcaster | null;
+  playPaymentCharger: import("../services/play-payment-charger.js").PlayPaymentCharger | null;
   playPaymentConfirmer: import("../services/play-payments.js").PlayPaymentConfirmer | null;
   walletBalanceReader: import("../services/wallet-balance.js").WalletBalanceReader | null;
   depositMinCents: number;
@@ -55,6 +57,44 @@ const CloseRound = z.object({ roundId: z.string().uuid(), reason: z.enum(["casho
 
 export function registerRoutes(server: FastifyInstance, deps: RouteDeps): void {
   const requireUser = makeRequireUser({ users: deps.users, devAuth: deps.devAuth, privyAuth: deps.privyAuth });
+
+  function playPaymentRefundRef(txSigs: string[]): string {
+    const basis = txSigs.length > 0 ? txSigs.slice().sort().join("|") : "missing-sigs";
+    const digest = createHash("sha256").update(basis).digest("hex");
+    return `play-payment-refund:${digest}`;
+  }
+
+  async function refundExcessPlayPayment(
+    userId: string,
+    destWallet: string,
+    out: PlayPaymentConfirmResult,
+    intendedAmountCents: number,
+  ): Promise<PlayPaymentConfirmResult & {
+    recoveredCents?: number;
+    refundedCents?: number;
+    refundTxSig?: string;
+    refundPrivyTxId?: string | null;
+  }> {
+    if (out.status !== "credited" || out.amountCents <= intendedAmountCents) return out;
+    const excessCents = out.amountCents - intendedAmountCents;
+    if (!deps.payoutSigner) return out;
+
+    const ref = playPaymentRefundRef(out.txSigs);
+    const sent = await deps.payoutSigner.signAndSend({
+      destWallet,
+      amountCents: excessCents,
+      idempotencyKey: ref,
+    });
+    await deps.ledger.post(userId, "cash", -excessCents, "play_payment_refund_sent", ref);
+    return {
+      ...out,
+      amountCents: intendedAmountCents,
+      recoveredCents: out.amountCents,
+      refundedCents: excessCents,
+      refundTxSig: sent.txSig,
+      refundPrivyTxId: sent.privyTxId,
+    };
+  }
 
   server.get("/v1/balance", { preHandler: requireUser }, async (req) => {
     return { balance: await deps.ledger.balance(req.userId!, deps.stakeAsset) };
@@ -98,6 +138,18 @@ export function registerRoutes(server: FastifyInstance, deps: RouteDeps): void {
 
   const DepositBuildBody = z.object({ amountCents: z.number().int().positive() });
   const PlayPaymentSendBody = z.object({ signedTxBase64: z.string().min(1) });
+  const PlayPaymentChargeBody = z.object({
+    amountCents: z.number().int().positive(),
+    attemptId: z.string().min(1).max(128).regex(/^[A-Za-z0-9_-]+$/).optional(),
+  });
+  const PlayPaymentPrepareBody = z.object({
+    amountCents: z.number().int().positive(),
+    attemptId: z.string().min(1).max(128).regex(/^[A-Za-z0-9_-]+$/),
+  });
+  const PlayPaymentAuthorizedChargeBody = z.object({
+    chargeId: z.string().uuid(),
+    signature: z.string().min(1),
+  });
   const PlayPaymentConfirmBody = z.object({ txSig: z.string().min(1) });
   const PlayPaymentRecoverBody = z.object({ amountCents: z.number().int().positive() });
   const buildUserToVaultTx = async (
@@ -135,11 +187,123 @@ export function registerRoutes(server: FastifyInstance, deps: RouteDeps): void {
     return deps.playPaymentBroadcaster.broadcast(body.data.signedTxBase64);
   });
 
+  function mapPlayPaymentChargeError(e: unknown, reply: any) {
+    if (e instanceof Error && e.message === "privy_user_wallet_id_missing") {
+      return reply.code(409).send({ error: "privy_user_wallet_id_missing" });
+    }
+    if (e instanceof Error && (
+      e.message === "play_payment_charge_not_prepared" ||
+      e.message === "play_payment_charge_wallet_mismatch"
+    )) {
+      return reply.code(409).send({ error: e.message });
+    }
+    if (e instanceof Error && e.message.startsWith("play_payment_charge_") && e.message.endsWith("_timeout")) {
+      console.warn("[play_payment_charge_timeout]", { error: e.message });
+      return reply.code(504).send({ error: e.message });
+    }
+    if (e instanceof Error && (
+      e.message === "privy_user_wallet_sign_failed" ||
+      e.message === "privy_user_wallet_sign_missing_signed_transaction" ||
+      e.message === "privy_play_signer_required"
+    )) {
+      console.warn("[play_payment_charge_sign_failed]", { error: e.message, cause: e.cause instanceof Error ? e.cause.message : e.cause });
+      return reply.code(502).send({ error: e.message });
+    }
+    throw e;
+  }
+
+  server.get("/v1/play/payment/signer", { preHandler: requireUser }, async (_req, reply) => {
+    if (!deps.playPaymentCharger) return reply.code(404).send({ error: "play_payment_charge_disabled" });
+    const signer = deps.playPaymentCharger.signer();
+    if (!signer) return reply.code(404).send({ error: "play_payment_signer_disabled" });
+    return { signers: [signer] };
+  });
+
+  server.post("/v1/play/payment/prepare", { preHandler: requireUser }, async (req, reply) => {
+    if (!deps.playPaymentCharger) return reply.code(404).send({ error: "play_payment_charge_disabled" });
+    const body = PlayPaymentPrepareBody.safeParse(req.body);
+    if (!body.success) return reply.code(400).send({ error: "bad_request" });
+    if (body.data.amountCents < PLAY_PAYMENT_MIN_CENTS || body.data.amountCents > PLAY_PAYMENT_MAX_CENTS) {
+      return reply.code(400).send({ error: "amount_out_of_bounds" });
+    }
+    const user = await deps.users.get(req.userId!);
+    if (!user?.walletPublicKey) return reply.code(409).send({ error: "no_bound_wallet" });
+    try {
+      return await deps.playPaymentCharger.prepare({
+        userWallet: user.walletPublicKey,
+        amountCents: body.data.amountCents,
+        idempotencyKey: `play-payment:${req.userId!}:${body.data.attemptId}`,
+      });
+    } catch (e) {
+      return mapPlayPaymentChargeError(e, reply);
+    }
+  });
+
+  server.post("/v1/play/payment/charge-authorized", { preHandler: requireUser }, async (req, reply) => {
+    if (!deps.playPaymentCharger) return reply.code(404).send({ error: "play_payment_charge_disabled" });
+    const body = PlayPaymentAuthorizedChargeBody.safeParse(req.body);
+    if (!body.success) return reply.code(400).send({ error: "bad_request" });
+    const user = await deps.users.get(req.userId!);
+    if (!user?.walletPublicKey) return reply.code(409).send({ error: "no_bound_wallet" });
+    try {
+      const charged = await deps.playPaymentCharger.chargeAuthorized({
+        userWallet: user.walletPublicKey,
+        chargeId: body.data.chargeId,
+        signature: body.data.signature,
+      });
+      return { status: "sent" as const, txSig: charged.txSig };
+    } catch (e) {
+      return mapPlayPaymentChargeError(e, reply);
+    }
+  });
+
+  server.post("/v1/play/payment/charge", { preHandler: requireUser }, async (req, reply) => {
+    if (!deps.playPaymentCharger) return reply.code(404).send({ error: "play_payment_charge_disabled" });
+    const body = PlayPaymentChargeBody.safeParse(req.body);
+    if (!body.success) {
+      console.warn("[play_payment_charge_bad_request]", { body: req.body, issues: body.error.issues });
+      return reply.code(400).send({ error: "bad_request" });
+    }
+    if (body.data.amountCents < PLAY_PAYMENT_MIN_CENTS || body.data.amountCents > PLAY_PAYMENT_MAX_CENTS) {
+      return reply.code(400).send({ error: "amount_out_of_bounds" });
+    }
+    const userJwt = req.privyAccessToken;
+    if (!userJwt) return reply.code(409).send({ error: "privy_token_required" });
+    const user = await deps.users.get(req.userId!);
+    if (!user?.walletPublicKey) return reply.code(409).send({ error: "no_bound_wallet" });
+    const started = Date.now();
+    console.info("[play_payment_charge_start]", { userId: req.userId, amountCents: body.data.amountCents, hasAttemptId: !!body.data.attemptId });
+    try {
+      const charged = await deps.playPaymentCharger.charge({
+        userWallet: user.walletPublicKey,
+        amountCents: body.data.amountCents,
+        userJwt,
+        idempotencyKey: `play-payment:${req.userId!}:${body.data.attemptId ?? randomUUID()}`,
+      });
+      console.info("[play_payment_charge_sent]", { userId: req.userId, txSig: charged.txSig, elapsedMs: Date.now() - started });
+      return { status: "sent" as const, txSig: charged.txSig };
+    } catch (e) {
+      return mapPlayPaymentChargeError(e, reply);
+    }
+  });
+
   server.post("/v1/play/payment/confirm", { preHandler: requireUser }, async (req, reply) => {
     if (!deps.playPaymentConfirmer) return reply.code(404).send({ error: "play_payment_confirm_disabled" });
     const body = PlayPaymentConfirmBody.safeParse(req.body);
     if (!body.success) return reply.code(400).send({ error: "bad_request" });
-    const out = await deps.playPaymentConfirmer.confirm(body.data.txSig);
+    const user = await deps.users.get(req.userId!);
+    if (!user?.walletPublicKey) return reply.code(409).send({ error: "no_bound_wallet" });
+    const confirmed = await deps.playPaymentConfirmer.confirm({
+      txSig: body.data.txSig,
+      userId: req.userId!,
+      sourceOwner: user.walletPublicKey,
+    });
+    const out = await refundExcessPlayPayment(
+      req.userId!,
+      user.walletPublicKey,
+      confirmed,
+      confirmed.status === "credited" ? confirmed.paymentCents : 0,
+    );
     return { ...out, balance: await deps.ledger.balance(req.userId!, deps.stakeAsset) };
   });
 
@@ -152,11 +316,12 @@ export function registerRoutes(server: FastifyInstance, deps: RouteDeps): void {
     }
     const user = await deps.users.get(req.userId!);
     if (!user?.walletPublicKey) return reply.code(409).send({ error: "no_bound_wallet" });
-    const out = await deps.playPaymentConfirmer.recover({
+    const recovered = await deps.playPaymentConfirmer.recover({
       userId: req.userId!,
       sourceOwner: user.walletPublicKey,
       amountCents: body.data.amountCents,
     });
+    const out = await refundExcessPlayPayment(req.userId!, user.walletPublicKey, recovered, body.data.amountCents);
     return { ...out, balance: await deps.ledger.balance(req.userId!, deps.stakeAsset) };
   });
 
@@ -230,19 +395,29 @@ export function registerRoutes(server: FastifyInstance, deps: RouteDeps): void {
     if (!p.success) return reply.code(400).send({ error: p.error.message });
     try {
       const res = await deps.rounds.close(req.userId!, p.data.roundId, p.data.reason);
-      let payoutTxSig: string | null = null;
-      let payoutPrivyTxId: string | null = null;
+      // Settle responds INSTANTLY. The winning payout is already credited in-game by
+      // rounds.close (round_payout), so the balance returned here includes it. Pushing it
+      // on-chain to the player's wallet is slow (Privy sign + Solana broadcast), so we do
+      // that in the BACKGROUND and let the client reconcile the wallet a moment later. If
+      // the send ever fails the payout just stays in-game — safe and withdrawable, never lost.
+      const balance = await deps.ledger.balance(req.userId!, deps.stakeAsset);
       if (deps.stakeAsset === "cash" && deps.payoutSigner && res.payoutCoins > 0) {
         const user = await deps.users.get(req.userId!);
         if (user?.walletPublicKey) {
-          const sent = await deps.payoutSigner.signAndSend({
-            destWallet: user.walletPublicKey,
-            amountCents: res.payoutCoins,
-            idempotencyKey: `round-payout:${res.round.id}`,
-          });
-          payoutTxSig = sent.txSig;
-          payoutPrivyTxId = sent.privyTxId;
-          await deps.ledger.post(req.userId!, "cash", -res.payoutCoins, "round_payout_sent", res.round.id);
+          const userId = req.userId!;
+          const destWallet = user.walletPublicKey;
+          const payoutCoins = res.payoutCoins;
+          const roundId = res.round.id;
+          const signer = deps.payoutSigner;
+          void (async () => {
+            try {
+              await signer.signAndSend({ destWallet, amountCents: payoutCoins, idempotencyKey: `round-payout:${roundId}` });
+              // mirror the on-chain move in the ledger (idempotent on round id)
+              await deps.ledger.post(userId, "cash", -payoutCoins, "round_payout_sent", roundId);
+            } catch (err) {
+              console.warn("[round_payout_send_failed]", { roundId, err: err instanceof Error ? err.message : String(err) });
+            }
+          })();
         }
       }
       return {
@@ -251,9 +426,9 @@ export function registerRoutes(server: FastifyInstance, deps: RouteDeps): void {
         pnlCoins: res.pnlCoins,
         equity: res.equity,
         exitRaw: res.round.exitRaw,
-        payoutTxSig,
-        payoutPrivyTxId,
-        balance: await deps.ledger.balance(req.userId!, deps.stakeAsset),
+        payoutTxSig: null,       // payout broadcasts in the background; client doesn't wait on it
+        payoutPrivyTxId: null,
+        balance,
       };
     } catch (e: any) {
       if (e instanceof FeedHaltError) return reply.code(503).send({ error: "feed_halt" });

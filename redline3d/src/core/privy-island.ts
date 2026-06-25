@@ -1,7 +1,7 @@
 // React island — dynamic-imported ONLY under VITE_AUTH=privy. createElement (no JSX) → no react plugin.
 import { createElement } from "react";
 import { createRoot, type Root } from "react-dom/client";
-import { PrivyProvider, usePrivy } from "@privy-io/react-auth";
+import { PrivyProvider, useAuthorizationSignature, usePrivy, useSigners } from "@privy-io/react-auth";
 import { useWallets, useSignAndSendTransaction, useSignTransaction } from "@privy-io/react-auth/solana";
 import { createSolanaRpc, createSolanaRpcSubscriptions } from "@solana/kit";
 
@@ -29,6 +29,8 @@ export interface PrivySnapshot {
   logout: () => Promise<void>;
   getAccessToken: () => Promise<string | null>;
   walletAddress: string | null;
+  addWalletSigners: (signers: unknown) => Promise<void>;
+  generateAuthorizationSignature: (input: unknown) => Promise<string>;
   /** sign a server-built tx (base64). Resolves to the signed wire tx base64. */
   signTransaction: (txBase64: string) => Promise<string>;
   /** sign + send a server-built tx (base64). Resolves to the transaction signature. */
@@ -73,9 +75,19 @@ function Bridge(props: { onState: (s: PrivySnapshot) => void }) {
   const { wallets } = useWallets();
   const { signTransaction: privySignTransaction } = useSignTransaction();
   const { signAndSendTransaction: privySignAndSendTransaction } = useSignAndSendTransaction();
+  const { addSigners } = useSigners();
+  const { generateAuthorizationSignature: privyGenerateAuthorizationSignature } = useAuthorizationSignature();
   const wallet = (p.user?.linkedAccounts ?? []).find(
     (a: any) => a.type === "wallet" && a.chainType === "solana" && a.walletClientType === "privy",
   );
+  const addWalletSigners = async (signers: unknown): Promise<void> => {
+    if (!wallet?.address) throw new Error("no wallet");
+    await addSigners({ address: wallet.address, signers: signers as any });
+  };
+  const generateAuthorizationSignature = async (input: unknown): Promise<string> => {
+    const { signature } = await privyGenerateAuthorizationSignature(input as any);
+    return signature;
+  };
   const signTransaction = async (txBase64: string): Promise<string> => {
     const sol = wallets.find((w) => w.address === wallet?.address);
     if (!sol) throw new Error("no wallet");
@@ -98,6 +110,8 @@ function Bridge(props: { onState: (s: PrivySnapshot) => void }) {
     ready: p.ready, authenticated: p.authenticated, did: p.user?.id ?? null,
     login: p.login, logout: p.logout, getAccessToken: p.getAccessToken,
     walletAddress: wallet?.address ?? null,
+    addWalletSigners,
+    generateAuthorizationSignature,
     signTransaction,
     signAndSendTransaction,
   });

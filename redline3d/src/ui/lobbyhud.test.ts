@@ -50,18 +50,30 @@ describe("createLobbyHud", () => {
     expect(onExit).toHaveBeenCalledOnce();
   });
 
-  test("shows the prompt for an asset and clears it on null", () => {
+  test("shows the prompt for a building and clears it on null", () => {
     installFakeDocument();
     const parent = new FakeElement();
 
     const hud = createLobbyHud(parent as unknown as HTMLElement, () => {});
     const prompt = (hud.el as unknown as FakeElement).querySelector("[data-prompt]")!;
 
-    hud.setPrompt("SOL");
+    hud.setPrompt("garage");
     expect(prompt.style.opacity).toBe("1");
-    expect(prompt.textContent).toContain("SOLANA");
+    expect(prompt.textContent).toContain("GARAGE");
 
     hud.setPrompt(null);
     expect(prompt.style.opacity).toBe("0");
+  });
+
+  test("toast shows a transient message", () => {
+    installFakeDocument();
+    const parent = new FakeElement();
+
+    const hud = createLobbyHud(parent as unknown as HTMLElement, () => {});
+    const toast = (hud.el as unknown as FakeElement).querySelector("[data-toast]")!;
+
+    hud.toast("Crate Shop — coming soon");
+    expect(toast.style.opacity).toBe("1");
+    expect(toast.textContent).toContain("Crate Shop");
   });
 });

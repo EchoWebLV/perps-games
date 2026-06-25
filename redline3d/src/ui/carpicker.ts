@@ -13,8 +13,12 @@ export interface CarOption {
   locked?: boolean;         // not yet owned → shown sealed in the collection
 }
 export interface Garage {
+  /** the wrap element (hamburger button + overlay) — lets the lobby toggle its chrome */
+  el: HTMLElement;
   /** while a round is live: the menu stays open, but cars can't be switched */
   setBusy(busy: boolean): void;
+  /** open the overlay straight to the garage (car collection) view — used by the lobby Garage building */
+  openGarage(): void;
 }
 
 const MODEL_YAW = Math.PI;       // base facing (matches the in-game car)
@@ -151,7 +155,7 @@ export interface MenuToggle {
   set: (on: boolean) => void;
 }
 
-export function createCarPicker(parent: HTMLElement, cars: CarOption[], onPick: (c: CarOption) => void, onUpgrades?: () => void, toggles: MenuToggle[] = [], onLogout?: () => void): Garage {
+export function createCarPicker(parent: HTMLElement, cars: CarOption[], onPick: (c: CarOption) => void, onUpgrades?: () => void, toggles: MenuToggle[] = [], onLogout?: () => void, onClose?: () => void): Garage {
   injectStyles();
 
   const wrap = document.createElement("div");
@@ -386,6 +390,7 @@ export function createCarPicker(parent: HTMLElement, cars: CarOption[], onPick: 
     overlay.style.display = "none";
     setHudMenuMode(parent, wrap, false);
     menuButton.style.display = "grid"; // the menu button is always available
+    onClose?.(); // let the lobby re-assert its chrome (hide the hamburger again, restore the back button)
   };
 
   menuButton.onclick = open;
@@ -413,6 +418,8 @@ export function createCarPicker(parent: HTMLElement, cars: CarOption[], onPick: 
   parent.appendChild(wrap);
 
   return {
+    el: wrap,
     setBusy(b: boolean) { busy = b; updateBusyUI(); },
+    openGarage() { wrap.style.display = "block"; open(); setView("garage"); },
   };
 }

@@ -1,10 +1,12 @@
 import { describe, it, expect } from "vitest";
-import { BUILDINGS, DOORS, LOT_BOUNDS, entranceHit } from "./lobby-layout";
+import { BUILDINGS, DOORS, LOT_BOUNDS, entranceHit, type BuildingKind } from "./lobby-layout";
+
+const KINDS: BuildingKind[] = ["garage", "upgrades", "crates", "track"];
 
 describe("lobby-layout", () => {
-  it("has one building + one door per market", () => {
-    expect(BUILDINGS.map((b) => b.asset).sort()).toEqual(["BTC", "ETH", "SOL"]);
-    expect(DOORS.map((d) => d.asset).sort()).toEqual(["BTC", "ETH", "SOL"]);
+  it("has one building + one door per functional kind", () => {
+    expect(BUILDINGS.map((b) => b.kind).sort()).toEqual([...KINDS].sort());
+    expect(DOORS.map((d) => d.kind).sort()).toEqual([...KINDS].sort());
   });
 
   it("keeps every building inside the lot bounds", () => {
@@ -14,8 +16,8 @@ describe("lobby-layout", () => {
     }
   });
 
-  it("returns the matching asset at a doorway centre", () => {
-    for (const d of DOORS) expect(entranceHit(d.x, d.z)).toBe(d.asset);
+  it("returns the matching kind at a doorway centre", () => {
+    for (const d of DOORS) expect(entranceHit(d.x, d.z)).toBe(d.kind);
   });
 
   it("returns null far from every door", () => {

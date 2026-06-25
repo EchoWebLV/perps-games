@@ -16,7 +16,7 @@ const IDLE = "#4da6ff";
 const WIN = "#2ee6a6";
 const LOSE = "#ff5067";
 
-const MODEL_URL = "/models/car.glb?v=2"; // bump to bust the browser cache when the model changes
+const MODEL_URL = "/models/delorean.glb"; // boot car; renaming the file busts the browser cache
 const TARGET_LEN = 11.23;     // scale the model so its longest horizontal axis ≈ our footprint (+30% then +20%)
 const MODEL_YAW = Math.PI;    // spin so the car faces down the road (-Z); tune in π/2 steps if needed
 const MAX_STEER = 0.5;        // radians the front wheels swing at full lock (~28°)

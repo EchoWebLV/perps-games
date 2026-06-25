@@ -33,6 +33,7 @@ async function main(): Promise<void> {
   let realMoney = { enabled: false, treasuryUsdcAta: null as string | null };
   let depositTxBuilder: DepositTxBuilder | null = null;
   let playPaymentBroadcaster: import("./services/play-payment-broadcaster.js").PlayPaymentBroadcaster | null = null;
+  let playPaymentCharger: import("./services/play-payment-charger.js").PlayPaymentCharger | null = null;
   let playPaymentConfirmer: import("./services/play-payments.js").PlayPaymentConfirmer | null = null;
   let walletBalanceReader: import("./services/wallet-balance.js").WalletBalanceReader | null = null;
   let withdrawalsSvc: import("./services/withdrawals.js").Withdrawals | undefined;
@@ -59,17 +60,20 @@ async function main(): Promise<void> {
     playPaymentBroadcaster = makeRpcPlayPaymentBroadcaster(env.SOLANA_RPC_URL!);
     realMoney = { enabled: true, treasuryUsdcAta: env.TREASURY_USDC_ATA! };
 
-    let signFeePayerTx: ((txBase64: string) => Promise<string>) | undefined;
-    if (env.TREASURY_WALLET_ID && env.TREASURY_OWNER_PUBKEY && env.PRIVY_APP_ID && env.PRIVY_APP_SECRET) {
+    let privyClient: import("@privy-io/node").PrivyClient | null = null;
+    if (env.PRIVY_APP_ID && env.PRIVY_APP_SECRET) {
       const { PrivyClient } = await import("@privy-io/node");
-      const treasuryPrivy = new PrivyClient({ appId: env.PRIVY_APP_ID, appSecret: env.PRIVY_APP_SECRET });
+      privyClient = new PrivyClient({ appId: env.PRIVY_APP_ID, appSecret: env.PRIVY_APP_SECRET });
+    }
+    let signFeePayerTx: ((txBase64: string) => Promise<string>) | undefined;
+    if (env.TREASURY_WALLET_ID && env.TREASURY_OWNER_PUBKEY && privyClient) {
       signFeePayerTx = async (txBase64) => {
-        const res = await treasuryPrivy.wallets().solana().signTransaction(env.TREASURY_WALLET_ID!, { transaction: txBase64 });
+        const res = await privyClient!.wallets().solana().signTransaction(env.TREASURY_WALLET_ID!, { transaction: txBase64 });
         return res.signed_transaction;
       };
       const { makePrivyWithdrawSigner } = await import("./solana/withdraw-signer.js");
       payoutSigner = makePrivyWithdrawSigner({
-        privy: treasuryPrivy,
+        privy: privyClient,
         treasuryWalletId: env.TREASURY_WALLET_ID,
         treasuryUsdcAta: env.TREASURY_USDC_ATA!,
         treasuryOwner: env.TREASURY_OWNER_PUBKEY,
@@ -89,6 +93,27 @@ async function main(): Promise<void> {
       signFeePayerTx,
       getLatestBlockhash: makeRpcBlockhash(env.SOLANA_RPC_URL!),
     });
+    if (privyClient) {
+      const { makePlayPaymentCharger } = await import("./services/play-payment-charger.js");
+      const policyIds = (env.PRIVY_PLAY_SIGNER_POLICY_IDS ?? "")
+        .split(",")
+        .map((s) => s.trim())
+        .filter(Boolean);
+      const signer = env.PRIVY_PLAY_SIGNER_ID
+        ? { signerId: env.PRIVY_PLAY_SIGNER_ID, ...(policyIds.length > 0 ? { policyIds } : {}) }
+        : undefined;
+      playPaymentCharger = makePlayPaymentCharger({
+        privy: privyClient,
+        privyAppId: env.PRIVY_APP_ID,
+        privyApiUrl: process.env.PRIVY_API_BASE_URL,
+        signer,
+        authorizationPrivateKeys: env.PRIVY_PLAY_SIGNER_PRIVATE_KEY ? [env.PRIVY_PLAY_SIGNER_PRIVATE_KEY] : undefined,
+        depositTxBuilder,
+        broadcaster: playPaymentBroadcaster,
+      });
+    } else {
+      console.warn("[play_payment_charger_disabled] Privy keys are missing; falling back to client wallet prompts");
+    }
     walletBalanceReader = makeRpcWalletBalanceReader(env.SOLANA_RPC_URL!, env.USDC_MINT!);
 
     const { makeWithdrawals } = await import("./services/withdrawals.js");
@@ -134,6 +159,7 @@ async function main(): Promise<void> {
     realMoney,
     depositTxBuilder,
     playPaymentBroadcaster,
+    playPaymentCharger,
     playPaymentConfirmer,
     walletBalanceReader,
     depositMinCents: env.DEPOSIT_MIN_CENTS,
