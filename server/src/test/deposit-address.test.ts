@@ -184,6 +184,20 @@ describe("POST /v1/wallet/bind*", () => {
     await ctx?.close();
   });
 
+  it("rejects invalid wallet input when issuing a bind challenge", async () => {
+    ctx = await makeTestDb();
+
+    const res = await ctx.server.inject({
+      method: "POST",
+      url: "/v1/wallet/bind-challenge",
+      headers: { "x-dev-user": "alice" },
+      payload: { wallet: "0".repeat(32) },
+    });
+
+    expect(res.statusCode).toBe(400);
+    expect(res.json()).toEqual({ error: "invalid_wallet_address" });
+  });
+
   it("binds a wallet only after a valid wallet signature", async () => {
     const secretKey = ed.utils.randomSecretKey();
     const publicKey = await ed.getPublicKeyAsync(secretKey);
@@ -210,6 +224,120 @@ describe("POST /v1/wallet/bind*", () => {
     });
     expect(b.statusCode).toBe(200);
     expect(b.json()).toEqual({ wallet });
+  });
+
+  it("rejects a challenge signed for another authenticated user", async () => {
+    const secretKey = ed.utils.randomSecretKey();
+    const publicKey = await ed.getPublicKeyAsync(secretKey);
+    const wallet = bs58.encode(publicKey);
+    ctx = await makeTestDb();
+
+    const challengeRes = await ctx.server.inject({
+      method: "POST",
+      url: "/v1/wallet/bind-challenge",
+      headers: { "x-dev-user": "alice" },
+      payload: { wallet },
+    });
+    expect(challengeRes.statusCode).toBe(200);
+
+    const signatureBase58 = bs58.encode(
+      await ed.signAsync(new TextEncoder().encode(challengeRes.json().message), secretKey),
+    );
+    const bindRes = await ctx.server.inject({
+      method: "POST",
+      url: "/v1/wallet/bind",
+      headers: { "x-dev-user": "bob" },
+      payload: { challenge: challengeRes.json().challenge, signatureBase58 },
+    });
+
+    expect(bindRes.statusCode).toBe(401);
+    expect(bindRes.json()).toEqual({ error: "invalid_wallet_signature" });
+  });
+
+  it("rejects a tampered challenge or signature", async () => {
+    const secretKey = ed.utils.randomSecretKey();
+    const publicKey = await ed.getPublicKeyAsync(secretKey);
+    const wallet = bs58.encode(publicKey);
+    ctx = await makeTestDb();
+
+    const challengeRes = await ctx.server.inject({
+      method: "POST",
+      url: "/v1/wallet/bind-challenge",
+      headers: { "x-dev-user": "alice" },
+      payload: { wallet },
+    });
+    expect(challengeRes.statusCode).toBe(200);
+
+    const validSignatureBase58 = bs58.encode(
+      await ed.signAsync(new TextEncoder().encode(challengeRes.json().message), secretKey),
+    );
+    const tamperedChallenge = `${challengeRes.json().challenge}tampered`;
+    const tamperedChallengeRes = await ctx.server.inject({
+      method: "POST",
+      url: "/v1/wallet/bind",
+      headers: { "x-dev-user": "alice" },
+      payload: { challenge: tamperedChallenge, signatureBase58: validSignatureBase58 },
+    });
+    expect(tamperedChallengeRes.statusCode).toBe(401);
+    expect(tamperedChallengeRes.json()).toEqual({ error: "invalid_wallet_signature" });
+
+    const tamperedSignature = bs58.encode(
+      Uint8Array.from(bs58.decode(validSignatureBase58), (byte, index) => (index === 0 ? byte ^ 1 : byte)),
+    );
+    const tamperedSignatureRes = await ctx.server.inject({
+      method: "POST",
+      url: "/v1/wallet/bind",
+      headers: { "x-dev-user": "alice" },
+      payload: { challenge: challengeRes.json().challenge, signatureBase58: tamperedSignature },
+    });
+    expect(tamperedSignatureRes.statusCode).toBe(401);
+    expect(tamperedSignatureRes.json()).toEqual({ error: "invalid_wallet_signature" });
+  });
+
+  it("returns wallet_already_bound when a second user claims an existing wallet", async () => {
+    const secretKey = ed.utils.randomSecretKey();
+    const publicKey = await ed.getPublicKeyAsync(secretKey);
+    const wallet = bs58.encode(publicKey);
+    ctx = await makeTestDb();
+
+    const aliceChallenge = await ctx.server.inject({
+      method: "POST",
+      url: "/v1/wallet/bind-challenge",
+      headers: { "x-dev-user": "alice" },
+      payload: { wallet },
+    });
+    expect(aliceChallenge.statusCode).toBe(200);
+
+    const signatureBase58 = bs58.encode(
+      await ed.signAsync(new TextEncoder().encode(aliceChallenge.json().message), secretKey),
+    );
+    const aliceBind = await ctx.server.inject({
+      method: "POST",
+      url: "/v1/wallet/bind",
+      headers: { "x-dev-user": "alice" },
+      payload: { challenge: aliceChallenge.json().challenge, signatureBase58 },
+    });
+    expect(aliceBind.statusCode).toBe(200);
+
+    const bobChallenge = await ctx.server.inject({
+      method: "POST",
+      url: "/v1/wallet/bind-challenge",
+      headers: { "x-dev-user": "bob" },
+      payload: { wallet },
+    });
+    expect(bobChallenge.statusCode).toBe(200);
+
+    const bobSignatureBase58 = bs58.encode(
+      await ed.signAsync(new TextEncoder().encode(bobChallenge.json().message), secretKey),
+    );
+    const bobBind = await ctx.server.inject({
+      method: "POST",
+      url: "/v1/wallet/bind",
+      headers: { "x-dev-user": "bob" },
+      payload: { challenge: bobChallenge.json().challenge, signatureBase58: bobSignatureBase58 },
+    });
+    expect(bobBind.statusCode).toBe(409);
+    expect(bobBind.json()).toEqual({ error: "wallet_already_bound" });
   });
 });
 

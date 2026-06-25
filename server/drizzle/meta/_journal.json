@@ -57,6 +57,13 @@
       "when": 1782231562338,
       "tag": "0007_wakeful_black_cat",
       "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "7",
+      "when": 1782391465896,
+      "tag": "0008_lyrical_robin_chapel",
+      "breakpoints": true
     }
   ]
 }

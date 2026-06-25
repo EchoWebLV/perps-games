@@ -98,3 +98,41 @@ Summary:
 
 - No blocking issues found.
 - The route-level suite currently covers the success path. The service-level uniqueness/rebind behavior continues to rely on existing `users` tests plus the new route wiring.
+
+---
+
+## Review fix follow-up: wallet binding uniqueness and rejection coverage
+
+### What changed
+
+- Added a partial unique index for non-null `users.wallet_public_key` in `server/src/db/schema.ts`.
+- Generated and added the matching Drizzle migration and metadata:
+  - `server/drizzle/0008_lyrical_robin_chapel.sql`
+  - `server/drizzle/meta/0008_snapshot.json`
+  - `server/drizzle/meta/_journal.json`
+- Updated `server/src/services/users.ts` to translate database duplicate/unique violations into `wallet_already_bound`, preserving the route-level `409` behavior for cross-user wallet conflicts.
+- Added focused service coverage in `server/src/services/users.test.ts` proving the database now rejects duplicate non-null wallet bindings even when bypassing the application precheck.
+- Expanded `server/src/test/deposit-address.test.ts` with focused route-level rejection coverage for:
+  - invalid wallet input on `POST /v1/wallet/bind-challenge`
+  - challenge replay under another authenticated user
+  - tampered challenge/signature
+  - second user attempting to bind an already-bound wallet and receiving `409 wallet_already_bound`
+
+### Verification
+
+- `cd server && npx vitest run src/auth/wallet-binding.test.ts src/services/users.test.ts src/test/deposit-address.test.ts`
+  - Result: passed
+  - Files: 3 passed
+  - Tests: 24 passed
+- `cd server && npm run build`
+  - Result: passed
+
+### Changed files for this follow-up
+
+- `server/src/db/schema.ts`
+- `server/drizzle/0008_lyrical_robin_chapel.sql`
+- `server/drizzle/meta/0008_snapshot.json`
+- `server/drizzle/meta/_journal.json`
+- `server/src/services/users.ts`
+- `server/src/services/users.test.ts`
+- `server/src/test/deposit-address.test.ts`

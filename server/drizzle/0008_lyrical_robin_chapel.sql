@@ -1,0 +1,1 @@
+CREATE UNIQUE INDEX IF NOT EXISTS "users_wallet_public_key_idx" ON "users" USING btree ("wallet_public_key") WHERE "users"."wallet_public_key" is not null;

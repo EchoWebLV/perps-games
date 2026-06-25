@@ -1,4 +1,6 @@
+import { eq } from "drizzle-orm";
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
+import { users } from "../db/schema.js";
 import { makeTestDb, type TestCtx } from "../test/harness.js";
 
 describe("users.setWalletPublicKey", () => {
@@ -44,5 +46,19 @@ describe("users.setWalletPublicKey", () => {
     } finally {
       warn.mockRestore();
     }
+  });
+
+  it("enforces wallet uniqueness at the database level for non-null bindings", async () => {
+    const a = await ctx.users.upsertByExternalId("privy:did:privy:db-unique-a");
+    const b = await ctx.users.upsertByExternalId("privy:did:privy:db-unique-b");
+
+    await ctx.users.setWalletPublicKey(a.id, "WalletShared");
+
+    await expect(
+      ctx.db
+        .update(users)
+        .set({ walletPublicKey: "WalletShared" })
+        .where(eq(users.id, b.id)),
+    ).rejects.toThrow(/unique|duplicate/i);
   });
 });

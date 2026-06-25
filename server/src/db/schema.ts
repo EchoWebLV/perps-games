@@ -25,6 +25,9 @@ export const users = pgTable(
   },
   (t) => ({
     externalIdx: uniqueIndex("users_external_id_idx").on(t.externalId),
+    walletPublicKeyIdx: uniqueIndex("users_wallet_public_key_idx")
+      .on(t.walletPublicKey)
+      .where(sql`${t.walletPublicKey} is not null`),
   }),
 );
 

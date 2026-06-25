@@ -1,6 +1,13 @@
 import { eq, and, isNull, ne } from "drizzle-orm";
 import { users, type User } from "../db/schema.js";
 
+function isUniqueViolation(error: unknown): boolean {
+  if (typeof error !== "object" || error === null) return false;
+  const code = "code" in error ? String(error.code) : "";
+  const message = "message" in error ? String(error.message) : String(error);
+  return code === "23505" || /unique|duplicate/i.test(message);
+}
+
 export function makeUsers(db: any) {
   return {
     /** find-or-create a user by external identity */
@@ -34,11 +41,17 @@ export function makeUsers(db: any) {
         .limit(1);
       if (owner[0]) throw new Error("wallet_already_bound");
 
-      const rows = await db
-        .update(users)
-        .set({ walletPublicKey: address })
-        .where(and(eq(users.id, id), isNull(users.walletPublicKey)))
-        .returning();
+      let rows: User[];
+      try {
+        rows = await db
+          .update(users)
+          .set({ walletPublicKey: address })
+          .where(and(eq(users.id, id), isNull(users.walletPublicKey)))
+          .returning();
+      } catch (error) {
+        if (isUniqueViolation(error)) throw new Error("wallet_already_bound");
+        throw error;
+      }
       if (rows[0]) return rows[0];
       const existing = await db.select().from(users).where(eq(users.id, id)).limit(1);
       const cur = existing[0] as User | undefined;
