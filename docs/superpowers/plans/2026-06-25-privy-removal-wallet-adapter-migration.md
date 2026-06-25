@@ -243,8 +243,9 @@ Then remove these `RouteDeps` fields:
   playPaymentBroadcaster: import("../services/play-payment-broadcaster.js").PlayPaymentBroadcaster | null;
   playPaymentCharger: import("../services/play-payment-charger.js").PlayPaymentCharger | null;
   playPaymentConfirmer: import("../services/play-payments.js").PlayPaymentConfirmer | null;
-  payoutSigner: import("../solana/withdraw-signer.js").WithdrawSigner | null;
 ```
+
+Keep `payoutSigner` in `RouteDeps` during Task 2. It belongs to the existing background round-payout path in `/v1/round/close`, not the deleted `/v1/play/payment/*` rail.
 
 - [ ] **Step 3: Remove all `/v1/play/payment/*` route code**
 
@@ -290,7 +291,6 @@ Delete these variables:
   let playPaymentBroadcaster: import("./services/play-payment-broadcaster.js").PlayPaymentBroadcaster | null = null;
   let playPaymentCharger: import("./services/play-payment-charger.js").PlayPaymentCharger | null = null;
   let playPaymentConfirmer: import("./services/play-payments.js").PlayPaymentConfirmer | null = null;
-  let payoutSigner: import("./solana/withdraw-signer.js").WithdrawSigner | null = null;
 ```
 
 Delete these dynamic imports from the real-money block:
@@ -312,7 +312,7 @@ with:
       minCents: env.DEPOSIT_MIN_CENTS, maxCents: env.DEPOSIT_MAX_CENTS,
 ```
 
-Delete all `playPaymentConfirmer`, `playPaymentBroadcaster`, and `playPaymentCharger` assignments. Keep `walletBalanceReader`, `depositTxBuilder`, and withdrawals.
+Delete all `playPaymentConfirmer`, `playPaymentBroadcaster`, and `playPaymentCharger` assignments. Keep `walletBalanceReader`, `depositTxBuilder`, withdrawals, and `payoutSigner`.
 
 Remove these properties from the `buildServer` call:
 
@@ -320,7 +320,6 @@ Remove these properties from the `buildServer` call:
     playPaymentBroadcaster,
     playPaymentCharger,
     playPaymentConfirmer,
-    payoutSigner,
 ```
 
 - [ ] **Step 5: Remove play-payment test harness options**
@@ -331,7 +330,6 @@ In `server/src/test/harness.ts`, remove these options from `makeTestDb`:
 playPaymentBroadcaster?: import("../services/play-payment-broadcaster.js").PlayPaymentBroadcaster | null;
 playPaymentCharger?: import("../services/play-payment-charger.js").PlayPaymentCharger | null;
 playPaymentConfirmer?: any;
-payoutSigner?: import("../solana/withdraw-signer.js").WithdrawSigner | null;
 ```
 
 Remove these properties from the `buildServer` test call:
@@ -340,8 +338,9 @@ Remove these properties from the `buildServer` test call:
     playPaymentBroadcaster: opts.playPaymentBroadcaster ?? null,
     playPaymentCharger: opts.playPaymentCharger ?? null,
     playPaymentConfirmer: opts.playPaymentConfirmer ?? null,
-    payoutSigner: opts.payoutSigner ?? null,
 ```
+
+Keep the existing `payoutSigner` test harness option in Task 2. Task 10 removes the Privy withdrawal signer after a replacement or disabled payout path is in place.
 
 - [ ] **Step 6: Rewrite deposit route tests to deposit-only behavior**
 
