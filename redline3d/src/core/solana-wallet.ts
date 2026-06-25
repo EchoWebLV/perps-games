@@ -45,14 +45,26 @@ export function chooseWalletTarget(
   return "web";
 }
 
+async function loadWalletStandardPort(): Promise<SolanaWalletPort> {
+  const { createWalletStandardPort } = await import("./wallet-standard-port");
+  return createWalletStandardPort();
+}
+
 export async function loadSolanaWalletPort(target: WalletTarget = "auto"): Promise<SolanaWalletPort> {
   const resolvedTarget = chooseWalletTarget(target);
 
   if (resolvedTarget === "seeker") {
-    const { createMobileWalletPort } = await import("./mobile-wallet-port");
-    return createMobileWalletPort();
+    try {
+      const { createMobileWalletPort } = await import("./mobile-wallet-port");
+      return createMobileWalletPort();
+    } catch (error) {
+      if (target === "auto") {
+        return loadWalletStandardPort();
+      }
+
+      throw error;
+    }
   }
 
-  const { createWalletStandardPort } = await import("./wallet-standard-port");
-  return createWalletStandardPort();
+  return loadWalletStandardPort();
 }

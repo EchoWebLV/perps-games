@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 describe("wallet target detection", () => {
   it("chooses seeker for capacitor android user agent", async () => {
@@ -25,6 +25,16 @@ describe("wallet target detection", () => {
 });
 
 describe("wallet loader", () => {
+  beforeEach(() => {
+    vi.resetModules();
+    vi.clearAllMocks();
+    vi.unstubAllGlobals();
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
   it("loads the web port for web targets", async () => {
     const createWalletStandardPort = vi.fn(() => ({ kind: "web-standard" }));
     vi.doMock("./wallet-standard-port", () => ({ createWalletStandardPort }));
@@ -39,17 +49,70 @@ describe("wallet loader", () => {
     expect(createWalletStandardPort).toHaveBeenCalledTimes(1);
   });
 
-  it("loads the seeker port for seeker targets", async () => {
+  it("loads the mobile port for auto targets on Android native", async () => {
     const createMobileWalletPort = vi.fn(() => ({ kind: "mobile-wallet-adapter" }));
     vi.doMock("./wallet-standard-port", () => ({
       createWalletStandardPort: vi.fn(() => ({ kind: "web-standard" })),
     }));
     vi.doMock("./mobile-wallet-port", () => ({ createMobileWalletPort }));
+    vi.stubGlobal("navigator", {
+      userAgent: "Mozilla/5.0 Android Seeker",
+    });
+    vi.stubGlobal("Capacitor", {
+      isNativePlatform: () => true,
+    });
 
     const { loadSolanaWalletPort } = await import("./solana-wallet");
-    const port = await loadSolanaWalletPort("seeker");
+    const port = await loadSolanaWalletPort("auto");
 
     expect(port).toEqual({ kind: "mobile-wallet-adapter" });
     expect(createMobileWalletPort).toHaveBeenCalledTimes(1);
+  });
+
+  it("falls back to the web port for auto targets when mobile loading fails", async () => {
+    const mobileError = new Error("mobile unavailable");
+    const createMobileWalletPort = vi.fn(() => {
+      throw mobileError;
+    });
+    const createWalletStandardPort = vi.fn(() => ({ kind: "web-standard" }));
+
+    vi.doMock("./wallet-standard-port", () => ({ createWalletStandardPort }));
+    vi.doMock("./mobile-wallet-port", () => ({ createMobileWalletPort }));
+    vi.stubGlobal("navigator", {
+      userAgent: "Mozilla/5.0 Android Seeker",
+    });
+    vi.stubGlobal("Capacitor", {
+      isNativePlatform: () => true,
+    });
+
+    const { loadSolanaWalletPort } = await import("./solana-wallet");
+    const port = await loadSolanaWalletPort("auto");
+
+    expect(port).toEqual({ kind: "web-standard" });
+    expect(createMobileWalletPort).toHaveBeenCalledTimes(1);
+    expect(createWalletStandardPort).toHaveBeenCalledTimes(1);
+  });
+
+  it("propagates mobile loading failures for seeker targets", async () => {
+    const mobileError = new Error("mobile unavailable");
+    const createMobileWalletPort = vi.fn(() => {
+      throw mobileError;
+    });
+    const createWalletStandardPort = vi.fn(() => ({ kind: "web-standard" }));
+
+    vi.doMock("./wallet-standard-port", () => ({ createWalletStandardPort }));
+    vi.doMock("./mobile-wallet-port", () => ({ createMobileWalletPort }));
+    vi.stubGlobal("navigator", {
+      userAgent: "Mozilla/5.0 Android Seeker",
+    });
+    vi.stubGlobal("Capacitor", {
+      isNativePlatform: () => true,
+    });
+
+    const { loadSolanaWalletPort } = await import("./solana-wallet");
+
+    await expect(loadSolanaWalletPort("seeker")).rejects.toThrow("mobile unavailable");
+    expect(createMobileWalletPort).toHaveBeenCalledTimes(1);
+    expect(createWalletStandardPort).not.toHaveBeenCalled();
   });
 });
