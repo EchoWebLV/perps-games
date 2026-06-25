@@ -16,11 +16,10 @@ import { createPriceSource } from "./core/price-source";
 import { RoundEngine } from "./core/round";
 import { createApi, type MarkResult } from "./core/api";
 import { createDevAuth } from "./core/auth-dev";
-import { createPrivyAuth } from "./core/auth-privy";
+import { createSessionAuth } from "./core/auth-session";
 import type { AuthProvider } from "./core/auth";
 import { usd } from "./core/money";
 import { createRoundSync, clampInt } from "./core/round-sync";
-import { sweepToPlayBalance } from "./core/play-funding";
 import { displayCashBalance, payoutWalletBalanceFloor } from "./core/wallet-balance-model";
 import { niceLev, tToLev } from "./core/leverage";
 import { liqPriceOf } from "./core/economics";
@@ -71,23 +70,20 @@ ctx.scene.add(pickups.group);
 
 // core
 const engine = new RoundEngine();
-// auth backend — default (dev) plays immediately as a guest; VITE_AUTH=privy gates login at boot.
-const usePrivy = (import.meta.env?.VITE_AUTH as string) === "privy";
-const auth: AuthProvider = usePrivy
-  ? createPrivyAuth(import.meta.env.VITE_PRIVY_APP_ID as string)
-  : createDevAuth();
+const useDevAuth = (import.meta.env?.VITE_AUTH as string) === "dev";
+const auth: AuthProvider = useDevAuth ? createDevAuth() : createSessionAuth();
 
 const api = createApi({ auth });
-// Sign-in is gated on INTENT, not at boot. Logged-out visitors see the 3D preview and can toggle
-// music/menu freely; pressing GO or the lobby button opens the sign-in. `signedIn` flips true once
-// the session loads (privy: after login · dev: immediately).
+// Sign-in is now the anonymous client session. `signedIn` flips true once the session-backed
+// identity loads and /v1/me succeeds.
 let signedIn = false;
-function triggerSignIn() { if (auth.login) auth.login(); } // privy: open the login modal · dev: no-op
+function triggerSignIn() { void initSession(); }
 const roundSync = createRoundSync({ api, clock: { now: () => performance.now() }, store: { get: (k) => { try { return localStorage.getItem(k); } catch { return null; } }, set: (k, v) => { try { localStorage.setItem(k, v); } catch {} } } });
 let balance = 0;                   // displayed cash balance, sourced from Privy wallet when available
 let serverBalance = 0;             // hidden round-accounting balance used by the existing server engine
-let walletBalance: number | null = null; // on-chain USDC in the embedded Privy wallet
+let walletBalance: number | null = null; // on-chain USDC in the connected wallet; null until wallet support lands
 let connected = false;
+const connectedWalletAddress = "";
 const syncDisplayedBalance = () => {
   // corner balance = on-chain wallet + in-game ledger, so a recovered/stuck deposit
   // sitting in the ledger is never hidden behind a near-empty wallet read.
@@ -96,11 +92,7 @@ const syncDisplayedBalance = () => {
 };
 
 async function refreshWalletBalance(): Promise<void> {
-  if (!auth.walletPublicKey?.()) {
-    walletBalance = null;
-    return;
-  }
-  walletBalance = (await api.walletBalance()).balance;
+  walletBalance = null;
 }
 
 async function refreshWalletBalanceEventually(minBalance?: number): Promise<void> {
@@ -142,21 +134,10 @@ async function pollMark() {
   finally { marking = false; }
 }
 
-// Bulletproof logout. The old code did `void auth.logout(); location.reload()` — fire-and-forget, so
-// the reload won the race and Privy's session survived → "log out then GO still plays". This closes
-// the race from BOTH ends: (1) flip signedIn off instantly so GO/lobby can't start a round in the
-// window before the reload lands; (2) AWAIT Privy's logout (capped at 3s so a hang can't strand us);
-// (3) force-drop any residual Privy session from storage/cookies so the reload can't re-authenticate.
 async function doLogout() {
   signedIn = false;
   serverMark = null;
-  try { await Promise.race([auth.logout?.() ?? Promise.resolve(), new Promise<void>((r) => setTimeout(r, 3000))]); }
-  catch { /* clear locally regardless of a logout error */ }
-  try {
-    for (const s of [localStorage, sessionStorage])
-      for (const k of Object.keys(s)) if (/^privy/i.test(k)) s.removeItem(k);
-    document.cookie.split(";").forEach((c) => { const n = c.split("=")[0].trim(); if (/privy/i.test(n)) document.cookie = `${n}=;expires=Thu, 01 Jan 1970 00:00:00 GMT;path=/`; });
-  } catch { /* best-effort */ }
+  try { await auth.logout?.(); } catch {}
   location.reload();
 }
 
@@ -198,42 +179,27 @@ coins.set(upgrades.coins(), false); // no pulse on the persisted balance at load
 
 // wallet page (opened by tapping the balance chip) — shows the player's deposit QR.
 const walletUI = createWallet(hudRoot, {
-  // privy: the captured embedded Solana wallet (deposit target + drives the account row).
-  // dev/guest: NO real wallet → empty string. The Receive tab then shows a "sign in" notice and
-  // renders NO QR/address — NEVER a placeholder, so real USDC can't be sent into a dead address.
-  address: () => auth.walletPublicKey?.() ?? "",
+  // Task 6 removes client wallet auth. Until the wallet port lands, there is no connected address,
+  // so the Receive tab intentionally shows no QR/address.
+  address: () => connectedWalletAddress,
   balance: () => balance,
   walletBalance: () => walletBalance,
-  onBuy: () => { hud.setStatus("Use Receive to add USDC to your Privy wallet."); },
+  onBuy: () => { hud.setStatus("Connect a wallet to add USDC."); },
   onWalletPoll: async () => {
     await refreshWalletBalance();
     syncDisplayedBalance();
     return walletBalance ?? balance;
   },
   onAddToPlay: async () => {
-    const walletCents = walletBalance ?? 0;
-    serverBalance = await sweepToPlayBalance({
-      walletBalanceCents: walletCents,
-      startingServerBalance: serverBalance,
-      buildDepositTx: async (amountCents) => (await api.depositBuild(amountCents)).txBase64,
-      signAndSend: (txBase64) => auth.signAndSendTransaction!(txBase64),
-      pollServerBalance: async () => {
-        const me = await api.me();
-        serverBalance = me.balance;
-        try { await refreshWalletBalance(); } catch { /* keep last wallet read */ }
-        syncDisplayedBalance(); walletUI.setBalance(balance);
-        return serverBalance;
-      },
-    });
-    syncDisplayedBalance(); walletUI.setBalance(balance);
+    hud.setStatus("Connect a wallet to add funds to play.");
+    throw new Error("wallet_not_connected");
   },
   // Log out moved to the menu (settings); the wallet page is deposit-only now.
 });
 hud.onWallet(() => { if (engine.getPhase() !== "live") walletUI.open(); });
 
-// Session init: seed the server-owned balance + settle any dangling round. Runs once the user is
-// authenticated — privy: after the login modal completes; dev: immediately (dev ready() resolves at
-// once, so guests still auto-load). Logged-out visitors never hit the server until they sign in.
+// Session init: seed the server-owned balance + settle any dangling round once the client session is
+// ready. Dev auth behaves the same through the narrower auth interface.
 async function initSession() {
   if (signedIn) return;
   try {
@@ -289,7 +255,7 @@ const garage = createCarPicker(hudRoot, [
 ], auth.logout ? doLogout : undefined, () => {
   // closed from the lobby Garage building → re-hide the hamburger chrome and restore the lobby back button
   if (mode === "lobby") { garage.el.style.display = "none"; lobbyHud.show(); }
-}); // Log out in the menu (privy only)
+}); // Log out in the menu
 
 // ── lobby: the economy-hub town ─────────────────────────────────────────────
 // the map button drops you into a giant drivable neon lot with 4 functional buildings —
@@ -450,7 +416,7 @@ async function settleVia(reason: "cashout" | "expire", localSnap: Snapshot) {
   syncDisplayedBalance(); walletUI.setBalance(balance);
   // Once the on-chain transfer lands, refresh BOTH pockets so the wallet panel reflects the
   // move (in-game drops, wallet rises — the corner total stays the same throughout).
-  if (res.payoutCoins > 0 && auth.walletPublicKey?.()) {
+  if (res.payoutCoins > 0 && connectedWalletAddress) {
     const expectedWallet = payoutWalletBalanceFloor({ preCloseWalletBalance, payoutCoins: res.payoutCoins });
     void refreshWalletBalanceEventually(expectedWallet ?? undefined).then(async () => {
       try { serverBalance = (await api.me()).balance; } catch { /* keep last in-game read */ }

@@ -36,9 +36,12 @@ export interface Api {
   roundAction(p: { roundId: string; actionId: string; kind: "flip" | "lever"; dir?: Dir; lev?: number }): Promise<void>;
   closeRound(p: { roundId: string; reason: "cashout" | "expire" }): Promise<CloseResult>;
   markRound(roundId: string): Promise<MarkResult>;
-  /** build an unsigned USDC deposit tx (user wallet → treasury) for the client to sign + broadcast */
-  depositBuild(amountCents: number): Promise<{ txBase64: string }>;
-  /** on-chain USDC currently sitting in the user's Privy wallet */
+  bindWalletChallenge(wallet: string): Promise<{ challenge: string; message: string; wallet: string; expiresAt: string }>;
+  bindWallet(input: { challenge: string; signatureBase58: string }): Promise<{ wallet: string }>;
+  /** build an unsigned USDC deposit tx (connected wallet → treasury) for the client to sign + broadcast */
+  depositBuild(amountCents: number): Promise<{ txBase64: string; depositIntent: string; expiresAt: string }>;
+  depositSend(input: { depositIntent: string; signedTxBase64: string }): Promise<{ txSig: string }>;
+  /** on-chain USDC currently sitting in the user's connected wallet */
   walletBalance(): Promise<WalletBalanceResult>;
 }
 
@@ -86,7 +89,10 @@ export function createApi(opts: ApiOpts = {}): Api {
     roundAction: (p) => call<void>("POST", "/v1/round/action", p),
     closeRound: (p) => call<CloseResult>("POST", "/v1/round/close", p),
     markRound: (id) => call<MarkResult>("GET", `/v1/round/${id}/mark`),
-    depositBuild: (amountCents) => call<{ txBase64: string }>("POST", "/v1/deposit/build", { amountCents }),
+    bindWalletChallenge: (wallet) => call("POST", "/v1/wallet/bind-challenge", { wallet }),
+    bindWallet: (input) => call("POST", "/v1/wallet/bind", input),
+    depositBuild: (amountCents) => call<{ txBase64: string; depositIntent: string; expiresAt: string }>("POST", "/v1/deposit/build", { amountCents }),
+    depositSend: (input) => call("POST", "/v1/deposit/send", input),
     walletBalance: () => call<WalletBalanceResult>("GET", "/v1/wallet/usdc-balance"),
   };
 }

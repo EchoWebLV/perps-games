@@ -67,4 +67,55 @@ describe("createApi", () => {
     const api = createApi({ baseUrl: "http://x", userId: "u", fetch: hangFetch as any, timeoutMs: 10 });
     await expect(api.me()).rejects.toMatchObject({ code: "network" });
   });
+
+  it("calls wallet bind and deposit endpoints with the new payloads", async () => {
+    const calls: Array<{ url: string; init: RequestInit }> = [];
+    const api = createApi({
+      baseUrl: "http://x",
+      userId: "u",
+      fetch: async (url, init) => {
+        calls.push({ url: String(url), init: init ?? {} });
+        if (String(url).endsWith("/v1/wallet/bind-challenge")) {
+          return res(200, { challenge: "c1", message: "m1", wallet: "w1", expiresAt: "2026-01-01T00:00:00.000Z" });
+        }
+        if (String(url).endsWith("/v1/wallet/bind")) {
+          return res(200, { wallet: "w1" });
+        }
+        if (String(url).endsWith("/v1/deposit/build")) {
+          return res(200, { txBase64: "tx", depositIntent: "di_1", expiresAt: "2026-01-01T00:00:00.000Z" });
+        }
+        if (String(url).endsWith("/v1/deposit/send")) {
+          return res(200, { txSig: "sig1" });
+        }
+        throw new Error(`unexpected url ${String(url)}`);
+      },
+    });
+
+    await expect(api.bindWalletChallenge("w1")).resolves.toEqual({
+      challenge: "c1",
+      message: "m1",
+      wallet: "w1",
+      expiresAt: "2026-01-01T00:00:00.000Z",
+    });
+    await expect(api.bindWallet({ challenge: "c1", signatureBase58: "s1" })).resolves.toEqual({ wallet: "w1" });
+    await expect(api.depositBuild(250)).resolves.toEqual({
+      txBase64: "tx",
+      depositIntent: "di_1",
+      expiresAt: "2026-01-01T00:00:00.000Z",
+    });
+    await expect(api.depositSend({ depositIntent: "di_1", signedTxBase64: "tx-signed" })).resolves.toEqual({ txSig: "sig1" });
+
+    expect(calls.map((call) => call.url)).toEqual([
+      "http://x/v1/wallet/bind-challenge",
+      "http://x/v1/wallet/bind",
+      "http://x/v1/deposit/build",
+      "http://x/v1/deposit/send",
+    ]);
+    expect(calls.map((call) => JSON.parse(String(call.init.body)))).toEqual([
+      { wallet: "w1" },
+      { challenge: "c1", signatureBase58: "s1" },
+      { amountCents: 250 },
+      { depositIntent: "di_1", signedTxBase64: "tx-signed" },
+    ]);
+  });
 });
