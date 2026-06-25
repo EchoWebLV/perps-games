@@ -62,9 +62,17 @@ describe("withdraw confirmer (never auto-reverse on inference)", () => {
     expect((await ctx.db.select().from(withdrawals).where(eq(withdrawals.id, id)))[0].status).toBe("confirmed");
   });
 
-  it("sent → needs_review on an UNKNOWN status (cash stays debited; never auto-reversed)", async () => {
-    const id = await seedWithdrawal(ctx, "sent");
+  it("sent → pending while still UNKNOWN within the stale window (stays sent, retried next poll)", async () => {
+    const id = await seedWithdrawal(ctx, "sent"); // fresh row: updatedAt ≈ now, so not yet stale
     const proc = makeWithdrawConfirmer(ctx.db, ctx.ledger, async () => "unknown");
+    expect(await proc.confirm(id)).toBe("pending");
+    // unchanged — a not-yet-finalized tx must keep retrying, NOT escalate prematurely
+    expect((await ctx.db.select().from(withdrawals).where(eq(withdrawals.id, id)))[0].status).toBe("sent");
+  });
+
+  it("sent → needs_review once an UNKNOWN tx is stale (cash stays debited; never auto-reversed)", async () => {
+    const id = await seedWithdrawal(ctx, "sent");
+    const proc = makeWithdrawConfirmer(ctx.db, ctx.ledger, async () => "unknown", { staleSeconds: 0 });
     expect(await proc.confirm(id)).toBe("needs_review");
     expect((await ctx.db.select().from(withdrawals).where(eq(withdrawals.id, id)))[0].status).toBe("needs_review");
   });

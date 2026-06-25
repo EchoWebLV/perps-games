@@ -39,10 +39,28 @@ import type { Ledger } from "./ledger.js";
 export type ChainStatus = "finalized" | "failed" | "unknown";
 export type ReadChainStatus = (txSig: string) => Promise<ChainStatus>;
 
-export function makeWithdrawConfirmer(db: any, ledger: Ledger, readStatus: ReadChainStatus) {
+/**
+ * How long a `sent` tx may sit not-yet-finalized before we stop waiting and flag it for manual
+ * review. Solana blockhash validity is ~60-90s, so past this an unfinalized tx was almost certainly
+ * dropped and will never land — but we still never auto-reverse (it MIGHT have landed), only escalate.
+ */
+const DEFAULT_CONFIRM_STALE_SECONDS = 180;
+
+export function makeWithdrawConfirmer(
+  db: any,
+  ledger: Ledger,
+  readStatus: ReadChainStatus,
+  opts?: { staleSeconds?: number },
+) {
+  const staleSeconds = opts?.staleSeconds ?? DEFAULT_CONFIRM_STALE_SECONDS;
   return {
-    /** From `sent`, the only auto-transitions: -> confirmed (finalized) | -> reversed (landed-but-failed) | -> needs_review (unknown). */
-    async confirm(id: string): Promise<"confirmed" | "reversed" | "needs_review" | "skip"> {
+    /**
+     * From `sent`: -> confirmed (finalized) | -> reversed (landed-but-failed) | -> pending (not yet
+     * finalized; leave in `sent` and retry next poll) | -> needs_review (still unknown past the stale
+     * window). `unknown` is the NORMAL transient state for a freshly-broadcast tx — escalating it
+     * immediately would mark every withdrawal for review before it could finalize.
+     */
+    async confirm(id: string): Promise<"confirmed" | "reversed" | "pending" | "needs_review" | "skip"> {
       const rows = await db.select().from(withdrawals).where(eq(withdrawals.id, id));
       const w = rows[0];
       if (!w || w.status !== "sent" || !w.txSig) return "skip";
@@ -58,6 +76,11 @@ export function makeWithdrawConfirmer(db: any, ledger: Ledger, readStatus: ReadC
         });
         return "reversed";
       }
+      // unknown: still pending finalization. Wait (leave in `sent`) until it's been too long to
+      // plausibly still land, then escalate to manual review. `updatedAt` is the sent time (set by
+      // approveAndSend and untouched while `sent`), so its age is how long the tx has been pending.
+      const sentMs = new Date(w.updatedAt).getTime();
+      if (Number.isFinite(sentMs) && Date.now() - sentMs < staleSeconds * 1000) return "pending";
       await db.update(withdrawals).set({ status: "needs_review", reviewReason: "status_unknown", updatedAt: new Date() }).where(eq(withdrawals.id, id));
       return "needs_review";
     },

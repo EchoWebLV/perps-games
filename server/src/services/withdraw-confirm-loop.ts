@@ -8,7 +8,7 @@ export interface WithdrawConfirmLoopDeps {
   /** Ids of withdrawals currently in status `sent`. */
   listSentIds: () => Promise<string[]>;
   /** The confirmer from makeWithdrawConfirmer. */
-  confirmer: { confirm: (id: string) => Promise<"confirmed" | "reversed" | "needs_review" | "skip"> };
+  confirmer: { confirm: (id: string) => Promise<"confirmed" | "reversed" | "pending" | "needs_review" | "skip"> };
   pollMs: number;
 }
 
