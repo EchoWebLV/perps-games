@@ -67,6 +67,16 @@ const Env = EnvShape.superRefine((e, ctx) => {
       message: "TREASURY_OWNER_PUBKEY is required when fee sponsorship is configured",
     });
   }
+  // The self-custody withdraw signer asserts its derived address == TREASURY_OWNER_PUBKEY at
+  // boot; without the pubkey that assertion has nothing to check against (and would throw a
+  // misleading "mismatch"). Require them together so a missing pubkey fails with a truthful message.
+  if (e.TREASURY_SECRET && !e.TREASURY_OWNER_PUBKEY) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ["TREASURY_OWNER_PUBKEY"],
+      message: "TREASURY_OWNER_PUBKEY is required when TREASURY_SECRET is set",
+    });
+  }
 });
 
 export type Env = z.infer<typeof Env>;
