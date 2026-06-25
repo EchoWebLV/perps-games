@@ -5,7 +5,7 @@ import type { Ledger } from "./ledger.js";
  * The reserved house counterparty. Round P&L flows to/from its `cash` balance: a player's
  * stake escrows INTO the house on open, the house pays the payout OUT on close. The bankroll
  * is just this account's cash balance — it may run negative when under-capitalized. It never
- * authenticates (no `dev:`/`privy:` auth prefix) and never opens rounds.
+ * authenticates (no `dev:` or provider-auth prefix) and never opens rounds.
  */
 export const HOUSE_EXTERNAL_ID = "system:house";
 

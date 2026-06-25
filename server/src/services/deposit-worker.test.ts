@@ -15,7 +15,7 @@ describe("makeDepositConfirmer.tick", () => {
   let ctx: TestCtx; let userId: string;
   beforeEach(async () => {
     ctx = await makeTestDb();
-    const u = await ctx.users.upsertByExternalId("privy:did:privy:a");
+    const u = await ctx.users.upsertByExternalId("wallet:did:deposit-worker-a");
     await ctx.users.setWalletPublicKey(u.id, "WALLET_A");
     userId = u.id;
   });

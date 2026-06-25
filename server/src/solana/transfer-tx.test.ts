@@ -56,7 +56,7 @@ describe("buildUnsignedTransferCheckedWireTx", () => {
     const wire = buildUnsignedTransferCheckedWireTx(args());
     expect(typeof wire).toBe("string");
     expect(wire.length).toBeGreaterThan(0);
-    // Re-compile to inspect the reserved signature slots (Privy fills these later).
+    // Re-compile to inspect the reserved signature slots the signer fills later.
     const compiled = compileTransaction(buildTransferCheckedMessage(args()));
     expect(Object.keys(compiled.signatures).sort()).toEqual(
       ["11111111111111111111111111111114", "11111111111111111111111111111115"].sort(),

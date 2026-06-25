@@ -22,7 +22,7 @@ describe("deposits.recordInbound", () => {
   let userId: string;
   beforeEach(async () => {
     ctx = await makeTestDb();
-    const u = await ctx.users.upsertByExternalId("privy:did:privy:a");
+    const u = await ctx.users.upsertByExternalId("wallet:did:deposit-a");
     await ctx.users.setWalletPublicKey(u.id, "WALLET_A");
     userId = u.id;
     deposits = makeDeposits(ctx.db, ctx.ledger, cfg);
@@ -72,7 +72,7 @@ describe("deposits.recordInbound", () => {
   });
 
   it("quarantines if the funding wallet is already bound to ANOTHER account (sybil guard)", async () => {
-    const other = await ctx.users.upsertByExternalId("privy:did:privy:b");
+    const other = await ctx.users.upsertByExternalId("wallet:did:deposit-b");
     await ctx.db.insert(depositSources).values({ userId: other.id, sourceWallet: "WALLET_A", firstSeenTxSig: "old" });
     const r = await deposits.recordInbound(transfer({ txSig: "syb" }));
     expect(r).toEqual({ status: "quarantine", reason: "source_bound_other" });

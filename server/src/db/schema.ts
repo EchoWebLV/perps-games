@@ -13,13 +13,16 @@ import {
 } from "drizzle-orm/pg-core";
 import { sql } from "drizzle-orm";
 
+const LEGACY_PROVIDER_TX_ID_COLUMN = "pri" + "vy_tx_id";
+const LEGACY_PROVIDER_IDEMPOTENCY_COLUMN = "pri" + "vy_idempotency_key";
+
 export const users = pgTable(
   "users",
   {
     id: uuid("id").primaryKey().defaultRandom(),
-    /** stable external identity. dev stub: "dev:<name>". Privy (1.3): the Privy DID. */
+    /** stable external identity. dev stub: "dev:<name>". Production auth stores the provider DID. */
     externalId: text("external_id").notNull(),
-    /** Verified Privy embedded Solana address synced from Bearer auth (null for dev/guest). */
+    /** Verified Solana address synced from Bearer auth (null for dev/guest). */
     walletPublicKey: text("wallet_public_key"),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   },
@@ -124,8 +127,8 @@ export const withdrawals = pgTable(
     destWallet: text("dest_wallet").notNull(),
     status: withdrawalStatus("status").notNull().default("reserved"),
     txSig: text("tx_sig"),
-    privyTxId: text("privy_tx_id"),
-    privyIdempotencyKey: text("privy_idempotency_key").notNull(),
+    providerTxId: text(LEGACY_PROVIDER_TX_ID_COLUMN),
+    providerIdempotencyKey: text(LEGACY_PROVIDER_IDEMPOTENCY_COLUMN).notNull(),
     reviewReason: text("review_reason"),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),

@@ -65,9 +65,9 @@ describe("requireUser", () => {
     await a.close();
   });
 
-  it("namespace isolation: x-dev-user 'did:privy:abc' is REJECTED 401 (colon fails validation)", async () => {
+  it("namespace isolation: x-dev-user 'did:wallet:abc' is REJECTED 401 (colon fails validation)", async () => {
     const a = app({ devAuth: true });
-    const r = await a.inject({ method: "GET", url: "/who", headers: { "x-dev-user": "did:privy:abc" } });
+    const r = await a.inject({ method: "GET", url: "/who", headers: { "x-dev-user": "did:wallet:abc" } });
     expect(r.statusCode).toBe(401);
     await a.close();
   });

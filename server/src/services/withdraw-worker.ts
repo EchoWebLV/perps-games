@@ -24,7 +24,7 @@ export function makeWithdrawProcessor(db: any, signer: WithdrawSigner) {
         destWallet: w.destWallet, amountCents: w.amountCents, idempotencyKey: withdrawIdempotencyKey(w.id),
       });
       await db.update(withdrawals)
-        .set({ status: "sent", txSig: res.txSig, privyTxId: res.providerTxId, updatedAt: new Date() })
+        .set({ status: "sent", txSig: res.txSig, providerTxId: res.providerTxId, updatedAt: new Date() })
         .where(eq(withdrawals.id, id));
       return { status: "sent" };
     },

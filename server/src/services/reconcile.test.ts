@@ -8,7 +8,7 @@ describe("reconcile.solvency", () => {
   afterEach(async () => { await ctx.close(); });
 
   it("reports O ≥ L solvent and O < L as a deficit (player cash only)", async () => {
-    const u = await ctx.users.upsertByExternalId("privy:did:privy:a");
+    const u = await ctx.users.upsertByExternalId("wallet:did:reconcile-a");
     await ctx.ledger.credit(u.id, "cash", 300, "deposit", "sig1"); // liabilities = 300¢
     const solvent = makeReconcile(ctx.db, async () => 3_000_000n, ctx.houseUserId); // O = $3.00
     expect(await solvent.solvency()).toMatchObject({ liabilitiesCents: 300, onChainCents: 300, deficitCents: 0, solvent: true });
@@ -17,7 +17,7 @@ describe("reconcile.solvency", () => {
   });
 
   it("excludes the house account from liabilities and reports it as the bankroll", async () => {
-    const u = await ctx.users.upsertByExternalId("privy:did:privy:b");
+    const u = await ctx.users.upsertByExternalId("wallet:did:reconcile-b");
     await ctx.ledger.credit(u.id, "cash", 500, "deposit", "sig2");          // player owed $5.00
     await ctx.ledger.credit(ctx.houseUserId, "cash", 1100, "house_seed", "seed-1"); // house bankroll $11.00
     const recon = makeReconcile(ctx.db, async () => 16_000_000n, ctx.houseUserId);   // vault = $16.00
@@ -29,7 +29,7 @@ describe("reconcile.solvency", () => {
   });
 
   it("a negative bankroll that leaves the vault below player liabilities flags a deficit", async () => {
-    const u = await ctx.users.upsertByExternalId("privy:did:privy:c");
+    const u = await ctx.users.upsertByExternalId("wallet:did:reconcile-c");
     await ctx.ledger.credit(u.id, "cash", 1400, "deposit", "sig3");      // player owed $14.00 (won big)
     await ctx.ledger.post(ctx.houseUserId, "cash", -400, "round_payout_house", "r-1"); // bankroll -$4.00
     const recon = makeReconcile(ctx.db, async () => 10_000_000n, ctx.houseUserId); // vault only $10.00

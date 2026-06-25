@@ -1,7 +1,7 @@
 /**
- * Deterministic Privy idempotency key for an outbound withdrawal (real-money rails, spec §6.2).
+ * Deterministic provider idempotency key for an outbound withdrawal (real-money rails, spec §6.2).
  *
- * Privy dedups a `signAndSendTransaction` only when the **caller** supplies a stable
+ * The signer dedups a `signAndSendTransaction` only when the **caller** supplies a stable
  * idempotency key (the SDK's auto-generated default would NOT dedup a retry from a fresh
  * process after a crash). The key is `'withdraw:'||withdrawalId`, persisted on the
  * `withdrawals` row in the SAME tx as the reserve-debit — BEFORE any network call — so a

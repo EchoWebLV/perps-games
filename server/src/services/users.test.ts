@@ -14,7 +14,7 @@ describe("users.setWalletPublicKey", () => {
   });
 
   it("stores and returns the wallet address on a user", async () => {
-    const u = await ctx.users.upsertByExternalId("privy:did:privy:abc");
+    const u = await ctx.users.upsertByExternalId("wallet:did:abc");
     expect(u.walletPublicKey ?? null).toBeNull();
     const updated = await ctx.users.setWalletPublicKey(u.id, "So1anaAddr111");
     expect(updated.walletPublicKey).toBe("So1anaAddr111");
@@ -23,7 +23,7 @@ describe("users.setWalletPublicKey", () => {
   });
 
   it("is set-once: a second bind to a DIFFERENT address is ignored", async () => {
-    const u = await ctx.users.upsertByExternalId("privy:did:privy:xyz");
+    const u = await ctx.users.upsertByExternalId("wallet:did:xyz");
     await ctx.users.setWalletPublicKey(u.id, "WalletAAA");
     const after = await ctx.users.setWalletPublicKey(u.id, "WalletBBB");
     expect(after.walletPublicKey).toBe("WalletAAA");
@@ -31,7 +31,7 @@ describe("users.setWalletPublicKey", () => {
   });
 
   it("is idempotent: re-binding the SAME address is a no-op", async () => {
-    const u = await ctx.users.upsertByExternalId("privy:did:privy:qqq");
+    const u = await ctx.users.upsertByExternalId("wallet:did:qqq");
     await ctx.users.setWalletPublicKey(u.id, "WalletSame");
     const again = await ctx.users.setWalletPublicKey(u.id, "WalletSame");
     expect(again.walletPublicKey).toBe("WalletSame");
@@ -40,7 +40,7 @@ describe("users.setWalletPublicKey", () => {
   it("alerts exactly once on a DIFFERENT-address rebind, never on first-bind or same-address", async () => {
     const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
     try {
-      const u = await ctx.users.upsertByExternalId("privy:did:privy:alert");
+      const u = await ctx.users.upsertByExternalId("wallet:did:alert");
       await ctx.users.setWalletPublicKey(u.id, "WalletFirst"); // first bind → no alert
       expect(warn).not.toHaveBeenCalled();
       await ctx.users.setWalletPublicKey(u.id, "WalletFirst"); // same address → no alert (no fatigue)
@@ -54,8 +54,8 @@ describe("users.setWalletPublicKey", () => {
   });
 
   it("enforces wallet uniqueness at the database level for non-null bindings", async () => {
-    const a = await ctx.users.upsertByExternalId("privy:did:privy:db-unique-a");
-    const b = await ctx.users.upsertByExternalId("privy:did:privy:db-unique-b");
+    const a = await ctx.users.upsertByExternalId("wallet:did:db-unique-a");
+    const b = await ctx.users.upsertByExternalId("wallet:did:db-unique-b");
 
     await ctx.users.setWalletPublicKey(a.id, "WalletShared");
 

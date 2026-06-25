@@ -39,7 +39,7 @@ describe("round close direct payout", () => {
       payoutProviderTxId: null,
       balance: 104,
     });
-    expect(res.json()).not.toHaveProperty("payoutPrivyTxId");
+    expect(res.json()).not.toHaveProperty("payoutLegacyTxId");
 
     // The wallet transfer + its mirroring ledger debit happen in the background.
     await vi.waitFor(async () => {

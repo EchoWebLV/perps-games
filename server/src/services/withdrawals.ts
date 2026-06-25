@@ -78,7 +78,7 @@ export function makeWithdrawals(db: any, ledger: Ledger, cfg: WithdrawConfig, re
           const state = amountCents > cfg.quorumThresholdCents || cfg.quorumThresholdCents === 0 ? "awaiting_approval" : "reserved";
           try {
             await tx.insert(withdrawals).values({
-              id, userId, amountCents, destWallet, status: state, privyIdempotencyKey: withdrawIdempotencyKey(id),
+              id, userId, amountCents, destWallet, status: state, providerIdempotencyKey: withdrawIdempotencyKey(id),
             });
           } catch (e: any) {
             // a unique/duplicate violation = a concurrent in-flight withdrawal. Re-throw OUT of the tx so the

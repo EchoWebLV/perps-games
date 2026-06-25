@@ -5,14 +5,14 @@ import { eq } from "drizzle-orm";
 import { makeWithdrawProcessor, makeWithdrawConfirmer } from "./withdraw-worker.js";
 
 async function seedWithdrawal(ctx: TestCtx, status: string, txSig: string | null | undefined = undefined) {
-  const u = await ctx.users.upsertByExternalId("privy:did:privy:w");
+  const u = await ctx.users.upsertByExternalId("wallet:did:w");
   const id = crypto.randomUUID();
   // For "sent" rows: auto-generate a sig unless caller explicitly passes null (to test the guard) or a specific string.
   const resolvedTxSig = status === "sent" ? (txSig === undefined ? `SIG-${id}` : txSig) : (txSig ?? null);
   await ctx.db.insert(withdrawals).values({
     id, userId: u.id, amountCents: 300, destWallet: "WALLET_W", status,
     txSig: resolvedTxSig,
-    privyIdempotencyKey: `withdraw:${id}`,
+    providerIdempotencyKey: `withdraw:${id}`,
   });
   return id;
 }
@@ -31,7 +31,7 @@ describe("withdraw processor (approval → signing → sent)", () => {
     const row = (await ctx.db.select().from(withdrawals).where(eq(withdrawals.id, id)))[0];
     expect(row.status).toBe("sent");
     expect(row.txSig).toBe("SIG123");
-    expect(row.privyTxId).toBe("ptx");
+    expect(row.providerTxId).toBe("ptx");
   });
 
   it("refuses to approve a withdrawal that is not awaiting_approval", async () => {
