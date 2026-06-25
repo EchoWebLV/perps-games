@@ -7,6 +7,7 @@ import { ensureHouseUserId } from "../services/house.js";
 import { makeStubFeed, type StubFeed } from "../feed/stub.js";
 import { buildServer } from "../http/server.js";
 import { makeSessionAuth, type SessionAuth } from "../auth/session.js";
+import { createWalletBinding, type WalletBinding } from "../auth/wallet-binding.js";
 
 export interface TestCtx {
   raw: Db;
@@ -22,7 +23,7 @@ export interface TestCtx {
 }
 
 /** fresh in-memory pglite DB with migrations applied + services wired (stub feed) */
-export async function makeTestDb(opts: { signupFaucet?: boolean; startBalance?: number; corsOrigins?: string[]; devAuth?: boolean; sessionAuth?: SessionAuth; realMoney?: { enabled: boolean; treasuryUsdcAta: string | null }; depositTxBuilder?: import("../services/deposit-tx.js").DepositTxBuilder | null; walletBalanceReader?: import("../services/wallet-balance.js").WalletBalanceReader | null; depositMinCents?: number; depositMaxCents?: number; withdrawals?: any; withdrawProcessor?: any; payoutSigner?: import("../solana/withdraw-signer.js").WithdrawSigner | null; stakeAsset?: "coin" | "cash" } = {}): Promise<TestCtx> {
+export async function makeTestDb(opts: { signupFaucet?: boolean; startBalance?: number; corsOrigins?: string[]; devAuth?: boolean; sessionAuth?: SessionAuth; walletBinding?: WalletBinding; realMoney?: { enabled: boolean; treasuryUsdcAta: string | null }; depositTxBuilder?: import("../services/deposit-tx.js").DepositTxBuilder | null; walletBalanceReader?: import("../services/wallet-balance.js").WalletBalanceReader | null; depositMinCents?: number; depositMaxCents?: number; withdrawals?: any; withdrawProcessor?: any; payoutSigner?: import("../solana/withdraw-signer.js").WithdrawSigner | null; stakeAsset?: "coin" | "cash" } = {}): Promise<TestCtx> {
   const raw = createDb(); // pglite
   await raw.runMigrations();
   const db = raw.db;
@@ -46,6 +47,9 @@ export async function makeTestDb(opts: { signupFaucet?: boolean; startBalance?: 
     sessionAuth: opts.sessionAuth ?? makeSessionAuth({
       users,
       secret: "test-session-secret-32-characters-long",
+    }),
+    walletBinding: opts.walletBinding ?? createWalletBinding({
+      secret: "test-wallet-binding-secret-32-chars",
     }),
     realMoney: opts.realMoney ?? { enabled: false, treasuryUsdcAta: null },
     depositTxBuilder: opts.depositTxBuilder ?? null,

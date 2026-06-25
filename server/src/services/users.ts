@@ -1,4 +1,4 @@
-import { eq, and, isNull } from "drizzle-orm";
+import { eq, and, isNull, ne } from "drizzle-orm";
 import { users, type User } from "../db/schema.js";
 
 export function makeUsers(db: any) {
@@ -27,6 +27,13 @@ export function makeUsers(db: any) {
      * existing row unchanged). Re-binding the same address is a harmless no-op.
      */
     async setWalletPublicKey(id: string, address: string): Promise<User> {
+      const owner = await db
+        .select()
+        .from(users)
+        .where(and(eq(users.walletPublicKey, address), ne(users.id, id)))
+        .limit(1);
+      if (owner[0]) throw new Error("wallet_already_bound");
+
       const rows = await db
         .update(users)
         .set({ walletPublicKey: address })

@@ -8,6 +8,7 @@ import { makeRounds } from "./services/rounds.js";
 import { ensureHouseUserId } from "./services/house.js";
 import { makeHermesFeed } from "./feed/hermes.js";
 import { makeSessionAuth } from "./auth/session.js";
+import { createWalletBinding } from "./auth/wallet-binding.js";
 import { makeDepositTxBuilder, makeRpcBlockhash, type DepositTxBuilder } from "./services/deposit-tx.js";
 
 async function main(): Promise<void> {
@@ -111,6 +112,9 @@ async function main(): Promise<void> {
     users,
     secret: env.SESSION_SECRET ?? "development-session-secret-change-before-production",
   });
+  const walletBinding = createWalletBinding({
+    secret: env.SESSION_SECRET ?? "development-session-secret-change-before-production",
+  });
 
   const server = buildServer({
     users,
@@ -125,6 +129,7 @@ async function main(): Promise<void> {
     corsOrigins: env.CORS_ORIGINS.split(",").map((s) => s.trim()),
     devAuth: env.DEV_AUTH && env.NODE_ENV !== "production",
     sessionAuth,
+    walletBinding,
     realMoney,
     depositTxBuilder,
     walletBalanceReader,

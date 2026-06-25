@@ -1,4 +1,6 @@
 import { afterEach, describe, expect, it } from "vitest";
+import bs58 from "bs58";
+import * as ed from "@noble/ed25519";
 import { makeTestDb, type TestCtx } from "./harness.js";
 
 const H = { "x-dev-user": "mallory", "content-type": "application/json" };
@@ -172,6 +174,42 @@ describe("POST /v1/deposit/build", () => {
 
     expect(res.statusCode).toBe(409);
     expect(res.json()).toEqual({ error: "no_bound_wallet" });
+  });
+});
+
+describe("POST /v1/wallet/bind*", () => {
+  let ctx: TestCtx;
+
+  afterEach(async () => {
+    await ctx?.close();
+  });
+
+  it("binds a wallet only after a valid wallet signature", async () => {
+    const secretKey = ed.utils.randomSecretKey();
+    const publicKey = await ed.getPublicKeyAsync(secretKey);
+    const wallet = bs58.encode(publicKey);
+    ctx = await makeTestDb();
+
+    const headers = { "x-dev-user": "alice" };
+    const c = await ctx.server.inject({
+      method: "POST",
+      url: "/v1/wallet/bind-challenge",
+      headers,
+      payload: { wallet },
+    });
+    expect(c.statusCode).toBe(200);
+
+    const signatureBase58 = bs58.encode(
+      await ed.signAsync(new TextEncoder().encode(c.json().message), secretKey),
+    );
+    const b = await ctx.server.inject({
+      method: "POST",
+      url: "/v1/wallet/bind",
+      headers,
+      payload: { challenge: c.json().challenge, signatureBase58 },
+    });
+    expect(b.statusCode).toBe(200);
+    expect(b.json()).toEqual({ wallet });
   });
 });
 

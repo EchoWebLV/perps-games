@@ -20,6 +20,7 @@ export interface RouteDeps {
   startBalance: number;    // coins to seed on first sight
   devAuth: boolean;
   sessionAuth: import("../auth/session.js").SessionAuth;
+  walletBinding: import("../auth/wallet-binding.js").WalletBinding;
   realMoney: { enabled: boolean; treasuryUsdcAta: string | null };
   depositTxBuilder: import("../services/deposit-tx.js").DepositTxBuilder | null;
   walletBalanceReader: import("../services/wallet-balance.js").WalletBalanceReader | null;
@@ -32,6 +33,11 @@ export interface RouteDeps {
 
 const GrantCoins = z.object({ amount: z.number().int().positive() });
 const GrantCar = z.object({ carId: z.string().min(1) });
+const WalletBindChallengeBody = z.object({ wallet: z.string().min(32).max(44) });
+const WalletBindBody = z.object({
+  challenge: z.string().min(1),
+  signatureBase58: z.string().min(1),
+});
 
 const OpenRound = z.object({
   asset: z.enum(["BTC", "ETH", "SOL"]),
@@ -109,6 +115,37 @@ export function registerRoutes(server: FastifyInstance, deps: RouteDeps): void {
     return { txBase64 };
   };
   server.post("/v1/deposit/build", { preHandler: requireUser }, buildDepositTx);
+
+  server.post("/v1/wallet/bind-challenge", { preHandler: requireUser }, async (req, reply) => {
+    const body = WalletBindChallengeBody.safeParse(req.body);
+    if (!body.success) return reply.code(400).send({ error: "bad_request" });
+    try {
+      return deps.walletBinding.createChallenge({
+        userId: req.userId!,
+        wallet: body.data.wallet,
+      });
+    } catch {
+      return reply.code(400).send({ error: "invalid_wallet_address" });
+    }
+  });
+
+  server.post("/v1/wallet/bind", { preHandler: requireUser }, async (req, reply) => {
+    const body = WalletBindBody.safeParse(req.body);
+    if (!body.success) return reply.code(400).send({ error: "bad_request" });
+    const verified = await deps.walletBinding.verifyChallenge(body.data);
+    if (!verified || verified.userId !== req.userId!) {
+      return reply.code(401).send({ error: "invalid_wallet_signature" });
+    }
+    try {
+      const user = await deps.users.setWalletPublicKey(req.userId!, verified.wallet);
+      return { wallet: user.walletPublicKey };
+    } catch (e) {
+      if (e instanceof Error && e.message === "wallet_already_bound") {
+        return reply.code(409).send({ error: "wallet_already_bound" });
+      }
+      throw e;
+    }
+  });
 
   server.get("/v1/wallet/usdc-balance", { preHandler: requireUser }, async (req, reply) => {
     if (!deps.walletBalanceReader) return reply.code(404).send({ error: "wallet_balance_disabled" });
