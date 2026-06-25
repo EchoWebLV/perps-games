@@ -32,4 +32,25 @@ describe("makeWithdrawConfirmLoop", () => {
     await expect(loop.tick()).resolves.toBeUndefined();
     expect(confirm).toHaveBeenCalledTimes(3);
   });
+
+  it("skips an overlapping tick while a prior tick is still running", async () => {
+    let release: () => void = () => {};
+    const gate = new Promise<void>((r) => {
+      release = r;
+    });
+    const listSentIds = vi.fn(async () => ["a"]);
+    const confirm = vi.fn(async () => {
+      await gate; // block the first tick mid-flight
+      return "confirmed" as const;
+    });
+    const loop = makeWithdrawConfirmLoop({ listSentIds, confirmer: { confirm }, pollMs: 1000 });
+
+    const first = loop.tick(); // starts, sets running=true synchronously, then blocks in confirm
+    await loop.tick(); // re-entrant call: should no-op immediately
+    expect(listSentIds).toHaveBeenCalledTimes(1);
+
+    release();
+    await first;
+    expect(listSentIds).toHaveBeenCalledTimes(1);
+  });
 });

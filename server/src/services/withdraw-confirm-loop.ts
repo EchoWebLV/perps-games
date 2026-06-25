@@ -14,11 +14,22 @@ export interface WithdrawConfirmLoopDeps {
 
 export function makeWithdrawConfirmLoop(deps: WithdrawConfirmLoopDeps) {
   let timer: ReturnType<typeof setInterval> | undefined;
+  let running = false;
 
   async function tick(): Promise<void> {
-    const ids = await deps.listSentIds();
-    for (const id of ids) {
-      await deps.confirmer.confirm(id).catch(() => {});
+    // A prior tick may still be in flight when the interval fires again (many `sent` rows ×
+    // per-id RPC latency > pollMs). Skip rather than run overlapping ticks that re-query the
+    // same rows and waste RPC. Correctness doesn't depend on this (the credit + status writes
+    // are idempotent), but it keeps the loop from hammering the chain.
+    if (running) return;
+    running = true;
+    try {
+      const ids = await deps.listSentIds();
+      for (const id of ids) {
+        await deps.confirmer.confirm(id).catch(() => {});
+      }
+    } finally {
+      running = false;
     }
   }
 
