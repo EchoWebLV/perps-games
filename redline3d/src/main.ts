@@ -229,7 +229,6 @@ const walletUI = createWallet(hudRoot, {
   balance: () => balance,
   walletBalance: () => walletBalance,
   onConnectWallet: async () => { await ensureWalletConnected(); },
-  onBuy: () => { hud.setStatus("Use Receive to add USDC to your connected wallet."); },
   onWalletPoll: async () => {
     await refreshWalletBalance();
     syncDisplayedBalance();

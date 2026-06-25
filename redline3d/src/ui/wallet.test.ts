@@ -196,7 +196,6 @@ describe("createWallet", () => {
       address: () => address,
       balance: () => 0,
       onConnectWallet,
-      onBuy: () => {},
     });
 
     wallet.open();
@@ -223,7 +222,6 @@ describe("createWallet", () => {
       address: () => "",
       balance: () => 0,
       onConnectWallet,
-      onBuy: () => {},
     });
 
     wallet.open();
@@ -251,7 +249,6 @@ describe("createWallet", () => {
       address: () => "",
       balance: () => 0,
       onConnectWallet,
-      onBuy: () => {},
     });
 
     wallet.open();
@@ -274,7 +271,6 @@ describe("createWallet", () => {
       address: () => "",
       balance: () => 0,
       onConnectWallet,
-      onBuy: () => {},
     });
 
     wallet.open();
@@ -295,7 +291,6 @@ describe("createWallet", () => {
     const wallet = createWallet(parent as unknown as HTMLElement, {
       address: () => "Wallet1111111111111111111111111111111111",
       balance: () => 0,
-      onBuy: () => {},
     });
 
     wallet.open();
@@ -316,7 +311,6 @@ describe("createWallet", () => {
       address: () => "Wallet1111111111111111111111111111111111",
       balance: () => 17500,
       walletBalance: () => 10000,
-      onBuy: () => {},
     });
 
     wallet.open();
@@ -324,5 +318,28 @@ describe("createWallet", () => {
     const overlay = parent.children[0];
     expect(overlay.querySelector<FakeElement>("#wltBal")?.textContent).toBe("100.00");
     expect(overlay.querySelector<FakeElement>("#wltPlayBal")?.textContent).toBe("75.00");
+  });
+
+  it("does not render fake buy amounts and routes funding to Receive", async () => {
+    const parent = new FakeElement("div");
+    const wallet = createWallet(parent as unknown as HTMLElement, {
+      address: () => "Wallet1111111111111111111111111111111111",
+      balance: () => 0,
+    });
+
+    wallet.open();
+
+    const overlay = parent.children[0];
+    expect(overlay.querySelector<FakeElement>(".wlt-amts")).toBeNull();
+    expect(overlay.querySelector<FakeElement>("#wltBuy")).toBeNull();
+
+    const receiveCta = overlay.querySelector<FakeElement>(".wlt-receive-cta");
+    const recv = overlay.querySelector<FakeElement>('.wlt-view[data-view="recv"]');
+    expect(receiveCta).toBeTruthy();
+    expect(recv?.hidden).toBe(true);
+
+    await receiveCta?.onclick?.(undefined);
+
+    expect(recv?.hidden).toBe(false);
   });
 });

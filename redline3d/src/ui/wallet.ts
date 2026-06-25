@@ -4,7 +4,7 @@ import { shortWallet } from "./auth-ui";
 /**
  * Wallet page — a full-screen synthwave overlay opened from the balance chip.
  *   • Connected wallet USDC balance hero
- *   • Buy USDC placeholder
+ *   • Add connected-wallet USDC to the play balance
  *   • Receive — connected wallet QR + copy
  *
  * The balance and wallet address run through callbacks so main owns auth and
@@ -25,8 +25,6 @@ export interface WalletOpts {
   /** on-chain USDC currently held by the connected wallet, in cents */
   walletBalance?: () => number | null;
   onConnectWallet?: () => Promise<void>;
-  /** credit `usd` USDC to the balance (sim deposit today, fiat on-ramp later) */
-  onBuy: (usd: number) => void;
   /** sign the player out — when omitted (dev/guest) the account row stays hidden */
   onLogout?: () => void;
   /** re-fetch the on-chain connected-wallet USDC balance, in cents */
@@ -34,8 +32,6 @@ export interface WalletOpts {
   /** Sweep the whole connected-wallet USDC into the in-game play balance. Resolves when credited. */
   onAddToPlay?: () => Promise<void>;
 }
-
-const AMOUNTS = [10, 25, 50, 100, 250];
 
 const ICONS = {
   plus: '<path d="M12 5v14M5 12h14"/>',
@@ -114,17 +110,7 @@ function injectStyles() {
     .wlt-view{display:flex;flex-direction:column;gap:13px}
     .wlt-view[hidden]{display:none}
 
-    /* Buy amounts */
-    .wlt-amts{display:grid;grid-template-columns:repeat(3,1fr);gap:9px}
-    .wlt-amt{padding:13px 0;border-radius:11px;cursor:pointer;text-align:center;
-      font:800 16px/1 'Chakra Petch',ui-monospace,monospace;font-variant-numeric:tabular-nums;
-      color:var(--ink);background:rgba(18,14,40,.72);border:1.5px solid rgba(132,150,224,.24);transition:.13s ease}
-    .wlt-amt small{display:block;margin-top:4px;font:600 8.5px/1 'Chakra Petch';letter-spacing:.12em;color:var(--mut);text-transform:uppercase}
-    .wlt-amt:hover{border-color:rgba(39,231,255,.5)}
-    .wlt-amt.on{color:#04101a;background:linear-gradient(180deg,#bfeeff,#7fd6ff);border-color:transparent;box-shadow:0 0 0 1px rgba(39,231,255,.5),0 6px 16px rgba(39,231,255,.28)}
-    .wlt-amt.on small{color:rgba(4,16,26,.6)}
-
-    /* the buy CTA — chamfered arcade button in USDC blue→cyan */
+    /* CTAs — chamfered arcade buttons in USDC blue→cyan */
     .wlt-cta{width:100%;border:0;padding:15px;cursor:pointer;position:relative;
       font:800 16px/1 'Chakra Petch',ui-monospace,monospace;letter-spacing:.08em;text-transform:uppercase;color:#04101a;
       background:linear-gradient(180deg,#5fe3ff,#2775ca);
@@ -189,16 +175,15 @@ export function createWallet(parent: HTMLElement, opts: WalletOpts): Wallet {
        <div class="wlt-play-bal" id="wltPlayRow">Play balance $<span id="wltPlayBal">0.00</span></div>
      </div>` +
     `<div class="wlt-seg">
-       <button class="wlt-tab on" data-tab="buy">${svg(ICONS.plus, 15)}Buy</button>
+       <button class="wlt-tab on" data-tab="buy">${svg(ICONS.plus, 15)}Fund</button>
        <button class="wlt-tab" data-tab="recv">${svg(ICONS.qr, 15)}Receive</button>
      </div>` +
     `<div class="wlt-view" data-view="buy">
        <div id="wltBuyConnect"></div>
        <button class="wlt-cta ok" id="wltAddPlay">Add to play balance</button>
        <div class="wlt-note" id="wltAddNote">Move your wallet USDC into your play balance — then GO is instant.</div>
-       <div class="wlt-amts">${AMOUNTS.map((a) => `<button class="wlt-amt" data-amt="${a}">$${a}<small>USDC</small></button>`).join("")}</div>
-       <button class="wlt-cta" id="wltBuy">Buy USDC</button>
-       <div class="wlt-note">Use Receive to add USDC to your connected wallet.</div>
+       <button class="wlt-cta wlt-receive-cta" id="wltReceiveCta">Receive USDC</button>
+       <div class="wlt-note">Send USDC to your connected wallet, then add it to play.</div>
      </div>` +
     // recv view + account row are filled live by renderAddressUI() on each open — the deposit
     // address only exists AFTER login, so it must be read fresh, never snapshotted at build time.
@@ -206,13 +191,11 @@ export function createWallet(parent: HTMLElement, opts: WalletOpts): Wallet {
     `<div id="wltAcct"></div>`;
 
   const q = <T extends HTMLElement>(s: string) => panel.querySelector(s) as T;
-  const balEl = q("#wltBal"), usdcEl = q("#wltUsdc"), buyBtn = q<HTMLButtonElement>("#wltBuy");
+  const balEl = q("#wltBal"), usdcEl = q("#wltUsdc");
   const heroLbl = q("#wltHeroLbl"), playRow = q("#wltPlayRow"), playBalEl = q("#wltPlayBal");
   const views = Array.from(panel.querySelectorAll<HTMLElement>(".wlt-view"));
   const tabs = Array.from(panel.querySelectorAll<HTMLElement>(".wlt-tab"));
-  const amtBtns = Array.from(panel.querySelectorAll<HTMLElement>(".wlt-amt"));
 
-  let amount = 50;
   let busy = false;
 
   const renderBalance = (bump = false) => {
@@ -229,19 +212,11 @@ export function createWallet(parent: HTMLElement, opts: WalletOpts): Wallet {
     playBalEl.textContent = fmt(playCents / 100);
     if (bump) { balEl.parentElement!.classList.remove("bump"); void balEl.offsetWidth; balEl.parentElement!.classList.add("bump"); }
   };
-  const renderAmount = () => {
-    amtBtns.forEach((b) => b.classList.toggle("on", Number(b.dataset.amt) === amount));
-    if (!buyBtn.classList.contains("ok")) buyBtn.textContent = `Buy $${amount} USDC`;
-  };
-  renderAmount();
-
   const refreshBalance = async () => {
     if (!opts.onWalletPoll) return;
     try { await opts.onWalletPoll(); renderBalance(); }
     catch { /* keep the last displayed balance */ }
   };
-
-  amtBtns.forEach((b) => (b.onclick = () => { amount = Number(b.dataset.amt); renderAmount(); }));
 
   const showTab = (tab: string) => {
     tabs.forEach((t) => t.classList.toggle("on", t.dataset.tab === tab));
@@ -249,30 +224,21 @@ export function createWallet(parent: HTMLElement, opts: WalletOpts): Wallet {
   };
   tabs.forEach((t) => (t.onclick = () => showTab(t.dataset.tab!)));
 
-  let okTimer = 0;
-  buyBtn.onclick = () => {
-    opts.onBuy(amount);
-    renderBalance(true);
-    buyBtn.classList.add("ok");
-    buyBtn.textContent = `✓ +$${amount} USDC`;
-    clearTimeout(okTimer);
-    okTimer = window.setTimeout(() => { buyBtn.classList.remove("ok"); renderAmount(); }, 1500);
-  };
+  const receiveCta = q<HTMLButtonElement>("#wltReceiveCta");
+  receiveCta.onclick = () => showTab("recv");
 
   const renderConnectButtons = () => {
     const addr = opts.address();
     const buyConnect = q<HTMLElement>("#wltBuyConnect");
-    const amtWrap = q<HTMLElement>(".wlt-amts");
 
     buyConnect.innerHTML = addr ? "" : `<button class="wlt-cta wlt-connect">Connect wallet</button>`;
     addPlayBtn.disabled = !addr;
-    buyBtn.disabled = !addr;
+    receiveCta.disabled = !addr;
     addPlayBtn.style.display = addr ? "" : "none";
+    receiveCta.style.display = addr ? "" : "none";
     addNote.textContent = addr
       ? "Move your wallet USDC into your play balance — then GO is instant."
       : "Connect a wallet to add USDC to play.";
-    amtWrap.style.display = addr ? "" : "none";
-    buyBtn.style.display = addr ? "" : "none";
 
     const connectButtons = panel.querySelectorAll<HTMLButtonElement>(".wlt-connect");
     for (const connectBtn of connectButtons) {
