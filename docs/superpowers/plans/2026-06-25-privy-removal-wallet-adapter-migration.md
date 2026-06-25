@@ -412,6 +412,7 @@ git commit -m "refactor(server): remove play payment rail"
 - Modify: `server/src/http/server.ts`
 - Modify: `server/src/index.ts`
 - Modify: `server/src/env.ts`
+- Modify: `server/src/test/env.test.ts`
 - Modify: `server/src/test/harness.ts`
 - Modify: `server/src/test/auth.test.ts`
 - Modify: `server/src/test/me.test.ts`
@@ -419,6 +420,8 @@ git commit -m "refactor(server): remove play payment rail"
 **Interfaces:**
 - Consumes: `Users.upsertByExternalId(externalId: string)`.
 - Produces: `SessionAuth` with `issueAnonymous(): Promise<{ token: string; userId: string }>` and `verifyToken(token: string): Promise<string | null>`.
+
+**Task boundary:** This task replaces request authentication only. It must not remove server Privy fee-payer, payout signer, `@privy-io/node`, or treasury signer code; Task 5 and Task 10 own those removals.
 
 - [ ] **Step 1: Write `server/src/auth/session.test.ts`**
 
@@ -634,6 +637,8 @@ In the `superRefine`, add:
     });
   }
 ```
+
+In `server/src/test/env.test.ts`, add regression coverage that production without `SESSION_SECRET` throws `SESSION_SECRET is required in production`, and that production with a 32+ character `SESSION_SECRET` parses successfully.
 
 - [ ] **Step 8: Wire session auth in `server/src/index.ts`**
 
