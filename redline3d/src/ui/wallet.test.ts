@@ -213,6 +213,57 @@ describe("createWallet", () => {
     expect(recv?.querySelector("#wltCopy")).toBeTruthy();
   });
 
+  it("shows a no-wallet message when connect has no Solana provider", async () => {
+    const parent = new FakeElement("div");
+    const onConnectWallet = vi.fn(async () => {
+      throw new Error("no_solana_wallet_installed");
+    });
+
+    const wallet = createWallet(parent as unknown as HTMLElement, {
+      address: () => "",
+      balance: () => 0,
+      onConnectWallet,
+      onBuy: () => {},
+    });
+
+    wallet.open();
+
+    const overlay = parent.children[0];
+    const connectButtons = overlay.querySelectorAll<FakeElement>(".wlt-connect");
+
+    await connectButtons[0].onclick?.(undefined);
+
+    expect(connectButtons[0].textContent).toBe("No wallet found");
+    expect(connectButtons[0].disabled).toBe(true);
+
+    vi.runAllTimers();
+    expect(connectButtons[0].textContent).toBe("Connect wallet");
+    expect(connectButtons[0].disabled).toBe(false);
+  });
+
+  it("shows a loading message when wallet adapter preload is not ready yet", async () => {
+    const parent = new FakeElement("div");
+    const onConnectWallet = vi.fn(async () => {
+      throw new Error("wallet_port_loading");
+    });
+
+    const wallet = createWallet(parent as unknown as HTMLElement, {
+      address: () => "",
+      balance: () => 0,
+      onConnectWallet,
+      onBuy: () => {},
+    });
+
+    wallet.open();
+
+    const overlay = parent.children[0];
+    const connectButtons = overlay.querySelectorAll<FakeElement>(".wlt-connect");
+
+    await connectButtons[0].onclick?.(undefined);
+
+    expect(connectButtons[0].textContent).toBe("Wallet loading");
+  });
+
   it("copies the connected wallet address from Receive", async () => {
     const parent = new FakeElement("div");
     const writeText = vi.fn(async () => {});

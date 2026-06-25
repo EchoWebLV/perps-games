@@ -28,7 +28,7 @@ export async function ensureWalletConnection(input: {
   walletPort: SolanaWalletPort | null;
   connectedWalletAddress: string;
   boundWalletAddress: string;
-  loadWalletPort: () => Promise<SolanaWalletPort>;
+  loadWalletPort: () => SolanaWalletPort;
   connectAndBindWallet: (port: SolanaWalletPort) => Promise<{ address: string; label?: string }>;
 }): Promise<{
   walletPort: SolanaWalletPort;
@@ -43,7 +43,7 @@ export async function ensureWalletConnection(input: {
     };
   }
 
-  const walletPort = input.walletPort ?? await input.loadWalletPort();
+  const walletPort = input.walletPort ?? input.loadWalletPort();
   if (!input.boundWalletAddress) {
     const bound = await input.connectAndBindWallet(walletPort);
     return {

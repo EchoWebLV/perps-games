@@ -25,7 +25,7 @@ describe("hydrateBoundWallet", () => {
       wallet: "Wallet1111111111111111111111111111111111",
       balance: 4200,
     }));
-    const loadWalletPort = vi.fn(async () => makePort());
+    const loadWalletPort = vi.fn(() => makePort());
 
     const result = await hydrateBoundWallet({ walletBalance });
 
@@ -51,7 +51,7 @@ describe("hydrateBoundWallet", () => {
 describe("ensureWalletConnection", () => {
   it("reuses an already connected wallet without loading or rebinding", async () => {
     const port = makePort();
-    const loadWalletPort = vi.fn(async () => port);
+    const loadWalletPort = vi.fn(() => port);
     const connectAndBind = vi.fn();
 
     const result = await ensureWalletConnection({
@@ -74,7 +74,7 @@ describe("ensureWalletConnection", () => {
 
   it("loads the wallet lazily and binds only when no wallet is bound on the server", async () => {
     const port = makePort();
-    const loadWalletPort = vi.fn(async () => port);
+    const loadWalletPort = vi.fn(() => port);
     const connectAndBind = vi.fn(async () => ({
       address: "Wallet1111111111111111111111111111111111",
       label: "Phantom",
@@ -97,9 +97,30 @@ describe("ensureWalletConnection", () => {
     });
   });
 
+  it("starts wallet connection before yielding the tap activation turn", async () => {
+    const port = makePort();
+    const loadWalletPort = vi.fn(() => port);
+    const connectAndBind = vi.fn(async () => ({
+      address: "Wallet1111111111111111111111111111111111",
+      label: "Phantom",
+    }));
+
+    const pending = ensureWalletConnection({
+      walletPort: null,
+      connectedWalletAddress: "",
+      boundWalletAddress: "",
+      loadWalletPort,
+      connectAndBindWallet: connectAndBind,
+    });
+
+    expect(loadWalletPort).toHaveBeenCalledTimes(1);
+    expect(connectAndBind).toHaveBeenCalledWith(port);
+    await pending;
+  });
+
   it("reconnects and validates the bound wallet without rebinding", async () => {
     const port = makePort();
-    const loadWalletPort = vi.fn(async () => port);
+    const loadWalletPort = vi.fn(() => port);
     const connectAndBind = vi.fn();
 
     const result = await ensureWalletConnection({
@@ -133,7 +154,7 @@ describe("ensureWalletConnection", () => {
         walletPort: port,
         connectedWalletAddress: "",
         boundWalletAddress: "Wallet1111111111111111111111111111111111",
-        loadWalletPort: vi.fn(async () => port),
+        loadWalletPort: vi.fn(() => port),
         connectAndBindWallet: vi.fn(),
       }),
     ).rejects.toBeInstanceOf(WalletMismatchError);

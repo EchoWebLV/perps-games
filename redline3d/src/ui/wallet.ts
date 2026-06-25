@@ -51,6 +51,15 @@ const usdcCoin = (size = 22) =>
 
 const shortAddr = (a: string) => (a.length > 12 ? `${a.slice(0, 6)}…${a.slice(-6)}` : a);
 const fmt = (n: number) => n.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+const connectErrorLabel = (error: unknown) => {
+  const text = error instanceof Error ? `${error.name} ${error.message}` : String(error);
+  const lower = text.toLowerCase();
+  if (/wallet_port_loading/.test(lower)) return "Wallet loading";
+  if (/no_solana_wallet_installed|wallet.*not.*found|not.*found.*wallet|no.*wallet/.test(lower)) return "No wallet found";
+  if (/reject|denied|cancel/.test(lower)) return "Connect canceled";
+  if (/wallet_mismatch|walletmismatch/.test(lower)) return "Wallet mismatch";
+  return "Connect failed";
+};
 
 let stylesInjected = false;
 function injectStyles() {
@@ -267,8 +276,8 @@ export function createWallet(parent: HTMLElement, opts: WalletOpts): Wallet {
           renderAddressUI();
           renderConnectButtons();
           renderBalance();
-        } catch {
-          connectBtn.textContent = "Connect failed";
+        } catch (error) {
+          connectBtn.textContent = connectErrorLabel(error);
           window.setTimeout(() => {
             connectBtn.textContent = "Connect wallet";
             connectBtn.disabled = false;

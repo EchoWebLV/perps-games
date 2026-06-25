@@ -42,7 +42,7 @@ import { createMapButton } from "./ui/mapbutton";
 import { createLobbyHud } from "./ui/lobbyhud";
 import { step as driveStep, DRIVE, type DriveState } from "./core/freedrive";
 import { entranceHit, LOT_BOUNDS, type BuildingKind } from "./core/lobby-layout";
-import { loadSolanaWalletPort, type SolanaWalletPort } from "./core/solana-wallet";
+import { createWalletPortPreloader, loadSolanaWalletPort, type SolanaWalletPort } from "./core/solana-wallet";
 import { connectAndBindWallet } from "./core/wallet-binding";
 import { sweepToPlayBalance } from "./core/play-funding";
 import { ensureWalletConnection, hydrateBoundWallet, submitDeposit } from "./core/wallet-connection";
@@ -90,6 +90,8 @@ let walletPort: SolanaWalletPort | null = null;
 let connected = false;
 let boundWalletAddress = "";
 let connectedWalletAddress = "";
+const walletPortPreloader = createWalletPortPreloader(() => loadSolanaWalletPort("auto"));
+void walletPortPreloader.preload().catch(() => {});
 const syncDisplayedBalance = () => {
   // corner balance = on-chain wallet + in-game ledger, so a recovered/stuck deposit
   // sitting in the ledger is never hidden behind a near-empty wallet read.
@@ -129,7 +131,7 @@ async function ensureWalletConnected(): Promise<SolanaWalletPort> {
     walletPort,
     connectedWalletAddress,
     boundWalletAddress,
-    loadWalletPort: () => loadSolanaWalletPort("auto"),
+    loadWalletPort: () => walletPort ?? walletPortPreloader.requireReady(),
     connectAndBindWallet: (port) => connectAndBindWallet({ port, api }),
   });
   walletPort = ensured.walletPort;

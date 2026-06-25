@@ -24,6 +24,25 @@ describe("wallet target detection", () => {
   });
 });
 
+describe("wallet port preloader", () => {
+  it("throws instead of awaiting when a tap arrives before the port is ready", async () => {
+    const port = { kind: "web-standard" };
+    let resolvePort: (value: typeof port) => void = () => {};
+    const load = vi.fn(() => new Promise<typeof port>((resolve) => { resolvePort = resolve; }));
+    const { createWalletPortPreloader } = await import("./solana-wallet");
+    const preloader = createWalletPortPreloader(load as never);
+
+    const pending = preloader.preload();
+
+    expect(() => preloader.requireReady()).toThrow("wallet_port_loading");
+    expect(load).toHaveBeenCalledTimes(1);
+
+    resolvePort(port);
+    await expect(pending).resolves.toBe(port);
+    expect(preloader.requireReady()).toBe(port);
+  });
+});
+
 describe("wallet loader", () => {
   beforeEach(() => {
     vi.resetModules();
@@ -185,7 +204,7 @@ describe("wallet loader", () => {
     expect(createWalletStandardPort).not.toHaveBeenCalled();
   });
 
-  it("keeps wallet SDKs behind dynamic imports", async () => {
+  it("keeps wallet SDK imports out of the main entrypoint", async () => {
     const fs = await import("node:fs/promises");
     const main = await fs.readFile(new URL("../main.ts", import.meta.url), "utf8");
 

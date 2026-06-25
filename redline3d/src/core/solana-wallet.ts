@@ -125,3 +125,34 @@ export async function loadSolanaWalletPort(target: WalletTarget = "auto"): Promi
 
   return loadWalletStandardPort();
 }
+
+export function createWalletPortPreloader(loadWalletPort: () => Promise<SolanaWalletPort>) {
+  let walletPort: SolanaWalletPort | null = null;
+  let loading: Promise<SolanaWalletPort> | null = null;
+
+  const preload = () => {
+    if (walletPort) return Promise.resolve(walletPort);
+    loading ??= loadWalletPort()
+      .then((port) => {
+        walletPort = port;
+        return port;
+      })
+      .catch((error) => {
+        loading = null;
+        throw error;
+      });
+    return loading;
+  };
+
+  return {
+    preload,
+    current() {
+      return walletPort;
+    },
+    requireReady() {
+      if (walletPort) return walletPort;
+      void preload();
+      throw new Error("wallet_port_loading");
+    },
+  };
+}
