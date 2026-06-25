@@ -20,9 +20,8 @@ import { createPrivyAuth } from "./core/auth-privy";
 import type { AuthProvider } from "./core/auth";
 import { usd } from "./core/money";
 import { createRoundSync, clampInt } from "./core/round-sync";
-import { ensurePlayPayment, InsufficientWalletBalanceError, PlayPaymentConfirmationError } from "./core/play-payment";
-import { settleWithTimeout } from "./core/signing-timeout";
-import { displayCashBalance } from "./core/wallet-balance-model";
+import { sweepToPlayBalance } from "./core/play-funding";
+import { displayCashBalance, payoutWalletBalanceFloor } from "./core/wallet-balance-model";
 import { niceLev, tToLev } from "./core/leverage";
 import { liqPriceOf } from "./core/economics";
 import { createUpgrades } from "./ui/upgrades";
@@ -43,7 +42,7 @@ import { createLobbyCam } from "./render/lobbycam";
 import { createMapButton } from "./ui/mapbutton";
 import { createLobbyHud } from "./ui/lobbyhud";
 import { step as driveStep, DRIVE, type DriveState } from "./core/freedrive";
-import { entranceHit, LOT_BOUNDS, type Asset } from "./core/lobby-layout";
+import { entranceHit, LOT_BOUNDS, type BuildingKind } from "./core/lobby-layout";
 
 const canvas = document.getElementById("gl") as HTMLCanvasElement;
 const hudRoot = document.getElementById("hud") as HTMLElement;
@@ -78,13 +77,6 @@ const auth: AuthProvider = usePrivy
   ? createPrivyAuth(import.meta.env.VITE_PRIVY_APP_ID as string)
   : createDevAuth();
 
-class PaymentSigningTimeoutError extends Error {
-  constructor() {
-    super("payment_signing_timeout");
-    this.name = "PaymentSigningTimeoutError";
-  }
-}
-
 const api = createApi({ auth });
 // Sign-in is gated on INTENT, not at boot. Logged-out visitors see the 3D preview and can toggle
 // music/menu freely; pressing GO or the lobby button opens the sign-in. `signedIn` flips true once
@@ -96,10 +88,10 @@ let balance = 0;                   // displayed cash balance, sourced from Privy
 let serverBalance = 0;             // hidden round-accounting balance used by the existing server engine
 let walletBalance: number | null = null; // on-chain USDC in the embedded Privy wallet
 let connected = false;
-let paymentInFlight = false;
 const syncDisplayedBalance = () => {
-  const fallbackBalance = auth.walletPublicKey?.() ? balance : serverBalance;
-  balance = displayCashBalance({ walletBalance, fallbackBalance });
+  // corner balance = on-chain wallet + in-game ledger, so a recovered/stuck deposit
+  // sitting in the ledger is never hidden behind a near-empty wallet read.
+  balance = displayCashBalance({ walletBalance, inGameBalance: serverBalance });
   hud.setBalance(balance);
 };
 
@@ -113,7 +105,7 @@ async function refreshWalletBalance(): Promise<void> {
 
 async function refreshWalletBalanceEventually(minBalance?: number): Promise<void> {
   let lastError: unknown = null;
-  for (let i = 0; i < 8; i++) {
+  for (let i = 0; i < 30; i++) {
     try {
       await refreshWalletBalance();
       if (minBalance == null || walletBalance == null || walletBalance >= minBalance) return;
@@ -196,7 +188,12 @@ const coins = createCoinCounter(hudRoot);
 const nitro = createNitro(hudRoot, () => { fx.nitro(); chase.shake(0.7); navigator.vibrate?.([0, 30, 20, 40]); });
 hud.setBalance(balance);
 // persistent coin balance + the upgrade tree (Turbo / Tank / Suspension); buying spends coins
-const upgrades = createUpgrades(hudRoot, { onCoins: (n) => coins.set(n), onApply: () => tach.rebuild(), economicEffects: false });
+const upgrades = createUpgrades(hudRoot, {
+  onCoins: (n) => coins.set(n),
+  onApply: () => tach.rebuild(),
+  economicEffects: false,
+  onClose: () => { if (mode === "lobby") lobbyHud.show(); }, // returning to the lobby town → restore the back button
+});
 coins.set(upgrades.coins(), false); // no pulse on the persisted balance at load
 
 // wallet page (opened by tapping the balance chip) — shows the player's deposit QR.
@@ -212,6 +209,23 @@ const walletUI = createWallet(hudRoot, {
     await refreshWalletBalance();
     syncDisplayedBalance();
     return walletBalance ?? balance;
+  },
+  onAddToPlay: async () => {
+    const walletCents = walletBalance ?? 0;
+    serverBalance = await sweepToPlayBalance({
+      walletBalanceCents: walletCents,
+      startingServerBalance: serverBalance,
+      buildDepositTx: async (amountCents) => (await api.depositBuild(amountCents)).txBase64,
+      signAndSend: (txBase64) => auth.signAndSendTransaction!(txBase64),
+      pollServerBalance: async () => {
+        const me = await api.me();
+        serverBalance = me.balance;
+        try { await refreshWalletBalance(); } catch { /* keep last wallet read */ }
+        syncDisplayedBalance(); walletUI.setBalance(balance);
+        return serverBalance;
+      },
+    });
+    syncDisplayedBalance(); walletUI.setBalance(balance);
   },
   // Log out moved to the menu (settings); the wallet page is deposit-only now.
 });
@@ -253,33 +267,40 @@ const setAbility = (a?: CarAbility) => {
 // synthwave radio — streams on the first gesture; its on/off toggle lives in the menu (below)
 const radio = createRadio(hudRoot);
 const garage = createCarPicker(hudRoot, [
-  { name: "DeLorean", url: "/models/car.glb?v=2", power: { name: "Flux Brake", desc: "freeze your P&L ~4s", icon: "clock" } },
+  { name: "DeLorean", url: "/models/delorean.glb", power: { name: "Flux Brake", desc: "freeze your P&L ~4s", icon: "clock" } },
   { name: "Cybertruck", url: "/models/cybertruck.glb", scale: 1.3, power: { name: "Exoskeleton", desc: "survive deeper drops", icon: "shield" } },
   { name: "Orion", url: "/models/orion.glb", yaw: -Math.PI / 2, ability: "nitro", power: { name: "Nitro Overdrive", desc: "2× leverage · 3s", icon: "flame" } },
   { name: "Vaporwave", url: "/models/vaporwave.glb", ability: "rainbow", power: { name: "Rainbow Coins", desc: "×2 ×3 ×5 coin drops", icon: "magnet" } },
-  { name: "Flintstone", url: "/models/flinstone.glb", scale: 0.7, power: { name: "Stone-Age Airbag", desc: "keep play amount on liq", icon: "chute" } },
-  { name: "Clown Car", url: "/models/clowncar.glb", yaw: Math.PI / 2, ability: "laneBet", power: { name: "Lane Bet", desc: "steer = LONG / SHORT", icon: "swap" } },
-  // newly-added models — same pack as the Clown Car (length-on-X, no wheel nodes) → yaw +π/2.
-  // placeholder names, no ability yet. If any one model faces backwards, it needs +π instead.
-  { name: "Car 5", url: "/models/5.glb", yaw: Math.PI / 2, power: { name: "New Ride", desc: "ability TBD", icon: "car" } },
-  { name: "Car 6", url: "/models/6.glb", yaw: Math.PI / 2, power: { name: "New Ride", desc: "ability TBD", icon: "car" } },
-  { name: "Car 7", url: "/models/7.glb", yaw: Math.PI / 2, power: { name: "New Ride", desc: "ability TBD", icon: "car" } },
-  { name: "Car 8", url: "/models/8.glb", yaw: Math.PI / 2, power: { name: "New Ride", desc: "ability TBD", icon: "car" } },
-  { name: "Default", url: "/models/default.glb", yaw: Math.PI / 2, power: { name: "New Ride", desc: "ability TBD", icon: "car" } },
+  { name: "Flintstone", url: "/models/flintstone.glb", scale: 0.7, power: { name: "Stone-Age Airbag", desc: "keep play amount on liq", icon: "chute" } },
+  { name: "Clown Car", url: "/models/clown-car.glb", yaw: Math.PI / 2, ability: "laneBet", power: { name: "Lane Bet", desc: "steer = LONG / SHORT", icon: "swap" } },
+  // headline new cars — abilities still to be designed (brainstorming car-by-car).
+  // skull/slot-machine are different model sources; yaw is a guess (+π/2) — fix if a card faces backwards.
+  { name: "Skull", url: "/models/skull.glb", yaw: Math.PI / 2, power: { name: "New Ride", desc: "ability TBD", icon: "car" } },
+  { name: "Slot Machine", url: "/models/slot-machine.glb", yaw: Math.PI / 2, power: { name: "New Ride", desc: "ability TBD", icon: "car" } },
+  // descriptive-renamed placeholders (were Car 5–8 / Default) — same pack, length-on-X → yaw +π/2.
+  { name: "Cart Rod", url: "/models/shopping-cart.glb", yaw: Math.PI / 2, power: { name: "New Ride", desc: "ability TBD", icon: "car" } },
+  { name: "Helmet", url: "/models/helmet.glb", yaw: Math.PI / 2, power: { name: "New Ride", desc: "ability TBD", icon: "car" } },
+  { name: "Pink Rod", url: "/models/pink-rod.glb", yaw: Math.PI / 2, power: { name: "New Ride", desc: "ability TBD", icon: "car" } },
+  { name: "Six Wheeler", url: "/models/six-wheeler.glb", yaw: Math.PI / 2, power: { name: "New Ride", desc: "ability TBD", icon: "car" } },
+  { name: "Starter", url: "/models/starter.glb", yaw: Math.PI / 2, power: { name: "New Ride", desc: "ability TBD", icon: "car" } },
 ], (c) => { car.setModel(c.url, c.scale, c.yaw); setAbility(c.ability); }, () => upgrades.open(), [
   { label: "Music", sub: "synthwave radio", glyph: "♫", get: () => radio.isOn(), set: (on) => radio.setOn(on) },
   { label: "SFX", sub: "engine & coins", glyph: "🔊", get: () => audio.isEnabled(), set: (on) => audio.setEnabled(on) },
-], auth.logout ? doLogout : undefined); // Log out in the menu (privy only)
+], auth.logout ? doLogout : undefined, () => {
+  // closed from the lobby Garage building → re-hide the hamburger chrome and restore the lobby back button
+  if (mode === "lobby") { garage.el.style.display = "none"; lobbyHud.show(); }
+}); // Log out in the menu (privy only)
 
-// ── parking-lot lobby ──────────────────────────────────────────────────────
-// the map button drops you into a giant drivable neon lot with 3 market buildings;
-// driving into a building selects that market and returns you to the race
+// ── lobby: the economy-hub town ─────────────────────────────────────────────
+// the map button drops you into a giant drivable neon lot with 4 functional buildings —
+// Garage (cars), Upgrades, Crates (coming soon), Track (back to the race). Solo / no netcode.
 const lobby = createLobby();
 ctx.scene.add(lobby.group);
 const lobbyCam = createLobbyCam();
 let mode: "race" | "lobby" = "race";
 let drive: DriveState = { x: 0, z: LOT_BOUNDS.z - 8, heading: 0, speed: 0, steer: 0 };
 let doorDwell = 0;
+let doorArmed = true; // disarmed after entering a building until the car leaves every doorway (no instant re-open)
 let steerNorm = 0; // steering from the pointer drag (-1..1), shared with the lobby
 
 const hudPrev = new Map<HTMLElement, string>();
@@ -297,6 +318,7 @@ function enterLobby() {
   mode = "lobby";
   drive = { x: 0, z: LOT_BOUNDS.z - 8, heading: 0, speed: 0, steer: 0 };
   doorDwell = 0;
+  doorArmed = true;
   lobbyCam.reset();
   world.group.visible = false;
   pickups.group.visible = false;
@@ -307,7 +329,7 @@ function enterLobby() {
   audio.resume(); radio.resume();
 }
 
-function exitLobby(selected?: Asset) {
+function exitLobby() {
   mode = "race";
   lobby.hide();
   lobbyHud.hide();
@@ -316,13 +338,19 @@ function exitLobby(selected?: Asset) {
   pickups.group.visible = true;
   setRaceHudVisible(true);
   mapBtn.setVisible(true);
-  // restore the road car pose; the chase cam takes back over next frame
+  // restore the road car pose; the chase cam takes back over next frame.
+  // market (BTC/ETH/SOL) stays whatever it was — it's chosen from the in-race HUD tabs, not the lobby.
   car.group.position.set(0, 0, -12);
   car.group.rotation.set(0, 0, 0);
-  if (selected) {
-    asset = selected;
-    solSmooth = 0; solEMA = 0; priceHist.length = 0;
-    hud.setActiveAsset(selected);
+}
+
+/** drive-into-a-building action. Economy screens open over the lobby; the Track gate leaves to the race. */
+function triggerBuilding(kind: BuildingKind) {
+  switch (kind) {
+    case "garage": lobbyHud.hide(); garage.openGarage(); break;     // your car collection
+    case "upgrades": lobbyHud.hide(); upgrades.open(); break;        // tune your car
+    case "crates": lobbyHud.toast("Crate Shop — coming soon"); break; // Pillar 2, not built yet
+    case "track": exitLobby(); break;                                // back to the race
   }
 }
 
@@ -398,6 +426,10 @@ async function settleVia(reason: "cashout" | "expire", localSnap: Snapshot) {
   settling = true;
   releaseHold();   // drop any active hold so the now-parked car can't be steered
   controls.setLive(true, "Settling…");
+  // Use the last-known wallet read as the pre-close baseline instead of blocking on a fresh
+  // RPC read here — settle should not wait on the network. The background reconcile after
+  // close refreshes the real on-chain balance anyway.
+  const preCloseWalletBalance = walletBalance;
   const res = await roundSync.close(reason);
   settling = false;
   // reset UI regardless of outcome
@@ -410,10 +442,21 @@ async function settleVia(reason: "cashout" | "expire", localSnap: Snapshot) {
     hud.setStatus("Round will settle shortly. Feed interruption.");
     return;
   }
-  const minWalletBalance = walletBalance != null && res.payoutCoins > 0 ? walletBalance + res.payoutCoins : undefined;
+  // The server settles instantly and transfers the payout to the wallet in the BACKGROUND,
+  // so res.balance already includes the win (it sits in the in-game pocket until the on-chain
+  // transfer lands). The corner = wallet + in-game, so the total is correct the moment we show
+  // it — no blocking on mainnet confirmation (that was the up-to-45s "Settling…" freeze).
   serverBalance = res.balance;
-  try { await refreshWalletBalanceEventually(minWalletBalance); } catch { /* keep last wallet read */ }
   syncDisplayedBalance(); walletUI.setBalance(balance);
+  // Once the on-chain transfer lands, refresh BOTH pockets so the wallet panel reflects the
+  // move (in-game drops, wallet rises — the corner total stays the same throughout).
+  if (res.payoutCoins > 0 && auth.walletPublicKey?.()) {
+    const expectedWallet = payoutWalletBalanceFloor({ preCloseWalletBalance, payoutCoins: res.payoutCoins });
+    void refreshWalletBalanceEventually(expectedWallet ?? undefined).then(async () => {
+      try { serverBalance = (await api.me()).balance; } catch { /* keep last in-game read */ }
+      syncDisplayedBalance(); walletUI.setBalance(balance);
+    }).catch(() => { /* keep current read until the next refresh */ });
+  }
   controls.setLive(false, "GO!");
   hud.setMultiplier(res.equity, res.outcome === "liq" ? "liquidated" : "settled");
   if (res.outcome === "liq") {
@@ -431,7 +474,7 @@ controls.onLaunch(async () => {
   audio.resume(); radio.resume(); // unlock audio + radio if GO! is the first interaction
   if (!signedIn) { triggerSignIn(); return; } // GO requires sign-in — opens the login; race on the next press
   if (!connected) { hud.setStatus("Can't reach the server. Reconnecting..."); return; }
-  if (paymentInFlight || settling || roundSync.isOpening() || engine.getPhase() === "live") return; // re-entrancy: don't race an in-flight settle/payment
+  if (settling || roundSync.isOpening() || engine.getPhase() === "live") return; // re-entrancy: don't race an in-flight settle
 
   // Self-heal a dangling round before opening a new one. A bail whose close couldn't settle
   // (halted feed / dropped response) leaves a stale local round that the single-round guard would
@@ -450,80 +493,13 @@ controls.onLaunch(async () => {
   }
 
   const playAmount = controls.playAmount();
-  if (auth.walletPublicKey?.()) {
-    paymentInFlight = true;
-    try {
-      controls.setLive(false, "PAYING...");
-      hud.setStatus(`Paying ${usd(playAmount)} from Privy wallet...`);
-      const currentServerBalance = serverBalance;
-      serverBalance = await ensurePlayPayment({
-        walletBalance,
-        currentServerBalance,
-        playAmount,
-        pay: async (amountCents) => {
-          const { txBase64 } = await api.playPaymentBuild(amountCents);
-          hud.setStatus("Approve the payment in Privy...");
-          const sent = await settleWithTimeout(auth.signAndSendTransaction(txBase64), 45_000, undefined, () => {
-            hud.setStatus("Checking Solana for the payment...");
-          });
-
-          const confirmPayment = async (txSig: string): Promise<number> => {
-            hud.setStatus("Confirming payment on Solana...");
-            for (let i = 0; i < 12; i++) {
-              const confirmed = await api.playPaymentConfirm(txSig);
-              serverBalance = confirmed.balance;
-              try { await refreshWalletBalance(); syncDisplayedBalance(); walletUI.setBalance(balance); } catch { /* keep last wallet read */ }
-              if (confirmed.status === "credited" || confirmed.status === "duplicate") return confirmed.balance;
-              if (confirmed.status === "rejected") throw new Error(`play_payment_rejected:${confirmed.reason ?? "unknown"}`);
-              await new Promise<void>((r) => setTimeout(r, 1500));
-            }
-            throw new PlayPaymentConfirmationError();
-          };
-
-          const recoverPayment = async (): Promise<number> => {
-            hud.setStatus("Checking Solana for the payment...");
-            for (let i = 0; i < 16; i++) {
-              const recovered = await api.playPaymentRecover(amountCents);
-              serverBalance = recovered.balance;
-              try { await refreshWalletBalance(); syncDisplayedBalance(); walletUI.setBalance(balance); } catch { /* keep last wallet read */ }
-              if (recovered.status === "credited" || recovered.status === "duplicate") return recovered.balance;
-              if (recovered.status === "rejected") throw new Error(`play_payment_rejected:${recovered.reason ?? "unknown"}`);
-              await new Promise<void>((r) => setTimeout(r, 1500));
-            }
-            throw new PaymentSigningTimeoutError();
-          };
-
-          if (sent.status === "resolved") return confirmPayment(sent.value);
-          if (sent.status === "rejected") console.warn("[privy_payment_signature_missing]", sent.error);
-          return recoverPayment();
-        },
-        pollServerBalance: async () => {
-          const me = await api.me();
-          serverBalance = me.balance;
-          try { await refreshWalletBalance(); } catch { /* keep last wallet read */ }
-          syncDisplayedBalance(); walletUI.setBalance(balance);
-          return serverBalance;
-        },
-      });
-      syncDisplayedBalance();
-      walletUI.setBalance(balance);
-    } catch (e) {
-      controls.setLive(false, "GO!");
-      console.error("[play_payment_failed]", e);
-      const msg = e instanceof InsufficientWalletBalanceError
-        ? "Not enough USDC in your Privy wallet."
-        : e instanceof PaymentSigningTimeoutError
-          ? "Payment was not found on Solana. If you approved it, press GO again shortly."
-        : e instanceof PlayPaymentConfirmationError
-          ? "Payment sent. Waiting for confirmation. Press GO again shortly."
-          : "Payment not approved. Add USDC to your Privy wallet or try again.";
-      hud.setStatus(msg);
-      return;
-    } finally {
-      paymentInFlight = false;
-    }
+  if (serverBalance < playAmount) {
+    // No on-chain at GO time. Send the player to the wallet to top up their play balance.
+    controls.setLive(false, "GO!");
+    hud.setStatus("Add USDC to your play balance to race.");
+    walletUI.open();
+    return;
   }
-  if (!auth.walletPublicKey?.() && serverBalance < playAmount) { hud.setStatus("Not enough balance. Lower your play amount."); return; }
   const lev = clampInt(game.lev, 10, 1000);                          // parity: send the clamped value
   hud.setStatus("Launching…");
   let out;
@@ -581,9 +557,14 @@ function frame() {
     car.setSteer(drive.steer / DRIVE.MAX_STEER_LOW); // front wheels point to the real steer angle
 
     const hit = entranceHit(drive.x, drive.z);
-    lobbyHud.setPrompt(hit);
-    if (hit) { doorDwell += dt; if (doorDwell > 0.45) exitLobby(hit); }
-    else doorDwell = 0;
+    lobbyHud.setPrompt(doorArmed ? hit : null);
+    if (doorArmed && hit) {
+      doorDwell += dt;
+      if (doorDwell > 0.45) { doorDwell = 0; doorArmed = false; triggerBuilding(hit); }
+    } else {
+      doorDwell = 0;
+      if (!hit) doorArmed = true; // re-arm once the car has cleared every doorway
+    }
 
     lobby.update(dt);
     lobby.setRemoteCars([]); // multiplayer seam — empty today
