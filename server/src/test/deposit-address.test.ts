@@ -131,7 +131,7 @@ describe("POST /v1/deposit/build", () => {
     expect(res.statusCode).toBe(200);
     expect(res.json()).toEqual({
       txBase64: "tx-deposit",
-      depositIntent: expect.stringMatching(/^intent:[0-9a-f-]+:WalletAAA:100:tx-deposit$/),
+      depositIntent: expect.stringMatching(/^v1\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+$/),
       expiresAt: new Date(60_000).toISOString(),
     });
   });
@@ -241,6 +241,51 @@ describe("POST /v1/deposit/send", () => {
 
     expect(res.statusCode).toBe(200);
     expect(res.json()).toEqual({ txSig: "sig-123" });
+  });
+
+  it("accepts a real deposit intent issued by /v1/deposit/build", async () => {
+    ctx = await makeTestDb({
+      depositTxBuilder: {
+        async buildForUser(wallet, amountCents) {
+          expect(wallet).toBe("WalletAAA");
+          expect(amountCents).toBe(100);
+          return { txBase64: "tx-deposit" };
+        },
+      },
+      signedTxBroadcaster: {
+        async broadcastSignedDeposit(input) {
+          expect(input).toEqual({
+            expectedTxBase64: "tx-deposit",
+            signedTxBase64: "signed-tx",
+          });
+          return { txSig: "sig-456" };
+        },
+      },
+    });
+    const user = await ctx.users.upsertByExternalId("dev:mallory");
+    await ctx.users.setWalletPublicKey(user.id, "WalletAAA");
+
+    const buildRes = await ctx.server.inject({
+      method: "POST",
+      url: "/v1/deposit/build",
+      headers: H,
+      payload: { amountCents: 100 },
+    });
+
+    expect(buildRes.statusCode).toBe(200);
+
+    const sendRes = await ctx.server.inject({
+      method: "POST",
+      url: "/v1/deposit/send",
+      headers: H,
+      payload: {
+        depositIntent: buildRes.json().depositIntent,
+        signedTxBase64: "signed-tx",
+      },
+    });
+
+    expect(sendRes.statusCode).toBe(200);
+    expect(sendRes.json()).toEqual({ txSig: "sig-456" });
   });
 
   it("rejects a deposit intent for another user", async () => {

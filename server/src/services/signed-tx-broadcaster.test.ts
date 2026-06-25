@@ -6,7 +6,9 @@ import {
   createNoopSigner,
   createTransactionMessage,
   generateKeyPairSigner,
+  getBase64Encoder,
   getBase64EncodedWireTransaction,
+  getTransactionDecoder,
   partiallySignTransaction,
   pipe,
   setTransactionMessageFeePayer,
@@ -62,6 +64,47 @@ describe("makeSignedTxBroadcaster", () => {
       expectedTxBase64: expected.expectedTxBase64,
       signedTxBase64: mutated.signedTxBase64,
     })).rejects.toThrow("signed_transaction_message_mismatch");
+    expect(send).not.toHaveBeenCalled();
+  });
+
+  it("rejects a signed transaction that removed an existing server signature", async () => {
+    const send = vi.fn(async () => "sig-123");
+    const feePayer = await generateKeyPairSigner();
+    const authority = await generateKeyPairSigner();
+    const ix = getTransferCheckedInstruction({
+      source: address("11111111111111111111111111111112"),
+      mint: address("EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v"),
+      destination: address("11111111111111111111111111111113"),
+      authority: createNoopSigner(authority.address),
+      amount: 100n,
+      decimals: 6,
+    });
+    const unsigned = compileTransaction(pipe(
+      createTransactionMessage({ version: 0 }),
+      (m) => setTransactionMessageFeePayer(feePayer.address, m),
+      (m) => setTransactionMessageLifetimeUsingBlockhash({
+        blockhash: "11111111111111111111111111111111" as never,
+        lastValidBlockHeight: 10n,
+      }, m),
+      (m) => appendTransactionMessageInstruction(ix, m),
+    ));
+    const expected = await partiallySignTransaction([feePayer.keyPair], unsigned);
+    const submitted = await partiallySignTransaction([feePayer.keyPair, authority.keyPair], unsigned);
+    const submittedDecoded = getTransactionDecoder().decode(
+      getBase64Encoder().encode(getBase64EncodedWireTransaction(submitted)),
+    );
+    const submittedWithoutServerSig = {
+      ...submittedDecoded,
+      signatures: {
+        ...submittedDecoded.signatures,
+        [feePayer.address]: null,
+      },
+    };
+
+    await expect(makeSignedTxBroadcaster(send).broadcastSignedDeposit({
+      expectedTxBase64: getBase64EncodedWireTransaction(expected),
+      signedTxBase64: getBase64EncodedWireTransaction(submittedWithoutServerSig),
+    })).rejects.toThrow("signed_transaction_missing_existing_signature");
     expect(send).not.toHaveBeenCalled();
   });
 });
