@@ -15,7 +15,6 @@
  */
 import {
   address,
-  type Address,
   type Base64EncodedWireTransaction,
   type BlockhashLifetimeConstraint,
   assertIsFullySignedTransaction,
@@ -100,7 +99,3 @@ export async function makeTreasuryWithdrawSigner(
   });
   return { address: signer.address, signAndSend: core.signAndSend };
 }
-
-/** Re-export for call sites validating address strings. */
-export { address };
-export type { Address };
