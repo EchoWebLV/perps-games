@@ -7,7 +7,7 @@ import { makeInventory } from "./services/inventory.js";
 import { makeRounds } from "./services/rounds.js";
 import { ensureHouseUserId } from "./services/house.js";
 import { makeHermesFeed } from "./feed/hermes.js";
-import { makePrivyAuth } from "./auth/privy.js";
+import { makeSessionAuth } from "./auth/session.js";
 import { makeDepositTxBuilder, makeRpcBlockhash, type DepositTxBuilder } from "./services/deposit-tx.js";
 
 async function main(): Promise<void> {
@@ -107,12 +107,10 @@ async function main(): Promise<void> {
   // Real money ON => rounds stake + pay out in real USDC-backed `cash`; OFF => soft `coin`.
   const stakeAsset = env.REAL_MONEY_ENABLED ? ("cash" as const) : ("coin" as const);
   const rounds = makeRounds({ db, ledger, feed, stakeAsset, houseUserId });
-  const privyAuth = makePrivyAuth(env);
-  // fail loud: production must verify real users — never boot with auth disabled
-  if (env.NODE_ENV === "production" && !privyAuth)
-    throw new Error(
-      "FATAL: production requires Privy keys (PRIVY_APP_ID/PRIVY_APP_SECRET) — refusing to start with auth disabled",
-    );
+  const sessionAuth = makeSessionAuth({
+    users,
+    secret: env.SESSION_SECRET ?? "development-session-secret-change-before-production",
+  });
 
   const server = buildServer({
     users,
@@ -126,7 +124,7 @@ async function main(): Promise<void> {
     startBalance: env.START_BALANCE,
     corsOrigins: env.CORS_ORIGINS.split(",").map((s) => s.trim()),
     devAuth: env.DEV_AUTH && env.NODE_ENV !== "production",
-    privyAuth,
+    sessionAuth,
     realMoney,
     depositTxBuilder,
     walletBalanceReader,

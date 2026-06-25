@@ -7,6 +7,21 @@ describe("GET /v1/me", () => {
   let ctx: TestCtx;
   afterEach(async () => { await ctx?.close(); });
 
+  it("accepts an anonymous session Bearer token", async () => {
+    ctx = await makeTestDb({ signupFaucet: false });
+    const session = await ctx.server.inject({ method: "POST", url: "/v1/session" });
+    expect(session.statusCode).toBe(200);
+
+    const res = await ctx.server.inject({
+      method: "GET",
+      url: "/v1/me",
+      headers: { authorization: `Bearer ${session.json().token}` },
+    });
+
+    expect(res.statusCode).toBe(200);
+    expect(res.json().userId).toBe(session.json().userId);
+  });
+
   it("returns openRoundId: null when no round is open", async () => {
     ctx = await makeTestDb({ signupFaucet: false });
     const res = await ctx.server.inject({ method: "GET", url: "/v1/me", headers: H });

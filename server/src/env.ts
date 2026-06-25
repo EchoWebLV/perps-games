@@ -12,6 +12,7 @@ const EnvShape = z.object({
   SIGNUP_FAUCET: z.string().optional().transform((v) => v === "true"),
   CORS_ORIGINS: z.string().optional().default("http://localhost:3000"),
   START_BALANCE: z.coerce.number().int().nonnegative().default(10000), // cents → $100.00 faucet
+  SESSION_SECRET: z.string().min(32).optional(),
   PRIVY_APP_ID: z.string().optional(),
   PRIVY_APP_SECRET: z.string().optional(),
   PRIVY_PLAY_SIGNER_ID: z.string().min(1).optional(),
@@ -44,6 +45,13 @@ const EnvShape = z.object({
 });
 
 const Env = EnvShape.superRefine((e, ctx) => {
+  if (e.NODE_ENV === "production" && !e.SESSION_SECRET) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ["SESSION_SECRET"],
+      message: "SESSION_SECRET is required in production",
+    });
+  }
   if (!e.REAL_MONEY_ENABLED) return;
   for (const k of ["SOLANA_RPC_URL", "USDC_MINT", "TREASURY_USDC_ATA"] as const) {
     if (!e[k]) ctx.addIssue({ code: z.ZodIssueCode.custom, path: [k], message: `${k} is required when REAL_MONEY_ENABLED=true` });

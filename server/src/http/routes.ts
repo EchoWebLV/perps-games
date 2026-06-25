@@ -19,7 +19,7 @@ export interface RouteDeps {
   signupFaucet: boolean;   // env-gated soft-coin seeding
   startBalance: number;    // coins to seed on first sight
   devAuth: boolean;
-  privyAuth: import("../auth/privy.js").PrivyAuth | null;
+  sessionAuth: import("../auth/session.js").SessionAuth;
   realMoney: { enabled: boolean; treasuryUsdcAta: string | null };
   depositTxBuilder: import("../services/deposit-tx.js").DepositTxBuilder | null;
   walletBalanceReader: import("../services/wallet-balance.js").WalletBalanceReader | null;
@@ -51,7 +51,9 @@ const RoundActionBody = z
 const CloseRound = z.object({ roundId: z.string().uuid(), reason: z.enum(["cashout", "expire"]).default("cashout") });
 
 export function registerRoutes(server: FastifyInstance, deps: RouteDeps): void {
-  const requireUser = makeRequireUser({ users: deps.users, devAuth: deps.devAuth, privyAuth: deps.privyAuth });
+  const requireUser = makeRequireUser({ users: deps.users, devAuth: deps.devAuth, sessionAuth: deps.sessionAuth });
+
+  server.post("/v1/session", async () => deps.sessionAuth.issueAnonymous());
 
   server.get("/v1/balance", { preHandler: requireUser }, async (req) => {
     return { balance: await deps.ledger.balance(req.userId!, deps.stakeAsset) };

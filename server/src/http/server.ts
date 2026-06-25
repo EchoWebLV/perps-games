@@ -8,7 +8,7 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
   const server = Fastify({ logger: false });
   server.register(cors, {
     origin: deps.corsOrigins,
-    allowedHeaders: ["x-dev-user", "x-privy-wallet", "content-type", "authorization"],
+    allowedHeaders: ["x-dev-user", "content-type", "authorization"],
     methods: ["GET", "POST", "OPTIONS"],
   });
   server.get("/healthz", async () => ({ ok: true }));
