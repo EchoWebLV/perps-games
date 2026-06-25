@@ -12,6 +12,8 @@ import { createWalletBinding } from "./auth/wallet-binding.js";
 import { makeDepositTxBuilder, makeRpcBlockhash, type DepositTxBuilder } from "./services/deposit-tx.js";
 import { makeDepositIntents } from "./services/deposit-intents.js";
 import type { WithdrawSigner } from "./services/withdraw-worker.js";
+import { eq } from "drizzle-orm";
+import { withdrawals } from "./db/schema.js";
 
 async function main(): Promise<void> {
   if (!env.DATABASE_URL) throw new Error("DATABASE_URL is required to start the server");
@@ -38,6 +40,7 @@ async function main(): Promise<void> {
   let signedTxBroadcaster: import("./services/signed-tx-broadcaster.js").SignedTxBroadcaster | null = null;
   let withdrawalsSvc: import("./services/withdrawals.js").Withdrawals | undefined;
   let payoutSigner: WithdrawSigner | null = null;
+  let withdrawProcessor: import("./services/withdraw-worker.js").WithdrawProcessor | null = null;
   if (env.REAL_MONEY_ENABLED) {
     const { makeRpcDepositSource } = await import("./solana/deposit-source.js");
     const { assertUsdcMint } = await import("./solana/mint-assert.js");
@@ -90,8 +93,37 @@ async function main(): Promise<void> {
       userDailyCapCents: env.WITHDRAW_USER_DAILY_CAP_CENTS, globalDailyCapCents: env.WITHDRAW_GLOBAL_DAILY_CAP_CENTS,
       holdHours: env.WITHDRAW_HOLD_HOURS, quorumThresholdCents: env.WITHDRAW_QUORUM_THRESHOLD_CENTS,
     }, () => source.readTreasuryBaseUnits(env.TREASURY_USDC_ATA!));
-    // withdrawProcessor stays null until the payout signer is reintroduced in a later task.
-    // The admin-approve endpoint 404s until then.
+    // Self-custody send-leg: enabled only when a treasury keypair secret is configured.
+    // Unset => withdrawProcessor stays null and the admin-approve endpoint 404s (unchanged).
+    if (env.TREASURY_SECRET) {
+      const { makeTreasuryWithdrawSigner } = await import("./solana/treasury-signer.js");
+      const treasurySigner = await makeTreasuryWithdrawSigner(env.TREASURY_SECRET, {
+        rpcUrl: env.SOLANA_RPC_URL!,
+        treasuryUsdcAta: env.TREASURY_USDC_ATA!,
+        usdcMint: env.USDC_MINT!,
+        getLatestBlockhash: makeRpcBlockhash(env.SOLANA_RPC_URL!),
+      });
+      if (treasurySigner.address !== env.TREASURY_OWNER_PUBKEY) {
+        throw new Error("TREASURY_OWNER_PUBKEY does not match TREASURY_SECRET");
+      }
+      const { makeWithdrawProcessor, makeWithdrawConfirmer } = await import("./services/withdraw-worker.js");
+      withdrawProcessor = makeWithdrawProcessor(db, treasurySigner);
+
+      if (env.RUN_CONFIRMER) {
+        const { makeRpcChainStatusReader } = await import("./solana/chain-status.js");
+        const { makeWithdrawConfirmLoop } = await import("./services/withdraw-confirm-loop.js");
+        const confirmer = makeWithdrawConfirmer(db, ledger, makeRpcChainStatusReader(env.SOLANA_RPC_URL!));
+        const loop = makeWithdrawConfirmLoop({
+          confirmer,
+          pollMs: env.WITHDRAW_POLL_MS,
+          listSentIds: async () =>
+            (await db.select({ id: withdrawals.id }).from(withdrawals).where(eq(withdrawals.status, "sent"))).map(
+              (r: { id: string }) => r.id,
+            ),
+        });
+        loop.start();
+      }
+    }
   }
   // poll rate + HALT tolerance are tunable: the public Hermes REST endpoint can
   // rate-limit a tight 500ms poll, so a too-small stale window flaps into feed_halt.
@@ -137,7 +169,7 @@ async function main(): Promise<void> {
     depositMinCents: env.DEPOSIT_MIN_CENTS,
     depositMaxCents: env.DEPOSIT_MAX_CENTS,
     withdrawals: withdrawalsSvc ?? null,
-    withdrawProcessor: null,
+    withdrawProcessor,
     payoutSigner,
   });
 
