@@ -17,7 +17,7 @@
     {
       "name": "perps-server",
       "runtimeExecutable": "bash",
-      "runtimeArgs": ["-c", "REAL_MONEY_ENABLED=false DATABASE_URL=postgres://localhost:5432/perps_dev CORS_ORIGINS=http://localhost:4000 SIGNUP_FAUCET=true DEV_ENDPOINTS=true PORT=8080 NODE_ENV=development npx tsx src/index.ts"],
+      "runtimeArgs": ["-c", "REAL_MONEY_ENABLED=false CORS_ORIGINS=http://localhost:4000 SIGNUP_FAUCET=true DEV_ENDPOINTS=true PORT=8080 NODE_ENV=development npx tsx src/index.ts"],
       "cwd": "server",
       "port": 8080
     }
