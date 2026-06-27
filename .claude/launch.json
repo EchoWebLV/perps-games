@@ -10,9 +10,16 @@
     {
       "name": "redline3d",
       "runtimeExecutable": "npm",
-      "runtimeArgs": ["run", "dev", "--", "--port", "5180", "--strictPort", "--host"],
+      "runtimeArgs": ["run", "dev", "--", "--port", "4000", "--strictPort", "--host"],
       "cwd": "redline3d",
-      "port": 5180
+      "port": 4000
+    },
+    {
+      "name": "perps-server",
+      "runtimeExecutable": "bash",
+      "runtimeArgs": ["-c", "REAL_MONEY_ENABLED=false DATABASE_URL=postgres://localhost:5432/perps_dev CORS_ORIGINS=http://localhost:4000 SIGNUP_FAUCET=true DEV_ENDPOINTS=true PORT=8080 NODE_ENV=development npx tsx src/index.ts"],
+      "cwd": "server",
+      "port": 8080
     }
   ]
 }
