@@ -81,6 +81,28 @@ The HUD should show the session bankroll as the playable balance. The wallet pan
 
 The vault is custody. The ledger is ownership. Rounds move ownership between the player and the house without moving USDC on-chain.
 
+## Gas Model
+
+Solana transactions require SOL fees. The player should not need to understand or hold SOL for normal gameplay.
+
+### Funding gas
+
+Funding is a user wallet to vault USDC transfer. The best UX is a sponsored deposit transaction:
+
+1. Server builds the USDC transfer.
+2. A server-managed fee-payer account pays the SOL transaction fee.
+3. The player signs only as the USDC token owner.
+
+The current server already supports this shape when `FEE_PAYER_SECRET` and `FEE_PAYER_OWNER_PUBKEY` are configured. If those are absent, the deposit transaction falls back to user-paid gas. In that fallback, the UI must say the wallet needs a small amount of SOL for network fees.
+
+### Withdrawal gas
+
+Withdrawals are vault to player wallet USDC transfers. The treasury signer pays its own SOL fee. The user should not need SOL to receive a withdrawal.
+
+### Operational requirements
+
+The app must expose whether deposits are gas-sponsored or user-paid. In sponsored mode, the fee-payer SOL balance is operational infrastructure and should have a low-balance warning. In user-paid fallback mode, the funding panel must show a clear "requires SOL for network fee" note before the player signs.
+
 ## Reuse Existing Architecture
 
 The current codebase already has most of the right primitives:
@@ -263,4 +285,3 @@ The implementation plan should focus on small vertical slices:
 3. Ensure server real-money mode starts at zero and requires `cash` bankroll for play.
 4. Tighten tests around house/player ledger conservation.
 5. Keep withdrawal explicit and visibly pending.
-
