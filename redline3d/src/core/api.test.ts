@@ -18,6 +18,31 @@ describe("createApi", () => {
     expect((seen!.init.headers as Record<string,string>)["x-dev-user"]).toBe("web-test");
   });
 
+  it("uses the page hostname for the API when opened from a LAN dev URL", async () => {
+    const oldLocation = Object.getOwnPropertyDescriptor(globalThis, "location");
+    Object.defineProperty(globalThis, "location", {
+      configurable: true,
+      value: { protocol: "http:", hostname: "192.168.1.102" },
+    });
+    try {
+      let seenUrl = "";
+      const api = createApi({
+        userId: "web-test",
+        fetch: async (url) => {
+          seenUrl = String(url);
+          return res(200, { userId: "u", balance: 100, cars: [], openRoundId: null });
+        },
+      });
+
+      await api.me();
+
+      expect(seenUrl).toBe("http://192.168.1.102:8080/v1/me");
+    } finally {
+      if (oldLocation) Object.defineProperty(globalThis, "location", oldLocation);
+      else delete (globalThis as any).location;
+    }
+  });
+
   it("maps status codes to typed ApiError codes", async () => {
     const mk = (status: number, body: unknown) =>
       createApi({ baseUrl: "http://x", userId: "u", fetch: async () => res(status, body) });

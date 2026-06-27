@@ -57,9 +57,27 @@ export interface ApiOpts {
   timeoutMs?: number;
 }
 
+function isLoopbackHost(hostname: string): boolean {
+  return hostname === "localhost" || hostname === "127.0.0.1" || hostname === "::1";
+}
+
+function resolveBaseUrl(explicitBaseUrl?: string): string {
+  const configured = explicitBaseUrl ?? (import.meta.env?.VITE_API_BASE as string | undefined) ?? "http://localhost:8080";
+  try {
+    const url = new URL(configured);
+    const page = globalThis.location;
+    if (isLoopbackHost(url.hostname) && page?.hostname && !isLoopbackHost(page.hostname)) {
+      return `${page.protocol}//${page.hostname}:8080`;
+    }
+  } catch {
+    // Fall back to the configured string; the fetch layer will surface bad URLs as network errors.
+  }
+  return configured;
+}
+
 export function createApi(opts: ApiOpts = {}): Api {
   const doFetch = opts.fetch ?? globalThis.fetch.bind(globalThis);
-  const baseUrl = (opts.baseUrl ?? (import.meta.env?.VITE_API_BASE as string) ?? "http://localhost:8080").replace(/\/$/, "");
+  const baseUrl = resolveBaseUrl(opts.baseUrl).replace(/\/$/, "");
   // Bound every request so a stalled connection can't hang the UI on "Launching…"/"Settling…"
   // forever. An abort surfaces as a network ApiError, which open()/close() already handle.
   const timeoutMs = opts.timeoutMs ?? 12_000;

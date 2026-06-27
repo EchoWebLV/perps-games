@@ -10,7 +10,10 @@ const EnvShape = z.object({
     .transform((v) => v === "true"),
   NODE_ENV: z.enum(["development", "test", "production"]).default("development"),
   SIGNUP_FAUCET: z.string().optional().transform((v) => v === "true"),
-  CORS_ORIGINS: z.string().optional().default("http://localhost:3000,http://127.0.0.1:3000"),
+  CORS_ORIGINS: z
+    .string()
+    .optional()
+    .default("http://localhost:3000,http://127.0.0.1:3000,http://localhost:4000,http://127.0.0.1:4000"),
   START_BALANCE: z.coerce.number().int().nonnegative().default(10000), // cents → $100.00 faucet
   SESSION_SECRET: z.string().min(32).optional(),
   DEV_AUTH: z

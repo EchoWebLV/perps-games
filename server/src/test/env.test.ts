@@ -6,6 +6,12 @@ describe("parseEnv auth flags", () => {
     expect(parseEnv({}).DEV_AUTH).toBe(true);
     expect(parseEnv({ DEV_AUTH: "false" }).DEV_AUTH).toBe(false);
   });
+  it("defaults CORS to the current dev frontend origins", () => {
+    expect(parseEnv({}).CORS_ORIGINS.split(",")).toEqual(expect.arrayContaining([
+      "http://localhost:4000",
+      "http://127.0.0.1:4000",
+    ]));
+  });
   it("requires SESSION_SECRET in production", () => {
     expect(() => parseEnv({ NODE_ENV: "production" })).toThrowError(/SESSION_SECRET is required in production/);
   });

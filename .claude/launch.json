@@ -17,7 +17,7 @@
     {
       "name": "perps-server",
       "runtimeExecutable": "bash",
-      "runtimeArgs": ["-c", "REAL_MONEY_ENABLED=false CORS_ORIGINS=http://localhost:4000 SIGNUP_FAUCET=true DEV_ENDPOINTS=true PORT=8080 NODE_ENV=development npx tsx src/index.ts"],
+      "runtimeArgs": ["-c", "LAN_IP=$(ipconfig getifaddr en0 2>/dev/null || true); REAL_MONEY_ENABLED=false CORS_ORIGINS=\"http://localhost:4000,http://127.0.0.1:4000${LAN_IP:+,http://$LAN_IP:4000}\" SIGNUP_FAUCET=true DEV_ENDPOINTS=true PORT=8080 NODE_ENV=development npx tsx src/index.ts"],
       "cwd": "server",
       "port": 8080
     }
