@@ -2,6 +2,8 @@ use anchor_lang::prelude::*;
 
 declare_id!("FwUNcUaRbYGiWasHa6DA3xQaQJfZWCgH7UhDeBvoJcBv");
 
+pub mod settle;
+
 // ===========================================================================
 // PROVEN PLUMBING PATTERN — Task 2 (two-account co-delegation), GREEN on devnet
 // ---------------------------------------------------------------------------
