@@ -3,7 +3,12 @@ use anchor_spl::associated_token::AssociatedToken;
 use anchor_spl::token::{self, Mint, Token, TokenAccount, Transfer};
 use ephemeral_rollups_sdk::anchor::{commit, delegate};
 use ephemeral_rollups_sdk::cpi::DelegateConfig;
-use ephemeral_rollups_sdk::ephem::MagicIntentBundleBuilder;
+// Lightweight commit+undelegate CPI (the v0 free function) instead of the
+// MagicIntentBundleBuilder: the builder drags in the intent/crypto machinery
+// (~+70KB of [u128;512] confidential-transfer weight) we don't use, which pushed
+// the .so past the available deploy-buffer SOL. This free function does the same
+// schedule-commit-and-undelegate CPI on the three PDAs.
+use ephemeral_rollups_sdk::ephem::commit_and_undelegate_accounts;
 
 declare_id!("FwUNcUaRbYGiWasHa6DA3xQaQJfZWCgH7UhDeBvoJcBv");
 
@@ -377,17 +382,23 @@ pub mod raider {
     /// settled balances are durable on devnet base layer and `withdraw` can pull
     /// real USDC against the player's restored on-L1 play balance.
     pub fn commit_and_undelegate(ctx: Context<SessionCommit>) -> Result<()> {
-        MagicIntentBundleBuilder::new(
-            ctx.accounts.payer.to_account_info(),
-            ctx.accounts.magic_context.to_account_info(),
-            ctx.accounts.magic_program.to_account_info(),
-        )
-        .commit_and_undelegate(&[
-            ctx.accounts.player.to_account_info(),
-            ctx.accounts.house.to_account_info(),
-            ctx.accounts.round.to_account_info(),
-        ])
-        .build_and_invoke()?;
+        let payer = ctx.accounts.payer.to_account_info();
+        let magic_context = ctx.accounts.magic_context.to_account_info();
+        let magic_program = ctx.accounts.magic_program.to_account_info();
+        let player_ai = ctx.accounts.player.to_account_info();
+        let house_ai = ctx.accounts.house.to_account_info();
+        let round_ai = ctx.accounts.round.to_account_info();
+
+        // None for magic_fee_vault: our payer is the session signer, NOT a
+        // delegated ephemeral balance account, so no commit-fee collection is
+        // needed (per the v0 doc comment, None is valid in that case).
+        commit_and_undelegate_accounts(
+            &payer,
+            vec![&player_ai, &house_ai, &round_ai],
+            &magic_context,
+            &magic_program,
+            None,
+        )?;
         Ok(())
     }
 }
