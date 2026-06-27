@@ -8,7 +8,16 @@
 
 use anchor_lang::prelude::*;
 
-pub const MAX_ROUND_SECS: i64 = 300; // liveness backstop, NOT the game time-cap (Phase 2)
+// Liveness backstop after which ANYONE can `force_close` a stalled round, NOT
+// the game time-cap (that's Phase 2). 300s in prod; the `test-short-deadline`
+// build feature shrinks it to 8s so the force_close post-deadline path can be
+// exercised in an integration test without a 5-minute wait. MUST be off in any
+// real deployment.
+#[cfg(not(feature = "test-short-deadline"))]
+pub const MAX_ROUND_SECS: i64 = 300;
+#[cfg(feature = "test-short-deadline")]
+pub const MAX_ROUND_SECS: i64 = 8;
+
 pub const STALE_SECS: i64 = 30; // reject settle against prices older than this
 
 // PDA seeds (kept here so every instruction context derives them identically).

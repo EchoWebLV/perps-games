@@ -1,8 +1,9 @@
 use anchor_lang::prelude::*;
 use anchor_spl::associated_token::AssociatedToken;
 use anchor_spl::token::{self, Mint, Token, TokenAccount, Transfer};
-use ephemeral_rollups_sdk::anchor::delegate;
+use ephemeral_rollups_sdk::anchor::{commit, delegate};
 use ephemeral_rollups_sdk::cpi::DelegateConfig;
+use ephemeral_rollups_sdk::ephem::MagicIntentBundleBuilder;
 
 declare_id!("FwUNcUaRbYGiWasHa6DA3xQaQJfZWCgH7UhDeBvoJcBv");
 
@@ -327,51 +328,113 @@ pub mod raider {
         let now = Clock::get()?.unix_timestamp;
         let snap = price::read_fresh(&ctx.accounts.price_update, now)?;
 
-        // Phase 1: only the owner closes their own round (force_close = Task 9
-        // is the permissionless time-bounded variant).
+        // Phase 1: only the owner closes their own round (force_close below is the
+        // permissionless time-bounded variant).
         require_keys_eq!(
             ctx.accounts.player.owner,
             ctx.accounts.player_authority.key(),
             RaiderError::NotOwner
         );
 
-        let player = &mut ctx.accounts.player;
-        let house = &mut ctx.accounts.house;
-        let round = &mut ctx.accounts.round;
+        settle_round(
+            &mut ctx.accounts.player,
+            &mut ctx.accounts.house,
+            &mut ctx.accounts.round,
+            &snap,
+        )
+    }
 
+    // ---- Task 9: permissionless time-bounded force_close ---------------------
+
+    /// Liveness backstop: ANY signer can settle a round once it has passed its
+    /// `deadline_ts`. Same settle + conserve + store body as `close` (it calls
+    /// the shared `settle_round`), but it intentionally OMITS the
+    /// `player.owner == authority` check and instead REQUIRES the deadline has
+    /// elapsed. This guarantees a stalled or abandoned round can always be
+    /// unwound by anyone, releasing the house lock and crediting the player —
+    /// no round can escrow the house's capital forever.
+    pub fn force_close(ctx: Context<ForceCloseRound>) -> Result<()> {
+        let now = Clock::get()?.unix_timestamp;
+        let snap = price::read_fresh(&ctx.accounts.price_update, now)?;
+
+        let round = &ctx.accounts.round;
         require!(round.status == 1, RaiderError::NoOpenRound);
+        // The ONLY gate: the round must have outlived its liveness deadline.
+        require!(now >= round.deadline_ts, RaiderError::NotYetExpired);
 
-        let (outcome, payout) =
-            settle::settle(round.dir, round.lev, round.stake, round.entry_raw, snap.price);
-        // Defense in depth: a settle can never exceed the pre-locked worst case.
-        let payout = payout.min(round.max_payout);
+        settle_round(
+            &mut ctx.accounts.player,
+            &mut ctx.accounts.house,
+            &mut ctx.accounts.round,
+            &snap,
+        )
+    }
 
-        // Value movement (conserved across player + house, edge stays house-side):
-        //   player gains `payout`
-        //   house gains the forfeited `stake`, pays out `payout`, releases the lock
-        player.balance = player
-            .balance
-            .checked_add(payout)
-            .ok_or(RaiderError::MathOverflow)?;
-        house.balance = house
-            .balance
-            .checked_add(round.stake)
-            .ok_or(RaiderError::MathOverflow)?
-            .checked_sub(payout)
-            .ok_or(RaiderError::MathOverflow)?;
-        house.locked = house
-            .locked
-            .checked_sub(round.max_payout)
-            .ok_or(RaiderError::MathOverflow)?;
+    // ---- Task 10: commit + undelegate the session back to L1 ----------------
 
-        // Self-contained provable-fairness record (before flipping to settled).
-        round.exit_raw = snap.price;
-        round.exit_ts = snap.publish_time;
-        round.payout = payout;
-        round.outcome = outcome.code();
-        round.status = 2;
+    /// Commit the final state of all three co-delegated PDAs (Player, House,
+    /// Round) and undelegate them back to L1 atomically. After this lands, the
+    /// settled balances are durable on devnet base layer and `withdraw` can pull
+    /// real USDC against the player's restored on-L1 play balance.
+    pub fn commit_and_undelegate(ctx: Context<SessionCommit>) -> Result<()> {
+        MagicIntentBundleBuilder::new(
+            ctx.accounts.payer.to_account_info(),
+            ctx.accounts.magic_context.to_account_info(),
+            ctx.accounts.magic_program.to_account_info(),
+        )
+        .commit_and_undelegate(&[
+            ctx.accounts.player.to_account_info(),
+            ctx.accounts.house.to_account_info(),
+            ctx.accounts.round.to_account_info(),
+        ])
+        .build_and_invoke()?;
         Ok(())
     }
+}
+
+/// Shared settle body for `close` and `force_close`: settle at the given mark,
+/// conserve value across player + house (the 5% edge stays house-favorable
+/// inside the payout), release the house lock, and write the self-contained
+/// provable-fairness record into the Round. The caller is responsible for any
+/// authorization gate (owner check for `close`, deadline check for `force_close`).
+fn settle_round(
+    player: &mut Account<PlayerBalance>,
+    house: &mut Account<HouseBalance>,
+    round: &mut Account<Round>,
+    snap: &price::PriceSnapshot,
+) -> Result<()> {
+    require!(round.status == 1, RaiderError::NoOpenRound);
+
+    let (outcome, payout) =
+        settle::settle(round.dir, round.lev, round.stake, round.entry_raw, snap.price);
+    // Defense in depth: a settle can never exceed the pre-locked worst case.
+    let payout = payout.min(round.max_payout);
+
+    // Value movement (conserved across player + house, edge stays house-side):
+    //   player gains `payout`
+    //   house gains the forfeited `stake`, pays out `payout`, releases the lock
+    player.balance = player
+        .balance
+        .checked_add(payout)
+        .ok_or(RaiderError::MathOverflow)?;
+    house.balance = house
+        .balance
+        .checked_add(round.stake)
+        .ok_or(RaiderError::MathOverflow)?
+        .checked_sub(payout)
+        .ok_or(RaiderError::MathOverflow)?;
+    house.locked = house
+        .locked
+        .checked_sub(round.max_payout)
+        .ok_or(RaiderError::MathOverflow)?;
+
+    // Self-contained provable-fairness record (before flipping to settled).
+    round.exit_raw = snap.price;
+    round.exit_ts = snap.publish_time;
+    round.payout = payout;
+    round.outcome = outcome.code();
+    round.status = 2;
+    Ok(())
 }
 
 // Silence "unused" on STALE_SECS — it is consumed inside price::read_fresh.
@@ -603,6 +666,56 @@ pub struct CloseRound<'info> {
     /// CHECK: Pyth Lazer price feed account; validated by price::read_fresh().
     pub price_update: AccountInfo<'info>,
     pub player_authority: Signer<'info>,
+}
+
+// force_close has the SAME account shape as close EXCEPT the signer carries no
+// ownership constraint — `caller` is ANY Signer. The Player PDA is re-derived
+// from `player.owner` (the stored value), NOT from the signer, so a stranger
+// can settle the round but cannot redirect funds: payout is credited to the
+// round owner's PlayerBalance regardless of who calls. The deadline gate in the
+// instruction body is what authorizes the call.
+#[derive(Accounts)]
+pub struct ForceCloseRound<'info> {
+    #[account(
+        mut,
+        seeds = [PLAYER_SEED, player.owner.as_ref(), mint.key().as_ref()],
+        bump = player.bump,
+    )]
+    pub player: Account<'info, PlayerBalance>,
+    #[account(
+        mut,
+        seeds = [HOUSE_SEED, mint.key().as_ref()],
+        bump = house.bump,
+    )]
+    pub house: Account<'info, HouseBalance>,
+    #[account(
+        mut,
+        seeds = [ROUND_SEED, player.owner.as_ref()],
+        bump = round.bump,
+    )]
+    pub round: Account<'info, Round>,
+    pub mint: Account<'info, Mint>,
+    /// CHECK: Pyth Lazer price feed account; validated by price::read_fresh().
+    pub price_update: AccountInfo<'info>,
+    // Permissionless: any signer (no owner constraint) — the deadline is the gate.
+    pub caller: Signer<'info>,
+}
+
+// commit_and_undelegate lands the three co-delegated ledger PDAs' final ER state
+// back on L1 and returns ownership to the program. The `#[commit]` macro injects
+// the magic_context / magic_program accounts the bundle builder needs.
+#[commit]
+#[derive(Accounts)]
+pub struct SessionCommit<'info> {
+    #[account(mut)]
+    pub payer: Signer<'info>,
+    #[account(mut, seeds = [PLAYER_SEED, player.owner.as_ref(), mint.key().as_ref()], bump = player.bump)]
+    pub player: Account<'info, PlayerBalance>,
+    #[account(mut, seeds = [HOUSE_SEED, mint.key().as_ref()], bump = house.bump)]
+    pub house: Account<'info, HouseBalance>,
+    #[account(mut, seeds = [ROUND_SEED, player.owner.as_ref()], bump = round.bump)]
+    pub round: Account<'info, Round>,
+    pub mint: Account<'info, Mint>,
 }
 
 #[error_code]

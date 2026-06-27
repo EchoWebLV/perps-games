@@ -8,6 +8,12 @@ resolver = "2"
 overflow-checks = true
 lto = "fat"
 codegen-units = 1
+# Size-optimize the deployed .so. "s" is the strongest size level that still
+# builds cleanly on SBF (the more aggressive "z" provokes a stack-frame overflow
+# in crypto-common's [u128; 512] (de)serialize). Behavior-preserving codegen;
+# settle.rs unit tests + the e2e driver validate logic, and it keeps the deploy
+# buffer rent within the available devnet SOL.
+opt-level = "s"
 [profile.release.build-override]
 opt-level = 3
 incremental = false
