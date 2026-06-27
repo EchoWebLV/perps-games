@@ -307,7 +307,7 @@ pub fn read_fresh(price_acct: &AccountInfo, now_ts: i64) -> Result<PriceSnapshot
 ```rust
 #[error_code]
 pub enum RaiderError {
-    StalePrice, RoundAlreadyOpen, NoOpenRound, InsufficientPlayerBalance,
+    StalePrice, BadPrice, RoundAlreadyOpen, NoOpenRound, InsufficientPlayerBalance,
     HouseUndercapitalized, BadLeverage, NotOwner, NotYetExpired, MathOverflow,
 }
 
@@ -409,6 +409,7 @@ pub fn open(ctx: Context<OpenRound>, dir: i8, lev: u32, stake: u64) -> Result<()
     require!(dir == 1 || dir == -1, RaiderError::BadLeverage);
     let now = Clock::get()?.unix_timestamp;
     let snap = price::read_fresh(&ctx.accounts.price_update, now)?;
+    require!(snap.price > 0, RaiderError::BadPrice); // entry is a divisor at close — never store <= 0 (settle::equity_fp would div-by-zero)
     let (player, house, round) = (&mut ctx.accounts.player, &mut ctx.accounts.house, &mut ctx.accounts.round);
     require!(round.status != 1, RaiderError::RoundAlreadyOpen);
     require!(player.balance >= stake, RaiderError::InsufficientPlayerBalance);
@@ -470,7 +471,7 @@ it("close settles at exit, conserves value, and is recomputable off-chain", asyn
   assert.equal(await sumBalances(), before, "value conserved across player+house"); // CONSERVATION
 });
 ```
-Implement `settleTs(...)` as an exact integer mirror of `settle.rs` in the test file (the proof that anyone can recompute).
+Implement `settleTs(...)` as an exact integer mirror of `settle.rs` in the test file (the proof that anyone can recompute). **CRITICAL (review finding): write it in `BigInt`, NOT by calling the float `@perps/engine` `payoutOf`/`Math.floor`.** The float engine can be off-by-one vs the integer math on IEEE-754 boundaries (a product landing on `…816.9999998`), and the on-chain Rust integer result is the *correct* one — so a float mirror would assert against the wrong number and spuriously fail. Mirror `settle.rs`'s exact i128/u128 truncating ops in `BigInt`.
 
 - [ ] **Step 3: Build + deploy + run** — Expected: PASS, both asserts green.
 
