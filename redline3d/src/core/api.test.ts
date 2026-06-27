@@ -58,6 +58,55 @@ describe("createApi", () => {
     expect(calls[0].init.headers["x-dev-user"]).toBeUndefined();
   });
 
+  it("clears a stale bearer token and retries once when the server rejects the token", async () => {
+    const calls: any[] = [];
+    let token = "stale";
+    const auth = {
+      ready: async () => {},
+      userId: () => "u",
+      authHeaders: async () => ({ authorization: `Bearer ${token}` }),
+      logout: async () => { token = "fresh"; },
+    };
+    const api = createApi({
+      baseUrl: "http://x",
+      auth,
+      fetch: async (url, init) => {
+        calls.push({ url: String(url), init: init ?? {} });
+        const header = (init?.headers as Record<string, string>).authorization;
+        if (header === "Bearer stale") return res(401, { error: "invalid_token" });
+        return res(200, { userId: "u", balance: 100, cars: [], openRoundId: null });
+      },
+    });
+
+    await expect(api.me()).resolves.toMatchObject({ balance: 100 });
+
+    expect(calls.map((call) => call.init.headers.authorization)).toEqual(["Bearer stale", "Bearer fresh"]);
+  });
+
+  it("does not retry application-level 401 responses", async () => {
+    let calls = 0;
+    const auth = {
+      ready: async () => {},
+      userId: () => "u",
+      authHeaders: async () => ({ authorization: "Bearer valid" }),
+      logout: async () => { throw new Error("must_not_logout"); },
+    };
+    const api = createApi({
+      baseUrl: "http://x",
+      auth,
+      fetch: async () => {
+        calls++;
+        return res(401, { error: "invalid_wallet_signature" });
+      },
+    });
+
+    await expect(api.bindWallet({ challenge: "c", signatureBase58: "s" })).rejects.toMatchObject({
+      code: "unauthorized",
+      bodyError: "invalid_wallet_signature",
+    });
+    expect(calls).toBe(1);
+  });
+
   it("aborts a hung request after the timeout and surfaces a network ApiError", async () => {
     // a fetch that never settles on its own — only the abort signal can end it (a stalled connection)
     const hangFetch = (_url: any, init: any) =>

@@ -49,7 +49,13 @@ export interface Api {
   walletBalance(): Promise<WalletBalanceResult>;
 }
 
-export interface ApiOpts { fetch?: typeof fetch; baseUrl?: string; auth?: Pick<AuthProvider, "authHeaders">; userId?: string; timeoutMs?: number; }
+export interface ApiOpts {
+  fetch?: typeof fetch;
+  baseUrl?: string;
+  auth?: Pick<AuthProvider, "authHeaders" | "logout">;
+  userId?: string;
+  timeoutMs?: number;
+}
 
 export function createApi(opts: ApiOpts = {}): Api {
   const doFetch = opts.fetch ?? globalThis.fetch.bind(globalThis);
@@ -61,7 +67,17 @@ export function createApi(opts: ApiOpts = {}): Api {
   const headers = async (): Promise<Record<string, string>> =>
     opts.auth ? await opts.auth.authHeaders() : { "x-dev-user": opts.userId ?? getDevUserId() };
 
-  async function call<T>(method: "GET" | "POST", path: string, body?: unknown, timeoutOverrideMs?: number): Promise<T> {
+  function shouldRefreshAuth(status: number, bodyError?: string): boolean {
+    return status === 401 && (bodyError === "invalid_token" || bodyError === "unauthorized");
+  }
+
+  async function call<T>(
+    method: "GET" | "POST",
+    path: string,
+    body?: unknown,
+    timeoutOverrideMs?: number,
+    retriedAuth = false,
+  ): Promise<T> {
     const ctrl = new AbortController();
     const timer = setTimeout(() => ctrl.abort(), timeoutOverrideMs ?? timeoutMs);
     try {
@@ -79,6 +95,10 @@ export function createApi(opts: ApiOpts = {}): Api {
       if (!r.ok) {
         let err: string | undefined;
         try { err = (await r.json())?.error; } catch { /* ignore */ }
+        if (!retriedAuth && opts.auth?.logout && shouldRefreshAuth(r.status, err)) {
+          await opts.auth.logout();
+          return call<T>(method, path, body, timeoutOverrideMs, true);
+        }
         throw new ApiError(codeFor(r.status, err), r.status, err);
       }
       return (await r.json()) as T;
