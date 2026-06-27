@@ -41,6 +41,12 @@ impl HouseBalance {
 }
 
 // status: 0 idle, 1 open, 2 settled
+//
+// The exit fields below are written at `close` so a settled Round is a
+// SELF-CONTAINED proof: anyone can recompute payout from the stored
+// (dir, lev, stake, entry_raw, exit_raw) with the same fixed-point math in
+// settle.rs — no racy live-feed re-read required to verify fairness.
+// outcome: 0 cashout, 1 cap, 2 liq.
 #[account]
 pub struct Round {
     pub owner: Pubkey,
@@ -54,7 +60,18 @@ pub struct Round {
     pub deadline_ts: i64,
     pub status: u8,
     pub bump: u8,
+    // --- settlement record (written at close; zero while open/idle) ---
+    pub exit_raw: i64,
+    pub exit_ts: i64,
+    pub payout: u64,
+    pub outcome: u8,
 }
 impl Round {
-    pub const SIZE: usize = 8 + 32 + 1 + 4 + 8 + 8 + 4 + 8 + 8 + 8 + 1 + 1;
+    // disc(8) + owner(32) + dir(1) + lev(4) + stake(8) + entry_raw(8)
+    //  + entry_expo(4) + entry_ts(8) + max_payout(8) + deadline_ts(8)
+    //  + status(1) + bump(1)                                  = 91 (base)
+    //  + exit_raw(8) + exit_ts(8) + payout(8) + outcome(1)    = 25 (record)
+    //  = 116 total.
+    pub const SIZE: usize =
+        8 + 32 + 1 + 4 + 8 + 8 + 4 + 8 + 8 + 8 + 1 + 1 + 8 + 8 + 8 + 1;
 }

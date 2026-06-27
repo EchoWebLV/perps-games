@@ -25,6 +25,17 @@ pub enum Outcome {
     Liq,
 }
 
+impl Outcome {
+    /// Stable wire code stored in `Round.outcome`: 0 cashout / 1 cap / 2 liq.
+    pub fn code(self) -> u8 {
+        match self {
+            Outcome::Cashout => 0,
+            Outcome::Cap => 1,
+            Outcome::Liq => 2,
+        }
+    }
+}
+
 /// equity_fp = SCALE + dir*lev*(exit/entry - 1), clamped >= 0. Same feed => expo cancels.
 pub fn equity_fp(dir: i8, lev: u32, entry_raw: i64, exit_raw: i64) -> i128 {
     let ratio = (exit_raw as i128) * SCALE / (entry_raw as i128);

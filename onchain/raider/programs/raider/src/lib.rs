@@ -11,7 +11,7 @@ pub mod settle;
 pub mod state;
 
 use state::{HouseBalance, PlayerBalance, Round};
-use state::{HOUSE_SEED, MAX_ROUND_SECS, PLAYER_SEED, ROUND_SEED, VAULT_SEED};
+use state::{HOUSE_SEED, MAX_ROUND_SECS, PLAYER_SEED, ROUND_SEED, STALE_SECS, VAULT_SEED};
 
 // ===========================================================================
 // PROVEN PLUMBING PATTERN — Task 2 (two-account co-delegation), GREEN on devnet
@@ -215,7 +215,168 @@ pub mod raider {
         )?;
         Ok(())
     }
+
+    // ---- Task 7: fund the house bankroll (L1, pre-delegation) ---------------
+
+    /// Add real USDC capital to the house bankroll. Transfers `amount` from the
+    /// funder's ATA into the same program-owned vault `buy_in` uses, then credits
+    /// `house.balance`. Permissionless: adding capital is benign (it only ever
+    /// increases the house's free balance, never moves value out).
+    ///
+    /// MUST run on L1 BEFORE `delegate_session` — once the HouseBalance PDA is
+    /// delegated to the ER, L1 can no longer mutate it. Without this, `open`
+    /// always rejects with `HouseUndercapitalized` (init_house leaves balance=0).
+    pub fn fund_house(ctx: Context<FundHouse>, amount: u64) -> Result<()> {
+        token::transfer(
+            CpiContext::new(
+                ctx.accounts.token_program.to_account_info(),
+                Transfer {
+                    from: ctx.accounts.funder_token.to_account_info(),
+                    to: ctx.accounts.vault_token.to_account_info(),
+                    authority: ctx.accounts.funder.to_account_info(),
+                },
+            ),
+            amount,
+        )?;
+        let house = &mut ctx.accounts.house;
+        house.balance = house
+            .balance
+            .checked_add(amount)
+            .ok_or(RaiderError::MathOverflow)?;
+        Ok(())
+    }
+
+    // ---- Task 7: open a round on the ER -------------------------------------
+
+    /// Open a round inside the ER: snapshot the live Lazer entry price, debit the
+    /// player's stake, and PRE-LOCK the house's maximum possible payout so the
+    /// house is provably solvent for this round before any price moves.
+    pub fn open(ctx: Context<OpenRound>, dir: i8, lev: u32, stake: u64) -> Result<()> {
+        require!(
+            lev >= settle::RMIN && lev <= settle::RMAX,
+            RaiderError::BadLeverage
+        );
+        require!(dir == 1 || dir == -1, RaiderError::BadLeverage);
+
+        let now = Clock::get()?.unix_timestamp;
+        let snap = price::read_fresh(&ctx.accounts.price_update, now)?;
+        // entry_raw is a DIVISOR in settle::equity_fp at close — a <= 0 entry would
+        // div-by-zero / invert the position. Never store a non-positive entry.
+        require!(snap.price > 0, RaiderError::BadPrice);
+
+        // Phase 1: the signing authority must be the player who owns the balance.
+        require_keys_eq!(
+            ctx.accounts.player.owner,
+            ctx.accounts.player_authority.key(),
+            RaiderError::NotOwner
+        );
+
+        let player = &mut ctx.accounts.player;
+        let house = &mut ctx.accounts.house;
+        let round = &mut ctx.accounts.round;
+
+        require!(round.status != 1, RaiderError::RoundAlreadyOpen);
+        require!(
+            player.balance >= stake,
+            RaiderError::InsufficientPlayerBalance
+        );
+
+        let max_payout = settle::max_payout(stake);
+        // House must have at least max_payout in FREE (unlocked) balance.
+        require!(
+            house.balance.saturating_sub(house.locked) >= max_payout,
+            RaiderError::HouseUndercapitalized
+        );
+
+        // Move value: stake leaves the player; the house pre-locks the worst case.
+        player.balance = player
+            .balance
+            .checked_sub(stake)
+            .ok_or(RaiderError::MathOverflow)?;
+        house.locked = house
+            .locked
+            .checked_add(max_payout)
+            .ok_or(RaiderError::MathOverflow)?;
+
+        round.owner = player.owner;
+        round.dir = dir;
+        round.lev = lev;
+        round.stake = stake;
+        round.entry_raw = snap.price;
+        round.entry_expo = snap.exponent;
+        round.entry_ts = snap.publish_time;
+        round.max_payout = max_payout;
+        round.deadline_ts = now + MAX_ROUND_SECS;
+        round.status = 1;
+        // Clear any stale settlement record from a previous round on this PDA.
+        round.exit_raw = 0;
+        round.exit_ts = 0;
+        round.payout = 0;
+        round.outcome = 0;
+        Ok(())
+    }
+
+    // ---- Task 8: close a round on the ER ------------------------------------
+
+    /// Close the open round at the live Lazer exit price: settle with the
+    /// fixed-point engine, credit the player, and conserve value across the
+    /// player+house ledgers (the 5% edge stays inside the house-favorable
+    /// payout). The settlement record is written into the Round so the result
+    /// is deterministically recomputable from on-chain data alone.
+    pub fn close(ctx: Context<CloseRound>) -> Result<()> {
+        let now = Clock::get()?.unix_timestamp;
+        let snap = price::read_fresh(&ctx.accounts.price_update, now)?;
+
+        // Phase 1: only the owner closes their own round (force_close = Task 9
+        // is the permissionless time-bounded variant).
+        require_keys_eq!(
+            ctx.accounts.player.owner,
+            ctx.accounts.player_authority.key(),
+            RaiderError::NotOwner
+        );
+
+        let player = &mut ctx.accounts.player;
+        let house = &mut ctx.accounts.house;
+        let round = &mut ctx.accounts.round;
+
+        require!(round.status == 1, RaiderError::NoOpenRound);
+
+        let (outcome, payout) =
+            settle::settle(round.dir, round.lev, round.stake, round.entry_raw, snap.price);
+        // Defense in depth: a settle can never exceed the pre-locked worst case.
+        let payout = payout.min(round.max_payout);
+
+        // Value movement (conserved across player + house, edge stays house-side):
+        //   player gains `payout`
+        //   house gains the forfeited `stake`, pays out `payout`, releases the lock
+        player.balance = player
+            .balance
+            .checked_add(payout)
+            .ok_or(RaiderError::MathOverflow)?;
+        house.balance = house
+            .balance
+            .checked_add(round.stake)
+            .ok_or(RaiderError::MathOverflow)?
+            .checked_sub(payout)
+            .ok_or(RaiderError::MathOverflow)?;
+        house.locked = house
+            .locked
+            .checked_sub(round.max_payout)
+            .ok_or(RaiderError::MathOverflow)?;
+
+        // Self-contained provable-fairness record (before flipping to settled).
+        round.exit_raw = snap.price;
+        round.exit_ts = snap.publish_time;
+        round.payout = payout;
+        round.outcome = outcome.code();
+        round.status = 2;
+        Ok(())
+    }
 }
+
+// Silence "unused" on STALE_SECS — it is consumed inside price::read_fresh.
+#[allow(dead_code)]
+const _STALE_SECS_USED: i64 = STALE_SECS;
 
 // ===========================================================================
 // Account contexts
@@ -355,9 +516,94 @@ pub struct DelegateSession<'info> {
     pub round: AccountInfo<'info>,
 }
 
-// Silence "unused" on the liveness backstop constant until `open` (Task 7) lands.
-#[allow(dead_code)]
-const _MAX_ROUND_SECS_USED: i64 = MAX_ROUND_SECS;
+#[derive(Accounts)]
+pub struct FundHouse<'info> {
+    #[account(mut)]
+    pub funder: Signer<'info>,
+    pub mint: Account<'info, Mint>,
+    #[account(
+        mut,
+        seeds = [HOUSE_SEED, mint.key().as_ref()],
+        bump = house.bump,
+    )]
+    pub house: Account<'info, HouseBalance>,
+    #[account(
+        mut,
+        constraint = funder_token.mint == mint.key() @ RaiderError::BadPrice,
+        constraint = funder_token.owner == funder.key() @ RaiderError::NotOwner,
+    )]
+    pub funder_token: Account<'info, TokenAccount>,
+    #[account(
+        seeds = [VAULT_SEED, mint.key().as_ref()],
+        bump,
+    )]
+    /// CHECK: vault authority PDA (token account owner)
+    pub vault_authority: UncheckedAccount<'info>,
+    #[account(
+        mut,
+        associated_token::mint = mint,
+        associated_token::authority = vault_authority,
+    )]
+    pub vault_token: Account<'info, TokenAccount>,
+    pub token_program: Program<'info, Token>,
+}
+
+// open/close mutate the three CO-DELEGATED ledger PDAs together inside the ER.
+// Per the Task-2 proven pattern they are declared as NORMAL `Account<'info, T>`
+// (the `del`/AccountInfo form is ONLY for the delegate context) — Anchor
+// re-serializes them and `commit_and_undelegate` lands the new state on L1.
+#[derive(Accounts)]
+pub struct OpenRound<'info> {
+    #[account(
+        mut,
+        seeds = [PLAYER_SEED, player.owner.as_ref(), mint.key().as_ref()],
+        bump = player.bump,
+    )]
+    pub player: Account<'info, PlayerBalance>,
+    #[account(
+        mut,
+        seeds = [HOUSE_SEED, mint.key().as_ref()],
+        bump = house.bump,
+    )]
+    pub house: Account<'info, HouseBalance>,
+    #[account(
+        mut,
+        seeds = [ROUND_SEED, player.owner.as_ref()],
+        bump = round.bump,
+    )]
+    pub round: Account<'info, Round>,
+    pub mint: Account<'info, Mint>,
+    /// CHECK: Pyth Lazer price feed account; validated by price::read_fresh().
+    pub price_update: AccountInfo<'info>,
+    // Phase 1 = the owner; session-key-ready slot for later phases.
+    pub player_authority: Signer<'info>,
+}
+
+#[derive(Accounts)]
+pub struct CloseRound<'info> {
+    #[account(
+        mut,
+        seeds = [PLAYER_SEED, player.owner.as_ref(), mint.key().as_ref()],
+        bump = player.bump,
+    )]
+    pub player: Account<'info, PlayerBalance>,
+    #[account(
+        mut,
+        seeds = [HOUSE_SEED, mint.key().as_ref()],
+        bump = house.bump,
+    )]
+    pub house: Account<'info, HouseBalance>,
+    #[account(
+        mut,
+        seeds = [ROUND_SEED, player.owner.as_ref()],
+        bump = round.bump,
+    )]
+    pub round: Account<'info, Round>,
+    pub mint: Account<'info, Mint>,
+    /// CHECK: Pyth Lazer price feed account; validated by price::read_fresh().
+    pub price_update: AccountInfo<'info>,
+    pub player_authority: Signer<'info>,
+}
 
 #[error_code]
 pub enum RaiderError {
