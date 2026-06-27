@@ -65,6 +65,22 @@ describe("requireUser", () => {
     await a.close();
   });
 
+  it("rejects a valid bearer when its user row no longer exists", async () => {
+    const a = app({
+      sessionAuth: {
+        issueAnonymous: async () => ({ token: "unused", userId: "unused" }),
+        issueForUser: async (userId: string) => ({ token: "unused", userId }),
+        verifyToken: async () => "00000000-0000-0000-0000-000000000000",
+      },
+    });
+
+    const r = await a.inject({ method: "GET", url: "/who", headers: { authorization: "Bearer valid-orphan" } });
+
+    expect(r.statusCode).toBe(401);
+    expect(r.json().error).toBe("invalid_token");
+    await a.close();
+  });
+
   it("namespace isolation: x-dev-user 'did:wallet:abc' is REJECTED 401 (colon fails validation)", async () => {
     const a = app({ devAuth: true });
     const r = await a.inject({ method: "GET", url: "/who", headers: { "x-dev-user": "did:wallet:abc" } });

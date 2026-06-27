@@ -26,6 +26,11 @@ export function makeRequireUser(deps: RequireUserDeps) {
         await reply.code(401).send({ error: "invalid_token" });
         return;
       }
+      const user = await deps.users.get(userId);
+      if (!user) {
+        await reply.code(401).send({ error: "invalid_token" });
+        return;
+      }
       req.userId = userId;
       return;
     }

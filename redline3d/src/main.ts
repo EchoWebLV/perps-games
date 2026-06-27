@@ -46,6 +46,7 @@ import { createWalletPortPreloader, loadSolanaWalletPort, type SolanaWalletPort 
 import { connectAndBindWallet } from "./core/wallet-binding";
 import { sweepToPlayBalance } from "./core/play-funding";
 import { ensureWalletConnection, hydrateBoundWallet, isRecoverableWalletBalanceError, submitDeposit } from "./core/wallet-connection";
+import { createReconnectLoop } from "./core/session-reconnect";
 
 const canvas = document.getElementById("gl") as HTMLCanvasElement;
 const hudRoot = document.getElementById("hud") as HTMLElement;
@@ -78,10 +79,11 @@ const useDevAuth = (import.meta.env?.VITE_AUTH as string) === "dev";
 const auth: AuthProvider = useDevAuth ? createDevAuth() : createSessionAuth();
 
 const api = createApi({ auth });
+const sessionReconnect = createReconnectLoop();
 // Sign-in is now the anonymous client session. `signedIn` flips true once the session-backed
 // identity loads and /v1/me succeeds.
 let signedIn = false;
-function triggerSignIn() { void initSession(); }
+function triggerSignIn() { void startSessionInit(); }
 const roundSync = createRoundSync({ api, clock: { now: () => performance.now() }, store: { get: (k) => { try { return localStorage.getItem(k); } catch { return null; } }, set: (k, v) => { try { localStorage.setItem(k, v); } catch {} } } });
 let balance = 0;                   // displayed cash balance, sourced from the connected wallet when available
 let serverBalance = 0;             // hidden round-accounting balance used by the existing server engine
@@ -260,6 +262,22 @@ hud.onWallet(() => { if (engine.getPhase() !== "live") walletUI.open(); });
 
 // Session init: seed the server-owned balance + settle any dangling round once the client session is
 // ready. Dev auth behaves the same through the narrower auth interface.
+function markSessionDisconnected() {
+  connected = false;
+  signedIn = false;
+  hud.setStatus("Can't reach the server. Reconnecting...");
+  sessionReconnect.schedule(() => { void startSessionInit(); });
+}
+
+async function startSessionInit() {
+  try {
+    await auth.ready();
+    await initSession();
+  } catch {
+    markSessionDisconnected();
+  }
+}
+
 async function initSession() {
   if (signedIn) return;
   try {
@@ -280,12 +298,13 @@ async function initSession() {
     serverBalance = refreshed.balance;
     try { await refreshWalletBalance(); } catch { /* keep the last wallet read */ }
     syncDisplayedBalance(); walletUI.setBalance(balance);
+    sessionReconnect.reset();
+    hud.setStatus("");
   } catch {
-    connected = false;
-    hud.setStatus("Can't reach the server. Reconnecting...");
+    markSessionDisconnected();
   }
 }
-void auth.ready().then(initSession);
+void startSessionInit();
 
 // car picker — swap the GLB model live + apply the card's special ability
 let ability: CarAbility | undefined;
