@@ -181,6 +181,7 @@ pub mod raider {
         r.entry_raw = 0;
         r.entry_expo = 0;
         r.entry_ts = 0;
+        r.banked = 0;
         r.max_payout = 0;
         r.deadline_ts = 0;
         r.status = 0; // idle
@@ -311,6 +312,7 @@ pub mod raider {
         round.entry_raw = snap.price;
         round.entry_expo = snap.exponent;
         round.entry_ts = snap.publish_time;
+        round.banked = 0;
         round.max_payout = max_payout;
         round.deadline_ts = now + MAX_ROUND_SECS;
         round.status = 1;
