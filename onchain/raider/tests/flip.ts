@@ -58,6 +58,12 @@ const STAKE = 1_000_000; // 1 USDC
 // getSignatureStatuses until confirmed.
 async function sendIxHttp(conn, methodBuilder, signer) {
   const tx = await methodBuilder.transaction();
+  // delegate_session co-delegates 3 PDAs and is near the default 200k CU limit;
+  // cold-account loading can push it over (ComputationalBudgetExceeded). Raise it
+  // so the heavy delegate tx lands deterministically.
+  tx.instructions.unshift(
+    anchor.web3.ComputeBudgetProgram.setComputeUnitLimit({ units: 400_000 })
+  );
   tx.feePayer = signer.publicKey;
   tx.recentBlockhash = (await conn.getLatestBlockhash("confirmed")).blockhash;
   tx.sign(signer);
@@ -110,7 +116,8 @@ function settleSeq(stake, dir0, lev0, entry0, actions, exitRaw) {
     entry = BigInt(entry0);
   for (const a of actions) {
     const t = terminal(equityFpB(b, dir, lev, entry, BigInt(a.priceRaw)));
-    if (t.code !== 0) return { outcome: t.code, payout: payoutFp(BigInt(stake), t.settled) };
+    if (t.code !== 0)
+      return { outcome: t.code, payout: payoutFp(BigInt(stake), t.settled) };
     b = rebankFp(b, dir, lev, entry, BigInt(a.priceRaw));
     entry = BigInt(a.priceRaw);
     if (a.kind === "flip") dir = BigInt(a.dir);
@@ -137,7 +144,13 @@ describe("raider — flip mid-round parity (terminal-first rebank, BigInt sequen
     const conn = baseConn;
 
     // ---- single-session setup (mint/house/buy_in/init_round/delegate) ----
-    const mint = await createMint(conn, funder.payer, funder.publicKey, null, 6);
+    const mint = await createMint(
+      conn,
+      funder.payer,
+      funder.publicKey,
+      null,
+      6
+    );
     const [housePda] = PublicKey.findProgramAddressSync(
       [Buffer.from("house"), mint.toBuffer()],
       program.programId
@@ -146,7 +159,11 @@ describe("raider — flip mid-round parity (terminal-first rebank, BigInt sequen
       [Buffer.from("vault"), mint.toBuffer()],
       program.programId
     );
-    const vaultToken = getAssociatedTokenAddressSync(mint, vaultAuthority, true);
+    const vaultToken = getAssociatedTokenAddressSync(
+      mint,
+      vaultAuthority,
+      true
+    );
 
     await program.methods
       .initHouse()

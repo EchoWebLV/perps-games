@@ -57,6 +57,12 @@ const STAKE = 1_000_000; // 1 USDC
 // getSignatureStatuses until confirmed.
 async function sendIxHttp(conn, methodBuilder, signer) {
   const tx = await methodBuilder.transaction();
+  // delegate_session co-delegates 3 PDAs and is near the default 200k CU limit;
+  // cold-account loading can push it over (ComputationalBudgetExceeded). Raise it
+  // so the heavy delegate tx lands deterministically.
+  tx.instructions.unshift(
+    anchor.web3.ComputeBudgetProgram.setComputeUnitLimit({ units: 400_000 })
+  );
   tx.feePayer = signer.publicKey;
   tx.recentBlockhash = (await conn.getLatestBlockhash("confirmed")).blockhash;
   tx.sign(signer);
