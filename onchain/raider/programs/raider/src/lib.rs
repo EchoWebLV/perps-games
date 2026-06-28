@@ -495,6 +495,15 @@ pub mod raider {
 
     /// Change leverage mid-round (owner-authority). Same terminal-first + rebank as
     /// `flip`, but re-anchors at the new leverage instead of reversing direction.
+    ///
+    /// A SAME-leverage `new_lev` (e.g. lever(currentLev)) is a LEGAL re-anchor — it
+    /// locks the current segment into `banked` and resets `entry_raw`, with `lev`
+    /// unchanged — NOT an error. Mirrors the off-chain engine's `applyAction` lever
+    /// (packages/engine/src/settle.ts: `{ ...rebank(pos), lev }`, no same-leverage
+    /// restriction). It is conservation-safe (the close payout is still cap-clamped)
+    /// and equity / liq-distance neutral at the lever instant: the terminal-first
+    /// `fires` check settles any real liq BEFORE re-anchoring, so a re-anchor can
+    /// never let a position escape a liquidation.
     pub fn lever(ctx: Context<CloseRound>, new_lev: u32) -> Result<()> {
         require!(
             new_lev >= settle::RMIN && new_lev <= settle::RMAX,
@@ -541,6 +550,7 @@ pub mod raider {
             banked: round.banked,
             dir: round.dir,
             lev: round.lev,
+            // entry_raw == snap.price here, so the new-segment term cancels: equity_fp == SCALE + banked.
             equity_fp: settle::equity_fp(round.banked, round.dir, round.lev, round.entry_raw, snap.price),
             outcome: 0,
             payout: 0,
