@@ -22,7 +22,13 @@ async function runKeeper(programER, accounts, signer, opts = {}) {
         .signers([signer])
         .rpc({ skipPreflight: true });
     } catch (e) {
-      // heartbeat no-op error / transient race — keep polling status.
+      // A tick on a round that just settled out from under us (status != 1) errors
+      // with NoOpenRound — that's the expected heartbeat race, swallow it. Anything
+      // else (StalePrice/BadPrice/send failure) is surfaced so it isn't mistaken for
+      // a no-op. Behavior is unchanged: we keep polling status either way.
+      if (e?.message && !/NoOpenRound/.test(e.message)) {
+        console.log("tick transient:", e.message);
+      }
     }
     await sleep(intervalMs);
   }

@@ -454,12 +454,16 @@ pub mod raider {
     }
 }
 
-/// Shared settle body for `close` and `force_close`: settle at the given mark,
-/// conserve value across player + house (the 5% edge stays house-favorable
+/// Shared settle body for `close`, `force_close`, and `tick`: settle at the given
+/// mark, conserve value across player + house (the 5% edge stays house-favorable
 /// inside the payout), release the house lock, write the self-contained
-/// provable-fairness record into the Round, and emit a RoundEvent. The caller
-/// is responsible for any authorization gate (owner check for `close`, deadline
-/// check for `force_close`).
+/// provable-fairness record into the Round, and emit a RoundEvent. The caller is
+/// responsible for the authorization/eligibility gate before invoking this:
+///   - `close`       → owner check (`player.owner == player_authority`);
+///   - `force_close` → deadline check (`now >= deadline_ts`);
+///   - `tick`        → `settle::fires()` guard (the callee returns early on false,
+///                     so this body only runs once a terminal or the time-cap has
+///                     actually fired at the live price).
 fn settle_round(
     player: &mut Account<PlayerBalance>,
     house: &mut Account<HouseBalance>,
@@ -763,8 +767,16 @@ pub struct CloseRound<'info> {
 // ownership constraint — `caller` is ANY Signer. The Player PDA is re-derived
 // from `player.owner` (the stored value), NOT from the signer, so a stranger
 // can settle the round but cannot redirect funds: payout is credited to the
-// round owner's PlayerBalance regardless of who calls. The deadline gate in the
-// instruction body is what authorizes the call.
+// round owner's PlayerBalance regardless of who calls.
+//
+// TWO instructions reuse this permissionless context, each with its OWN
+// eligibility gate in the instruction body (the context itself authorizes nobody):
+//   - `force_close` → the deadline gate (`now >= deadline_ts`) authorizes the call;
+//   - `tick`        → the `settle::fires()` guard authorizes settlement (a terminal
+//                     or the time-cap must have fired at the live price; otherwise
+//                     it is a no-op heartbeat).
+// In BOTH cases the program reads the authenticated price and renders the verdict,
+// so a permissionless caller can never choose an outcome.
 #[derive(Accounts)]
 pub struct ForceCloseRound<'info> {
     #[account(

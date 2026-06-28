@@ -55,11 +55,16 @@ const VALIDATOR = new PublicKey(
 );
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const STAKE = 1_000_000;
-// Keeper window per attempt + how many fresh windows to try. Sized to the DEPLOYED
-// round time-cap: with the test-short-deadline (8s) build, ~60 ticks @200ms ≈ 12s
-// covers the window; with the default (60s) build, ~250 ticks ≈ 50s lets a slower
-// (calm-market) ~0.04% move liquidate before the 60s time-cap. At 2000x a liq needs
-// only ~0.04% adverse, so the 60s build reliably liquidates even in a calm market.
+// Keeper window per attempt + how many fresh windows to try. MAX_TICKS (@200ms each)
+// MUST be sized to the DEPLOYED round time-cap so the keeper observes a full window
+// (and re-opens AFTER it settles). Pick MAX_TICKS via env to match the build:
+//   - test-short-deadline (8s):  MAX_TICKS=60   (60*200ms = 12s > 8s)
+//   - default (60s):             MAX_TICKS=300  (300*200ms = 60s)
+//   - test-long-deadline (180s): MAX_TICKS=900  (900*200ms = 180s)
+// On a calm, mean-reverting feed a 2000x liq (needs only ~0.04% adverse) can take
+// >60s of HELD-entry drift to cross, so the long-deadline build is what reliably
+// liquidates today. NOTE: under-sizing MAX_TICKS leaves the round still open
+// (status 1) when the loop re-opens → `RoundAlreadyOpen`; size it to the cap.
 const MAX_TICKS = Number(process.env.MAX_TICKS || 250);
 const ATTEMPTS = Number(process.env.LIQ_ATTEMPTS || 6);
 
@@ -381,7 +386,7 @@ describe("raider — continuous 2000x liquidation via tick (keeper-driven)", fun
         `attempt ${attempt}: long=${lr.outcome}/${lr.status} short=${sr.outcome}/${sr.status}` +
           (liquidated.length
             ? "  <-- LIQUIDATED via tick"
-            : "  (both time-capped; re-opening)")
+            : "  (no liq this attempt; re-opening)")
       );
       if (liquidated.length >= 1) {
         liqAttempt = attempt;
@@ -395,7 +400,7 @@ describe("raider — continuous 2000x liquidation via tick (keeper-driven)", fun
     );
     assert.ok(
       liquidated.length >= 1,
-      `no 2000x side liquidated via tick in ${ATTEMPTS} attempts — the live feed never moved ~0.04% inside an 8s window (calm market; rerun). last: long=${lr.outcome}/${lr.status} short=${sr.outcome}/${sr.status}`
+      `no 2000x side liquidated via tick in ${ATTEMPTS} attempts — the live feed never moved ~0.04% inside the round window (calm market; rerun, or use a longer-deadline build). last: long=${lr.outcome}/${lr.status} short=${sr.outcome}/${sr.status}`
     );
     for (const r of liquidated) {
       assert.equal(r.payout.toString(), "0", "a liquidation pays 0");
