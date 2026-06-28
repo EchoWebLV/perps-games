@@ -36,6 +36,75 @@ player PDA is rejected by the seeds/owner constraints.
 
 ---
 
+## 🔴→🟢 Security fix — the price feed was UNAUTHENTICATED (CRITICAL, now closed)
+
+**The bug (confirmed by audit, reproduced, fixed).** `price::read_fresh` validated
+ONLY `publish_time` staleness — it never checked the price account's `owner` or the
+decoded `feed_id`, and `price_update` was declared as a bare `AccountInfo` (with a
+false `/// CHECK: validated by read_fresh()` comment) in `OpenRound`, `CloseRound`,
+and `ForceCloseRound`. An attacker could pass **any** account whose bytes decode to a
+`PriceUpdateV2` with an attacker-chosen price + a fresh timestamp, force a `Cap`
+outcome, and drain the house (the 23.75× pre-lock) → withdraw real USDC.
+`force_close` being permissionless made **any abandoned round** drainable. This
+defeated both pillars: provable-fairness and house-solvency.
+
+**The fix (defense-in-depth, deployed devnet upgrade `2UehD6ZTMv4…`):**
+
+1. **Feed account pinned (primary, airtight).** `pub const BTC_FEED = pubkey!("71wtTRDY8Gxgw56bXFt2oc6qeAbTxzStdNiC425Z51sr")`,
+   and `#[account(address = BTC_FEED)]` on `price_update` in OpenRound / CloseRound /
+   ForceCloseRound. An attacker simply cannot supply an account at a pubkey they don't
+   control — Anchor rejects with `ConstraintAddress` (2012) before the body runs.
+2. **Owner check in `read_fresh` (defense-in-depth).** `require!(price_acct.owner == &EXPECTED_FEED_OWNER, …)`
+   where `EXPECTED_FEED_OWNER = PriCems5tHihc6UDXDjzjeawomAwBduWMGAi8ZUjppd` — the Pyth
+   receiver program **as the feed is served INSIDE the ER**, where open/close actually
+   execute. (⚠️ KEY FINDING: the feed account has a DIFFERENT owner on L1 base devnet —
+   `DELeGGvXpWV2fqJUhqcF5ZSYMS4JTLjteaAMARRSaeSh`, the delegation program, because it's
+   delegated to the ER. Using the L1 owner would have broken the legitimate in-rollup
+   read. Verified live via `getAccountInfo` on `devnet.magicblock.app`.)
+3. **Future-dated guard.** `read_fresh` now rejects `publish_time > now + STALE_SECS`
+   in addition to the existing lower-bound staleness check.
+4. **feed_id assertion (bonus).** The parser now decodes `feed_id` and `read_fresh`
+   asserts it equals the BTC/USD `BTC_FEED_ID` (`59642ec3…`).
+5. New `RaiderError::UntrustedFeed` (6010) backs (2) and (4).
+
+**Proven CLOSED — `tests/feedauth.ts` (GREEN on the deployed fixed program):**
+opens a real round, then attempts BOTH `open` and `close` with a forged
+`price_update` (the SystemProgram id) — each **REJECTED with "An address constraint
+was violated"**. The SAME setup accepts the real BTC feed (open status=1, close
+settled status=2), proving no false-positive lock-out of the legitimate feed. The
+forged-feed `open` left the round idle and the house unlocked; the forged-feed `close`
+left the open round un-settled (never settled against a forged price).
+
+> **Prod-build note:** this fix was rebuilt + redeployed WITH `--features test-short-deadline`
+> (so `forceclose.ts` still works at the 8s deadline). **Production must rebuild WITHOUT it**
+> (`MAX_ROUND_SECS = 300`). The address pin / owner / future-date / feed_id checks are
+> independent of that feature.
+
+---
+
+## Closed coverage gaps (audit-flagged; Phase-2 machinery builds on these)
+
+- **LIQ outcome on-chain — `tests/liq.ts` (GREEN).** Opens a 2000× LONG and a 2000×
+  SHORT, polls the live Lazer feed until it drifts past a 0.06% safe margin of the liq
+  band (equity ≤ 0.2 at 2000× ⇒ ~0.04% adverse move), then closes both. Whichever side
+  is adverse settles **`outcome=liq` (2), `payout=0`**, `house.locked` released, value
+  conserved. Proven on devnet: a −0.068% BTC move liquidated the LONG (payout 0, locked
+  0, conserved total 28 750 000). CAP (+ceiling) is NOT deterministically forceable
+  against the live feed without a price backdoor we deliberately do NOT add — it stays
+  covered by the Rust unit `settle::tests::cap_clamp` + the `payout.min(max_payout)`
+  clamp in `settle_round`.
+- **Negative gates — `tests/gates.ts` (GREEN).** Deterministic rejections:
+  `open(lev=2001)` → `BadLeverage` (6006); `open(dir=0)` → `BadLeverage`;
+  double-open → `RoundAlreadyOpen` (6002); close-with-no-open-round → `NoOpenRound`
+  (6003); `withdraw` > play balance → `InsufficientPlayerBalance` (6004). Each verified
+  to reject AND leave state untouched (round idle / balance unchanged).
+- **Vault reconciliation — `tests/raider.ts` ASSERT 4b.** The real program-owned USDC
+  vault token balance must be ≥ `player.balance + house.balance` (the ledger can never
+  promise more USDC than is custodied). `house.locked` is a reservation OF
+  `house.balance`, not an extra claim, so it is not double-counted.
+
+---
+
 ## What ran (reproducible)
 
 - **Program id:** `FwUNcUaRbYGiWasHa6DA3xQaQJfZWCgH7UhDeBvoJcBv` (devnet; upgrade authority = `FP39ztVCx7FDPpou4mfPV6HyXoNVDRLEqZyvKkFgpCCM` / `lazer-probe`). ProgramData `ECky8yr4WTfpZveeKVV4s3jH14RfmEz8LsjFeAVAW2pM`.
@@ -67,8 +136,16 @@ player PDA is rejected by the seeds/owner constraints.
     npx ts-mocha -p ./tsconfig.json -t 1000000 tests/forceclose.ts
   ANCHOR_WALLET=~/.config/solana/lazer-probe.json BASE_RPC="$HELIUS" LAT_N=8 \
     npx ts-mocha -p ./tsconfig.json -t 2000000 tests/latency.ts
+  # security + coverage drivers (added with the feed-auth fix):
+  ANCHOR_WALLET=~/.config/solana/lazer-probe.json BASE_RPC="$HELIUS" \
+    npx ts-mocha -p ./tsconfig.json -t 1000000 tests/feedauth.ts   # forged feed REJECTED
+  ANCHOR_WALLET=~/.config/solana/lazer-probe.json BASE_RPC="$HELIUS" \
+    npx ts-mocha -p ./tsconfig.json -t 1000000 tests/liq.ts        # real on-chain 2000x LIQ
+  ANCHOR_WALLET=~/.config/solana/lazer-probe.json BASE_RPC="$HELIUS" \
+    npx ts-mocha -p ./tsconfig.json -t 1000000 tests/gates.ts      # BadLeverage/NoOpenRound/etc.
   ```
   > Use a Helius (or other unthrottled) base RPC — public devnet (`api.devnet.solana.com`) is hard rate-limited.
+  > **Production rebuild:** drop `--features test-short-deadline` (restores `MAX_ROUND_SECS = 300`).
 
 ---
 
