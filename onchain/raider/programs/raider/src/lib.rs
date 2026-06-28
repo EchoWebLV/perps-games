@@ -647,7 +647,9 @@ pub struct OpenRound<'info> {
     )]
     pub round: Account<'info, Round>,
     pub mint: Account<'info, Mint>,
-    /// CHECK: Pyth Lazer price feed account; validated by price::read_fresh().
+    /// CHECK: pinned to the Lazer BTC feed (address = BTC_FEED); the bytes are
+    /// further authenticated (owner + feed_id + staleness) by price::read_fresh().
+    #[account(address = price::BTC_FEED)]
     pub price_update: AccountInfo<'info>,
     // Phase 1 = the owner; session-key-ready slot for later phases.
     pub player_authority: Signer<'info>,
@@ -674,7 +676,9 @@ pub struct CloseRound<'info> {
     )]
     pub round: Account<'info, Round>,
     pub mint: Account<'info, Mint>,
-    /// CHECK: Pyth Lazer price feed account; validated by price::read_fresh().
+    /// CHECK: pinned to the Lazer BTC feed (address = BTC_FEED); the bytes are
+    /// further authenticated (owner + feed_id + staleness) by price::read_fresh().
+    #[account(address = price::BTC_FEED)]
     pub price_update: AccountInfo<'info>,
     pub player_authority: Signer<'info>,
 }
@@ -706,7 +710,11 @@ pub struct ForceCloseRound<'info> {
     )]
     pub round: Account<'info, Round>,
     pub mint: Account<'info, Mint>,
-    /// CHECK: Pyth Lazer price feed account; validated by price::read_fresh().
+    /// CHECK: pinned to the Lazer BTC feed (address = BTC_FEED); the bytes are
+    /// further authenticated (owner + feed_id + staleness) by price::read_fresh().
+    /// This pin matters most here: force_close is permissionless, so without it
+    /// any abandoned round would be drainable via a forged feed.
+    #[account(address = price::BTC_FEED)]
     pub price_update: AccountInfo<'info>,
     // Permissionless: any signer (no owner constraint) — the deadline is the gate.
     pub caller: Signer<'info>,
@@ -741,4 +749,7 @@ pub enum RaiderError {
     NotOwner,
     NotYetExpired,
     MathOverflow,
+    /// The price account is not the trusted Pyth Lazer BTC feed (wrong owner
+    /// program or wrong decoded feed_id) — defense-in-depth behind the address pin.
+    UntrustedFeed,
 }
