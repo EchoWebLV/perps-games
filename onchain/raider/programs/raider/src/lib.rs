@@ -321,6 +321,19 @@ pub mod raider {
         round.exit_ts = 0;
         round.payout = 0;
         round.outcome = 0;
+
+        emit!(RoundEvent {
+            owner: round.owner,
+            kind: 0,
+            price_raw: snap.price,
+            ts: snap.publish_time,
+            banked: 0,
+            dir,
+            lev,
+            equity_fp: settle::SCALE,
+            outcome: 0,
+            payout: 0,
+        });
         Ok(())
     }
 
@@ -348,6 +361,7 @@ pub mod raider {
             &mut ctx.accounts.house,
             &mut ctx.accounts.round,
             &snap,
+            now,
         )
     }
 
@@ -374,6 +388,7 @@ pub mod raider {
             &mut ctx.accounts.house,
             &mut ctx.accounts.round,
             &snap,
+            now,
         )
     }
 
@@ -407,26 +422,36 @@ pub mod raider {
 
 /// Shared settle body for `close` and `force_close`: settle at the given mark,
 /// conserve value across player + house (the 5% edge stays house-favorable
-/// inside the payout), release the house lock, and write the self-contained
-/// provable-fairness record into the Round. The caller is responsible for any
-/// authorization gate (owner check for `close`, deadline check for `force_close`).
+/// inside the payout), release the house lock, write the self-contained
+/// provable-fairness record into the Round, and emit a RoundEvent. The caller
+/// is responsible for any authorization gate (owner check for `close`, deadline
+/// check for `force_close`).
 fn settle_round(
     player: &mut Account<PlayerBalance>,
     house: &mut Account<HouseBalance>,
     round: &mut Account<Round>,
     snap: &price::PriceSnapshot,
+    now: i64,
 ) -> Result<()> {
     require!(round.status == 1, RaiderError::NoOpenRound);
 
-    // banked_fp = 0: Phase-1 bridge (no mid-round actions yet); Task 3 threads banked.
-    let (outcome, payout) =
-        settle::settle(0, round.dir, round.lev, round.stake, round.entry_raw, snap.price);
+    let (mut outcome, payout) = settle::settle(
+        round.banked,
+        round.dir,
+        round.lev,
+        round.stake,
+        round.entry_raw,
+        snap.price,
+    );
     // Defense in depth: a settle can never exceed the pre-locked worst case.
     let payout = payout.min(round.max_payout);
+    // Precedence liq > cap > time > cashout: relabel a plain cashout to Time once
+    // the 60s cap has elapsed (payout is the same current-equity cashout).
+    if outcome == settle::Outcome::Cashout && now >= round.deadline_ts {
+        outcome = settle::Outcome::Time;
+    }
 
-    // Value movement (conserved across player + house, edge stays house-side):
-    //   player gains `payout`
-    //   house gains the forfeited `stake`, pays out `payout`, releases the lock
+    // Value movement (conserved across player + house; edge stays house-side):
     player.balance = player
         .balance
         .checked_add(payout)
@@ -448,6 +473,20 @@ fn settle_round(
     round.payout = payout;
     round.outcome = outcome.code();
     round.status = 2;
+
+    emit!(RoundEvent {
+        owner: round.owner,
+        kind: 3,
+        price_raw: snap.price,
+        ts: snap.publish_time,
+        banked: round.banked,
+        dir: round.dir,
+        lev: round.lev,
+        // equity_fp is recomputed here because settle::settle() computes equity internally then discards it.
+        equity_fp: settle::equity_fp(round.banked, round.dir, round.lev, round.entry_raw, snap.price),
+        outcome: outcome.code(),
+        payout,
+    });
     Ok(())
 }
 
@@ -755,4 +794,26 @@ pub enum RaiderError {
     /// The price account is not the trusted Pyth Lazer BTC feed (wrong owner
     /// program or wrong decoded feed_id) — defense-in-depth behind the address pin.
     UntrustedFeed,
+    /// flip got a direction that is not +1 or -1.
+    BadDirection,
+}
+
+/// Emitted on every Round state transition so the entire path is reconstructable
+/// from chain history (final committed Round + this event stream = provable trail).
+/// kind: 0 open, 1 flip, 2 lever, 3 settle. price_raw/ts come from the authenticated
+/// Lazer read. For kind 0/1/2, banked/dir/lev are the values AFTER the transition;
+/// for kind 3 (settle) they are the final realized-segment values at close (settle
+/// does not mutate the position). outcome/payout are valid only when kind == 3.
+#[event]
+pub struct RoundEvent {
+    pub owner: Pubkey,
+    pub kind: u8,
+    pub price_raw: i64,
+    pub ts: i64,
+    pub banked: i128,
+    pub dir: i8,
+    pub lev: u32,
+    pub equity_fp: i128,
+    pub outcome: u8, // valid when kind == 3
+    pub payout: u64, // valid when kind == 3
 }
