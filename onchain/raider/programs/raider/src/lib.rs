@@ -416,8 +416,9 @@ fn settle_round(
 ) -> Result<()> {
     require!(round.status == 1, RaiderError::NoOpenRound);
 
+    // banked_fp = 0: Phase-1 bridge (no mid-round actions yet); Task 3 threads banked.
     let (outcome, payout) =
-        settle::settle(round.dir, round.lev, round.stake, round.entry_raw, snap.price);
+        settle::settle(0, round.dir, round.lev, round.stake, round.entry_raw, snap.price);
     // Defense in depth: a settle can never exceed the pre-locked worst case.
     let payout = payout.min(round.max_payout);
 

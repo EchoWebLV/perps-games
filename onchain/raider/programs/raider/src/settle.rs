@@ -1,15 +1,15 @@
-// settle.rs — fixed-point port of packages/engine/src/economics.ts (no actions: banked = 0).
+// settle.rs — fixed-point port of packages/engine/src/economics.ts.
 //
 // PROVABLE-FAIRNESS CORE. Pure integer math, NO f64. Anyone holding the on-chain
-// round data (dir, lev, stake, entry_raw) plus the exit mark can recompute the exact
-// payout this module produces. All rounding is house-favorable (truncating integer
-// division floors the payout), matching the off-chain engine's `Math.floor`.
+// round data (dir, lev, stake, entry_raw, banked) plus the exit mark can recompute
+// the exact payout this module produces. All rounding is house-favorable (truncating
+// integer division floors the payout), matching the off-chain engine's `Math.floor`.
 //
 // Parity with packages/engine:
 //   economics.ts  equityOf = 1 + banked + dir*lev*(price/entryRaw - 1), clamped >= 0
 //                 payoutOf = stake * max(0, equity) * (1 - edge)         [floored here]
 //   config.ts     EDGE 0.05, LIQ 0.2, CAP 25, RMIN 10, RMAX (Phase 1 = 2000 per spec)
-// Phase 1 has no mid-round actions, so banked = 0.
+// banked is threaded as i128 (fixed-point, SCALE=1e6). Phase 1 passes 0.
 
 pub const SCALE: i128 = 1_000_000;
 pub const EDGE_FP: i128 = 50_000; // 0.05
@@ -23,23 +23,32 @@ pub enum Outcome {
     Cashout,
     Cap,
     Liq,
+    Time,
 }
 
 impl Outcome {
-    /// Stable wire code stored in `Round.outcome`: 0 cashout / 1 cap / 2 liq.
+    /// Stable wire code stored in `Round.outcome`: 0 cashout / 1 cap / 2 liq / 3 time.
     pub fn code(self) -> u8 {
         match self {
             Outcome::Cashout => 0,
             Outcome::Cap => 1,
             Outcome::Liq => 2,
+            Outcome::Time => 3,
         }
     }
 }
 
-/// equity_fp = SCALE + dir*lev*(exit/entry - 1), clamped >= 0. Same feed => expo cancels.
-pub fn equity_fp(dir: i8, lev: u32, entry_raw: i64, exit_raw: i64) -> i128 {
-    let ratio = (exit_raw as i128) * SCALE / (entry_raw as i128);
-    let eq = SCALE + (dir as i128) * (lev as i128) * (ratio - SCALE);
+/// Realize the current segment into banked: banked + dir*lev*(price/entry - 1).
+/// Integer port of packages/engine economics.ts `rebank`. Signed (can go negative).
+pub fn rebank_fp(banked_fp: i128, dir: i8, lev: u32, entry_raw: i64, price_raw: i64) -> i128 {
+    let ratio = (price_raw as i128) * SCALE / (entry_raw as i128);
+    banked_fp + (dir as i128) * (lev as i128) * (ratio - SCALE)
+}
+
+/// equity_fp = SCALE + banked + dir*lev*(exit/entry - 1), clamped >= 0.
+/// Integer port of economics.ts `equityOf`. Same feed => the expo cancels in `ratio`.
+pub fn equity_fp(banked_fp: i128, dir: i8, lev: u32, entry_raw: i64, exit_raw: i64) -> i128 {
+    let eq = SCALE + rebank_fp(banked_fp, dir, lev, entry_raw, exit_raw);
     if eq < 0 {
         0
     } else {
@@ -72,57 +81,109 @@ pub fn max_payout(stake: u64) -> u64 {
     payout(stake, CAP_FP)
 }
 
-/// Full settle for one mark.
-pub fn settle(dir: i8, lev: u32, stake: u64, entry_raw: i64, exit_raw: i64) -> (Outcome, u64) {
-    let (o, eq) = terminal(equity_fp(dir, lev, entry_raw, exit_raw));
+/// Full settle for one mark (liq/cap/cashout precedence; time is layered by the
+/// caller, which has `now`/`deadline_ts`).
+pub fn settle(
+    banked_fp: i128,
+    dir: i8,
+    lev: u32,
+    stake: u64,
+    entry_raw: i64,
+    exit_raw: i64,
+) -> (Outcome, u64) {
+    let (o, eq) = terminal(equity_fp(banked_fp, dir, lev, entry_raw, exit_raw));
     (o, payout(stake, eq))
+}
+
+/// True iff a terminal fires at this mark: liq/cap by equity, OR the 60s time-cap
+/// by the clock. The keeper/crank calls `tick`, which settles only when this is true.
+pub fn fires(
+    banked_fp: i128,
+    dir: i8,
+    lev: u32,
+    entry_raw: i64,
+    exit_raw: i64,
+    now: i64,
+    deadline_ts: i64,
+) -> bool {
+    let (term, _) = terminal(equity_fp(banked_fp, dir, lev, entry_raw, exit_raw));
+    term != Outcome::Cashout || now >= deadline_ts
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
 
-    // long, 100x, entry 60000, exit 60600 (+1%): ratio = 60600*1e6/60000 = 1_010_000;
-    // equity = 1e6 + 1*100*(1_010_000-1e6) = 1e6 + 100*10_000 = 2_000_000 (= 2.0x).
+    // banked = 0 path (Phase-1 parity): long, 100x, +1% => equity 2.0x, cashout.
     #[test]
-    fn long_winner() {
-        let (o, p) = settle(1, 100, 1_000_000, 60_000, 60_600);
+    fn long_winner_no_bank() {
+        let (o, p) = settle(0, 1, 100, 1_000_000, 60_000, 60_600);
         assert_eq!(o, Outcome::Cashout);
-        // payout = floor(1_000_000 * 2_000_000 * 950_000 / 1e12) = 1_900_000.
-        assert_eq!(p, 1_900_000);
+        assert_eq!(p, 1_900_000); // floor(1e6 * 2e6 * 950_000 / 1e12)
     }
 
-    // long, 1000x, exit -0.1% => ratio = 59940*1e6/60000 = 999_000;
-    // equity = 1e6 + 1000*(999_000-1e6) = 1e6 + 1000*(-1000) = 0 => 0 <= LIQ_FP => Liq.
+    // banked = 0: long, 1000x, -0.1% => equity 0 <= LIQ => Liq, payout 0.
     #[test]
-    fn long_liquidated() {
-        let (o, p) = settle(1, 1000, 1_000_000, 60_000, 59_940);
+    fn long_liquidated_no_bank() {
+        let (o, p) = settle(0, 1, 1000, 1_000_000, 60_000, 59_940);
         assert_eq!(o, Outcome::Liq);
         assert_eq!(p, 0);
     }
 
-    // short, 50x, exit -2% => ratio = 58800*1e6/60000 = 980_000;
-    // equity = 1e6 + (-1)*50*(980_000-1e6) = 1e6 + (-50)*(-20_000) = 2_000_000 (= 2.0x).
+    // cap clamp: long, 2000x, +1.5% => raw equity 31x >= CAP => Cap, payout = max_payout.
     #[test]
-    fn short_winner() {
-        let (o, _) = settle(-1, 50, 1_000_000, 60_000, 58_800);
-        assert_eq!(o, Outcome::Cashout);
-    }
-
-    // cap clamp: long, 2000x, exit +1.5% => ratio = 60900*1e6/60000 = 1_015_000;
-    // raw equity = 1e6 + 2000*(1_015_000-1e6) = 1e6 + 2000*15_000 = 31_000_000 (= 31x) >= CAP
-    // => Cap, equity settles at CAP_FP, payout = max_payout(stake).
-    #[test]
-    fn cap_clamp() {
-        let (o, p) = settle(1, 2000, 1_000_000, 60_000, 60_900);
+    fn cap_clamp_no_bank() {
+        let (o, p) = settle(0, 1, 2000, 1_000_000, 60_000, 60_900);
         assert_eq!(o, Outcome::Cap);
         assert_eq!(p, max_payout(1_000_000)); // 23_750_000
     }
 
-    // House pre-lock invariant: max_payout = stake * CAP * (1 - EDGE) = stake * 25 * 0.95
-    // = stake * 23.75. For stake 1_000_000 => floor(1e6 * 25e6 * 950_000 / 1e12) = 23_750_000.
     #[test]
     fn max_payout_is_23_75x() {
         assert_eq!(max_payout(1_000_000), 23_750_000);
+    }
+
+    // rebank: long 10x, entry 100, price 110 (+10%) => segment = 10*(1_100_000-1e6)
+    // = 10*100_000 = 1_000_000; banked 0 -> 1_000_000 (i.e. +1.0 realized).
+    #[test]
+    fn rebank_realizes_segment() {
+        let b = rebank_fp(0, 1, 10, 100, 110);
+        assert_eq!(b, 1_000_000);
+    }
+
+    // equity carries banked: with banked = 1_000_000 (+1.0), a flat new segment
+    // (price == entry) => equity = SCALE + banked + 0 = 2_000_000 (= 2.0x).
+    #[test]
+    fn equity_includes_banked() {
+        let eq = equity_fp(1_000_000, 1, 10, 110, 110);
+        assert_eq!(eq, 2_000_000);
+    }
+
+    // Mirror packages/engine settle.test.ts "flip" vector with integer math:
+    // open long 10x entry 100; flip to short at 110; exit 105.
+    //   banked after flip = 0 + 10*(1_100_000-1e6) = 1_000_000
+    //   exit segment (dir -1, lev 10, entry 110, exit 105):
+    //     ratio = 105*1e6/110 = 954_545; -10*(954_545-1e6) = -10*(-45_455)=454_550
+    //   equity = 1e6 + 1_000_000 + 454_550 = 2_454_550 => cashout.
+    #[test]
+    fn flip_sequence_matches_engine() {
+        let banked = rebank_fp(0, 1, 10, 100, 110);
+        let eq = equity_fp(banked, -1, 10, 110, 105);
+        let (o, _) = terminal(eq);
+        assert_eq!(o, Outcome::Cashout);
+        assert_eq!(eq, 2_454_550);
+    }
+
+    // fires(): liq, cap, time(now>=deadline), and the heartbeat no-op (false).
+    #[test]
+    fn fires_predicate() {
+        // adverse 2000x => liq => fires
+        assert!(fires(0, 1, 2000, 60_000, 59_970, 100, 1_000_000));
+        // cap equity (2000x, +1.5%) => terminal Cap => fires
+        assert!(fires(0, 1, 2000, 60_000, 60_900, 100, 1_000_000));
+        // favorable small move, before deadline => no terminal => heartbeat (false)
+        assert!(!fires(0, 1, 100, 60_000, 60_060, 100, 1_000_000));
+        // same benign price but now >= deadline => time => fires
+        assert!(fires(0, 1, 100, 60_000, 60_060, 1_000_000, 1_000_000));
     }
 }
