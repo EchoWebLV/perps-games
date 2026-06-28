@@ -298,6 +298,18 @@ describe("raider — canonical end-to-end loop (L1 <-> ER, real USDC, provable f
     assert.equal(l1Round.payout.toString(), settled.payout.toString(), "[4] L1 round.payout must equal the committed payout");
     console.log("[4] final balances are durable on L1 and equal the ER's committed state");
 
+    // --- ASSERT 4b: VAULT RECONCILIATION — real custody covers the ledger ---
+    // The program-owned USDC vault token balance must be >= the sum of every
+    // play-balance claim against it (player.balance + house.balance). The ledger
+    // can never promise more USDC than is actually custodied. (house.locked is a
+    // RESERVATION of house.balance, not an extra claim, so it is not added here.)
+    const vaultCustody = BigInt((await getAccount(conn, vaultToken)).amount.toString());
+    const ledgerClaims = l1Player + BigInt(l1House.balance.toString());
+    console.log(`[4b] vault custody=${vaultCustody.toString()} >= ledger claims (player+house.balance)=${ledgerClaims.toString()}`);
+    assert.ok(vaultCustody >= ledgerClaims,
+      `[4b] vault custody (${vaultCustody}) must be >= ledger claims (${ledgerClaims})`);
+    console.log("[4b] vault reconciliation OK — real USDC custody >= the play-balance ledger");
+
     // --- ASSERT 5: withdraw returns real USDC to the owner (owner-only) ---
     const WITHDRAW = STAKE; // pull 1 USDC of play balance back to real USDC
     const ownerUsdcBefore = BigInt((await getAccount(conn, ownerAta.address)).amount.toString());

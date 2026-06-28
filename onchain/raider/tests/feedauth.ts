@@ -55,7 +55,7 @@ async function buildScenario({ funder, baseProvider, program }) {
     new anchor.web3.Transaction().add(
       SystemProgram.transfer({
         fromPubkey: funder.publicKey, toPubkey: session.publicKey,
-        lamports: 0.2 * LAMPORTS_PER_SOL,
+        lamports: 0.03 * LAMPORTS_PER_SOL,
       })));
 
   const sessionProvider = new anchor.AnchorProvider(
