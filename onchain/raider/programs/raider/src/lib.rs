@@ -392,6 +392,40 @@ pub mod raider {
         )
     }
 
+    // ---- Phase 2: permissionless continuous settler (tick) ------------------
+
+    /// Continuous settler. PERMISSIONLESS heartbeat the keeper/crank calls each
+    /// tick: settle ONLY if a terminal (liq/cap) or the 60s time-cap fires at the
+    /// live authenticated price; otherwise a no-op. The program reads the price and
+    /// renders the verdict, so the trigger can NEVER choose an outcome.
+    pub fn tick(ctx: Context<ForceCloseRound>) -> Result<()> {
+        let now = Clock::get()?.unix_timestamp;
+        let snap = price::read_fresh(&ctx.accounts.price_update, now)?;
+
+        require!(ctx.accounts.round.status == 1, RaiderError::NoOpenRound);
+
+        let fires = settle::fires(
+            ctx.accounts.round.banked,
+            ctx.accounts.round.dir,
+            ctx.accounts.round.lev,
+            ctx.accounts.round.entry_raw,
+            snap.price,
+            now,
+            ctx.accounts.round.deadline_ts,
+        );
+        if !fires {
+            return Ok(()); // heartbeat: nothing crossed, leave the round open
+        }
+
+        settle_round(
+            &mut ctx.accounts.player,
+            &mut ctx.accounts.house,
+            &mut ctx.accounts.round,
+            &snap,
+            now,
+        )
+    }
+
     // ---- Task 10: commit + undelegate the session back to L1 ----------------
 
     /// Commit the final state of all three co-delegated PDAs (Player, House,
