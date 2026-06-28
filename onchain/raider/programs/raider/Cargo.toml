@@ -18,6 +18,11 @@ idl-build = ["anchor-lang/idl-build", "anchor-spl/idl-build"]
 # Shrinks MAX_ROUND_SECS (state.rs) so the force_close post-deadline path is
 # exercisable in a test without a 5-minute wait. NEVER ship with this on.
 test-short-deadline = []
+# Stretches MAX_ROUND_SECS (state.rs) to 180s so the permissionless `tick`
+# liquidation can be proven against the live feed on a calm market (a ~0.04% move
+# can need >60s to cross). Mutually exclusive with test-short-deadline. NEVER ship
+# with this on.
+test-long-deadline = []
 
 [dependencies]
 anchor-lang = { version = "0.32.1", features = ["init-if-needed"] }

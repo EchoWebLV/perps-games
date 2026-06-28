@@ -11,12 +11,21 @@ use anchor_lang::prelude::*;
 // The game time-cap: a round auto-closes at this age (outcome = time), settling
 // at the then-current price. ALSO the permissionless `force_close` deadline (the
 // liveness backstop if the keeper/crank AND the player all go silent). 60s in
-// prod; `test-short-deadline` shrinks it to 8s so the time/force_close paths can
-// be exercised without a long wait. MUST be off in any real deployment.
-#[cfg(not(feature = "test-short-deadline"))]
+// prod. Two MUTUALLY EXCLUSIVE test affordances tune the cap (both MUST be off in
+// any real deployment):
+//   - `test-short-deadline` shrinks it to 8s so the time/force_close paths can be
+//     exercised without a long wait;
+//   - `test-long-deadline` stretches it to 180s so the permissionless `tick`
+//     liquidation can be PROVEN against the live Lazer feed on a calm, mean-
+//     reverting market — at 2000x a liq needs only a ~0.04% adverse move, but on a
+//     quiet day the cumulative excursion from a held entry can take >60s to cross
+//     it, so a 180s window holds one entry long enough for `tick` to observe it.
+#[cfg(all(not(feature = "test-short-deadline"), not(feature = "test-long-deadline")))]
 pub const MAX_ROUND_SECS: i64 = 60;
 #[cfg(feature = "test-short-deadline")]
 pub const MAX_ROUND_SECS: i64 = 8;
+#[cfg(feature = "test-long-deadline")]
+pub const MAX_ROUND_SECS: i64 = 180;
 
 pub const STALE_SECS: i64 = 30; // reject settle against prices older than this
 
