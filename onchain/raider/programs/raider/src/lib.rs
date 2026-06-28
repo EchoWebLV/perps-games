@@ -432,6 +432,16 @@ pub mod raider {
     /// price; if it already liq/caps or the cap-time has passed, SETTLES instead of
     /// flipping (matches off-chain terminalAt-before-applyAction). Otherwise realizes
     /// the current segment into `banked`, re-anchors `entry_raw`, and reverses `dir`.
+    ///
+    /// Mirrors the off-chain engine's `applyAction` flip (packages/engine/src/settle.ts:
+    /// `case "flip": return { ...rebank(pos, priceRaw), dir }`): rebank the current
+    /// segment into `banked`, then set `dir = new_dir`. A SAME-direction `new_dir`
+    /// (e.g. `flip(1)` while already long) is a LEGAL re-anchor — it locks the current
+    /// segment into `banked` and resets `entry_raw`, NOT an error — matching the engine,
+    /// which applies `{ ...rebank(pos), dir }` with no same-direction restriction. It is
+    /// conservation-safe (the close payout is still cap-clamped) and equity / liq-distance
+    /// neutral at the flip instant: the terminal-first `fires` check settles any real liq
+    /// BEFORE re-anchoring, so a re-anchor can never let a position escape a liquidation.
     pub fn flip(ctx: Context<CloseRound>, new_dir: i8) -> Result<()> {
         require!(new_dir == 1 || new_dir == -1, RaiderError::BadDirection);
         let now = Clock::get()?.unix_timestamp;
@@ -475,6 +485,7 @@ pub mod raider {
             banked: round.banked,
             dir: round.dir,
             lev: round.lev,
+            // entry_raw == snap.price here, so the new-segment term cancels: equity_fp == SCALE + banked (the realized P&L going into the new segment).
             equity_fp: settle::equity_fp(round.banked, round.dir, round.lev, round.entry_raw, snap.price),
             outcome: 0,
             payout: 0,
