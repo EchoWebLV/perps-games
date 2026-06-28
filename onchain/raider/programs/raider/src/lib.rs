@@ -493,6 +493,61 @@ pub mod raider {
         Ok(())
     }
 
+    /// Change leverage mid-round (owner-authority). Same terminal-first + rebank as
+    /// `flip`, but re-anchors at the new leverage instead of reversing direction.
+    pub fn lever(ctx: Context<CloseRound>, new_lev: u32) -> Result<()> {
+        require!(
+            new_lev >= settle::RMIN && new_lev <= settle::RMAX,
+            RaiderError::BadLeverage
+        );
+        let now = Clock::get()?.unix_timestamp;
+        let snap = price::read_fresh(&ctx.accounts.price_update, now)?;
+
+        require_keys_eq!(
+            ctx.accounts.player.owner,
+            ctx.accounts.player_authority.key(),
+            RaiderError::NotOwner
+        );
+        require!(ctx.accounts.round.status == 1, RaiderError::NoOpenRound);
+
+        if settle::fires(
+            ctx.accounts.round.banked,
+            ctx.accounts.round.dir,
+            ctx.accounts.round.lev,
+            ctx.accounts.round.entry_raw,
+            snap.price,
+            now,
+            ctx.accounts.round.deadline_ts,
+        ) {
+            return settle_round(
+                &mut ctx.accounts.player,
+                &mut ctx.accounts.house,
+                &mut ctx.accounts.round,
+                &snap,
+                now,
+            );
+        }
+
+        let round = &mut ctx.accounts.round;
+        round.banked = settle::rebank_fp(round.banked, round.dir, round.lev, round.entry_raw, snap.price);
+        round.entry_raw = snap.price;
+        round.entry_expo = snap.exponent;
+        round.lev = new_lev;
+        emit!(RoundEvent {
+            owner: round.owner,
+            kind: 2,
+            price_raw: snap.price,
+            ts: snap.publish_time,
+            banked: round.banked,
+            dir: round.dir,
+            lev: round.lev,
+            equity_fp: settle::equity_fp(round.banked, round.dir, round.lev, round.entry_raw, snap.price),
+            outcome: 0,
+            payout: 0,
+        });
+        Ok(())
+    }
+
     // ---- Task 10: commit + undelegate the session back to L1 ----------------
 
     /// Commit the final state of all three co-delegated PDAs (Player, House,
