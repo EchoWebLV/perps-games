@@ -18,6 +18,17 @@ const MAXSEC = 60;
 let roundStartMs = 0;
 let delegated = false;
 let busy = false;
+let liveDir: 1 | -1 = 1;
+let liveLev = 100;
+let polling = false;
+
+// Single place a settlement (close, terminal-first flip/lever, OR the native crank) lands in the HUD.
+function finalizeSettled(o: { outcome: number; outcomeName: string; payout: bigint }) {
+  if (engine.getPhase() === "live") engine.cashout(priceSource.price(), Date.now()); // freeze the local visual
+  setText("status", `${o.outcomeName.toUpperCase()} — payout ${usd(o.payout)} USDC.`);
+  setText("mult", o.outcome === 2 ? "💥 liquidated" : `settled · +${usd(o.payout)} USDC`);
+  void refreshBalance(true);
+}
 
 // BTC feed only (the on-chain program is BTC). priceSource.price() is a human float.
 const priceSource = createPriceSource({
@@ -87,11 +98,59 @@ $("go").onclick = async () => {
     setText("status", "opening on-chain…");
     const opened = await chain.open(dir, lev, stake);
     roundStartMs = Date.now();
+    liveDir = dir; liveLev = lev;
     engine.launch({ dir, lev, stake, entryRaw: opened.entryHuman, startMs: roundStartMs });
-    setText("status", `LIVE — entry $${opened.entryHuman.toFixed(2)}. Press GO again to CASH OUT.`);
+    (($("flip") as HTMLButtonElement).disabled = false);
+    (($("levminus") as HTMLButtonElement).disabled = false);
+    (($("levplus") as HTMLButtonElement).disabled = false);
+    setText("status", `LIVE — entry $${opened.entryHuman.toFixed(2)}. arming crank…`);
+    try {
+      await chain.scheduleCrank();
+      setText("status", `LIVE — entry $${opened.entryHuman.toFixed(2)}. crank armed — auto-settles. GO = cash out.`);
+    } catch (e) {
+      setText("status", `LIVE — entry $${opened.entryHuman.toFixed(2)}. ⚠ crank not armed (${(e as Error).message}); GO to cash out.`);
+    }
   } catch (e) { setText("status", `open failed: ${(e as Error).message}`); }
   finally { busy = false; }
 };
+
+$("flip").onclick = async () => {
+  if (!chain || busy || !delegated || engine.getPhase() !== "live") return;
+  busy = true;
+  try {
+    const newDir = (liveDir * -1) as 1 | -1;
+    setText("status", `flipping → ${newDir === 1 ? "LONG" : "SHORT"}…`);
+    const res = await chain.flip(newDir);
+    if (res.settled) finalizeSettled(res);
+    else {
+      liveDir = newDir;
+      engine.setDir(newDir, priceSource.price());
+      ($("dir") as HTMLSelectElement).value = String(newDir);
+      setText("status", `flipped → ${newDir === 1 ? "LONG" : "SHORT"} (gains banked).`);
+    }
+  } catch (e) { setText("status", `flip failed: ${(e as Error).message}`); }
+  finally { busy = false; }
+};
+
+async function changeLever(newLev: number) {
+  if (!chain || busy || !delegated || engine.getPhase() !== "live") return;
+  busy = true;
+  try {
+    setText("status", `leverage → ${newLev}×…`);
+    const res = await chain.lever(newLev);
+    if (res.settled) finalizeSettled(res);
+    else {
+      liveLev = newLev;
+      engine.setLeverage(newLev, priceSource.price());
+      ($("lev") as HTMLInputElement).value = String(newLev);
+      setText("status", `leverage → ${newLev}× (gains banked).`);
+    }
+  } catch (e) { setText("status", `lever failed: ${(e as Error).message}`); }
+  finally { busy = false; }
+}
+// Program clamps to RMIN=10..RMAX=2000; the UI doubles/halves within those bounds.
+$("levplus").onclick = () => void changeLever(Math.min(2000, liveLev * 2));
+$("levminus").onclick = () => void changeLever(Math.max(10, Math.floor(liveLev / 2)));
 
 $("end").onclick = async () => {
   if (!chain || busy) return;
@@ -101,6 +160,9 @@ $("end").onclick = async () => {
     await chain.commitAndUndelegate();
     delegated = false;
     (($("go") as HTMLButtonElement).disabled = true);
+    (($("flip") as HTMLButtonElement).disabled = true);
+    (($("levminus") as HTMLButtonElement).disabled = true);
+    (($("levplus") as HTMLButtonElement).disabled = true);
     (($("withdraw") as HTMLButtonElement).disabled = false);
     await refreshBalance(false);
     setText("status", "session ended. You can Withdraw all.");
@@ -119,6 +181,19 @@ $("withdraw").onclick = async () => {
   } catch (e) { setText("status", `withdraw failed: ${(e as Error).message}`); }
   finally { busy = false; }
 };
+
+// Poll on-chain Round ~1.5x/s so a crank/keeper settlement surfaces even if the player never clicks.
+// setInterval (not rAF) because rAF is throttled to ~1.5fps in Claude Preview.
+async function pollChain() {
+  if (!chain || busy || !delegated || polling || engine.getPhase() !== "live") return;
+  polling = true;
+  try {
+    const snap = await chain.readRound(true);
+    if (snap && snap.status === 2) finalizeSettled(snap);
+  } catch { /* transient RPC — keep last */ }
+  finally { polling = false; }
+}
+setInterval(() => void pollChain(), 650);
 
 // display loop: equity/payout from the local engine snapshot (no server mark in slice 1)
 function frame() {
