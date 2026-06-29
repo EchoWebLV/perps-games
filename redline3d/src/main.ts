@@ -14,13 +14,13 @@ import { createControls } from "./ui/controls";
 import { connectFeed } from "./core/feed";
 import { createPriceSource } from "./core/price-source";
 import { RoundEngine } from "./core/round";
-import { createApi, type MarkResult } from "./core/api";
+import { createApi } from "./core/api";
 import { createDevAuth } from "./core/auth-dev";
 import { createSessionAuth } from "./core/auth-session";
 import type { AuthProvider } from "./core/auth";
 import { usd } from "./core/money";
-import { createRoundSync, clampInt } from "./core/round-sync";
-import { displayCashBalance, payoutWalletBalanceFloor } from "./core/wallet-balance-model";
+import { clampInt } from "./core/round-sync";
+import { displayCashBalance } from "./core/wallet-balance-model";
 import { niceLev, tToLev } from "./core/leverage";
 import { liqPriceOf } from "./core/economics";
 import { createUpgrades } from "./ui/upgrades";
@@ -35,7 +35,6 @@ import { createRadio } from "./ui/radio";
 import { createCoinCounter } from "./ui/coins";
 import { createNitro } from "./ui/nitro";
 import { createWallet } from "./ui/wallet";
-import type { Snapshot } from "./core/types";
 import { createLobby } from "./render/lobby";
 import { createLobbyCam } from "./render/lobbycam";
 import { createMapButton } from "./ui/mapbutton";
@@ -47,6 +46,9 @@ import { connectAndBindWallet } from "./core/wallet-binding";
 import { sweepToPlayBalance } from "./core/play-funding";
 import { ensureWalletConnection, hydrateBoundWallet, isRecoverableWalletBalanceError, submitDeposit } from "./core/wallet-connection";
 import { createReconnectLoop } from "./core/session-reconnect";
+import { PublicKey } from "@solana/web3.js";
+import { CHAIN } from "./chain/config";
+import { createGameSession } from "./chain/game-session";
 
 const canvas = document.getElementById("gl") as HTMLCanvasElement;
 const hudRoot = document.getElementById("hud") as HTMLElement;
@@ -75,6 +77,29 @@ ctx.scene.add(pickups.group);
 
 // core
 const engine = new RoundEngine();
+// ── on-chain round (Slice 4) ────────────────────────────────────────────────
+// The round loop + USDC play balance run on-chain via the dev-keypair port. The local engine
+// still drives the smooth visual ×; the on-chain Round is the only money truth.
+const USDC_PER_CENT = 10 ** (CHAIN.USDC_DECIMALS - 2); // 6-decimal USDC, display in cents → 10_000
+const centsToBase = (cents: number) => cents * USDC_PER_CENT;
+const baseToCents = (base: bigint) => Number(base / BigInt(USDC_PER_CENT));
+const BUY_IN_BASE = 2_000_000; // 2 test-USDC auto buy-in on the first GO (dev default)
+let lastStakeCents = 0;
+void lastStakeCents; // recorded at open for the upcoming wager-history slice; not read on the hot path yet
+let roundActive = false; // a round is open locally (de-dupes finalizeSettled across crank/poll/close)
+let settling = false;    // a close tx is in flight
+let opening = false;     // the GO handler (ensureSession+open) is mid-flight
+const session = createGameSession({
+  mint: new PublicKey(CHAIN.TEST_USDC_MINT),
+  onSettled: (info) => finalizeSettled(info), // terminal-first background lever
+});
+// The cash chip + wallet hero read the on-chain play balance (cents). Single writer.
+function syncOnchainBalance() {
+  balance = baseToCents(session.balance());
+  hud.setBalance(balance);
+  walletUI.setBalance(balance);
+}
+void session.init().then(() => syncOnchainBalance()).catch(() => {});
 const useDevAuth = (import.meta.env?.VITE_AUTH as string) === "dev";
 const auth: AuthProvider = useDevAuth ? createDevAuth() : createSessionAuth();
 
@@ -84,12 +109,10 @@ const sessionReconnect = createReconnectLoop();
 // identity loads and /v1/me succeeds.
 let signedIn = false;
 function triggerSignIn() { void startSessionInit(); }
-const roundSync = createRoundSync({ api, clock: { now: () => performance.now() }, store: { get: (k) => { try { return localStorage.getItem(k); } catch { return null; } }, set: (k, v) => { try { localStorage.setItem(k, v); } catch {} } } });
 let balance = 0;                   // displayed cash balance, sourced from the connected wallet when available
 let serverBalance = 0;             // hidden round-accounting balance used by the existing server engine
 let walletBalance: number | null = null; // on-chain USDC in the connected wallet; null until we have a bound wallet
 let walletPort: SolanaWalletPort | null = null;
-let connected = false;
 let boundWalletAddress = "";
 let connectedWalletAddress = "";
 const walletPortPreloader = createWalletPortPreloader(() => loadSolanaWalletPort("auto"));
@@ -112,20 +135,6 @@ async function refreshWalletBalance(): Promise<void> {
   if (connectedWalletAddress && boundWalletAddress && connectedWalletAddress !== boundWalletAddress) {
     throw new Error("wallet_mismatch");
   }
-}
-
-async function refreshWalletBalanceEventually(minBalance?: number): Promise<void> {
-  let lastError: unknown = null;
-  for (let i = 0; i < 30; i++) {
-    try {
-      await refreshWalletBalance();
-      if (minBalance == null || walletBalance == null || walletBalance >= minBalance) return;
-    } catch (e) {
-      lastError = e;
-    }
-    await new Promise<void>((r) => setTimeout(r, 1500));
-  }
-  if (lastError) throw lastError;
 }
 
 async function ensureWalletConnected(): Promise<SolanaWalletPort> {
@@ -157,34 +166,8 @@ async function ensureWalletConnected(): Promise<SolanaWalletPort> {
   return ensured.walletPort;
 }
 
-// Live "mark": the SERVER's current equity for the open round. The displayed × / buffer / payout
-// and the terminal (liq/cap/time) are driven by this so what you see == what you settle for.
-// SAMPLE-AND-HOLD: the mark refreshes ~once a second and the display holds it rock-steady between
-// reveals, so the × is a readable number you can tap — not a 5Hz flicker that's unreadable at high
-// leverage. You settle at the held value; you can only be liquidated AT a reveal, never mid-hold.
-// The local engine stays only for the smooth car visual + the ~RTT pre-first-mark gap.
-const MARK_HOLD_MS = 400; // server-mark poll interval — faster = fresher settle reference + snappier ×
-let serverMark: MarkResult | null = null;
-let marking = false;
-let lastMarkMs = 0;
-// Eased live multiplier. The displayed × glides each frame toward the SERVER mark — the exact value
-// close() settles at — so "what you see" == "what you get". Eased only so it ramps instead of hard-
-// stepping on each feed update; NOT the local-engine prediction, which diverges from the settle.
-let dispEq = 1;
-async function pollMark() {
-  const id = roundSync.roundId();
-  if (!id || marking) return;
-  marking = true;
-  try {
-    const m = await api.markRound(id);
-    if (m.status === "open" && !m.stale) serverMark = m; // ignore stale → hold the last mark
-  } catch { /* transient: hold the last mark */ }
-  finally { marking = false; }
-}
-
 async function doLogout() {
   signedIn = false;
-  serverMark = null;
   try { await auth.logout?.(); } catch {}
   location.reload();
 }
@@ -256,6 +239,21 @@ const walletUI = createWallet(hudRoot, {
     syncDisplayedBalance();
     walletUI.setBalance(balance);
   },
+  onchain: {
+    status: () => ({ delegated: session.delegated(), playCents: baseToCents(session.balance()) }),
+    end: async () => {
+      hud.setStatus("Ending session…");
+      await session.endSession();
+      syncOnchainBalance();
+      hud.setStatus("Session ended. Withdraw to your wallet, or press GO to start a new one.");
+    },
+    withdraw: async () => {
+      hud.setStatus("Withdrawing…");
+      await session.withdraw();
+      syncOnchainBalance();
+      hud.setStatus("Withdrew your play balance to the wallet.");
+    },
+  },
   // Log out moved to the menu (settings); the wallet page is deposit-only now.
 });
 hud.onWallet(() => { if (engine.getPhase() !== "live") walletUI.open(); });
@@ -263,7 +261,6 @@ hud.onWallet(() => { if (engine.getPhase() !== "live") walletUI.open(); });
 // Session init: seed the server-owned balance + settle any dangling round once the client session is
 // ready. Dev auth behaves the same through the narrower auth interface.
 function markSessionDisconnected() {
-  connected = false;
   signedIn = false;
   hud.setStatus("Can't reach the server. Reconnecting...");
   sessionReconnect.schedule(() => { void startSessionInit(); });
@@ -283,7 +280,6 @@ async function initSession() {
   try {
     const me = await api.me();
     serverBalance = me.balance;
-    connected = true;
     signedIn = true;
     try {
       const hydrated = await hydrateBoundWallet({ walletBalance: () => api.walletBalance() });
@@ -293,7 +289,6 @@ async function initSession() {
       walletBalance = null;
     }
     syncDisplayedBalance(); walletUI.setBalance(balance);
-    if (me.openRoundId) await roundSync.recover(me.openRoundId);
     const refreshed = await api.me();
     serverBalance = refreshed.balance;
     try { await refreshWalletBalance(); } catch { /* keep the last wallet read */ }
@@ -469,123 +464,121 @@ addEventListener("pointermove", (e) => {
   touchGas = !touchBrake;
 });
 
-// single settle path — local prediction already animated the ride; the server's
-// close result is authoritative for balance + outcome, and FX waits for it.
-let settling = false;
-async function settleVia(reason: "cashout" | "expire", localSnap: Snapshot) {
-  if (settling) return;
-  settling = true;
-  releaseHold();   // drop any active hold so the now-parked car can't be steered
-  controls.setLive(true, "Settling…");
-  // Use the last-known wallet read as the pre-close baseline instead of blocking on a fresh
-  // RPC read here — settle should not wait on the network. The background reconcile after
-  // close refreshes the real on-chain balance anyway.
-  const preCloseWalletBalance = walletBalance;
-  const res = await roundSync.close(reason);
-  settling = false;
-  // reset UI regardless of outcome
-  throttle = 34; game.equity = 1; dispEq = 1; serverMark = null; chase.setDriving(false);
-  garage.setBusy(false); mapBtn.setVisible(true); upgrades.setBusy(false);
-  walletUI.setBusy(false);
+// Single sink for every ending — manual cash out, terminal-first flip/lever, and the crank poll.
+// Freezes the local visual, sets the HUD outcome from the on-chain settled payload, fires FX, and
+// refreshes the on-chain balance. Idempotent per round via `roundActive`.
+function finalizeSettled(info: { outcome: number; outcomeName: string; payout: bigint }) {
+  if (!roundActive) return;
+  roundActive = false;
+  const price = priceSource.price(), now = Date.now();
+  if (engine.getPhase() === "live") engine.cashout(price, now); // freeze the visual at the live value
+  const finalEq = engine.snapshot(price, now).equity;
+  const liq = info.outcome === 2; // 0 cashout · 1 cap · 2 liq · 3 time
+  const payoutCents = baseToCents(info.payout);
+  // reset UI
+  releaseHold();
+  throttle = 34; game.equity = 1; chase.setDriving(false);
+  garage.setBusy(false); mapBtn.setVisible(true); upgrades.setBusy(false); walletUI.setBusy(false);
   hud.setTimer(CONFIG.MAXSEC, false);
-  if (!res) { // feed-halt / gave up -> the round will settle via 1.4
-    controls.setLive(false, "GO!");
-    hud.setStatus("Round will settle shortly. Feed interruption.");
-    return;
-  }
-  // The server settles instantly and transfers the payout to the wallet in the BACKGROUND,
-  // so res.balance already includes the win (it sits in the in-game pocket until the on-chain
-  // transfer lands). The corner = wallet + in-game, so the total is correct the moment we show
-  // it — no blocking on mainnet confirmation (that was the up-to-45s "Settling…" freeze).
-  serverBalance = res.balance;
-  syncDisplayedBalance(); walletUI.setBalance(balance);
-  // Once the on-chain transfer lands, refresh BOTH pockets so the wallet panel reflects the
-  // move (in-game drops, wallet rises — the corner total stays the same throughout).
-  if (res.payoutCoins > 0 && connectedWalletAddress) {
-    const expectedWallet = payoutWalletBalanceFloor({ preCloseWalletBalance, payoutCoins: res.payoutCoins });
-    void refreshWalletBalanceEventually(expectedWallet ?? undefined).then(async () => {
-      try { serverBalance = (await api.me()).balance; } catch { /* keep last in-game read */ }
-      syncDisplayedBalance(); walletUI.setBalance(balance);
-    }).catch(() => { /* keep current read until the next refresh */ });
-  }
   controls.setLive(false, "GO!");
-  hud.setMultiplier(res.equity, res.outcome === "liq" ? "liquidated" : "settled");
-  if (res.outcome === "liq") {
-    hud.setStatus(`💥 Liquidated. Lost the play amount.`);
+  hud.setMultiplier(Math.max(0, liq ? 0 : finalEq), liq ? "liquidated" : "settled");
+  if (liq) {
+    hud.setStatus("💥 Liquidated. Lost the play amount.");
     fx.liquidate(); audio.liquidate(); navigator.vibrate?.([30, 40, 30, 40, 90]);
   } else {
-    hud.setStatus(`Settled at ×${res.equity.toFixed(2)}. Banked ${usd(res.payoutCoins)}.`);
+    hud.setStatus(`Settled at ×${finalEq.toFixed(2)}. Banked ${usd(payoutCents)}.`);
     fx.confetti(); audio.cashout(); navigator.vibrate?.(35);
   }
-  void localSnap; // local prediction already animated the ride; server result is authoritative
+  void session.refreshBalance(session.delegated()).then(() => syncOnchainBalance()).catch(() => {});
+}
+
+// Authoritative on-chain close. On a confirmed close we finalize immediately; on an RPC hiccup we
+// leave the round active so the crank/poll finalizes it (idempotent vs the crank).
+async function closeRound(reason: "cashout" | "expire") {
+  if (settling || !roundActive) return;
+  settling = true;
+  releaseHold();
+  controls.setLive(true, "Settling…");
+  try {
+    const res = await session.close();
+    finalizeSettled(res);
+  } catch {
+    controls.setLive(true, "CASH OUT");
+    hud.setStatus("Close didn't confirm — the round will settle shortly.");
+    void reason;
+  } finally {
+    settling = false;
+  }
 }
 
 controls.onLaunch(async () => {
-  if (mode === "lobby") return; // Space/Enter in the lot must not launch a round behind the scene
-  audio.resume(); radio.resume(); // unlock audio + radio if GO! is the first interaction
-  if (!signedIn) { triggerSignIn(); return; } // GO requires sign-in — opens the login; race on the next press
-  if (!connected) { hud.setStatus("Can't reach the server. Reconnecting..."); return; }
-  if (settling || roundSync.isOpening() || engine.getPhase() === "live") return; // re-entrancy: don't race an in-flight settle
-
-  // Self-heal a dangling round before opening a new one. A bail whose close couldn't settle
-  // (halted feed / dropped response) leaves a stale local round that the single-round guard would
-  // silently reject — stranding the UI on "Launching…". reconcile() asks the server what's true and
-  // settles or clears it, so ONE GO press recovers the old round AND launches the next.
-  if (roundSync.roundId()) {
-    hud.setStatus("Wrapping up your last round…");
-    const r = await roundSync.reconcile();
-    if (r === "blocked") { controls.setLive(false, "GO!"); hud.setStatus("Last round still settling. Try again in a moment."); return; }
+  if (mode === "lobby") return; // Space/Enter in the lot must not launch behind the scene
+  audio.resume(); radio.resume();
+  if (opening || settling || roundActive || engine.getPhase() === "live") return; // re-entrancy
+  opening = true;
+  try {
+    // First GO auto-starts the ER session (buy-in if empty + delegate).
+    hud.setStatus("Starting session…");
     try {
-      const me = await api.me();
-      serverBalance = me.balance;
-      try { await refreshWalletBalance(); } catch { /* keep the last wallet read */ }
-      syncDisplayedBalance(); walletUI.setBalance(balance);
-    } catch { /* keep the displayed balance */ }
-  }
-
-  const playAmount = controls.playAmount();
-  if (serverBalance < playAmount) {
-    // No on-chain at GO time. Send the player to the wallet to top up their play balance.
-    controls.setLive(false, "GO!");
-    hud.setStatus("Add USDC to your play balance to race.");
-    walletUI.open();
-    return;
-  }
-  const lev = clampInt(game.lev, 10, 1000);                          // parity: send the clamped value
-  hud.setStatus("Launching…");
-  let out;
-  try { out = await roundSync.open({ asset: asset as "BTC"|"ETH"|"SOL", dir: controls.dir(), lev, stake: playAmount }); }
-  catch (e: any) {
-    const code = e?.code;
-    if (code === "round_already_open") {
-      // the server holds a round this client lost track of — recover it, then the user retries
-      try { const me = await api.me(); if (me.openRoundId) await roundSync.recover(me.openRoundId); } catch { /* retry next press */ }
-      hud.setStatus(roundSync.roundId() ? "Last round still settling. Try again in a moment." : "Ready. Press GO again.");
-    } else {
-      hud.setStatus(code === "insufficient_balance" ? "Payment is still confirming. Try again shortly."
-        : code === "feed_halt" ? "Feed is down. Try again in a moment."
-        : "Can't reach the server. Try again.");
+      await session.ensureSession(BUY_IN_BASE);
+    } catch (e: any) {
+      hud.setStatus(e?.code === "delegate_busy" ? e.message : "Couldn't start the session. Try again.");
+      return;
     }
-    controls.setLive(false, "GO!");                                  // never strand the button mid-launch
-    return;
+    await session.refreshBalance(true); syncOnchainBalance();
+
+    const playAmount = controls.playAmount(); // cents
+    if (session.balance() < BigInt(centsToBase(playAmount))) {
+      hud.setStatus("Add USDC to your play balance to race.");
+      walletUI.open();
+      return;
+    }
+    const dir = controls.dir();
+    const lev = clampInt(game.lev, 10, 2000); // on-chain RMAX=2000
+    hud.setStatus("Launching…");
+    let opened;
+    try {
+      opened = await session.open(dir, lev, centsToBase(playAmount));
+    } catch {
+      hud.setStatus("Couldn't start the round. Try again.");
+      controls.setLive(false, "GO!");
+      return;
+    }
+    round.entryPx = opened.entryHuman; // human entry price (NOT the raw mantissa)
+    round.dir = dir;
+    lastStakeCents = playAmount;
+    roundStartMs = Date.now();
+    engine.launch({ dir, lev, stake: playAmount, entryRaw: opened.entryHuman, startMs: roundStartMs });
+    roundActive = true;
+    chase.setDriving(true);
+    controls.setLive(true, "CASH OUT");
+    garage.setBusy(true); mapBtn.setVisible(false); upgrades.setBusy(true); walletUI.setBusy(true);
+    hud.setStatus(session.crankArmed() ? "" : "⚠ auto-settle crank not armed — cash out manually.");
+  } finally {
+    opening = false;
   }
-  if (!out) { controls.setLive(false, "GO!"); hud.setStatus("Couldn't start the round. Try again."); return; }
-  round.entryPx = out.entryRaw;
-  round.dir = controls.dir();
-  roundStartMs = out.entryTsUs / 1000;                               // parity: server clock
-  engine.launch({ dir: controls.dir(), lev, stake: playAmount, entryRaw: out.entryRaw, startMs: roundStartMs });
-  serverMark = null; lastMarkMs = 0; dispEq = 1; // fresh mark + display for the new round
-  chase.setDriving(true); // smooth transition from the idle orbit into the chase cam
-  controls.setLive(true, "CASH OUT");
-  garage.setBusy(true); mapBtn.setVisible(false); upgrades.setBusy(true); walletUI.setBusy(true);
-  hud.setStatus("");
 });
 
 controls.onCashout(() => {
-  if (engine.getPhase() !== "live") return;
-  const snap = engine.cashout(priceSource.price(), Date.now());
-  void settleVia("cashout", snap);
+  if (!roundActive || settling) return;
+  void closeRound("cashout");
 });
+
+// Lane-bet flips fire an on-chain flip() in the background (instant local feel above). A terminal-first
+// flip settles the round via finalizeSettled; single-flight via `flipping` so a held lane can't spam txs.
+let flipping = false;
+async function doFlip(dir: 1 | -1) {
+  if (flipping || !roundActive) return;
+  flipping = true;
+  try {
+    const res = await session.flip(dir);
+    if (res.settled) finalizeSettled(res);
+  } catch {
+    /* keep playing; the local flip already applied and close() settles at on-chain truth */
+  } finally {
+    flipping = false;
+  }
+}
 
 function frame() {
   const dt = Math.min(0.05, ctx.clock.getDelta()); // clamp so a frame hitch can't teleport the world
@@ -651,38 +644,25 @@ function frame() {
     throttle = Math.max(0, Math.min(100, throttle));
   }
   const boost = nitro.update(dt, drivable); // Orion Nitro Overdrive: 2× for 3s, else 1
-  game.lev = clampInt(niceLev(tToLev(throttle)) * boost, 10, 1000); // parity: never exceed server RMAX
+  game.lev = clampInt(niceLev(tToLev(throttle)) * boost, 10, 2000); // on-chain RMAX=2000
   tach.setThrottle(Math.min(1, (throttle / 100) * boost), game.lev); // needle pegs during nitro
   audio.engine(throttle / 100, gasOn || drivable); // rev drone tracks leverage (live only)
-  if (drivable) { engine.setLeverage(game.lev, roundPrice); roundSync.noteLeverage(game.lev); }
-  roundSync.pump();
+  if (drivable) { engine.setLeverage(game.lev, roundPrice); session.noteLeverage(game.lev); } // instant local + coalesced on-chain
 
   if (engine.getPhase() === "live") {
     const nowMs = Date.now();
-    if (nowMs - lastMarkMs > MARK_HOLD_MS) { lastMarkMs = nowMs; void pollMark(); } // sample-and-hold: reveal the mark ~1×/s
-    const m = serverMark;
-    const serverTerminal = m ? (m.outcome === "liq" || m.outcome === "cap" || m.outcome === "time") : false;
-    const timeUp = (nowMs - roundStartMs) / 1000 >= CONFIG.MAXSEC; // backstop if marks lag at the cap
-    if (serverTerminal || timeUp) {
-      void settleVia("expire", engine.cashout(roundPrice, nowMs)); // server settles authoritatively
-    } else {
-      // SEE == SETTLE: the live ×, payout and liq-buffer track the SERVER mark — the exact value
-      // close() settles a cashout at (it settles at the last mark the client was shown). The × is
-      // EASED toward it so it ramps instead of hard-stepping on each feed update; the payout/buffer
-      // and the win/lose colour read the RAW mark so the money number is always truthful. The local
-      // engine is only the car visual + the pre-first-mark fallback (before any mark has landed).
-      const fb = engine.snapshot(roundPrice, nowMs);  // fallback until the first server mark lands
-      const trueEq = m ? m.equity : fb.equity;        // the value you will actually settle for
-      const k = 1 - Math.exp(-dt / 0.09);             // fps-independent ease; locks onto each mark well within 1s
-      dispEq += (trueEq - dispEq) * k;
-      game.equity = dispEq;
-      hud.setMultiplier(Math.max(0, dispEq), "live");
-      controls.setBuffer(Math.max(0, Math.min(1, m ? m.buffer : fb.buffer))); // the bail button IS the liquidation bar
-      hud.setTimer(CONFIG.MAXSEC - (nowMs - roundStartMs) / 1000, true);
-      car.setEquity("live", Math.max(0, dispEq));
-      const payC = m ? m.payoutCoins : Math.floor(fb.payout);
-      controls.setLive(true, `${trueEq >= 1 ? "CASH OUT" : "BAIL"} ${usd(payC)}`, trueEq < 1);
-    }
+    // The smooth ×, payout and liq-buffer are the LOCAL engine off the live feed (no server mark).
+    // The on-chain Round is the money truth — surfaced by the crank poll + the authoritative close().
+    const snap = engine.snapshot(roundPrice, nowMs);
+    game.equity = snap.equity;
+    hud.setMultiplier(Math.max(0, snap.equity), "live");
+    controls.setBuffer(Math.max(0, Math.min(1, snap.buffer)));
+    hud.setTimer(CONFIG.MAXSEC - (nowMs - roundStartMs) / 1000, true);
+    car.setEquity("live", Math.max(0, snap.equity));
+    const payC = Math.floor(snap.payout);
+    controls.setLive(true, `${snap.equity >= 1 ? "CASH OUT" : "BAIL"} ${usd(payC)}`, snap.equity < 1);
+    // Local 60s backstop: the native crank normally settles first; this closes on-chain if it lags.
+    if (roundActive && !settling && (nowMs - roundStartMs) / 1000 >= CONFIG.MAXSEC) void closeRound("expire");
   } else {
     car.setEquity("idle", 1);
     hud.setTimer(CONFIG.MAXSEC, false);
@@ -697,13 +677,13 @@ function frame() {
     if (ability === "laneBet") {
       const laneDir: 0 | 1 | -1 = carXTarget < -0.6 ? 1 : carXTarget > 0.6 ? -1 : 0;
       if (laneDir !== 0) {
-        if (laneDir !== round.dir) {
-          engine.setDir(laneDir, roundPrice);
+        if (laneDir !== round.dir && !flipping) {
+          engine.setDir(laneDir, roundPrice);    // instant local flip (feel)
           round.dir = laneDir;
-          round.entryPx = roundPrice;          // re-anchored on the flip (drives the liq line)
-          roundSync.noteFlip(laneDir);         // mirror the flip to the server segment stream
+          round.entryPx = roundPrice;             // re-anchor the local liq line
+          void doFlip(laneDir);                   // mirror to the on-chain round in the background
         }
-        controls.setDir(laneDir);              // reflect on the LONG/SHORT readout
+        controls.setDir(laneDir);
       }
     }
   } else {
@@ -758,5 +738,18 @@ function frame() {
   else ctx.renderer.render(ctx.scene, ctx.camera);
   requestAnimationFrame(frame);
 }
+// Poll the on-chain Round ~1.5×/s so a crank/keeper settlement surfaces even if the player never taps.
+// setInterval (not rAF) because rAF is throttled hard in Claude Preview.
+let polling = false;
+setInterval(async () => {
+  if (!roundActive || settling || polling || !session.delegated()) return;
+  polling = true;
+  try {
+    const snap = await session.poll();
+    if (snap && snap.status === 2) finalizeSettled(snap);
+  } catch { /* transient RPC — keep last */ }
+  finally { polling = false; }
+}, 650);
+
 requestAnimationFrame(frame);
 console.log("redline3d render up");
