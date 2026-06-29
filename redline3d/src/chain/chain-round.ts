@@ -30,6 +30,44 @@ export interface OpenedRound { entryRaw: bigint; entryExpo: number; entryHuman: 
 export interface SettledRound { outcome: number; outcomeName: string; payout: bigint; exitRaw: bigint; exitHuman: number; balance: bigint; }
 const OUTCOME = ["cashout", "cap", "liq", "time"];
 
+export interface RoundSnap {
+  status: number; outcome: number; outcomeName: string;
+  payout: bigint; banked: bigint; dir: number; lev: number;
+  entryRaw: bigint; entryExpo: number; entryHuman: number;
+  exitRaw: bigint; exitHuman: number; deadlineTs: number;
+}
+
+/** Result of a mid-round flip/lever: either re-anchored (still open) or settled (terminal-first hit). */
+export type ActionResult =
+  | { settled: false; banked: bigint; dir: number; lev: number; entryHuman: number }
+  | ({ settled: true } & SettledRound);
+
+/** Map an anchor-decoded Round account into a typed, BN-free snapshot. */
+export function roundToSnap(r: {
+  status: number; outcome: number; payout: { toString(): string }; banked: { toString(): string };
+  dir: number; lev: number; entryRaw: { toString(): string }; entryExpo: number;
+  exitRaw: { toString(): string }; deadlineTs: number;
+}): RoundSnap {
+  const entryExpo = Number(r.entryExpo);
+  const entryRaw = BigInt(r.entryRaw.toString());
+  const exitRaw = BigInt(r.exitRaw.toString());
+  return {
+    status: Number(r.status), outcome: Number(r.outcome), outcomeName: OUTCOME[Number(r.outcome)] ?? "?",
+    payout: BigInt(r.payout.toString()), banked: BigInt(r.banked.toString()),
+    dir: Number(r.dir), lev: Number(r.lev),
+    entryRaw, entryExpo, entryHuman: rawToHuman(entryRaw, entryExpo),
+    exitRaw, exitHuman: rawToHuman(exitRaw, entryExpo), deadlineTs: Number(r.deadlineTs),
+  };
+}
+
+/** Shape a flip/lever outcome: settled payload when the action hit a terminal (status 2), else the re-anchored round. */
+export function actionResultFromSnap(snap: RoundSnap, balance: bigint): ActionResult {
+  if (snap.status === 2) {
+    return { settled: true, outcome: snap.outcome, outcomeName: snap.outcomeName, payout: snap.payout, exitRaw: snap.exitRaw, exitHuman: snap.exitHuman, balance };
+  }
+  return { settled: false, banked: snap.banked, dir: snap.dir, lev: snap.lev, entryHuman: snap.entryHuman };
+}
+
 export interface ChainRound {
   address: string;
   readPlayerBalance(onEr?: boolean): Promise<bigint>;
