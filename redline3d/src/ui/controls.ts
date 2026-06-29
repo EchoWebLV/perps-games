@@ -1,4 +1,4 @@
-import { usd } from "../core/money";
+import { sol } from "../core/money";
 
 export interface Controls {
   dir(): 1 | -1;
@@ -30,7 +30,7 @@ export function createControls(ctrlMount: HTMLElement, goMount: HTMLElement, ped
     <div style="${seg}"><span class="lbl" style="${lab}">play amount</span>
       <div style="display:flex;align-items:center;gap:7px">
         <div id="sdn" class="step">−</div>
-        <div id="sval" class="num" style="flex:1;text-align:center;font-size:16px">$1.00</div>
+        <div id="sval" class="num" style="flex:1;text-align:center;font-size:16px">0.05 SOL</div>
         <div id="sup" class="step">+</div>
       </div></div>`;
   pedalMount.innerHTML = `
@@ -38,7 +38,7 @@ export function createControls(ctrlMount: HTMLElement, goMount: HTMLElement, ped
   goMount.innerHTML = `<button id="go" class="cta"><span id="gofill"></span><span id="golabel">GO!</span></button>`;
 
   const q = (s: string) => (ctrlMount.querySelector(s) || goMount.querySelector(s) || pedalMount.querySelector(s)) as HTMLElement;
-  let d: 1 | -1 = 1, playAmount = 100, live = false; // cents → $1.00 default
+  let d: 1 | -1 = 1, playAmount = 5, live = false; // 0.01-SOL units → 0.05 SOL default
   let gasOn = false, brakeOn = false, steerL = false, steerR = false;
   let launchCb = () => {}, cashCb = () => {};
   // anti-double-tap: when a round goes live the GO button becomes BAIL in place, so a quick second
@@ -64,8 +64,8 @@ export function createControls(ctrlMount: HTMLElement, goMount: HTMLElement, ped
     callbox.style.opacity = !live || laneMode ? "1" : "0";
     callbox.style.pointerEvents = live ? "none" : "auto";
   };
-  q("#sup").onclick = () => { if (!live) { playAmount = Math.min(5000, playAmount + 25); sval.textContent = usd(playAmount); } }; // +$0.25 → $50 cap
-  q("#sdn").onclick = () => { if (!live) { playAmount = Math.max(25, playAmount - 25); sval.textContent = usd(playAmount); } };   // -$0.25 → $0.25 floor
+  q("#sup").onclick = () => { if (!live) { playAmount = Math.min(10, playAmount + 1); sval.textContent = sol(playAmount); } }; // +0.01 → 0.10 SOL cap
+  q("#sdn").onclick = () => { if (!live) { playAmount = Math.max(1, playAmount - 1); sval.textContent = sol(playAmount); } };   // -0.01 → 0.01 SOL floor
   go.onclick = () => {
     if (live) { if (performance.now() < cashLockUntil) return; cashCb(); } // bail is locked for BAIL_LOCK_MS after launch
     else launchCb();

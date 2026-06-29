@@ -1,4 +1,4 @@
-import { usd } from "../core/money";
+import { sol } from "../core/money";
 
 export interface Hud {
   root: HTMLElement;
@@ -9,6 +9,8 @@ export interface Hud {
   miniCanvas: HTMLCanvasElement;
   setPrice(px: number, live: boolean): void;
   setBalance(b: number): void;
+  /** Live SOL/USD so the SOL balance can show a ~$ equivalent. */
+  setSolUsd(v: number): void;
   onAsset(cb: (asset: string) => void): void;
   setActiveAsset(asset: string): void;
   setMultiplier(equity: number, phase: "idle" | "live" | "settled" | "liquidated"): void;
@@ -64,6 +66,9 @@ export function createHud(parent: HTMLElement): Hud {
   const bal = q("#bal"), px = q("#solpx"), feed = q("#feed"), multi = q("#multi"),
     status = q("#status"), assetEl = q("#asset"), timer = q("#timer"), balchip = q("#balchip");
   const tabs = Array.from(parent.querySelectorAll<HTMLElement>(".atab"));
+  // Balance is in centi-SOL units; show SOL + a ~$ equivalent off the live SOL price.
+  let lastBal = 0, solUsd = 0;
+  const renderBal = () => { bal.textContent = sol(lastBal) + (solUsd > 0 ? ` · ~$${(lastBal / 100 * solUsd).toFixed(2)}` : ""); };
 
   return {
     root: parent,
@@ -73,7 +78,8 @@ export function createHud(parent: HTMLElement): Hud {
     pedalMount: q("#pedalMount"),
     miniCanvas: q("#mini") as HTMLCanvasElement,
     setPrice(p, live) { px.textContent = "$" + (p ? p.toFixed(2) : "—"); feed.textContent = live ? "live" : "sim"; feed.style.color = live ? "var(--grn)" : "var(--amb)"; },
-    setBalance(b) { bal.textContent = usd(b); },
+    setBalance(b) { lastBal = b; renderBal(); },
+    setSolUsd(v) { solUsd = v; renderBal(); },
     onAsset(cb) { for (const t of tabs) t.onclick = () => cb(t.dataset.asset!); },
     setActiveAsset(a) {
       assetEl.textContent = a;

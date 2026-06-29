@@ -366,7 +366,7 @@ export function createWallet(parent: HTMLElement, opts: WalletOpts): Wallet {
     ocEl.hidden = false;
     ocEl.innerHTML =
       `<div class="wlt-oc">
-         <div class="wlt-oc-row"><span class="lbl">Play balance</span><span class="val">$${fmt(playCents / 100)}</span></div>
+         <div class="wlt-oc-row"><span class="lbl">Play balance</span><span class="val">${fmt(playCents / 100)} SOL</span></div>
          <div class="wlt-oc-btns">
            <button class="wlt-oc-btn end" id="wltOcEnd" ${delegated ? "" : "disabled"}>End session</button>
            <button class="wlt-oc-btn wd" id="wltOcWd" ${!delegated && playCents > 0 ? "" : "disabled"}>Withdraw</button>

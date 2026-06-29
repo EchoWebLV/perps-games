@@ -18,7 +18,7 @@ import { createApi } from "./core/api";
 import { createDevAuth } from "./core/auth-dev";
 import { createSessionAuth } from "./core/auth-session";
 import type { AuthProvider } from "./core/auth";
-import { usd } from "./core/money";
+import { sol } from "./core/money";
 import { clampInt } from "./core/round-sync";
 import { displayCashBalance } from "./core/wallet-balance-model";
 import { niceLev, tToLev } from "./core/leverage";
@@ -78,14 +78,16 @@ ctx.scene.add(pickups.group);
 // core
 const engine = new RoundEngine();
 // ── on-chain round (Slice 4) ────────────────────────────────────────────────
-// The round loop + USDC play balance run on-chain via the dev-keypair port. The local engine
+// The round loop + SOL play balance run on-chain via the dev-keypair port. The local engine
 // still drives the smooth visual ×; the on-chain Round is the only money truth.
-const USDC_PER_CENT = 10 ** (CHAIN.STAKE_DECIMALS - 2); // 6-decimal USDC, display in cents → 10_000
-const centsToBase = (cents: number) => cents * USDC_PER_CENT;
-const baseToCents = (base: bigint) => Number(base / BigInt(USDC_PER_CENT));
-const BUY_IN_BASE = 2_000_000; // 2 test-USDC auto buy-in on the first GO (dev default)
-let lastStakeCents = 0;
-void lastStakeCents; // recorded at open for the upcoming wager-history slice; not read on the hot path yet
+// The play ledger is denominated in CENTI-SOL units (1 unit = 0.01 SOL). With 9-decimal
+// wSOL this maps a unit to 10^7 lamports — the same ×100 scale the old cents model used.
+const BASE_PER_UNIT = 10 ** (CHAIN.STAKE_DECIMALS - 2); // 9-decimal SOL, 0.01-SOL units → 10_000_000 lamports
+const unitsToBase = (units: number) => units * BASE_PER_UNIT;
+const baseToUnits = (base: bigint) => Number(base / BigInt(BASE_PER_UNIT));
+const BUY_IN_BASE = 100_000_000; // 0.1 SOL auto buy-in float on the first GO (covers one max-stake round)
+let lastStakeUnits = 0;
+void lastStakeUnits; // recorded at open for the upcoming wager-history slice; not read on the hot path yet
 let roundActive = false; // a round is open locally (de-dupes finalizeSettled across crank/poll/close)
 let settling = false;    // a close tx is in flight
 let opening = false;     // the GO handler (ensureSession+open) is mid-flight
@@ -93,9 +95,9 @@ const session = createGameSession({
   mint: new PublicKey(CHAIN.STAKE_MINT),
   onSettled: (info) => finalizeSettled(info), // terminal-first background lever
 });
-// The cash chip + wallet hero read the on-chain play balance (cents). Single writer.
+// The cash chip + wallet hero read the on-chain play balance (centi-SOL units). Single writer.
 function syncOnchainBalance() {
-  balance = baseToCents(session.balance());
+  balance = baseToUnits(session.balance());
   hud.setBalance(balance);
   walletUI.setBalance(balance);
 }
@@ -179,9 +181,10 @@ const ASSETS = [
   { key: "SOL", lz: 6, hx: "ef0d8b6fda2ceba41da15d4095d1da392a0d2f8ed0c6c7bc0f4cfac8c280b56d", expo: -8 },
 ];
 let asset: "BTC" | "ETH" | "SOL" = "BTC"; // the active tab; open() binds the round to this asset's registered Lazer feed
+let solUsd = 0; // live SOL/USD (captured from the feed regardless of active asset) → balance ~$ hint
 const priceSource = createPriceSource({
   connect: (onPrice) => {
-    const h = connectFeed({ feeds: ASSETS, onPrice: (k, v) => { if (k === asset) onPrice(v); } });
+    const h = connectFeed({ feeds: ASSETS, onPrice: (k, v) => { if (k === "SOL") solUsd = v; if (k === asset) onPrice(v); } });
     return () => h.stop();
   },
 });
@@ -240,7 +243,7 @@ const walletUI = createWallet(hudRoot, {
     walletUI.setBalance(balance);
   },
   onchain: {
-    status: () => ({ delegated: session.delegated(), playCents: baseToCents(session.balance()) }),
+    status: () => ({ delegated: session.delegated(), playCents: baseToUnits(session.balance()) }),
     end: async () => {
       hud.setStatus("Ending session…");
       await session.endSession();
@@ -474,7 +477,7 @@ function finalizeSettled(info: { outcome: number; outcomeName: string; payout: b
   if (engine.getPhase() === "live") engine.cashout(price, now); // freeze the visual at the live value
   const finalEq = engine.snapshot(price, now).equity;
   const liq = info.outcome === 2; // 0 cashout · 1 cap · 2 liq · 3 time
-  const payoutCents = baseToCents(info.payout);
+  const payoutUnits = baseToUnits(info.payout);
   // reset UI
   releaseHold();
   throttle = 34; game.equity = 1; chase.setDriving(false);
@@ -486,7 +489,7 @@ function finalizeSettled(info: { outcome: number; outcomeName: string; payout: b
     hud.setStatus("💥 Liquidated. Lost the play amount.");
     fx.liquidate(); audio.liquidate(); navigator.vibrate?.([30, 40, 30, 40, 90]);
   } else {
-    hud.setStatus(`Settled at ×${finalEq.toFixed(2)}. Banked ${usd(payoutCents)}.`);
+    hud.setStatus(`Settled at ×${finalEq.toFixed(2)}. Banked ${sol(payoutUnits)}.`);
     fx.confetti(); audio.cashout(); navigator.vibrate?.(35);
   }
   void session.refreshBalance(session.delegated()).then(() => syncOnchainBalance()).catch(() => {});
@@ -530,9 +533,9 @@ controls.onLaunch(async () => {
     }
     await session.refreshBalance(true); syncOnchainBalance();
 
-    const playAmount = controls.playAmount(); // cents
-    if (session.balance() < BigInt(centsToBase(playAmount))) {
-      hud.setStatus("Add USDC to your play balance to race.");
+    const playAmount = controls.playAmount(); // 0.01-SOL units
+    if (session.balance() < BigInt(unitsToBase(playAmount))) {
+      hud.setStatus("Add SOL to your play balance to race.");
       walletUI.open();
       return;
     }
@@ -541,7 +544,7 @@ controls.onLaunch(async () => {
     hud.setStatus("Launching…");
     let opened;
     try {
-      opened = await session.open(asset, dir, lev, centsToBase(playAmount));
+      opened = await session.open(asset, dir, lev, unitsToBase(playAmount));
     } catch (e) {
       console.error("on-chain open failed", e);
       hud.setStatus("Couldn't start the round. Try again.");
@@ -550,7 +553,7 @@ controls.onLaunch(async () => {
     }
     round.entryPx = opened.entryHuman; // human entry price (NOT the raw mantissa)
     round.dir = dir;
-    lastStakeCents = playAmount;
+    lastStakeUnits = playAmount;
     roundStartMs = Date.now();
     engine.launch({ dir, lev, stake: playAmount, entryRaw: opened.entryHuman, startMs: roundStartMs });
     roundActive = true;
@@ -631,6 +634,7 @@ function frame() {
   if (price > 0) solSmooth = solSmooth ? solSmooth + (price - solSmooth) * 0.1 : price;
   if (solSmooth > 0) solEMA = solEMA ? solEMA + (solSmooth - solEMA) * 0.012 : solSmooth;
   hud.setPrice(solSmooth || price, live);
+  if (solUsd > 0) hud.setSolUsd(solUsd);
   if (solSmooth > 0) { priceHist.push(solSmooth); if (priceHist.length > 300) priceHist.shift(); }
 
   // spec §9: never settle P&L on a stale feed. Freeze equity at the last real
@@ -664,7 +668,7 @@ function frame() {
     hud.setTimer(CONFIG.MAXSEC - (nowMs - roundStartMs) / 1000, true);
     car.setEquity("live", Math.max(0, snap.equity));
     const payC = Math.floor(snap.payout);
-    controls.setLive(true, `${snap.equity >= 1 ? "CASH OUT" : "BAIL"} ${usd(payC)}`, snap.equity < 1);
+    controls.setLive(true, `${snap.equity >= 1 ? "CASH OUT" : "BAIL"} ${sol(payC)}`, snap.equity < 1);
     // Local 60s backstop: the native crank normally settles first; this closes on-chain if it lags.
     if (roundActive && !settling && (nowMs - roundStartMs) / 1000 >= CONFIG.MAXSEC) void closeRound("expire");
   } else {
