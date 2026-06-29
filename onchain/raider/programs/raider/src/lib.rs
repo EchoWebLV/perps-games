@@ -288,15 +288,24 @@ pub mod raider {
     /// Open a round inside the ER: snapshot the live Lazer entry price, debit the
     /// player's stake, and PRE-LOCK the house's maximum possible payout so the
     /// house is provably solvent for this round before any price moves.
-    pub fn open(ctx: Context<OpenRound>, dir: i8, lev: u32, stake: u64) -> Result<()> {
+    pub fn open(ctx: Context<OpenRound>, asset: u8, dir: i8, lev: u32, stake: u64) -> Result<()> {
         require!(
             lev >= settle::RMIN && lev <= settle::RMAX,
             RaiderError::BadLeverage
         );
         require!(dir == 1 || dir == -1, RaiderError::BadLeverage);
+        require!((asset as usize) < state::MAX_ASSETS, RaiderError::UnknownAsset);
+
+        // Registry binds the asset → feed. The passed price_update MUST be the registered,
+        // enabled feed for this asset; read_fresh authenticates owner+staleness; the decoded
+        // feed_id must match the registered id (defense-in-depth).
+        let entry = ctx.accounts.registry.feeds[asset as usize];
+        require!(entry.enabled, RaiderError::UnknownAsset);
+        require_keys_eq!(ctx.accounts.price_update.key(), entry.feed, RaiderError::UntrustedFeed);
 
         let now = Clock::get()?.unix_timestamp;
         let snap = price::read_fresh(&ctx.accounts.price_update, now)?;
+        require!(snap.feed_id == entry.feed_id, RaiderError::UntrustedFeed);
         // entry_raw is a DIVISOR in settle::equity_fp at close — a <= 0 entry would
         // div-by-zero / invert the position. Never store a non-positive entry.
         require!(snap.price > 0, RaiderError::BadPrice);
@@ -336,6 +345,7 @@ pub mod raider {
             .ok_or(RaiderError::MathOverflow)?;
 
         round.owner = player.owner;
+        round.feed = ctx.accounts.price_update.key();
         round.dir = dir;
         round.lev = lev;
         round.stake = stake;
@@ -1039,10 +1049,11 @@ pub struct OpenRound<'info> {
     )]
     pub round: Account<'info, Round>,
     pub mint: Account<'info, Mint>,
-    /// CHECK: pinned to the Lazer BTC feed (address = BTC_FEED); the bytes are
-    /// further authenticated (owner + feed_id + staleness) by price::read_fresh().
-    #[account(address = price::BTC_FEED)]
+    /// CHECK: must equal registry.feeds[asset].feed (checked in the handler); the bytes are
+    /// authenticated (owner + staleness) by price::read_fresh().
     pub price_update: AccountInfo<'info>,
+    #[account(seeds = [FEEDS_SEED], bump = registry.bump)]
+    pub registry: Account<'info, FeedRegistry>,
     // Phase 1 = the owner; session-key-ready slot for later phases.
     pub player_authority: Signer<'info>,
 }
