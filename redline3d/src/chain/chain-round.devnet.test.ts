@@ -120,4 +120,52 @@ describe.skipIf(!RUN)("chain-round devnet loop", () => {
     await chain.withdraw(Number(l1));
     expect(await chain.readPlayerBalance(false)).toBe(0n);
   }, 240_000);
+
+  it("delegate() reuses our own live session and rejects a foreign wallet on the shared house", async () => {
+    const RPC = process.env.BASE_RPC || "https://api.devnet.solana.com";
+    const conn = new Connection(RPC, { commitment: "confirmed" });
+    const wpath = process.env.ANCHOR_WALLET || `${process.env.HOME}/.config/solana/lazer-probe.json`;
+    const funder = Keypair.fromSecretKey(new Uint8Array(JSON.parse(readFileSync(wpath, "utf8"))));
+    const provider = new anchor.AnchorProvider(conn, new anchor.Wallet(funder), { commitment: "confirmed" });
+    const program = new anchor.Program(idl as anchor.Idl, provider);
+
+    // fresh mint + funded house shared by both players
+    const mint = await createMint(conn, funder, funder.publicKey, null, 6);
+    const [house] = PublicKey.findProgramAddressSync([Buffer.from("house"), mint.toBuffer()], program.programId);
+    const [vaultAuthority] = PublicKey.findProgramAddressSync([Buffer.from("vault"), mint.toBuffer()], program.programId);
+    const vaultToken = getAssociatedTokenAddressSync(mint, vaultAuthority, true);
+    await program.methods.initHouse().accounts({ authority: funder.publicKey, mint, house, vaultAuthority, vaultToken, tokenProgram: TOKEN_PROGRAM_ID, associatedTokenProgram: ASSOCIATED_TOKEN_PROGRAM_ID, systemProgram: SystemProgram.programId }).rpc({ skipPreflight: true });
+    const funderAta = await getOrCreateAssociatedTokenAccount(conn, funder, mint, funder.publicKey);
+    await mintTo(conn, funder, mint, funderAta.address, funder.publicKey, 50_000_000);
+    await program.methods.fundHouse(new anchor.BN(50_000_000)).accounts({ funder: funder.publicKey, mint, house, funderToken: funderAta.address, vaultAuthority, vaultToken, tokenProgram: TOKEN_PROGRAM_ID }).rpc({ skipPreflight: true });
+
+    // two independent dev-keypair players on the same mint
+    const mkPlayer = async () => {
+      const kp = Keypair.generate();
+      await provider.sendAndConfirm(new anchor.web3.Transaction().add(SystemProgram.transfer({ fromPubkey: funder.publicKey, toPubkey: kp.publicKey, lamports: 0.1 * LAMPORTS_PER_SOL })));
+      const ata = await getOrCreateAssociatedTokenAccount(conn, funder, mint, kp.publicKey);
+      await mintTo(conn, funder, mint, ata.address, funder.publicKey, 5_000_000);
+      const port = createDevKeypairPort({ secretKey: kp.secretKey, store: { get: () => null, set: () => {} } });
+      await port.connect();
+      return createChainRound({ wallet: portToAnchorWallet(port), mint });
+    };
+    const a = await mkPlayer();
+    const b = await mkPlayer();
+
+    // A takes the house
+    await a.buyIn(5_000_000);
+    await a.ensureRoundInited();
+    await a.delegate();
+
+    // A re-delegating is a clean reuse (no throw)
+    await expect(a.delegate()).resolves.toBeUndefined();
+
+    // B can't delegate against the held shared house — typed busy, not a raw revert
+    await b.buyIn(5_000_000);
+    await b.ensureRoundInited();
+    await expect(b.delegate()).rejects.toMatchObject({ code: "delegate_busy" });
+
+    // cleanup: A brings the house home so the shared PDA is free for the next run
+    await a.commitAndUndelegate();
+  }, 240_000);
 });
