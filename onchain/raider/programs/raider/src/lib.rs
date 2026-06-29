@@ -21,8 +21,8 @@ pub mod price;
 pub mod settle;
 pub mod state;
 
-use state::{HouseBalance, PlayerBalance, Round};
-use state::{HOUSE_SEED, MAX_ROUND_SECS, PLAYER_SEED, ROUND_SEED, STALE_SECS, VAULT_SEED};
+use state::{FeedRegistry, HouseBalance, PlayerBalance, Round};
+use state::{FEEDS_SEED, HOUSE_SEED, MAX_ROUND_SECS, PLAYER_SEED, ROUND_SEED, STALE_SECS, VAULT_SEED};
 
 // ===========================================================================
 // PROVEN PLUMBING PATTERN — Task 2 (two-account co-delegation), GREEN on devnet
@@ -103,6 +103,31 @@ pub mod raider {
         h.balance = 0;
         h.locked = 0;
         h.bump = ctx.bumps.house;
+        Ok(())
+    }
+
+    // ---- Multi-asset: feed registry (admin, L1) -----------------------------
+
+    /// Create the singleton feed registry. The signer becomes the admin authority.
+    pub fn init_feed_registry(ctx: Context<InitFeedRegistry>) -> Result<()> {
+        let r = &mut ctx.accounts.registry;
+        r.authority = ctx.accounts.authority.key();
+        r.feeds = Default::default();
+        r.bump = ctx.bumps.registry;
+        Ok(())
+    }
+
+    /// Register (or update/disable) the feed for an asset slot. Admin-only.
+    pub fn set_feed(
+        ctx: Context<SetFeed>,
+        asset: u8,
+        feed: Pubkey,
+        feed_id: [u8; 32],
+        enabled: bool,
+    ) -> Result<()> {
+        require!((asset as usize) < state::MAX_ASSETS, RaiderError::UnknownAsset);
+        let r = &mut ctx.accounts.registry;
+        r.feeds[asset as usize] = state::FeedEntry { feed, feed_id, enabled };
         Ok(())
     }
 
@@ -825,6 +850,33 @@ pub struct InitHouse<'info> {
 }
 
 #[derive(Accounts)]
+pub struct InitFeedRegistry<'info> {
+    #[account(mut)]
+    pub authority: Signer<'info>,
+    #[account(
+        init,
+        payer = authority,
+        space = state::FeedRegistry::SIZE,
+        seeds = [state::FEEDS_SEED],
+        bump
+    )]
+    pub registry: Account<'info, state::FeedRegistry>,
+    pub system_program: Program<'info, System>,
+}
+
+#[derive(Accounts)]
+pub struct SetFeed<'info> {
+    pub authority: Signer<'info>,
+    #[account(
+        mut,
+        seeds = [state::FEEDS_SEED],
+        bump = registry.bump,
+        has_one = authority @ RaiderError::NotOwner,
+    )]
+    pub registry: Account<'info, state::FeedRegistry>,
+}
+
+#[derive(Accounts)]
 pub struct BuyIn<'info> {
     #[account(mut)]
     pub owner: Signer<'info>,
@@ -1161,6 +1213,8 @@ pub enum RaiderError {
     UntrustedFeed,
     /// flip got a direction that is not +1 or -1.
     BadDirection,
+    /// open/set_feed got an asset index outside the registry, or an unregistered/disabled feed.
+    UnknownAsset,
 }
 
 /// Emitted on every Round state transition so the entire path is reconstructable
