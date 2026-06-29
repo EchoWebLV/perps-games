@@ -30,6 +30,30 @@ export interface OpenedRound { entryRaw: bigint; entryExpo: number; entryHuman: 
 export interface SettledRound { outcome: number; outcomeName: string; payout: bigint; exitRaw: bigint; exitHuman: number; balance: bigint; }
 const OUTCOME = ["cashout", "cap", "liq", "time"];
 
+/** A delegate attempt that can't proceed because the shared house is held (foreign or torn). */
+export class DelegateBusyError extends Error {
+  readonly code = "delegate_busy" as const;
+  constructor(message: string) { super(message); this.name = "DelegateBusyError"; }
+}
+
+export type DelegateState = "reuse" | "fresh" | "busy";
+
+/**
+ * Classify the three raider PDAs' on-chain owners before delegating:
+ *  - all delegated  → "reuse" (our own stale-but-live session; skip the delegate tx)
+ *  - none delegated → "fresh" (normal delegate; nulls = not-yet-created PDAs count as not-delegated)
+ *  - anything else  → "busy"  (another wallet holds the shared house, or torn mid-delegation)
+ */
+export function classifyDelegateState(owners: {
+  player: PublicKey | null; house: PublicKey | null; round: PublicKey | null;
+}): DelegateState {
+  const del = (o: PublicKey | null) => !!o && o.equals(CHAIN.DELEGATION_PROGRAM);
+  const p = del(owners.player), h = del(owners.house), r = del(owners.round);
+  if (p && h && r) return "reuse";
+  if (!p && !h && !r) return "fresh";
+  return "busy";
+}
+
 export interface RoundSnap {
   status: number; outcome: number; outcomeName: string;
   payout: bigint; banked: bigint; dir: number; lev: number;
@@ -155,9 +179,27 @@ export function createChainRound(deps: { wallet: AnchorWalletLike; mint: PublicK
     },
 
     async delegate() {
-      await send(baseConn, program.methods.delegateSession().accountsPartial({
-        payer: owner, mint, player: pdas.player, house: pdas.house, round: pdas.round,
-      }).remainingAccounts([{ pubkey: CHAIN.VALIDATOR, isSigner: false, isWritable: false }]), 400_000);
+      const [pi, hi, ri] = await Promise.all([
+        baseConn.getAccountInfo(pdas.player),
+        baseConn.getAccountInfo(pdas.house),
+        baseConn.getAccountInfo(pdas.round),
+      ]);
+      const state = classifyDelegateState({ player: pi?.owner ?? null, house: hi?.owner ?? null, round: ri?.owner ?? null });
+      if (state === "reuse") return; // our own session is already live on the ER — nothing to send
+      if (state === "busy") {
+        throw new DelegateBusyError("Session busy — another player holds the table, or end your previous session and try again.");
+      }
+      try {
+        await send(baseConn, program.methods.delegateSession().accountsPartial({
+          payer: owner, mint, player: pdas.player, house: pdas.house, round: pdas.round,
+        }).remainingAccounts([{ pubkey: CHAIN.VALIDATOR, isSigner: false, isWritable: false }]), 400_000);
+      } catch (e) {
+        // race: the house was grabbed between our ownership read and our send.
+        if (String((e as Error).message).includes("ExternalAccountDataModified")) {
+          throw new DelegateBusyError("Session busy — the table was just taken. Try again in a moment.");
+        }
+        throw e;
+      }
       await pollOwner(CHAIN.DELEGATION_PROGRAM, "delegate", 25, 1000);
     },
 

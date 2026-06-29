@@ -1,6 +1,8 @@
 import { describe, it, expect } from "vitest";
 import { PublicKey } from "@solana/web3.js";
 import { deriveRaiderPdas, rawToHuman, roundToSnap, actionResultFromSnap } from "./chain-round";
+import { classifyDelegateState, DelegateBusyError } from "./chain-round";
+import { CHAIN } from "./config";
 
 describe("chain-round pure helpers", () => {
   it("derives the same PDAs the program expects", () => {
@@ -48,5 +50,33 @@ describe("chain-round pure helpers", () => {
     const done = actionResultFromSnap({ ...base, status: 2, outcome: 2, outcomeName: "liq" }, 4_000_000n);
     expect(done.settled).toBe(true);
     if (done.settled) { expect(done.outcomeName).toBe("liq"); expect(done.balance).toBe(4_000_000n); }
+  });
+});
+
+describe("classifyDelegateState", () => {
+  const DEL = CHAIN.DELEGATION_PROGRAM;
+  const PROG = CHAIN.PROGRAM_ID;
+
+  it("reuse when all three PDAs are already delegated (our own live session)", () => {
+    expect(classifyDelegateState({ player: DEL, house: DEL, round: DEL })).toBe("reuse");
+  });
+
+  it("fresh when none are delegated (fresh wallet / clean state — nulls allowed)", () => {
+    expect(classifyDelegateState({ player: null, house: PROG, round: null })).toBe("fresh");
+    expect(classifyDelegateState({ player: PROG, house: PROG, round: PROG })).toBe("fresh");
+  });
+
+  it("busy when the shared house is delegated but our PDAs are still on L1", () => {
+    expect(classifyDelegateState({ player: PROG, house: DEL, round: PROG })).toBe("busy");
+  });
+
+  it("busy on a torn mid-delegation state", () => {
+    expect(classifyDelegateState({ player: DEL, house: DEL, round: PROG })).toBe("busy");
+  });
+
+  it("DelegateBusyError carries a typed code", () => {
+    const e = new DelegateBusyError("nope");
+    expect(e.code).toBe("delegate_busy");
+    expect(e.message).toBe("nope");
   });
 });
