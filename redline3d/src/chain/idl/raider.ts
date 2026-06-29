@@ -295,11 +295,7 @@ export type Raider = {
           "name": "mint"
         },
         {
-          "name": "priceUpdate",
-          "docs": [
-            "further authenticated (owner + feed_id + staleness) by price::read_fresh()."
-          ],
-          "address": "71wtTRDY8Gxgw56bXFt2oc6qeAbTxzStdNiC425Z51sr"
+          "name": "priceUpdate"
         },
         {
           "name": "playerAuthority",
@@ -1030,11 +1026,7 @@ export type Raider = {
           "name": "mint"
         },
         {
-          "name": "priceUpdate",
-          "docs": [
-            "further authenticated (owner + feed_id + staleness) by price::read_fresh()."
-          ],
-          "address": "71wtTRDY8Gxgw56bXFt2oc6qeAbTxzStdNiC425Z51sr"
+          "name": "priceUpdate"
         },
         {
           "name": "playerAuthority",
@@ -1147,13 +1139,7 @@ export type Raider = {
           "name": "mint"
         },
         {
-          "name": "priceUpdate",
-          "docs": [
-            "further authenticated (owner + feed_id + staleness) by price::read_fresh().",
-            "This pin matters most here: force_close is permissionless, so without it",
-            "any abandoned round would be drainable via a forged feed."
-          ],
-          "address": "71wtTRDY8Gxgw56bXFt2oc6qeAbTxzStdNiC425Z51sr"
+          "name": "priceUpdate"
         },
         {
           "name": "caller",
@@ -1341,6 +1327,52 @@ export type Raider = {
           "type": "u64"
         }
       ]
+    },
+    {
+      "name": "initFeedRegistry",
+      "docs": [
+        "Create the singleton feed registry. The signer becomes the admin authority."
+      ],
+      "discriminator": [
+        43,
+        102,
+        107,
+        110,
+        199,
+        57,
+        0,
+        63
+      ],
+      "accounts": [
+        {
+          "name": "authority",
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "registry",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  102,
+                  101,
+                  101,
+                  100,
+                  115
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "systemProgram",
+          "address": "11111111111111111111111111111111"
+        }
+      ],
+      "args": []
     },
     {
       "name": "initHouse",
@@ -1669,11 +1701,7 @@ export type Raider = {
           "name": "mint"
         },
         {
-          "name": "priceUpdate",
-          "docs": [
-            "further authenticated (owner + feed_id + staleness) by price::read_fresh()."
-          ],
-          "address": "71wtTRDY8Gxgw56bXFt2oc6qeAbTxzStdNiC425Z51sr"
+          "name": "priceUpdate"
         },
         {
           "name": "playerAuthority",
@@ -1784,9 +1812,25 @@ export type Raider = {
         {
           "name": "priceUpdate",
           "docs": [
-            "further authenticated (owner + feed_id + staleness) by price::read_fresh()."
-          ],
-          "address": "71wtTRDY8Gxgw56bXFt2oc6qeAbTxzStdNiC425Z51sr"
+            "authenticated (owner + staleness) by price::read_fresh()."
+          ]
+        },
+        {
+          "name": "registry",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  102,
+                  101,
+                  101,
+                  100,
+                  115
+                ]
+              }
+            ]
+          }
         },
         {
           "name": "playerAuthority",
@@ -1794,6 +1838,10 @@ export type Raider = {
         }
       ],
       "args": [
+        {
+          "name": "asset",
+          "type": "u8"
+        },
         {
           "name": "dir",
           "type": "i8"
@@ -1889,14 +1937,38 @@ export type Raider = {
         },
         {
           "name": "round",
-          "writable": true
+          "docs": [
+            "Round PDA — typed so we can read round.feed, and `mut` so the scheduled",
+            "tick_crank's writable `round` meta inherits write privilege (else the",
+            "MagicBlock scheduler rejects the task with PrivilegeEscalation). schedule_tick",
+            "never mutates it; the re-serialize writes identical bytes."
+          ],
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  114,
+                  111,
+                  117,
+                  110,
+                  100
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "round.owner",
+                "account": "round"
+              }
+            ]
+          }
         },
         {
           "name": "mint"
         },
         {
-          "name": "priceUpdate",
-          "address": "71wtTRDY8Gxgw56bXFt2oc6qeAbTxzStdNiC425Z51sr"
+          "name": "priceUpdate"
         }
       ],
       "args": [
@@ -1911,6 +1983,72 @@ export type Raider = {
         {
           "name": "iterations",
           "type": "i64"
+        }
+      ]
+    },
+    {
+      "name": "setFeed",
+      "docs": [
+        "Register (or update/disable) the feed for an asset slot. Admin-only."
+      ],
+      "discriminator": [
+        79,
+        150,
+        2,
+        207,
+        41,
+        104,
+        77,
+        41
+      ],
+      "accounts": [
+        {
+          "name": "authority",
+          "signer": true,
+          "relations": [
+            "registry"
+          ]
+        },
+        {
+          "name": "registry",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  102,
+                  101,
+                  101,
+                  100,
+                  115
+                ]
+              }
+            ]
+          }
+        }
+      ],
+      "args": [
+        {
+          "name": "asset",
+          "type": "u8"
+        },
+        {
+          "name": "feed",
+          "type": "pubkey"
+        },
+        {
+          "name": "feedId",
+          "type": {
+            "array": [
+              "u8",
+              32
+            ]
+          }
+        },
+        {
+          "name": "enabled",
+          "type": "bool"
         }
       ]
     },
@@ -2010,13 +2148,7 @@ export type Raider = {
           "name": "mint"
         },
         {
-          "name": "priceUpdate",
-          "docs": [
-            "further authenticated (owner + feed_id + staleness) by price::read_fresh().",
-            "This pin matters most here: force_close is permissionless, so without it",
-            "any abandoned round would be drainable via a forged feed."
-          ],
-          "address": "71wtTRDY8Gxgw56bXFt2oc6qeAbTxzStdNiC425Z51sr"
+          "name": "priceUpdate"
         },
         {
           "name": "caller",
@@ -2123,11 +2255,7 @@ export type Raider = {
           "name": "mint"
         },
         {
-          "name": "priceUpdate",
-          "docs": [
-            "further authenticated (owner + feed_id + staleness) by price::read_fresh()."
-          ],
-          "address": "71wtTRDY8Gxgw56bXFt2oc6qeAbTxzStdNiC425Z51sr"
+          "name": "priceUpdate"
         }
       ],
       "args": []
@@ -2321,6 +2449,19 @@ export type Raider = {
   ],
   "accounts": [
     {
+      "name": "feedRegistry",
+      "discriminator": [
+        165,
+        19,
+        142,
+        137,
+        18,
+        194,
+        61,
+        247
+      ]
+    },
+    {
       "name": "houseBalance",
       "discriminator": [
         29,
@@ -2423,9 +2564,67 @@ export type Raider = {
     {
       "code": 6011,
       "name": "badDirection"
+    },
+    {
+      "code": 6012,
+      "name": "unknownAsset"
     }
   ],
   "types": [
+    {
+      "name": "feedEntry",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "feed",
+            "type": "pubkey"
+          },
+          {
+            "name": "feedId",
+            "type": {
+              "array": [
+                "u8",
+                32
+              ]
+            }
+          },
+          {
+            "name": "enabled",
+            "type": "bool"
+          }
+        ]
+      }
+    },
+    {
+      "name": "feedRegistry",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "authority",
+            "type": "pubkey"
+          },
+          {
+            "name": "feeds",
+            "type": {
+              "array": [
+                {
+                  "defined": {
+                    "name": "feedEntry"
+                  }
+                },
+                8
+              ]
+            }
+          },
+          {
+            "name": "bump",
+            "type": "u8"
+          }
+        ]
+      }
+    },
     {
       "name": "houseBalance",
       "type": {
@@ -2485,6 +2684,10 @@ export type Raider = {
         "fields": [
           {
             "name": "owner",
+            "type": "pubkey"
+          },
+          {
+            "name": "feed",
             "type": "pubkey"
           },
           {

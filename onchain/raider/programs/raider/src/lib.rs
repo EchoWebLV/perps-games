@@ -1180,8 +1180,11 @@ pub struct ScheduleTick<'info> {
     /// CHECK: HouseBalance PDA, forwarded to the scheduled-ix metas
     #[account(mut)]
     pub house: UncheckedAccount<'info>,
-    /// Round PDA — typed read so we can forward round.feed into the scheduled metas.
-    #[account(seeds = [ROUND_SEED, round.owner.as_ref()], bump = round.bump)]
+    /// Round PDA — typed so we can read round.feed, and `mut` so the scheduled
+    /// tick_crank's writable `round` meta inherits write privilege (else the
+    /// MagicBlock scheduler rejects the task with PrivilegeEscalation). schedule_tick
+    /// never mutates it; the re-serialize writes identical bytes.
+    #[account(mut, seeds = [ROUND_SEED, round.owner.as_ref()], bump = round.bump)]
     pub round: Account<'info, Round>,
     /// CHECK: mint, forwarded to the scheduled-ix metas
     pub mint: UncheckedAccount<'info>,
