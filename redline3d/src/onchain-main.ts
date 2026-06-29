@@ -22,9 +22,15 @@ let liveDir: 1 | -1 = 1;
 let liveLev = 100;
 let polling = false;
 
+// Mid-round controls are only live while a round is open.
+function setRoundButtons(live: boolean) {
+  for (const id of ["flip", "levminus", "levplus"]) (($(id) as HTMLButtonElement).disabled = !live);
+}
+
 // Single place a settlement (close, terminal-first flip/lever, OR the native crank) lands in the HUD.
 function finalizeSettled(o: { outcome: number; outcomeName: string; payout: bigint }) {
   if (engine.getPhase() === "live") engine.cashout(priceSource.price(), Date.now()); // freeze the local visual
+  setRoundButtons(false);
   setText("status", `${o.outcomeName.toUpperCase()} — payout ${usd(o.payout)} USDC.`);
   setText("mult", o.outcome === 2 ? "💥 liquidated" : `settled · +${usd(o.payout)} USDC`);
   void refreshBalance(true);
@@ -81,6 +87,7 @@ async function settle(kind: "cashout" | "expire") {
     const res: SettledRound = await chain.close();
     setText("status", `${res.outcomeName.toUpperCase()} — payout ${usd(res.payout)} USDC. balance ${usd(res.balance)}.`);
     setText("mult", res.outcome === 2 ? "💥 liquidated" : `settled · +${usd(res.payout)} USDC`);
+    setRoundButtons(false);
     await refreshBalance(true);
   } catch (e) { setText("status", `close failed: ${(e as Error).message}`); }
   finally { busy = false; }
@@ -100,9 +107,7 @@ $("go").onclick = async () => {
     roundStartMs = Date.now();
     liveDir = dir; liveLev = lev;
     engine.launch({ dir, lev, stake, entryRaw: opened.entryHuman, startMs: roundStartMs });
-    (($("flip") as HTMLButtonElement).disabled = false);
-    (($("levminus") as HTMLButtonElement).disabled = false);
-    (($("levplus") as HTMLButtonElement).disabled = false);
+    setRoundButtons(true);
     setText("status", `LIVE — entry $${opened.entryHuman.toFixed(2)}. arming crank…`);
     try {
       await chain.scheduleCrank();
@@ -160,9 +165,7 @@ $("end").onclick = async () => {
     await chain.commitAndUndelegate();
     delegated = false;
     (($("go") as HTMLButtonElement).disabled = true);
-    (($("flip") as HTMLButtonElement).disabled = true);
-    (($("levminus") as HTMLButtonElement).disabled = true);
-    (($("levplus") as HTMLButtonElement).disabled = true);
+    setRoundButtons(false);
     (($("withdraw") as HTMLButtonElement).disabled = false);
     await refreshBalance(false);
     setText("status", "session ended. You can Withdraw all.");
