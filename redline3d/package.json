@@ -12,7 +12,10 @@
     "apk": "bash scripts/build-apk.sh",
     "apk:install": "bash scripts/build-apk.sh --install",
     "apk:serve": "bash scripts/build-apk.sh --serve",
-    "bake:cards": "node scripts/bake-cards.mjs"
+    "bake:cards": "node scripts/bake-cards.mjs",
+    "chain:bootstrap": "node scripts/bootstrap-devnet.mjs",
+    "chain:fund": "node scripts/fund-wallet.mjs",
+    "chain:itest": "RAIDER_DEVNET=1 vitest run src/chain/chain-round.devnet.test.ts"
   },
   "devDependencies": {
     "@capacitor/cli": "^8.4.0",
