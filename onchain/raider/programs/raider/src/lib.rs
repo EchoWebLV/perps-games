@@ -489,6 +489,11 @@ pub mod raider {
         execution_interval_millis: i64,
         iterations: i64,
     ) -> Result<()> {
+        // The feed this round opened on (bound by the ScheduleTick constraint to
+        // equal price_update.key()); forwarded into both scheduled metas so the
+        // native crank settles against the round's own asset feed.
+        let feed = ctx.accounts.round.feed;
+
         // The scheduled inner instruction: our own `tick_crank` bound to this
         // round's PDAs. The validator executes/signs it at run time.
         let tick_ix = Instruction {
@@ -498,7 +503,7 @@ pub mod raider {
                 AccountMeta::new(ctx.accounts.house.key(), false),
                 AccountMeta::new(ctx.accounts.round.key(), false),
                 AccountMeta::new_readonly(ctx.accounts.mint.key(), false),
-                AccountMeta::new_readonly(price::BTC_FEED, false),
+                AccountMeta::new_readonly(feed, false),
             ],
             data: anchor_lang::InstructionData::data(&crate::instruction::TickCrank {}),
         };
@@ -523,7 +528,7 @@ pub mod raider {
                 AccountMeta::new(ctx.accounts.house.key(), false),
                 AccountMeta::new(ctx.accounts.round.key(), false),
                 AccountMeta::new_readonly(ctx.accounts.mint.key(), false),
-                AccountMeta::new_readonly(price::BTC_FEED, false),
+                AccountMeta::new_readonly(feed, false),
             ],
         );
 
@@ -1153,9 +1158,8 @@ pub struct CrankClose<'info> {
     )]
     pub round: Account<'info, Round>,
     pub mint: Account<'info, Mint>,
-    /// CHECK: pinned to the Lazer BTC feed (address = BTC_FEED); the bytes are
-    /// further authenticated (owner + feed_id + staleness) by price::read_fresh().
-    #[account(address = price::BTC_FEED)]
+    /// CHECK: must equal round.feed; the no-signer crank is bound to the round's feed. Authenticated by read_fresh.
+    #[account(constraint = price_update.key() == round.feed @ RaiderError::UntrustedFeed)]
     pub price_update: AccountInfo<'info>,
 }
 
@@ -1176,13 +1180,13 @@ pub struct ScheduleTick<'info> {
     /// CHECK: HouseBalance PDA, forwarded to the scheduled-ix metas
     #[account(mut)]
     pub house: UncheckedAccount<'info>,
-    /// CHECK: Round PDA, forwarded to the scheduled-ix metas
-    #[account(mut)]
-    pub round: UncheckedAccount<'info>,
+    /// Round PDA — typed read so we can forward round.feed into the scheduled metas.
+    #[account(seeds = [ROUND_SEED, round.owner.as_ref()], bump = round.bump)]
+    pub round: Account<'info, Round>,
     /// CHECK: mint, forwarded to the scheduled-ix metas
     pub mint: UncheckedAccount<'info>,
-    /// CHECK: pinned BTC feed, forwarded to the scheduled-ix metas
-    #[account(address = price::BTC_FEED)]
+    /// CHECK: must equal round.feed; forwarded to the scheduled-ix metas. Authenticated by read_fresh at run time.
+    #[account(constraint = price_update.key() == round.feed @ RaiderError::UntrustedFeed)]
     pub price_update: AccountInfo<'info>,
 }
 
