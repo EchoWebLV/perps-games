@@ -37,6 +37,8 @@ The security guarantee is identical to the hardcoded pin — a round can only ev
 
 `open`/`close`/`tick`/`flip`/`lever` execute **inside** the ER, so they must read the registry in-rollup. Consts came compiled into the binary (available everywhere); a real account does not. **Task 0b is a spike** to confirm MagicBlock clones a read-only L1 account into the ER when it is referenced by an ER transaction (the standard read-only-config pattern). If clone-on-read does not work cleanly, the fallback is to **delegate the registry read-only to the ER** once (admin updates it via undelegate → `set_feed` → redelegate). The read path is proven before anything is built on it.
 
+> **RESOLVED 2026-06-29: Option A (clone-on-read).** The gated devnet ETH-open test (`chain-round.devnet.test.ts`) opened a round inside the ER against the **non-delegated** L1 registry `[b"feeds"]` and it bound to the ETH feed + settled conserved — MagicBlock clones the registry into the ER on reference. No registry delegation needed. (Note: only `open` reads the registry; `close`/`flip`/`lever`/`tick`/`crank` validate `price_update.key() == round.feed` against the feed `open` stamped on the `Round`, so the registry is read exactly once per round.)
+
 ## Components
 
 ### Program (`onchain/raider/programs/raider/src/`)
