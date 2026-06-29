@@ -27,7 +27,7 @@ export function createHud(parent: HTMLElement): Hud {
     <div id="balchip" class="pe panel chip" style="position:absolute;${top};left:14px;cursor:pointer" aria-label="Open wallet">
       <span class="lbl">balance</span>
       <span style="display:flex;align-items:center;gap:6px">
-        <span id="bal" class="num">$100.00</span>
+        <span id="bal" class="num">0.00 SOL</span>
         <span id="baladd" style="display:grid;place-items:center;width:17px;height:17px;border-radius:50%;font-size:14px;font-weight:700;line-height:0;color:#04101a;background:linear-gradient(180deg,#5fe3ff,#2775ca);box-shadow:0 0 9px rgba(39,231,255,.55)">+</span>
       </span></div>
 
