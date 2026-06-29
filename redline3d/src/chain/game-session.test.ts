@@ -15,7 +15,7 @@ function fakeChain(over: Partial<ChainRound> = {}): ChainRound {
     buyIn: vi.fn(async () => {}),
     ensureRoundInited: vi.fn(async () => {}),
     delegate: vi.fn(async () => {}),
-    open: vi.fn(async () => ({ entryRaw: 0n, entryExpo: 8, entryHuman: 60000, deadlineTs: 0 })),
+    open: vi.fn(async () => ({ entryRaw: 0n, entryExpo: 8, entryHuman: 60000, deadlineTs: 0, feed: "71wtTRDY8Gxgw56bXFt2oc6qeAbTxzStdNiC425Z51sr" })),
     close: vi.fn(async () => ({ outcome: 0, outcomeName: "cashout", payout: 1_500_000n, exitRaw: 0n, exitHuman: 0, balance: 4_500_000n })),
     flip: vi.fn(async () => ({ settled: false as const, banked: 0n, dir: -1, lev: 100, entryHuman: 60000 })),
     lever: vi.fn(async () => ({ settled: false as const, banked: 0n, dir: 1, lev: 2000, entryHuman: 60000 })),
@@ -70,7 +70,7 @@ describe("createGameSession", () => {
     const chain = fakeChain();
     const s = createGameSession({ mint: MINT, onSettled: vi.fn(), injectChain: chain, injectAddress: "Fake111" });
     await s.init();
-    const opened = await s.open(1, 2000, 1_000_000);
+    const opened = await s.open("BTC", 1, 2000, 1_000_000);
     expect(opened.entryHuman).toBe(60000);
     expect(chain.scheduleCrank).toHaveBeenCalled();
     expect(s.crankArmed()).toBe(true);
@@ -80,7 +80,7 @@ describe("createGameSession", () => {
     const chain = fakeChain({ scheduleCrank: vi.fn(async () => { throw new Error("escrow underfunded"); }) });
     const s = createGameSession({ mint: MINT, onSettled: vi.fn(), injectChain: chain, injectAddress: "Fake111" });
     await s.init();
-    await s.open(1, 2000, 1_000_000);
+    await s.open("BTC", 1, 2000, 1_000_000);
     expect(s.crankArmed()).toBe(false);
   });
 

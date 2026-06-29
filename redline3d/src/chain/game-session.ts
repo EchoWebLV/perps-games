@@ -1,7 +1,7 @@
 import { PublicKey } from "@solana/web3.js";
 import { createDevKeypairPort } from "./dev-keypair-port";
 import { portToAnchorWallet } from "./anchor-wallet";
-import { createChainRound, type ChainRound, type OpenedRound, type SettledRound, type ActionResult, type RoundSnap } from "./chain-round";
+import { createChainRound, type ChainRound, type OpenedRound, type SettledRound, type ActionResult, type RoundSnap, type AssetSym } from "./chain-round";
 import { createLeverSync } from "./lever-sync";
 
 /** The settled shape main.ts needs to finalize a round in the HUD. */
@@ -15,7 +15,7 @@ export interface GameSession {
   init(): Promise<bigint>;
   refreshBalance(onEr?: boolean): Promise<bigint>;
   ensureSession(buyInBase: number): Promise<void>;
-  open(dir: 1 | -1, lev: number, stakeBase: number): Promise<OpenedRound>;
+  open(asset: AssetSym, dir: 1 | -1, lev: number, stakeBase: number): Promise<OpenedRound>;
   noteLeverage(lev: number): void;
   flip(dir: 1 | -1): Promise<ActionResult>;
   close(): Promise<SettledRound>;
@@ -85,9 +85,9 @@ export function createGameSession(opts: {
       bal = await c.readPlayerBalance(true);
     },
 
-    async open(dir, lev, stakeBase) {
+    async open(asset, dir, lev, stakeBase) {
       const c = need();
-      const opened = await c.open(dir, lev, stakeBase);
+      const opened = await c.open(asset, dir, lev, stakeBase);
       armed = false;
       try { await c.scheduleCrank(); armed = true; } catch { armed = false; }
       return opened;

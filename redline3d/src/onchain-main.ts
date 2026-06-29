@@ -103,7 +103,7 @@ $("go").onclick = async () => {
     const lev = Math.max(10, Math.min(2000, Math.round(Number(($("lev") as HTMLInputElement).value))));
     const stake = Math.round(Number(($("stake") as HTMLInputElement).value) * 10 ** CHAIN.USDC_DECIMALS);
     setText("status", "opening on-chain…");
-    const opened = await chain.open(dir, lev, stake);
+    const opened = await chain.open("BTC", dir, lev, stake); // debug UI is BTC-only
     roundStartMs = Date.now();
     liveDir = dir; liveLev = lev;
     engine.launch({ dir, lev, stake, entryRaw: opened.entryHuman, startMs: roundStartMs });

@@ -46,7 +46,7 @@ describe.skipIf(!RUN)("chain-round devnet loop", () => {
     await chain.ensureRoundInited();
     await chain.delegate();
 
-    const opened = await chain.open(1, 100, 1_000_000); // long, 100x, 1 USDC
+    const opened = await chain.open("BTC", 1, 100, 1_000_000); // long, 100x, 1 USDC
     expect(opened.entryHuman).toBeGreaterThan(1000); // BTC in the tens of thousands
     expect(await chain.readRoundStatus(true)).toBe(1); // open on ER
 
@@ -97,7 +97,7 @@ describe.skipIf(!RUN)("chain-round devnet loop", () => {
     await chain.delegate();
 
     // open 2000x, exercise the mid-round actions, then arm the crank
-    await chain.open(1, 2000, 1_000_000);
+    await chain.open("BTC", 1, 2000, 1_000_000);
     expect(await chain.readRoundStatus(true)).toBe(1);
     const afterFlip = await chain.flip(-1);
     if (!afterFlip.settled) expect(afterFlip.dir).toBe(-1); // 2000x could terminal-first; both are valid

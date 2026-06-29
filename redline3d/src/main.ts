@@ -516,10 +516,9 @@ controls.onLaunch(async () => {
   audio.resume(); radio.resume();
   if (opening || settling || roundActive || engine.getPhase() === "live") return; // re-entrancy
   opening = true;
-  // The on-chain program settles BTC only, so lock the active asset to BTC before the round goes
-  // live — the local engine's × (driven off priceSource) must read the same feed the chain settles
-  // against, or the round shows a bogus insta-liquidation. (Multi-asset on-chain is a later slice.)
-  if (asset !== "BTC") { asset = "BTC"; hud.setActiveAsset("BTC"); solSmooth = 0; solEMA = 0; priceHist.length = 0; }
+  // The round opens on whatever asset the BTC/ETH/SOL tabs have selected; the registry binds the
+  // round to that asset's feed and `hud.onAsset` blocks switching once live, so the local engine's ×
+  // (driven off priceSource for `asset`) reads the same feed the chain settles against.
   try {
     // First GO auto-starts the ER session (buy-in if empty + delegate).
     hud.setStatus("Starting session…");
@@ -542,8 +541,9 @@ controls.onLaunch(async () => {
     hud.setStatus("Launching…");
     let opened;
     try {
-      opened = await session.open(dir, lev, centsToBase(playAmount));
-    } catch {
+      opened = await session.open(asset, dir, lev, centsToBase(playAmount));
+    } catch (e) {
+      console.error("on-chain open failed", e);
       hud.setStatus("Couldn't start the round. Try again.");
       controls.setLive(false, "GO!");
       return;
