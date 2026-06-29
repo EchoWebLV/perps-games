@@ -8,7 +8,8 @@ describe("CHAIN config", () => {
     expect(CHAIN.VALIDATOR.toBase58()).toBe("MAS1Dt9qreoRMQ14YQuhg8UTZMMzDdKhmkZMECCzk57");
     expect(CHAIN.DELEGATION_PROGRAM.toBase58()).toBe("DELeGGvXpWV2fqJUhqcF5ZSYMS4JTLjteaAMARRSaeSh");
     expect(CHAIN.ER_RPC).toBe("https://devnet.magicblock.app");
-    expect(CHAIN.USDC_DECIMALS).toBe(6);
+    expect(CHAIN.STAKE_MINT).toBe("So11111111111111111111111111111111111111112");
+    expect(CHAIN.STAKE_DECIMALS).toBe(9);
   });
 
   it("pins the MagicBlock task-scheduler program id", () => {

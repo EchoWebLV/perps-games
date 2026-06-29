@@ -80,7 +80,7 @@ const engine = new RoundEngine();
 // ── on-chain round (Slice 4) ────────────────────────────────────────────────
 // The round loop + USDC play balance run on-chain via the dev-keypair port. The local engine
 // still drives the smooth visual ×; the on-chain Round is the only money truth.
-const USDC_PER_CENT = 10 ** (CHAIN.USDC_DECIMALS - 2); // 6-decimal USDC, display in cents → 10_000
+const USDC_PER_CENT = 10 ** (CHAIN.STAKE_DECIMALS - 2); // 6-decimal USDC, display in cents → 10_000
 const centsToBase = (cents: number) => cents * USDC_PER_CENT;
 const baseToCents = (base: bigint) => Number(base / BigInt(USDC_PER_CENT));
 const BUY_IN_BASE = 2_000_000; // 2 test-USDC auto buy-in on the first GO (dev default)
@@ -90,7 +90,7 @@ let roundActive = false; // a round is open locally (de-dupes finalizeSettled ac
 let settling = false;    // a close tx is in flight
 let opening = false;     // the GO handler (ensureSession+open) is mid-flight
 const session = createGameSession({
-  mint: new PublicKey(CHAIN.TEST_USDC_MINT),
+  mint: new PublicKey(CHAIN.STAKE_MINT),
   onSettled: (info) => finalizeSettled(info), // terminal-first background lever
 });
 // The cash chip + wallet hero read the on-chain play balance (cents). Single writer.

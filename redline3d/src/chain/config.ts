@@ -23,10 +23,10 @@ export const CHAIN = {
   DELEGATION_PROGRAM: new PublicKey("DELeGGvXpWV2fqJUhqcF5ZSYMS4JTLjteaAMARRSaeSh"),
   // MagicBlock native task-scheduler program — schedule_tick CPIs the crank to this.
   MAGIC_PROGRAM: new PublicKey("Magic11111111111111111111111111111111111111"),
-  // The stable devnet test-USDC mint the demo plays against. Filled by Task 5's
-  // bootstrap script output; "" means "not bootstrapped yet" (the demo will warn).
-  TEST_USDC_MINT: "48oPKLwGRGkmVFe2hudXQRyZnPUZbYfGgQ2Bnar4mmre",
-  USDC_DECIMALS: 6,
+  // Stake mint. wSOL (So111…112) so the mint-agnostic program plays in SOL with no
+  // program change; the client wraps/unwraps around buy_in/withdraw. USDC later = swap this.
+  STAKE_MINT: "So11111111111111111111111111111111111111112",
+  STAKE_DECIMALS: 9,
 } as const;
 
 /** The singleton on-chain feed registry PDA (`[b"feeds"]`) — read by `open` to bind a round to its asset feed. */

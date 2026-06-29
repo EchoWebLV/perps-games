@@ -9,7 +9,7 @@ import { RoundEngine } from "./core/round";
 
 const $ = (id: string) => document.getElementById(id) as HTMLElement;
 const setText = (id: string, t: string) => { $(id).textContent = t; };
-const usd = (lamports: bigint) => (Number(lamports) / 10 ** CHAIN.USDC_DECIMALS).toFixed(2);
+const usd = (lamports: bigint) => (Number(lamports) / 10 ** CHAIN.STAKE_DECIMALS).toFixed(2);
 
 const port = createDevKeypairPort();
 let chain: ReturnType<typeof createChainRound> | null = null;
@@ -53,8 +53,8 @@ async function refreshBalance(onEr = false) {
 async function init() {
   await port.connect();
   setText("addr", port.currentAddress() ?? "?");
-  if (!CHAIN.TEST_USDC_MINT) { setText("status", "TEST_USDC_MINT not set in config.ts — run npm run chain:bootstrap first."); return; }
-  chain = createChainRound({ wallet: portToAnchorWallet(port), mint: new PublicKey(CHAIN.TEST_USDC_MINT) });
+  if (!CHAIN.STAKE_MINT) { setText("status", "STAKE_MINT not set in config.ts — run npm run chain:bootstrap first."); return; }
+  chain = createChainRound({ wallet: portToAnchorWallet(port), mint: new PublicKey(CHAIN.STAKE_MINT) });
   await refreshBalance(false);
   setText("status", "Fund the wallet (npm run chain:fund <addr> <mint>), then Start session.");
 }
@@ -101,7 +101,7 @@ $("go").onclick = async () => {
   try {
     const dir = Number(($("dir") as HTMLSelectElement).value) as 1 | -1;
     const lev = Math.max(10, Math.min(2000, Math.round(Number(($("lev") as HTMLInputElement).value))));
-    const stake = Math.round(Number(($("stake") as HTMLInputElement).value) * 10 ** CHAIN.USDC_DECIMALS);
+    const stake = Math.round(Number(($("stake") as HTMLInputElement).value) * 10 ** CHAIN.STAKE_DECIMALS);
     setText("status", "opening on-chain…");
     const opened = await chain.open("BTC", dir, lev, stake); // debug UI is BTC-only
     roundStartMs = Date.now();
