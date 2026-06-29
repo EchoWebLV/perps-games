@@ -1079,9 +1079,8 @@ pub struct CloseRound<'info> {
     )]
     pub round: Account<'info, Round>,
     pub mint: Account<'info, Mint>,
-    /// CHECK: pinned to the Lazer BTC feed (address = BTC_FEED); the bytes are
-    /// further authenticated (owner + feed_id + staleness) by price::read_fresh().
-    #[account(address = price::BTC_FEED)]
+    /// CHECK: must equal round.feed (the feed this round opened on); authenticated by read_fresh.
+    #[account(constraint = price_update.key() == round.feed @ RaiderError::UntrustedFeed)]
     pub price_update: AccountInfo<'info>,
     pub player_authority: Signer<'info>,
 }
@@ -1121,11 +1120,8 @@ pub struct ForceCloseRound<'info> {
     )]
     pub round: Account<'info, Round>,
     pub mint: Account<'info, Mint>,
-    /// CHECK: pinned to the Lazer BTC feed (address = BTC_FEED); the bytes are
-    /// further authenticated (owner + feed_id + staleness) by price::read_fresh().
-    /// This pin matters most here: force_close is permissionless, so without it
-    /// any abandoned round would be drainable via a forged feed.
-    #[account(address = price::BTC_FEED)]
+    /// CHECK: must equal round.feed; permissionless, so the round-bound feed is the guard. Authenticated by read_fresh.
+    #[account(constraint = price_update.key() == round.feed @ RaiderError::UntrustedFeed)]
     pub price_update: AccountInfo<'info>,
     // Permissionless: any signer (no owner constraint) — the deadline is the gate.
     pub caller: Signer<'info>,
