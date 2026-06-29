@@ -28,3 +28,7 @@ test-long-deadline = []
 anchor-lang = { version = "0.32.1", features = ["init-if-needed"] }
 anchor-spl = "0.32.1"
 ephemeral-rollups-sdk = { version = "0.15.5", features = ["anchor-compat"] }
+# Task 9: native MagicBlock crank (ScheduleTask) for the self-driving tick.
+# Versions proven by the Task-8 crank-probe spike (built+deployed GREEN on devnet).
+magicblock-magic-program-api = { version = "0.10.1", default-features = false }
+bincode = "1.3"

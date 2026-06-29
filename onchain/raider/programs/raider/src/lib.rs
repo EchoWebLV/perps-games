@@ -1,8 +1,13 @@
 use anchor_lang::prelude::*;
+use anchor_lang::solana_program::instruction::{AccountMeta, Instruction};
+use anchor_lang::solana_program::program::invoke_signed;
 use anchor_spl::associated_token::AssociatedToken;
 use anchor_spl::token::{self, Mint, Token, TokenAccount, Transfer};
 use ephemeral_rollups_sdk::anchor::{commit, delegate};
+use ephemeral_rollups_sdk::consts::MAGIC_PROGRAM_ID;
 use ephemeral_rollups_sdk::cpi::DelegateConfig;
+use magicblock_magic_program_api::args::ScheduleTaskArgs;
+use magicblock_magic_program_api::instruction::MagicBlockInstruction;
 // Lightweight commit+undelegate CPI (the v0 free function) instead of the
 // MagicIntentBundleBuilder: the builder drags in the intent/crypto machinery
 // (~+70KB of [u128;512] confidential-transfer weight) we don't use, which pushed
@@ -399,31 +404,114 @@ pub mod raider {
     /// live authenticated price; otherwise a no-op. The program reads the price and
     /// renders the verdict, so the trigger can NEVER choose an outcome.
     pub fn tick(ctx: Context<ForceCloseRound>) -> Result<()> {
-        let now = Clock::get()?.unix_timestamp;
-        let snap = price::read_fresh(&ctx.accounts.price_update, now)?;
-
+        // Keep the keeper-path error contract: a `tick` on a non-open round errors
+        // with NoOpenRound (tests/keeper.ts swallows exactly that). The crank path
+        // (`tick_crank`) instead NO-OPs on a settled round so leftover scheduled
+        // iterations after a liq are harmless.
         require!(ctx.accounts.round.status == 1, RaiderError::NoOpenRound);
-
-        let fires = settle::fires(
-            ctx.accounts.round.banked,
-            ctx.accounts.round.dir,
-            ctx.accounts.round.lev,
-            ctx.accounts.round.entry_raw,
-            snap.price,
-            now,
-            ctx.accounts.round.deadline_ts,
-        );
-        if !fires {
-            return Ok(()); // heartbeat: nothing crossed, leave the round open
-        }
-
-        settle_round(
+        let now = Clock::get()?.unix_timestamp;
+        try_settle_tick(
             &mut ctx.accounts.player,
             &mut ctx.accounts.house,
             &mut ctx.accounts.round,
-            &snap,
+            &ctx.accounts.price_update,
             now,
         )
+    }
+
+    // ---- Task 9: native MagicBlock crank (self-driving tick, zero client tx) ---
+
+    /// The instruction the ER validator auto-runs on the schedule (see
+    /// `schedule_tick`). Identical settlement logic to `tick`, but with NO signer:
+    /// the validator is the executor at run time, so `CrankClose` carries no
+    /// `Signer`. It NO-OPs on a non-open round so leftover scheduled iterations that
+    /// fire AFTER the round has already liquidated/settled don't error (the schedule
+    /// runs `iterations` times regardless of when the round actually closes).
+    pub fn tick_crank(ctx: Context<CrankClose>) -> Result<()> {
+        let now = Clock::get()?.unix_timestamp;
+        try_settle_tick(
+            &mut ctx.accounts.player,
+            &mut ctx.accounts.house,
+            &mut ctx.accounts.round,
+            &ctx.accounts.price_update,
+            now,
+        )
+    }
+
+    /// Arm the native crank: ask the MagicBlock validator to auto-invoke
+    /// `tick_crank` on THIS round every `execution_interval_millis` ms for
+    /// `iterations` runs, with ZERO further client tx. Runs INSIDE the ER (the three
+    /// PDAs are delegated). The scheduled inner ix is the program's own `tick_crank`
+    /// bound to this player/house/round/mint/feed; the validator becomes the
+    /// executor/signer at run time, funded from the schedule payer's MagicBlock
+    /// escrow. Construction is byte-identical to the Task-8 crank-probe spike (a
+    /// direct `invoke_signed` of `bincode(MagicBlockInstruction::ScheduleTask)`,
+    /// sidestepping the SDK wrapper's borrow-lifetime conflicts) — only the scheduled
+    /// inner ix carries raider's 5 accounts instead of the spike's single Counter.
+    pub fn schedule_tick(
+        ctx: Context<ScheduleTick>,
+        task_id: i64,
+        execution_interval_millis: i64,
+        iterations: i64,
+    ) -> Result<()> {
+        // The scheduled inner instruction: our own `tick_crank` bound to this
+        // round's PDAs. The validator executes/signs it at run time.
+        let tick_ix = Instruction {
+            program_id: crate::ID,
+            accounts: vec![
+                AccountMeta::new(ctx.accounts.player.key(), false),
+                AccountMeta::new(ctx.accounts.house.key(), false),
+                AccountMeta::new(ctx.accounts.round.key(), false),
+                AccountMeta::new_readonly(ctx.accounts.mint.key(), false),
+                AccountMeta::new_readonly(price::BTC_FEED, false),
+            ],
+            data: anchor_lang::InstructionData::data(&crate::instruction::TickCrank {}),
+        };
+
+        let ix_data = bincode::serialize(&MagicBlockInstruction::ScheduleTask(ScheduleTaskArgs {
+            task_id,
+            execution_interval_millis,
+            iterations,
+            instructions: vec![tick_ix],
+        }))
+        .map_err(|err| {
+            msg!("ERROR: failed to serialize ScheduleTask args {:?}", err);
+            ProgramError::InvalidArgument
+        })?;
+
+        let schedule_ix = Instruction::new_with_bytes(
+            MAGIC_PROGRAM_ID,
+            &ix_data,
+            vec![
+                AccountMeta::new(ctx.accounts.payer.key(), true),
+                AccountMeta::new(ctx.accounts.player.key(), false),
+                AccountMeta::new(ctx.accounts.house.key(), false),
+                AccountMeta::new(ctx.accounts.round.key(), false),
+                AccountMeta::new_readonly(ctx.accounts.mint.key(), false),
+                AccountMeta::new_readonly(price::BTC_FEED, false),
+            ],
+        );
+
+        invoke_signed(
+            &schedule_ix,
+            &[
+                ctx.accounts.payer.to_account_info(),
+                ctx.accounts.player.to_account_info(),
+                ctx.accounts.house.to_account_info(),
+                ctx.accounts.round.to_account_info(),
+                ctx.accounts.mint.to_account_info(),
+                ctx.accounts.price_update.to_account_info(),
+            ],
+            &[],
+        )?;
+
+        msg!(
+            "scheduled tick task {} interval {}ms x{} iterations",
+            task_id,
+            execution_interval_millis,
+            iterations,
+        );
+        Ok(())
     }
 
     // ---- Phase 2: flip direction mid-round ----------------------------------
@@ -584,6 +672,41 @@ pub mod raider {
         )?;
         Ok(())
     }
+}
+
+/// Shared continuous-settler body for `tick` (keeper) and `tick_crank` (native
+/// crank): read the live authenticated price and settle ONLY if a terminal
+/// (liq/cap) or the time-cap fires; otherwise no-op. NO-OPs (returns Ok) on a
+/// non-open round so a crank iteration that fires after the round already settled
+/// is harmless. The CALLER owns the open-round error contract: `tick` requires
+/// status==1 BEFORE calling this (keeper-path NoOpenRound error preserved);
+/// `tick_crank` does not (leftover scheduled iterations must not error). Because the
+/// program reads the price and renders the verdict, the trigger can NEVER choose an
+/// outcome — identical to the pre-Task-9 inline `tick` body.
+fn try_settle_tick<'info>(
+    player: &mut Account<'info, PlayerBalance>,
+    house: &mut Account<'info, HouseBalance>,
+    round: &mut Account<'info, Round>,
+    price_update: &AccountInfo<'info>,
+    now: i64,
+) -> Result<()> {
+    if round.status != 1 {
+        return Ok(()); // not open: no-op (harmless for leftover crank ticks after settle)
+    }
+    let snap = price::read_fresh(price_update, now)?;
+    let fires = settle::fires(
+        round.banked,
+        round.dir,
+        round.lev,
+        round.entry_raw,
+        snap.price,
+        now,
+        round.deadline_ts,
+    );
+    if !fires {
+        return Ok(()); // heartbeat: nothing crossed, leave the round open
+    }
+    settle_round(player, house, round, &snap, now)
 }
 
 /// Shared settle body for `close`, `force_close`, and `tick`: settle at the given
@@ -938,6 +1061,65 @@ pub struct ForceCloseRound<'info> {
     pub price_update: AccountInfo<'info>,
     // Permissionless: any signer (no owner constraint) — the deadline is the gate.
     pub caller: Signer<'info>,
+}
+
+// CrankClose mirrors ForceCloseRound MINUS the `caller: Signer` — the native crank
+// is executed BY THE VALIDATOR with no client signer, so there is no signer slot.
+// The Player/House/Round PDAs are re-derived from stored values (player.owner), so
+// the crank can only ever settle THIS round's owner; the pinned feed + read_fresh
+// authenticate the price. This is the no-signer twin of the `tick` context.
+#[derive(Accounts)]
+pub struct CrankClose<'info> {
+    #[account(
+        mut,
+        seeds = [PLAYER_SEED, player.owner.as_ref(), mint.key().as_ref()],
+        bump = player.bump,
+    )]
+    pub player: Account<'info, PlayerBalance>,
+    #[account(
+        mut,
+        seeds = [HOUSE_SEED, mint.key().as_ref()],
+        bump = house.bump,
+    )]
+    pub house: Account<'info, HouseBalance>,
+    #[account(
+        mut,
+        seeds = [ROUND_SEED, player.owner.as_ref()],
+        bump = round.bump,
+    )]
+    pub round: Account<'info, Round>,
+    pub mint: Account<'info, Mint>,
+    /// CHECK: pinned to the Lazer BTC feed (address = BTC_FEED); the bytes are
+    /// further authenticated (owner + feed_id + staleness) by price::read_fresh().
+    #[account(address = price::BTC_FEED)]
+    pub price_update: AccountInfo<'info>,
+}
+
+// ScheduleTick forwards the pubkeys the scheduled `tick_crank` ix needs into the
+// ScheduleTask CPI. The forwarded PDAs are UncheckedAccount (NOT typed Account) so
+// Anchor does NOT re-serialize delegated/stale data after the CPI — mirrors the
+// spike's ScheduleIncrement, just with raider's extra accounts. The feed is pinned.
+#[derive(Accounts)]
+pub struct ScheduleTick<'info> {
+    /// CHECK: the Magic program, used for the ScheduleTask CPI
+    #[account(address = MAGIC_PROGRAM_ID)]
+    pub magic_program: UncheckedAccount<'info>,
+    #[account(mut)]
+    pub payer: Signer<'info>,
+    /// CHECK: PlayerBalance PDA, forwarded to the scheduled-ix metas
+    #[account(mut)]
+    pub player: UncheckedAccount<'info>,
+    /// CHECK: HouseBalance PDA, forwarded to the scheduled-ix metas
+    #[account(mut)]
+    pub house: UncheckedAccount<'info>,
+    /// CHECK: Round PDA, forwarded to the scheduled-ix metas
+    #[account(mut)]
+    pub round: UncheckedAccount<'info>,
+    /// CHECK: mint, forwarded to the scheduled-ix metas
+    pub mint: UncheckedAccount<'info>,
+    /// CHECK: pinned BTC feed, forwarded to the scheduled-ix metas
+    #[account(address = price::BTC_FEED)]
+    pub price_update: AccountInfo<'info>,
 }
 
 // commit_and_undelegate lands the three co-delegated ledger PDAs' final ER state
