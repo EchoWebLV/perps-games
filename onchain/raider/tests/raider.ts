@@ -41,45 +41,29 @@ const assert = require("assert");
 const idl = require("../target/idl/raider.json");
 const { BN } = anchor;
 
-const BASE_RPC = process.env.BASE_RPC || "https://api.devnet.solana.com";
-const ER_RPC = process.env.ER_RPC || "https://devnet.magicblock.app";
-const ER_WS = process.env.ER_WS || "wss://devnet.magicblock.app";
-const BTC_FEED = new PublicKey(process.env.BTC_FEED || "71wtTRDY8Gxgw56bXFt2oc6qeAbTxzStdNiC425Z51sr");
-const VALIDATOR = new PublicKey(process.env.ER_VALIDATOR || "MAS1Dt9qreoRMQ14YQuhg8UTZMMzDdKhmkZMECCzk57");
+const {
+  BASE_RPC,
+  ER_RPC,
+  ER_WS,
+  BTC_FEED,
+  VALIDATOR,
+  sleep,
+  settleSeq,
+} = require("./helpers");
 const DELEGATION_PROGRAM = new PublicKey("DELeGGvXpWV2fqJUhqcF5ZSYMS4JTLjteaAMARRSaeSh");
 
 const STAKE = 1_000_000; // 1 USDC
 const MAX_PAYOUT = 23_750_000; // max_payout(1e6) = stake * 25 * 0.95
-const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 // ---------------------------------------------------------------------------
 // BigInt integer MIRROR of programs/raider/src/settle.rs — proves anyone can
-// recompute the payout from on-chain data alone (truncating BigInt division
-// mirrors Rust i128/u128 integer division). Outcome codes: 0 cashout/1 cap/2 liq.
+// recompute the payout from on-chain data alone. settleTs is the Phase-1
+// single-leg view of the shared banked-aware settle mirror in ./helpers:
+// settleSeq with NO mid-round actions reduces EXACTLY to it (truncating BigInt
+// division mirrors Rust i128/u128). Outcome codes: 0 cashout/1 cap/2 liq.
 // ---------------------------------------------------------------------------
-const SCALE = 1_000_000n;
-const EDGE_FP = 50_000n;
-const LIQ_FP = 200_000n;
-const CAP_FP = 25_000_000n;
-
-function equityFp(dir, lev, entryRaw, exitRaw) {
-  const ratio = (exitRaw * SCALE) / entryRaw;
-  let eq = SCALE + dir * lev * (ratio - SCALE);
-  if (eq < 0n) eq = 0n;
-  return eq;
-}
-function terminal(eq) {
-  if (eq <= LIQ_FP) return { code: 2, settled: 0n };
-  if (eq >= CAP_FP) return { code: 1, settled: CAP_FP };
-  return { code: 0, settled: eq };
-}
-function payoutFp(stake, settledEqFp) {
-  return (stake * settledEqFp * (SCALE - EDGE_FP)) / SCALE / SCALE;
-}
-function settleTs(dir, lev, stake, entryRaw, exitRaw) {
-  const t = terminal(equityFp(BigInt(dir), BigInt(lev), BigInt(entryRaw), BigInt(exitRaw)));
-  return { outcome: t.code, payout: payoutFp(BigInt(stake), t.settled) };
-}
+const settleTs = (dir, lev, stake, entryRaw, exitRaw) =>
+  settleSeq(stake, dir, lev, entryRaw, [], exitRaw);
 
 describe("raider — canonical end-to-end loop (L1 <-> ER, real USDC, provable fairness)", function () {
   this.timeout(1_000_000);

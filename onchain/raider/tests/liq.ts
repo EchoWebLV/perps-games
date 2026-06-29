@@ -27,17 +27,19 @@ const assert = require("assert");
 const idl = require("../target/idl/raider.json");
 const { BN } = anchor;
 
-const BASE_RPC = process.env.BASE_RPC || "https://api.devnet.solana.com";
-const ER_RPC = process.env.ER_RPC || "https://devnet.magicblock.app";
-const ER_WS = process.env.ER_WS || "wss://devnet.magicblock.app";
-const BTC_FEED = new PublicKey(process.env.BTC_FEED || "71wtTRDY8Gxgw56bXFt2oc6qeAbTxzStdNiC425Z51sr");
-const VALIDATOR = new PublicKey(process.env.ER_VALIDATOR || "MAS1Dt9qreoRMQ14YQuhg8UTZMMzDdKhmkZMECCzk57");
+const {
+  BASE_RPC,
+  ER_RPC,
+  ER_WS,
+  BTC_FEED,
+  VALIDATOR,
+  sleep,
+} = require("./helpers");
 const DELEGATION_PROGRAM = new PublicKey("DELeGGvXpWV2fqJUhqcF5ZSYMS4JTLjteaAMARRSaeSh");
 
 const STAKE = 1_000_000; // 1 USDC
 const MAX_PAYOUT = 23_750_000;
 const RMAX = 2000;
-const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 // init_house -> fund_house -> buy_in -> init_round -> delegate_session.
 async function buildScenario({ funder, baseProvider, program }) {
