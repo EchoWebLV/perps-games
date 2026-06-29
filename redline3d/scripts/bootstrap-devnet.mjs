@@ -1,10 +1,10 @@
 // Operator one-time devnet bootstrap: create a stable test-USDC mint (or reuse one
 // passed as argv[2]), init_house + fund_house for it, and print the mint pubkey to
-// paste into src/chain/config.ts (TEST_USDC_MINT). Run:
+// paste into src/chain/config.ts (STAKE_MINT). Run:
 //   ANCHOR_WALLET=~/.config/solana/lazer-probe.json node scripts/bootstrap-devnet.mjs
 import anchor from "@coral-xyz/anchor";
-import { PublicKey, SystemProgram, Connection } from "@solana/web3.js";
-import { createMint, getOrCreateAssociatedTokenAccount, getAssociatedTokenAddressSync, mintTo, TOKEN_PROGRAM_ID, ASSOCIATED_TOKEN_PROGRAM_ID } from "@solana/spl-token";
+import { PublicKey, SystemProgram, Connection, Transaction } from "@solana/web3.js";
+import { createMint, getOrCreateAssociatedTokenAccount, getAssociatedTokenAddressSync, mintTo, createAssociatedTokenAccountInstruction, createSyncNativeInstruction, TOKEN_PROGRAM_ID, ASSOCIATED_TOKEN_PROGRAM_ID } from "@solana/spl-token";
 import { readFileSync } from "node:fs";
 import idl from "../src/chain/idl/raider.json" with { type: "json" };
 
@@ -33,10 +33,25 @@ if (!existing) {
   }).rpc({ skipPreflight: true });
   console.log("init_house done");
 }
-const funderAta = await getOrCreateAssociatedTokenAccount(conn, funder, mint, funder.publicKey);
-await mintTo(conn, funder, mint, funderAta.address, funder.publicKey, HOUSE_FUND);
+// wSOL can't be mintTo'd — wrap native SOL into the funder's wSOL ATA instead. Any other
+// (test-USDC) mint is minted as before. The house bankroll is HOUSE_FUND base units either way.
+const isWsol = mint.toBase58() === "So11111111111111111111111111111111111111112";
+let funderTokenPk;
+if (isWsol) {
+  funderTokenPk = getAssociatedTokenAddressSync(mint, funder.publicKey);
+  const info = await conn.getAccountInfo(funderTokenPk);
+  const ixs = [];
+  if (!info) ixs.push(createAssociatedTokenAccountInstruction(funder.publicKey, funderTokenPk, funder.publicKey, mint));
+  ixs.push(SystemProgram.transfer({ fromPubkey: funder.publicKey, toPubkey: funderTokenPk, lamports: HOUSE_FUND }));
+  ixs.push(createSyncNativeInstruction(funderTokenPk));
+  await provider.sendAndConfirm(new Transaction().add(...ixs));
+} else {
+  const funderAta = await getOrCreateAssociatedTokenAccount(conn, funder, mint, funder.publicKey);
+  await mintTo(conn, funder, mint, funderAta.address, funder.publicKey, HOUSE_FUND);
+  funderTokenPk = funderAta.address;
+}
 await program.methods.fundHouse(new anchor.BN(HOUSE_FUND)).accounts({
-  funder: funder.publicKey, mint, house, funderToken: funderAta.address, vaultAuthority, vaultToken, tokenProgram: TOKEN_PROGRAM_ID,
+  funder: funder.publicKey, mint, house, funderToken: funderTokenPk, vaultAuthority, vaultToken, tokenProgram: TOKEN_PROGRAM_ID,
 }).rpc({ skipPreflight: true });
 const h = await program.account.houseBalance.fetch(house);
 console.log(`house funded: balance=${h.balance.toString()} locked=${h.locked.toString()}`);
@@ -76,4 +91,4 @@ for (const f of FEEDS) {
 }
 console.log(`registry ${registry.toBase58()} bootstrapped with ${FEEDS.length} feeds`);
 
-console.log(`\n>>> paste into src/chain/config.ts: TEST_USDC_MINT: "${mint.toBase58()}"`);
+console.log(`\n>>> paste into src/chain/config.ts: STAKE_MINT: "${mint.toBase58()}"`);
