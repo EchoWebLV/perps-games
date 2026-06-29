@@ -178,7 +178,7 @@ const ASSETS = [
   { key: "ETH", lz: 2, hx: "ff61491a931112ddf1bd8147cd1b641375f79f5825126d665480874634fd0ace", expo: -8 },
   { key: "SOL", lz: 6, hx: "ef0d8b6fda2ceba41da15d4095d1da392a0d2f8ed0c6c7bc0f4cfac8c280b56d", expo: -8 },
 ];
-let asset: "BTC" | "ETH" | "SOL" = "BTC"; // on-chain rounds settle BTC (raider program reads the BTC Lazer feed)
+let asset: "BTC" | "ETH" | "SOL" = "BTC"; // the active tab; open() binds the round to this asset's registered Lazer feed
 const priceSource = createPriceSource({
   connect: (onPrice) => {
     const h = connectFeed({ feeds: ASSETS, onPrice: (k, v) => { if (k === asset) onPrice(v); } });
