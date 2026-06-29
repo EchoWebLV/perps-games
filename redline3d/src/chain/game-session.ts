@@ -78,7 +78,7 @@ export function createGameSession(opts: {
       const c = need();
       if (isDelegated) return;
       const onL1 = await c.readPlayerBalance(false);
-      if (onL1 === 0n) await c.buyIn(buyInBase);
+      if (onL1 === 0n) { await c.wrapForBuyIn(buyInBase); await c.buyIn(buyInBase); }
       await c.ensureRoundInited();
       await c.delegate(); // hardened: reuses a stale-but-live same-wallet session, else throws DelegateBusyError
       isDelegated = true;
@@ -121,6 +121,7 @@ export function createGameSession(opts: {
       const c = need();
       const b = await c.readPlayerBalance(false);
       await c.withdraw(Number(b));
+      await c.unwrapAll(); // wSOL → native SOL back in the wallet
       bal = await c.readPlayerBalance(false);
     },
   };

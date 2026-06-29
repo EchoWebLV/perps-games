@@ -2,6 +2,7 @@ import * as anchor from "@coral-xyz/anchor";
 import { Connection, PublicKey, Transaction, ComputeBudgetProgram, SystemProgram } from "@solana/web3.js";
 import { getAssociatedTokenAddressSync, TOKEN_PROGRAM_ID } from "@solana/spl-token";
 import { CHAIN, deriveFeedRegistry } from "./config";
+import { wsolAta, buildWrapIxs, buildUnwrapIxs } from "./wsol";
 import idlJson from "./idl/raider.json";
 import type { Raider } from "./idl/raider";
 import type { AnchorWalletLike } from "./anchor-wallet";
@@ -110,6 +111,8 @@ export interface ChainRound {
   forceClose(): Promise<SettledRound>;
   commitAndUndelegate(): Promise<void>;
   withdraw(amount: number): Promise<void>;
+  wrapForBuyIn(lamports: number): Promise<void>;
+  unwrapAll(): Promise<void>;
 }
 
 export function createChainRound(deps: { wallet: AnchorWalletLike; mint: PublicKey }): ChainRound {
@@ -285,6 +288,24 @@ export function createChainRound(deps: { wallet: AnchorWalletLike; mint: PublicK
       await send(baseConn, program.methods.withdraw(new BN(amount)).accountsPartial({
         owner, mint, player: pdas.player, vaultAuthority: pdas.vaultAuthority, vaultToken: pdas.vaultToken, ownerToken: ownerAta, tokenProgram: TOKEN_PROGRAM_ID,
       }));
+    },
+
+    // --- wSOL: the stake mint is wrapped SOL, so the client wraps native SOL into the
+    // owner's wSOL ATA before buy_in and unwraps (closes the ATA) on withdraw. Invisible
+    // to the player — they hold/spend/receive native SOL. (See wsol.ts.)
+    async wrapForBuyIn(lamports) {
+      const ata = wsolAta(owner);
+      const info = await baseConn.getAccountInfo(ata);
+      const ixs = buildWrapIxs({ owner, lamports: BigInt(lamports), ataExists: !!info });
+      await send(baseConn, { async transaction() { return new Transaction().add(...ixs); } });
+    },
+
+    async unwrapAll() {
+      const ata = wsolAta(owner);
+      const info = await baseConn.getAccountInfo(ata);
+      if (!info) return; // nothing wrapped
+      const ixs = buildUnwrapIxs({ owner });
+      await send(baseConn, { async transaction() { return new Transaction().add(...ixs); } });
     },
   };
 }

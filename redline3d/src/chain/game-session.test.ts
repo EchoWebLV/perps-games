@@ -23,6 +23,8 @@ function fakeChain(over: Partial<ChainRound> = {}): ChainRound {
     forceClose: vi.fn(async () => ({ outcome: 3, outcomeName: "time", payout: 0n, exitRaw: 0n, exitHuman: 0, balance: 0n })),
     commitAndUndelegate: vi.fn(async () => {}),
     withdraw: vi.fn(async () => {}),
+    wrapForBuyIn: vi.fn(async () => {}),
+    unwrapAll: vi.fn(async () => {}),
     ...over,
   };
 }
