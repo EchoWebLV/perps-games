@@ -1,7 +1,7 @@
 import * as anchor from "@coral-xyz/anchor";
 import { Connection, PublicKey, Transaction, ComputeBudgetProgram, SystemProgram } from "@solana/web3.js";
 import { getAssociatedTokenAddressSync, TOKEN_PROGRAM_ID } from "@solana/spl-token";
-import { CHAIN } from "./config";
+import { CHAIN, deriveFeedRegistry } from "./config";
 import idlJson from "./idl/raider.json";
 import type { Raider } from "./idl/raider";
 import type { AnchorWalletLike } from "./anchor-wallet";
@@ -26,7 +26,9 @@ export function rawToHuman(raw: number | bigint, expo: number): number {
   return Number(raw) * Math.pow(10, -Math.abs(expo));
 }
 
-export interface OpenedRound { entryRaw: bigint; entryExpo: number; entryHuman: number; deadlineTs: number; }
+export type AssetSym = "BTC" | "ETH" | "SOL";
+
+export interface OpenedRound { entryRaw: bigint; entryExpo: number; entryHuman: number; deadlineTs: number; feed: string; }
 export interface SettledRound { outcome: number; outcomeName: string; payout: bigint; exitRaw: bigint; exitHuman: number; balance: bigint; }
 const OUTCOME = ["cashout", "cap", "liq", "time"];
 
@@ -100,7 +102,7 @@ export interface ChainRound {
   buyIn(amount: number): Promise<void>;
   ensureRoundInited(): Promise<void>;
   delegate(): Promise<void>;
-  open(dir: 1 | -1, lev: number, stake: number): Promise<OpenedRound>;
+  open(asset: AssetSym, dir: 1 | -1, lev: number, stake: number): Promise<OpenedRound>;
   close(): Promise<SettledRound>;
   flip(newDir: 1 | -1): Promise<ActionResult>;
   lever(newLev: number): Promise<ActionResult>;
@@ -121,6 +123,16 @@ export function createChainRound(deps: { wallet: AnchorWalletLike; mint: PublicK
   const programER = new anchor.Program<Raider>(idlJson as Raider, erProvider);
   const pdas = deriveRaiderPdas(CHAIN.PROGRAM_ID, owner, mint);
   const ownerAta = getAssociatedTokenAddressSync(mint, owner);
+  const registry = deriveFeedRegistry(CHAIN.PROGRAM_ID);
+  const feedFor = (asset: AssetSym) => CHAIN.FEEDS[asset];
+
+  // The feed every settle path must pass — it must equal the feed `open` recorded on
+  // the round (the program enforces `price_update.key() == round.feed`). Read it from
+  // the live ER round; fall back to BTC only if the round isn't readable yet.
+  async function roundFeed(): Promise<PublicKey> {
+    const r = await programER.account.round.fetchNullable(pdas.round);
+    return r ? new PublicKey(r.feed) : feedFor("BTC");
+  }
 
   // HTTP send + getSignatureStatuses poll — dodges the rpc-websockets v9
   // "Unknown action 'undefined'" bug on the ER/Helius signature stream (helpers.ts:37).
@@ -203,17 +215,17 @@ export function createChainRound(deps: { wallet: AnchorWalletLike; mint: PublicK
       await pollOwner(CHAIN.DELEGATION_PROGRAM, "delegate", 25, 1000);
     },
 
-    async open(dir, lev, stake) {
-      await send(erConn, programER.methods.open(dir, lev, new BN(stake)).accountsPartial({
-        player: pdas.player, house: pdas.house, round: pdas.round, mint, priceUpdate: CHAIN.BTC_FEED, playerAuthority: owner,
+    async open(asset, dir, lev, stake) {
+      await send(erConn, programER.methods.open(CHAIN.ASSET_ID[asset], dir, lev, new BN(stake)).accountsPartial({
+        player: pdas.player, house: pdas.house, round: pdas.round, mint, priceUpdate: feedFor(asset), registry, playerAuthority: owner,
       }));
       const r = await programER.account.round.fetch(pdas.round);
-      return { entryRaw: BigInt(r.entryRaw.toString()), entryExpo: Number(r.entryExpo), entryHuman: rawToHuman(BigInt(r.entryRaw.toString()), Number(r.entryExpo)), deadlineTs: Number(r.deadlineTs) };
+      return { entryRaw: BigInt(r.entryRaw.toString()), entryExpo: Number(r.entryExpo), entryHuman: rawToHuman(BigInt(r.entryRaw.toString()), Number(r.entryExpo)), deadlineTs: Number(r.deadlineTs), feed: r.feed.toBase58() };
     },
 
     async close() {
       await send(erConn, programER.methods.close().accountsPartial({
-        player: pdas.player, house: pdas.house, round: pdas.round, mint, priceUpdate: CHAIN.BTC_FEED, playerAuthority: owner,
+        player: pdas.player, house: pdas.house, round: pdas.round, mint, priceUpdate: await roundFeed(), playerAuthority: owner,
       }));
       const r = await programER.account.round.fetch(pdas.round);
       const p = await programER.account.playerBalance.fetch(pdas.player);
@@ -222,7 +234,7 @@ export function createChainRound(deps: { wallet: AnchorWalletLike; mint: PublicK
 
     async forceClose() {
       await send(erConn, programER.methods.forceClose().accountsPartial({
-        player: pdas.player, house: pdas.house, round: pdas.round, mint, priceUpdate: CHAIN.BTC_FEED, caller: owner,
+        player: pdas.player, house: pdas.house, round: pdas.round, mint, priceUpdate: await roundFeed(), caller: owner,
       }));
       const r = await programER.account.round.fetch(pdas.round);
       const p = await programER.account.playerBalance.fetch(pdas.player);
@@ -237,7 +249,7 @@ export function createChainRound(deps: { wallet: AnchorWalletLike; mint: PublicK
 
     async flip(newDir) {
       await send(erConn, programER.methods.flip(newDir).accountsPartial({
-        player: pdas.player, house: pdas.house, round: pdas.round, mint, priceUpdate: CHAIN.BTC_FEED, playerAuthority: owner,
+        player: pdas.player, house: pdas.house, round: pdas.round, mint, priceUpdate: await roundFeed(), playerAuthority: owner,
       }));
       const snap = roundToSnap(await programER.account.round.fetch(pdas.round));
       const balance = snap.status === 2 ? BigInt((await programER.account.playerBalance.fetch(pdas.player)).balance.toString()) : 0n;
@@ -246,7 +258,7 @@ export function createChainRound(deps: { wallet: AnchorWalletLike; mint: PublicK
 
     async lever(newLev) {
       await send(erConn, programER.methods.lever(newLev).accountsPartial({
-        player: pdas.player, house: pdas.house, round: pdas.round, mint, priceUpdate: CHAIN.BTC_FEED, playerAuthority: owner,
+        player: pdas.player, house: pdas.house, round: pdas.round, mint, priceUpdate: await roundFeed(), playerAuthority: owner,
       }));
       const snap = roundToSnap(await programER.account.round.fetch(pdas.round));
       const balance = snap.status === 2 ? BigInt((await programER.account.playerBalance.fetch(pdas.player)).balance.toString()) : 0n;
@@ -258,7 +270,7 @@ export function createChainRound(deps: { wallet: AnchorWalletLike; mint: PublicK
       const iterations = opts.iterations ?? 70; // ~70s coverage over the 60s round cap
       const taskId = opts.taskId ?? Date.now(); // unique per round within a session
       await send(erConn, programER.methods.scheduleTick(new BN(taskId), new BN(intervalMs), new BN(iterations)).accountsPartial({
-        magicProgram: CHAIN.MAGIC_PROGRAM, payer: owner, player: pdas.player, house: pdas.house, round: pdas.round, mint, priceUpdate: CHAIN.BTC_FEED,
+        magicProgram: CHAIN.MAGIC_PROGRAM, payer: owner, player: pdas.player, house: pdas.house, round: pdas.round, mint, priceUpdate: await roundFeed(),
       }));
     },
 
