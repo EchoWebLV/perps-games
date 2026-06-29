@@ -280,4 +280,37 @@ describe.skipIf(!RUN)("chain-round devnet loop", () => {
 
     await chain.commitAndUndelegate(); // free the shared house
   }, 180_000);
+
+  // --- SOL stakes via wSOL: the stake mint is wrapped SOL; the client wraps native SOL on
+  // buy-in and unwraps (closes the ATA) on withdraw. Uses the bootstrapped wSOL house. ---
+  it("plays a full SOL (wSOL) round and unwraps back to native SOL, conserved", async () => {
+    const RPC = process.env.BASE_RPC || "https://api.devnet.solana.com";
+    const conn = new Connection(RPC, { commitment: "confirmed" });
+    const wpath = process.env.ANCHOR_WALLET || `${process.env.HOME}/.config/solana/lazer-probe.json`;
+    const funder = Keypair.fromSecretKey(new Uint8Array(JSON.parse(readFileSync(wpath, "utf8"))));
+    const provider = new anchor.AnchorProvider(conn, new anchor.Wallet(funder), { commitment: "confirmed" });
+
+    const mint = new PublicKey("So11111111111111111111111111111111111111112"); // wSOL house (bootstrapped)
+    const player = Keypair.generate();
+    await provider.sendAndConfirm(new anchor.web3.Transaction().add(SystemProgram.transfer({ fromPubkey: funder.publicKey, toPubkey: player.publicKey, lamports: 0.4 * LAMPORTS_PER_SOL })));
+    const port = createDevKeypairPort({ secretKey: player.secretKey, store: { get: () => null, set: () => {} } });
+    await port.connect();
+    const chain = createChainRound({ wallet: portToAnchorWallet(port), mint });
+
+    await chain.wrapForBuyIn(100_000_000); // wrap 0.1 SOL → wSOL
+    await chain.buyIn(100_000_000);
+    expect(await chain.readPlayerBalance()).toBe(100_000_000n);
+    await chain.ensureRoundInited();
+    await chain.delegate();
+    await chain.open("SOL", 1, 50, 50_000_000); // 0.05 SOL stake on the SOL feed
+    expect(await chain.readRoundStatus(true)).toBe(1);
+    await sleep(6000);
+    const settled = await chain.close();
+    expect(settled.balance).toBe(100_000_000n - 50_000_000n + settled.payout); // conserved (lamports)
+    await chain.commitAndUndelegate();
+    const l1 = await chain.readPlayerBalance(false);
+    await chain.withdraw(Number(l1));
+    await chain.unwrapAll();
+    expect(await chain.readPlayerBalance(false)).toBe(0n);
+  }, 180_000);
 });
