@@ -311,8 +311,15 @@ describe("raider — continuous 2000x liquidation via tick (keeper-driven)", fun
       };
     }
 
-    // Run both slow setups concurrently (delegation is the expensive, one-time part).
-    const [long, short] = await Promise.all([setupSide(1), setupSide(-1)]);
+    // Run the two slow setups SEQUENTIALLY (not Promise.all). Each side's setup is a
+    // chain of ~12 base-layer RPC calls (createMint/mintTo/fund/buy_in/delegate);
+    // running both interleaved bursts the public devnet RPC past its per-method limit
+    // ("429 Too many requests for a specific RPC call"). Serializing them keeps each
+    // side's calls spaced. This does NOT weaken the proof: `open` is deferred (returned
+    // as a thunk) and the two opens are still fired together below, so both rounds'
+    // deadlines start fresh in lockstep regardless of when each side was delegated.
+    const long = await setupSide(1);
+    const short = await setupSide(-1);
 
     // `open` requires round.status != 1, so a SETTLED round (status 2) can be
     // re-opened — re-snapshotting a fresh entry + a fresh 8s deadline — WITHOUT any
