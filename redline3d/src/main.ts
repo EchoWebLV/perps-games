@@ -178,7 +178,7 @@ const ASSETS = [
   { key: "ETH", lz: 2, hx: "ff61491a931112ddf1bd8147cd1b641375f79f5825126d665480874634fd0ace", expo: -8 },
   { key: "SOL", lz: 6, hx: "ef0d8b6fda2ceba41da15d4095d1da392a0d2f8ed0c6c7bc0f4cfac8c280b56d", expo: -8 },
 ];
-let asset: "BTC" | "ETH" | "SOL" = "SOL";
+let asset: "BTC" | "ETH" | "SOL" = "BTC"; // on-chain rounds settle BTC (raider program reads the BTC Lazer feed)
 const priceSource = createPriceSource({
   connect: (onPrice) => {
     const h = connectFeed({ feeds: ASSETS, onPrice: (k, v) => { if (k === asset) onPrice(v); } });
@@ -288,11 +288,11 @@ async function initSession() {
     } catch {
       walletBalance = null;
     }
-    syncDisplayedBalance(); walletUI.setBalance(balance);
+    syncOnchainBalance(); // cash chip = on-chain play balance, never the server faucet
     const refreshed = await api.me();
     serverBalance = refreshed.balance;
     try { await refreshWalletBalance(); } catch { /* keep the last wallet read */ }
-    syncDisplayedBalance(); walletUI.setBalance(balance);
+    syncOnchainBalance(); // cash chip = on-chain play balance, never the server faucet
     sessionReconnect.reset();
     hud.setStatus("");
   } catch {
@@ -516,6 +516,10 @@ controls.onLaunch(async () => {
   audio.resume(); radio.resume();
   if (opening || settling || roundActive || engine.getPhase() === "live") return; // re-entrancy
   opening = true;
+  // The on-chain program settles BTC only, so lock the active asset to BTC before the round goes
+  // live — the local engine's × (driven off priceSource) must read the same feed the chain settles
+  // against, or the round shows a bogus insta-liquidation. (Multi-asset on-chain is a later slice.)
+  if (asset !== "BTC") { asset = "BTC"; hud.setActiveAsset("BTC"); solSmooth = 0; solEMA = 0; priceHist.length = 0; }
   try {
     // First GO auto-starts the ER session (buy-in if empty + delegate).
     hud.setStatus("Starting session…");
