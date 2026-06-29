@@ -34,6 +34,8 @@ pub const PLAYER_SEED: &[u8] = b"player";
 pub const HOUSE_SEED: &[u8] = b"house";
 pub const ROUND_SEED: &[u8] = b"round";
 pub const VAULT_SEED: &[u8] = b"vault";
+pub const FEEDS_SEED: &[u8] = b"feeds";
+pub const MAX_ASSETS: usize = 8;
 
 #[account]
 pub struct PlayerBalance {
@@ -58,6 +60,23 @@ impl HouseBalance {
     pub const SIZE: usize = 8 + 32 + 32 + 8 + 8 + 1;
 }
 
+#[derive(AnchorSerialize, AnchorDeserialize, Clone, Copy, Default)]
+pub struct FeedEntry {
+    pub feed: Pubkey,       // the MagicBlock-relayed Pyth Lazer price account
+    pub feed_id: [u8; 32],  // decoded Lazer feed_id (defense-in-depth at open)
+    pub enabled: bool,
+}
+
+#[account]
+pub struct FeedRegistry {
+    pub authority: Pubkey,
+    pub feeds: [FeedEntry; MAX_ASSETS], // indexed by asset id (0=BTC,1=ETH,2=SOL)
+    pub bump: u8,
+}
+impl FeedRegistry {
+    pub const SIZE: usize = 8 + 32 + MAX_ASSETS * (32 + 32 + 1) + 1;
+}
+
 // status: 0 idle, 1 open, 2 settled
 //
 // The exit fields below are written at `close` so a settled Round is a
@@ -68,6 +87,7 @@ impl HouseBalance {
 #[account]
 pub struct Round {
     pub owner: Pubkey,
+    pub feed: Pubkey, // the price feed this round opened on (bound at open; validated on every settle)
     pub dir: i8,
     pub lev: u32,
     pub stake: u64,
@@ -86,11 +106,24 @@ pub struct Round {
     pub outcome: u8,
 }
 impl Round {
-    // disc(8) + owner(32) + dir(1) + lev(4) + stake(8) + entry_raw(8)
+    // disc(8) + owner(32) + feed(32) + dir(1) + lev(4) + stake(8) + entry_raw(8)
     //  + entry_expo(4) + entry_ts(8) + banked(16) + max_payout(8) + deadline_ts(8)
-    //  + status(1) + bump(1)                                  = 107 (base)
-    //  + exit_raw(8) + exit_ts(8) + payout(8) + outcome(1)    = 25 (record)
-    //  = 132 total.
+    //  + status(1) + bump(1) + exit_raw(8) + exit_ts(8) + payout(8) + outcome(1) = 164
     pub const SIZE: usize =
-        8 + 32 + 1 + 4 + 8 + 8 + 4 + 8 + 16 + 8 + 8 + 1 + 1 + 8 + 8 + 8 + 1;
+        8 + 32 + 32 + 1 + 4 + 8 + 8 + 4 + 8 + 16 + 8 + 8 + 1 + 1 + 8 + 8 + 8 + 1;
+}
+
+#[cfg(test)]
+mod size_tests {
+    use super::*;
+    #[test]
+    fn round_size_includes_feed() {
+        // 132 (old) + 32 (feed: Pubkey) = 164
+        assert_eq!(Round::SIZE, 164);
+    }
+    #[test]
+    fn feed_registry_size_fits_eight_entries() {
+        // disc(8) + authority(32) + bump(1) + 8 * (feed 32 + feed_id 32 + enabled 1 = 65) = 561
+        assert_eq!(FeedRegistry::SIZE, 8 + 32 + 1 + 8 * 65);
+    }
 }
