@@ -12,6 +12,8 @@ export const CHAIN = {
   BTC_FEED: new PublicKey("71wtTRDY8Gxgw56bXFt2oc6qeAbTxzStdNiC425Z51sr"),
   VALIDATOR: new PublicKey("MAS1Dt9qreoRMQ14YQuhg8UTZMMzDdKhmkZMECCzk57"),
   DELEGATION_PROGRAM: new PublicKey("DELeGGvXpWV2fqJUhqcF5ZSYMS4JTLjteaAMARRSaeSh"),
+  // MagicBlock native task-scheduler program — schedule_tick CPIs the crank to this.
+  MAGIC_PROGRAM: new PublicKey("Magic11111111111111111111111111111111111111"),
   // The stable devnet test-USDC mint the demo plays against. Filled by Task 5's
   // bootstrap script output; "" means "not bootstrapped yet" (the demo will warn).
   TEST_USDC_MINT: "8tZXkKuat9KoisUjFkq4kBUa1p746Mn4tj4i3st5Th1Y",

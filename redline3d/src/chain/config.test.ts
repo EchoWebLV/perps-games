@@ -10,4 +10,8 @@ describe("CHAIN config", () => {
     expect(CHAIN.ER_RPC).toBe("https://devnet.magicblock.app");
     expect(CHAIN.USDC_DECIMALS).toBe(6);
   });
+
+  it("pins the MagicBlock task-scheduler program id", () => {
+    expect(CHAIN.MAGIC_PROGRAM.toBase58()).toBe("Magic11111111111111111111111111111111111111");
+  });
 });
