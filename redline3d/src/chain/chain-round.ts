@@ -72,11 +72,15 @@ export interface ChainRound {
   address: string;
   readPlayerBalance(onEr?: boolean): Promise<bigint>;
   readRoundStatus(onEr?: boolean): Promise<number>;
+  readRound(onEr?: boolean): Promise<RoundSnap | null>;
   buyIn(amount: number): Promise<void>;
   ensureRoundInited(): Promise<void>;
   delegate(): Promise<void>;
   open(dir: 1 | -1, lev: number, stake: number): Promise<OpenedRound>;
   close(): Promise<SettledRound>;
+  flip(newDir: 1 | -1): Promise<ActionResult>;
+  lever(newLev: number): Promise<ActionResult>;
+  scheduleCrank(opts?: { intervalMs?: number; iterations?: number; taskId?: number }): Promise<void>;
   forceClose(): Promise<SettledRound>;
   commitAndUndelegate(): Promise<void>;
   withdraw(amount: number): Promise<void>;
@@ -181,6 +185,39 @@ export function createChainRound(deps: { wallet: AnchorWalletLike; mint: PublicK
       const r = await programER.account.round.fetch(pdas.round);
       const p = await programER.account.playerBalance.fetch(pdas.player);
       return { outcome: Number(r.outcome), outcomeName: OUTCOME[Number(r.outcome)] ?? "?", payout: BigInt(r.payout.toString()), exitRaw: BigInt(r.exitRaw.toString()), exitHuman: rawToHuman(BigInt(r.exitRaw.toString()), Number(r.entryExpo)), balance: BigInt(p.balance.toString()) };
+    },
+
+    async readRound(onEr = false) {
+      const prog = onEr ? programER : program;
+      const acct = await prog.account.round.fetchNullable(pdas.round);
+      return acct ? roundToSnap(acct) : null;
+    },
+
+    async flip(newDir) {
+      await send(erConn, programER.methods.flip(newDir).accountsPartial({
+        player: pdas.player, house: pdas.house, round: pdas.round, mint, priceUpdate: CHAIN.BTC_FEED, playerAuthority: owner,
+      }));
+      const snap = roundToSnap(await programER.account.round.fetch(pdas.round));
+      const balance = snap.status === 2 ? BigInt((await programER.account.playerBalance.fetch(pdas.player)).balance.toString()) : 0n;
+      return actionResultFromSnap(snap, balance);
+    },
+
+    async lever(newLev) {
+      await send(erConn, programER.methods.lever(newLev).accountsPartial({
+        player: pdas.player, house: pdas.house, round: pdas.round, mint, priceUpdate: CHAIN.BTC_FEED, playerAuthority: owner,
+      }));
+      const snap = roundToSnap(await programER.account.round.fetch(pdas.round));
+      const balance = snap.status === 2 ? BigInt((await programER.account.playerBalance.fetch(pdas.player)).balance.toString()) : 0n;
+      return actionResultFromSnap(snap, balance);
+    },
+
+    async scheduleCrank(opts = {}) {
+      const intervalMs = opts.intervalMs ?? 1000;
+      const iterations = opts.iterations ?? 70; // ~70s coverage over the 60s round cap
+      const taskId = opts.taskId ?? Date.now(); // unique per round within a session
+      await send(erConn, programER.methods.scheduleTick(new BN(taskId), new BN(intervalMs), new BN(iterations)).accountsPartial({
+        magicProgram: CHAIN.MAGIC_PROGRAM, payer: owner, player: pdas.player, house: pdas.house, round: pdas.round, mint, priceUpdate: CHAIN.BTC_FEED,
+      }));
     },
 
     async commitAndUndelegate() {
