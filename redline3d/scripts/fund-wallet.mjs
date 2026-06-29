@@ -1,7 +1,9 @@
-// Operator: airdrop SOL + mint test USDC to a player address. Run:
+// Operator: fund a player address with SOL + test USDC. Run:
 //   node scripts/fund-wallet.mjs <PLAYER_ADDRESS> <MINT_ADDRESS>
+// SOL is TRANSFERRED from the funder (the devnet airdrop faucet is unreliable and
+// frequently returns "Internal error"); USDC is minted by the funder (mint authority).
 import anchor from "@coral-xyz/anchor";
-import { PublicKey, Connection, LAMPORTS_PER_SOL } from "@solana/web3.js";
+import { PublicKey, Connection, LAMPORTS_PER_SOL, SystemProgram, Transaction } from "@solana/web3.js";
 import { getOrCreateAssociatedTokenAccount, mintTo } from "@solana/spl-token";
 import { readFileSync } from "node:fs";
 
@@ -15,9 +17,10 @@ const mint = new PublicKey(process.argv[3]);
 
 const before = await conn.getBalance(player);
 if (before < 0.05 * LAMPORTS_PER_SOL) {
-  const sig = await conn.requestAirdrop(player, 0.1 * LAMPORTS_PER_SOL);
+  const tx = new Transaction().add(SystemProgram.transfer({ fromPubkey: funder.publicKey, toPubkey: player, lamports: 0.1 * LAMPORTS_PER_SOL }));
+  const sig = await conn.sendTransaction(tx, [funder]);
   await conn.confirmTransaction(sig, "confirmed");
-  console.log("airdropped 0.1 SOL");
+  console.log("transferred 0.1 SOL from funder");
 }
 const ata = await getOrCreateAssociatedTokenAccount(conn, funder, mint, player);
 await mintTo(conn, funder, mint, ata.address, funder.publicKey, USDC);

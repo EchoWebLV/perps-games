@@ -14,6 +14,6 @@ export const CHAIN = {
   DELEGATION_PROGRAM: new PublicKey("DELeGGvXpWV2fqJUhqcF5ZSYMS4JTLjteaAMARRSaeSh"),
   // The stable devnet test-USDC mint the demo plays against. Filled by Task 5's
   // bootstrap script output; "" means "not bootstrapped yet" (the demo will warn).
-  TEST_USDC_MINT: "",
+  TEST_USDC_MINT: "8tZXkKuat9KoisUjFkq4kBUa1p746Mn4tj4i3st5Th1Y",
   USDC_DECIMALS: 6,
 } as const;
