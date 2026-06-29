@@ -31,6 +31,15 @@ export interface WalletOpts {
   onWalletPoll?: () => Promise<number>;
   /** Sweep the whole connected-wallet USDC into the in-game play balance. Resolves when credited. */
   onAddToPlay?: () => Promise<void>;
+  /**
+   * On-chain (Slice 4) session controls. When present the panel shows a play-balance + End/Withdraw
+   * footer and hides the off-chain deposit CTAs. `status()` is read on every open/refresh.
+   */
+  onchain?: {
+    status: () => { delegated: boolean; playCents: number };
+    end: () => Promise<void>;
+    withdraw: () => Promise<void>;
+  };
 }
 
 const ICONS = {
@@ -150,6 +159,17 @@ function injectStyles() {
       font:700 11px/1 'Chakra Petch',ui-monospace,monospace;letter-spacing:.06em;text-transform:uppercase;
       color:rgba(255,209,102,.9);background:rgba(255,209,102,.1);border:1px solid rgba(255,209,102,.35);transition:.13s}
     .wlt-logout:hover{background:rgba(255,209,102,.18)}
+    .wlt-oc{display:flex;flex-direction:column;gap:10px;padding-top:4px;border-top:1px solid rgba(132,150,224,.18)}
+    .wlt-oc-row{display:flex;align-items:center;gap:10px;padding:11px 12px;border-radius:11px;
+      background:rgba(7,5,18,.6);border:1px solid rgba(132,150,224,.2)}
+    .wlt-oc-row .lbl{flex:1;font:700 9px/1.3 'Chakra Petch',ui-monospace,monospace;letter-spacing:.14em;text-transform:uppercase;color:var(--mut)}
+    .wlt-oc-row .val{font:800 16px/1 'Chakra Petch',ui-monospace,monospace;color:var(--ink);font-variant-numeric:tabular-nums}
+    .wlt-oc-btns{display:flex;gap:8px}
+    .wlt-oc-btn{flex:1;border:0;cursor:pointer;border-radius:9px;padding:12px 0;
+      font:700 12px/1 'Chakra Petch',ui-monospace,monospace;letter-spacing:.06em;text-transform:uppercase;transition:.13s}
+    .wlt-oc-btn.end{color:rgba(255,209,102,.92);background:rgba(255,209,102,.1);border:1px solid rgba(255,209,102,.35)}
+    .wlt-oc-btn.wd{color:var(--cyan);background:rgba(39,231,255,.12);border:1px solid rgba(39,231,255,.38)}
+    .wlt-oc-btn:disabled{opacity:.4;cursor:not-allowed}
   `;
   document.head.appendChild(s);
 }
@@ -188,7 +208,8 @@ export function createWallet(parent: HTMLElement, opts: WalletOpts): Wallet {
     // recv view + account row are filled live by renderAddressUI() on each open — the deposit
     // address only exists AFTER login, so it must be read fresh, never snapshotted at build time.
     `<div class="wlt-view" data-view="recv" hidden></div>` +
-    `<div id="wltAcct"></div>`;
+    `<div id="wltAcct"></div>` +
+    `<div id="wltOnchain" hidden></div>`;
 
   const q = <T extends HTMLElement>(s: string) => panel.querySelector(s) as T;
   const balEl = q("#wltBal"), usdcEl = q("#wltUsdc");
@@ -332,12 +353,44 @@ export function createWallet(parent: HTMLElement, opts: WalletOpts): Wallet {
     }
   };
 
+  const ocEl = q<HTMLElement>("#wltOnchain");
+  let ocBusy = false;
+  const renderOnchain = () => {
+    if (!opts.onchain) { ocEl.hidden = true; return; }
+    // on-chain mode: the auto buy-in + Receive QR fund the table, so hide the off-chain deposit CTAs
+    const addPlay = panel.querySelector<HTMLElement>("#wltAddPlay");
+    const addNoteEl = panel.querySelector<HTMLElement>("#wltAddNote");
+    if (addPlay) addPlay.style.display = "none";
+    if (addNoteEl) addNoteEl.style.display = "none";
+    const { delegated, playCents } = opts.onchain.status();
+    ocEl.hidden = false;
+    ocEl.innerHTML =
+      `<div class="wlt-oc">
+         <div class="wlt-oc-row"><span class="lbl">Play balance</span><span class="val">$${fmt(playCents / 100)}</span></div>
+         <div class="wlt-oc-btns">
+           <button class="wlt-oc-btn end" id="wltOcEnd" ${delegated ? "" : "disabled"}>End session</button>
+           <button class="wlt-oc-btn wd" id="wltOcWd" ${!delegated && playCents > 0 ? "" : "disabled"}>Withdraw</button>
+         </div>
+       </div>`;
+    const endBtn = ocEl.querySelector<HTMLButtonElement>("#wltOcEnd");
+    const wdBtn = ocEl.querySelector<HTMLButtonElement>("#wltOcWd");
+    const run = async (btn: HTMLButtonElement, label: string, fn: () => Promise<void>) => {
+      if (ocBusy) return;
+      ocBusy = true; btn.disabled = true; const prev = btn.textContent; btn.textContent = label;
+      try { await fn(); } catch { /* surfaced by main's status line */ }
+      finally { ocBusy = false; btn.textContent = prev ?? ""; renderOnchain(); renderBalance(); }
+    };
+    if (endBtn) endBtn.onclick = () => void run(endBtn, "Ending…", opts.onchain!.end);
+    if (wdBtn) wdBtn.onclick = () => void run(wdBtn, "Withdrawing…", opts.onchain!.withdraw);
+  };
+
   const setOpen = (open: boolean) => {
     overlay.style.display = open ? "flex" : "none";
     if (open) {
       renderBalance();
       renderAddressUI();
       renderConnectButtons();
+      renderOnchain();
       showTab("buy");
       void refreshBalance();
     }
@@ -353,7 +406,7 @@ export function createWallet(parent: HTMLElement, opts: WalletOpts): Wallet {
 
   return {
     open() { if (!busy) setOpen(true); },
-    setBalance() { renderBalance(); },
+    setBalance() { renderBalance(); renderOnchain(); },
     setBusy(b) { busy = b; if (b) setOpen(false); },
   };
 }
