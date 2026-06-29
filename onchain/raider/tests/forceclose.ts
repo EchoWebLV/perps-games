@@ -210,7 +210,10 @@ describe("raider force_close (permissionless, time-bounded liveness backstop)", 
 
     const settled = await programOwnerER.account.round.fetch(sc.roundPda);
     const house1 = await programOwnerER.account.houseBalance.fetch(sc.housePda);
-    const outName = ["cashout", "cap", "liq"][settled.outcome];
+    // Outcome 3 (time) is the Phase-2 relabel: force_close past the deadline now
+    // settles a Cashout-equivalent as `time` (see settle_round's now>=deadline_ts
+    // relabel). Include it so the log reads "time" not "undefined".
+    const outName = ["cashout", "cap", "liq", "time"][settled.outcome];
     console.log(`POST-DEADLINE force_close OK: status=${settled.status} outcome=${settled.outcome}(${outName}) ` +
       `payout=${settled.payout.toString()} exit_raw=${settled.exitRaw.toString()} ` +
       `house.locked=${house1.locked.toString()}`);

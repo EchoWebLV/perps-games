@@ -253,3 +253,137 @@ commit/undelegate → real USDC out, with a permissionless liveness backstop tha
 guarantees no round can escrow house capital forever. Phase 2 (intra-round liq, time
 cap, actions, session keys, multi-player house topology) can build directly on this
 proven lifecycle.
+
+---
+---
+
+# Phase 2 Result — Continuous settlement + actions + native crank (2026-06-29)
+
+Phase 2 makes the round **self-driving**: a permissionless settler (`tick`) that
+latches liquidation/time-cap intra-round, mid-round **flip / lever** actions that
+match the off-chain engine bit-for-bit, a **60s game time-cap**, and — the headline —
+the MagicBlock **native crank** auto-running the settler on the rollup with **zero
+client transactions**. Program id unchanged (`FwUNcUaRbYGiWasHa6DA3xQaQJfZWCgH7UhDeBvoJcBv`).
+The Phase-1 lifecycle (custody, fairness, conservation, liveness backstop) is carried
+forward unchanged and re-verified green with the Phase-2 code present.
+
+## Assumption verdicts (Phase 2)
+
+| # | Claim | Verdict | Proof |
+|---|-------|---------|-------|
+| 1 | A permissionless `tick` can liquidate a live 2000× round intra-round, payout 0, lock released, value conserved | 🟢 GREEN | `tests/tick-liq.ts` (180s build) — liquidated on attempt 1; both sides settled via tick, payout 0, conserved |
+| 2 | The **native MagicBlock crank** drives that settlement with **zero client per-tick tx** | 🟢 GREEN | `tests/tick-liq-crank.ts` (180s, slot 472740616): one `schedule_tick` per side then pure status polling — long LIQUIDATED via the validator-driven crank (outcome 2, payout 0, lock 23.75→0, conserved); short time-settled at the cap, also crank-driven |
+| 3 | Mid-round `flip` / `lever` settle bit-identically to the off-chain engine | 🟢 GREEN | `tests/flip.ts` + `tests/lever.ts` (60s) — on-chain payout == BigInt `settleSeq` mirror of the actual observed prices |
+| 4 | A 60s game time-cap settles open rounds as `time`, payout preserved, lock released | 🟢 GREEN | `tests/timecap.ts` (8s build) — outcome 3 (time), payout > 0, lock 0 |
+| 5 | A post-settle action cannot double-settle (terminal-first race guard) | 🟢 GREEN | `tests/raceguard.ts` (8s) — `flip` after a force-settled round REJECTED `NoOpenRound` |
+| 6 | Phase-1 lifecycle still holds with the Phase-2 code present (no regression) | 🟢 GREEN | `tests/raider.ts` 6/6 + `tests/gates.ts` + `tests/feedauth.ts` + `tests/liq.ts` re-run green on the canonical 60s build with the crank wired in |
+
+## Native crank — verdict & economics (the load-bearing Phase-2 question)
+
+**WIRED and GREEN.** Task-8's spike (`spikes/crank-probe/`) proved the public devnet ER
+validator `MAS1Dt9…` honors `MagicBlockInstruction::ScheduleTask` (50 ms–1 s intervals,
+**exact** iteration counts, zero client tx). Task 9 wired it into `raider`:
+`schedule_tick` CPIs `ScheduleTask` (direct `invoke_signed` of the bincode'd enum,
+sidestepping the SDK wrapper's borrow conflicts) to auto-run `tick_crank` — a
+**no-signer** twin of `tick` (the validator is the executor) that **no-ops on a settled
+round** so leftover scheduled iterations after a liq are harmless.
+
+- **Cost source:** crank execution is billed to the **schedule payer's MagicBlock SOL
+  escrow** on the base layer — the validator executes but does not pay. The schedule
+  tx itself is feeless on the ER. **The treasury that schedules must keep that escrow
+  funded; size the per-crank fee into round economics.**
+- **Liveness:** the keeper path (`tick`) is retained as a belt-and-suspenders fallback
+  — not required for liveness, but useful if the validator ever drops a schedule.
+
+## Continuous-tick latency (T10 step 3)
+
+Measured `tests/latency-tick.ts` — 30 back-to-back `tick` round-trips on one open round,
+timed **submit → first signature status** via HTTP `getSignatureStatuses` polling (the
+ER's WS signature stream trips the rpc-websockets v9 bug, so polling is used):
+
+```
+tick  p50 = 817 ms   p95 = 842 ms   min = 812 ms   max = 907 ms   (n=30, this region)
+```
+
+Tightly clustered. This is a conservative (confirmed-tier, 25 ms poll quantization)
+client round-trip; the Phase-1 *processed-tier* warm-close was ~390 ms (`accountSubscribe`
+method) — the player-perceived "it landed" figure is in that faster band. **The crank
+path has NO client round-trip at all** — its cadence is the validator schedule interval
+(50 ms–1 s), independent of client geography.
+
+## Named limitation — the missed-tick (dip-recover) asymmetry
+
+Continuous settlement observes the feed at the **tick cadence** (keeper interval, or the
+crank's `execution_interval_millis`), not at every Lazer update. If an adverse move
+crosses the liq band and **recovers between two observed ticks**, no tick witnesses the
+crossing, so the position is **not** liquidated and later settles at a non-zero payout.
+This asymmetry is **favorable to the player / borne by the house** (the house "eats" an
+unobserved dip-recover). Finer cadence shrinks the gap — the 50 ms crank floor makes it
+small — but it is never exactly zero with discrete observation. This is inherent to
+mark-at-observation settlement and is an explicit, accepted Phase-2 property, not a bug.
+
+## Security (independent review of the crank surface)
+
+Reviewed the no-signer/permissionless crank path against the two locked drivers.
+**No fund-loss, custody, fairness, or conservation issue.**
+- **Non-custodial:** `tick_crank`/`CrankClose` re-derive player/house/round PDAs from
+  `player.owner`; a no-signer caller cannot redirect funds — payout only ever reaches
+  the round owner.
+- **Provable-fair:** settlement still flows feed → `read_fresh` (owner + feed_id +
+  staleness, feed pinned to `BTC_FEED`) → `settle::fires`/`settle`; the trigger renders
+  the verdict, never chooses it.
+- **Self-funded `schedule_tick`:** its permissionless `UncheckedAccount` inputs are
+  re-validated by `CrankClose`'s seed constraints at execution (a mismatched set just
+  no-ops), and cranks are billed to the *scheduler's own* escrow — no victim drain.
+- **No double-settle:** `try_settle_tick` early-returns on `status != 1` **and**
+  `settle_round` re-asserts `status == 1`.
+- Optional hardening noted but **not added** (per the build-only-what's-asked rule, and
+  because it is not a fund risk): `payer == round.owner` and an `iterations`/`interval`
+  clamp on `schedule_tick`.
+
+## What ran (Phase 2, reproducible)
+
+Three mutually-exclusive `state.rs` time-cap builds (cargo feature): default 60s
+(canonical/product), `test-short-deadline` 8s (time-cap/race-guard), `test-long-deadline`
+180s (intra-round liq on a calm feed). Toolchain `~/.avm/bin/anchor-0.32.1`; tests via
+`yarn run ts-mocha -p ./tsconfig.json -t 1000000 tests/<file>.ts` with
+`ANCHOR_WALLET=~/.config/solana/lazer-probe.json`.
+
+- Rust unit tests (`settle.rs`): **9/9** — `rebank_fp`, banked-`equity_fp`, `fires`,
+  flip-sequence parity, time/cap/liq outcomes.
+- 60s: `raider.ts` 6/6, `gates.ts`, `feedauth.ts`, `flip.ts`, `lever.ts`, `forceclose.ts`,
+  `latency-tick.ts` — all green.
+- 180s: `tick-liq.ts`, `tick-liq-crank.ts`, `liq.ts` — all green.
+- 8s: `timecap.ts`, `raceguard.ts` — all green.
+
+Test infra: shared `tests/helpers.ts` (env wiring, the `sendIxHttp` WS-bug workaround,
+the banked-aware BigInt `settleSeq` mirror) extracted so every driver settles against the
+same definitions. tick-liq's two-side setup is serialized to avoid a public-RPC 429.
+
+## Devnet SOL cost (Phase 2)
+
+Phase-2 program work + the full re-verified suite ran on devnet from one funder
+(`FP39zt…`). The dominant cost is **delegation escrow** (per-session, same as Phase 1),
+not the cranks; the Task-8 crank spike's larger spend was delegation escrow + ER rent,
+with per-crank cost modest. Program upgrades use a transient ~3 SOL buffer that is
+reclaimed. The standing operational input for mainnet: **fund the schedule payer's crank
+escrow** for any self-driving round.
+
+## Phase-2 carry-forwards now DONE vs. still deferred
+
+**Done in Phase 2:** intra-round liquidation (path-latched via continuous `tick`), 60s
+game time-cap, mid-round flip/lever (engine-parity), and the self-driving native crank.
+
+**Still deferred:** session keys (client phase), multi-player house topology (the single
+co-delegated `HouseBalance` still serializes per session), VRF crates/economy, and the
+client/front-end (wallet connect + driving the loop against this program). These are the
+next phase; the on-chain settlement substrate they build on is proven.
+
+## Bottom line (Phase 2)
+
+The round is now self-driving on devnet: open a real 2000× position on the ER, and the
+MagicBlock validator's native crank settles it — liquidation, cap, or 60s time-cap —
+**with zero client transactions**, while mid-round flip/lever match the off-chain engine
+exactly. Custody, provable fairness, and conservation hold under the new no-signer crank
+path (independently reviewed). What remains for a playable product is the client: wallet
+connect, session keys, and wiring the UI to this proven on-chain loop.

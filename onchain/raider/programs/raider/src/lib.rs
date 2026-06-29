@@ -709,16 +709,21 @@ fn try_settle_tick<'info>(
     settle_round(player, house, round, &snap, now)
 }
 
-/// Shared settle body for `close`, `force_close`, and `tick`: settle at the given
+/// Shared settle body for `close`, `force_close`, `flip`/`lever` (terminal-first),
+/// and the `tick`/`tick_crank` settler (via `try_settle_tick`): settle at the given
 /// mark, conserve value across player + house (the 5% edge stays house-favorable
 /// inside the payout), release the house lock, write the self-contained
 /// provable-fairness record into the Round, and emit a RoundEvent. The caller is
 /// responsible for the authorization/eligibility gate before invoking this:
-///   - `close`       → owner check (`player.owner == player_authority`);
-///   - `force_close` → deadline check (`now >= deadline_ts`);
-///   - `tick`        → `settle::fires()` guard (the callee returns early on false,
-///                     so this body only runs once a terminal or the time-cap has
-///                     actually fired at the live price).
+///   - `close`               → owner check (`player.owner == player_authority`);
+///   - `force_close`         → deadline check (`now >= deadline_ts`);
+///   - `flip`/`lever`        → `settle::fires()` terminal-first check (settle a real
+///                             liq/cap/time BEFORE re-anchoring, never after);
+///   - `tick`/`tick_crank`   → `settle::fires()` guard inside `try_settle_tick` (it
+///                             returns early on false, so this body only runs once a
+///                             terminal or the time-cap has actually fired at the
+///                             live price). `settle_round` itself re-asserts
+///                             `status==1`, so a redundant call is a safe no-op.
 fn settle_round(
     player: &mut Account<PlayerBalance>,
     house: &mut Account<HouseBalance>,
