@@ -15,7 +15,7 @@
     "bake:cards": "node scripts/bake-cards.mjs",
     "chain:bootstrap": "node scripts/bootstrap-devnet.mjs",
     "chain:fund": "node scripts/fund-wallet.mjs",
-    "chain:itest": "RAIDER_DEVNET=1 vitest run src/chain/chain-round.devnet.test.ts"
+    "chain:itest": "RAIDER_DEVNET=1 vitest run --config vitest.config.devnet.ts"
   },
   "devDependencies": {
     "@capacitor/cli": "^8.4.0",
