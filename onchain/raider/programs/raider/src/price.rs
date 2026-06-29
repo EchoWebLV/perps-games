@@ -20,17 +20,14 @@ use crate::RaiderError;
 // `read_fresh` used to validate ONLY staleness — it never checked WHICH account
 // it was decoding. An attacker could pass any account whose bytes decode to a
 // PriceUpdateV2 with an attacker-chosen price + fresh timestamp, force a Cap
-// outcome, and drain the house. The primary, airtight fix is the
-// `#[account(address = BTC_FEED)]` constraint on the price_update account in
-// lib.rs (OpenRound/CloseRound/ForceCloseRound): an attacker simply cannot
-// supply an account at a pubkey they don't control. The owner + feed_id checks
-// below are defense-in-depth.
+// outcome, and drain the house. The primary, airtight fix is the per-asset feed
+// binding in lib.rs: `open` requires `price_update.key()` to equal the registry's
+// registered feed for the chosen asset AND records it on `round.feed`, and every
+// settle site (close/force_close/tick/flip/lever/crank) requires
+// `price_update.key() == round.feed`. An attacker simply cannot supply an account
+// at a pubkey they don't control. The owner check below + the per-asset feed_id
+// check in `open` are defense-in-depth.
 // ---------------------------------------------------------------------------
-
-/// The ONLY price account this program will ever read: the MagicBlock-relayed
-/// Pyth Lazer BTC/USD feed. Pinned by `#[account(address = BTC_FEED)]` at every
-/// settle site so no attacker-controlled account can be substituted.
-pub const BTC_FEED: Pubkey = pubkey!("71wtTRDY8Gxgw56bXFt2oc6qeAbTxzStdNiC425Z51sr");
 
 /// Owner program of the BTC feed account AS SEEN INSIDE THE EPHEMERAL ROLLUP
 /// (where open/close/force_close actually execute). The ER serves the feed under
@@ -39,14 +36,6 @@ pub const BTC_FEED: Pubkey = pubkey!("71wtTRDY8Gxgw56bXFt2oc6qeAbTxzStdNiC425Z51
 /// Since read_fresh runs IN-ROLLUP, this MUST be the ER-side owner.
 /// (Verified live: `getAccountInfo` on devnet.magicblock.app reports this owner.)
 pub const EXPECTED_FEED_OWNER: Pubkey = pubkey!("PriCems5tHihc6UDXDjzjeawomAwBduWMGAi8ZUjppd");
-
-/// The 32-byte Pyth feed_id of BTC/USD, decoded from the live PriceUpdateV2.
-/// Used to assert the decoded message really is the BTC feed (belt-and-braces;
-/// the address pin already guarantees the account identity).
-pub const BTC_FEED_ID: [u8; 32] = [
-    0x59, 0x64, 0x2e, 0xc3, 0x90, 0x6a, 0x38, 0xd1, 0x26, 0x7d, 0x4a, 0xaf, 0xac, 0x36, 0xa5, 0xe2,
-    0xa4, 0x7e, 0x6d, 0x38, 0xed, 0x7e, 0x5b, 0x58, 0x43, 0xdd, 0x28, 0x7e, 0x5e, 0x21, 0xab, 0x65,
-];
 
 // ---------------------------------------------------------------------------
 // Minimal Pyth PriceUpdateV2 deserialiser (verbatim from the spike).
@@ -135,14 +124,17 @@ pub fn parse_price_update(data: &[u8]) -> Result<PriceSnapshot> {
 /// Used by open/close/force_close so a round can NEVER settle against a forged
 /// or frozen feed.
 ///
-/// Defense-in-depth layered behind the `#[account(address = BTC_FEED)]` pin:
+/// Defense-in-depth layered behind the per-asset feed binding (the caller pins
+/// `price_update.key()` to `round.feed` / the registry's registered feed):
 ///   1. owner — the account must be owned by the real Pyth feed program (as
 ///      served inside the ER), so a same-pubkey lookalike at a different owner
 ///      is rejected.
 ///   2. staleness (both bounds) — reject prices older than STALE_SECS AND
 ///      prices dated in the future (a forged/clock-skewed publish_time).
-///   3. feed_id — the decoded message must be the BTC/USD feed, not some other
-///      Pyth feed smuggled in.
+///
+/// The decoded `snap.feed_id` is returned so `open` can additionally assert it
+/// matches the registry entry's `feed_id` for the chosen asset (the per-asset
+/// equivalent of the old hardcoded BTC feed_id check).
 pub fn read_fresh(price_acct: &AccountInfo, now_ts: i64) -> Result<PriceSnapshot> {
     // (1) The account must be owned by the trusted feed program.
     require!(
@@ -162,9 +154,6 @@ pub fn read_fresh(price_acct: &AccountInfo, now_ts: i64) -> Result<PriceSnapshot
         snap.publish_time <= now_ts + crate::state::STALE_SECS,
         RaiderError::StalePrice
     );
-
-    // (3) The decoded message must be the BTC/USD feed.
-    require!(snap.feed_id == BTC_FEED_ID, RaiderError::UntrustedFeed);
 
     Ok(snap)
 }
