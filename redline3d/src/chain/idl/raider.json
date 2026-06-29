@@ -1,0 +1,2604 @@
+{
+  "address": "FwUNcUaRbYGiWasHa6DA3xQaQJfZWCgH7UhDeBvoJcBv",
+  "metadata": {
+    "name": "raider",
+    "version": "0.1.0",
+    "spec": "0.1.0",
+    "description": "Created with Anchor"
+  },
+  "instructions": [
+    {
+      "name": "buy_in",
+      "docs": [
+        "Deposit real USDC: transfer `amount` from the owner's ATA into the vault,",
+        "then credit the owner's play balance. Non-custodial: funds only ever move",
+        "owner -> vault here, and back out via owner-only `withdraw`."
+      ],
+      "discriminator": [
+        126,
+        94,
+        133,
+        165,
+        163,
+        236,
+        161,
+        152
+      ],
+      "accounts": [
+        {
+          "name": "owner",
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "mint"
+        },
+        {
+          "name": "player",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  112,
+                  108,
+                  97,
+                  121,
+                  101,
+                  114
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "owner"
+              },
+              {
+                "kind": "account",
+                "path": "mint"
+              }
+            ]
+          }
+        },
+        {
+          "name": "owner_token",
+          "writable": true
+        },
+        {
+          "name": "vault_authority",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  118,
+                  97,
+                  117,
+                  108,
+                  116
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "mint"
+              }
+            ]
+          }
+        },
+        {
+          "name": "vault_token",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "account",
+                "path": "vault_authority"
+              },
+              {
+                "kind": "const",
+                "value": [
+                  6,
+                  221,
+                  246,
+                  225,
+                  215,
+                  101,
+                  161,
+                  147,
+                  217,
+                  203,
+                  225,
+                  70,
+                  206,
+                  235,
+                  121,
+                  172,
+                  28,
+                  180,
+                  133,
+                  237,
+                  95,
+                  91,
+                  55,
+                  145,
+                  58,
+                  140,
+                  245,
+                  133,
+                  126,
+                  255,
+                  0,
+                  169
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "mint"
+              }
+            ],
+            "program": {
+              "kind": "const",
+              "value": [
+                140,
+                151,
+                37,
+                143,
+                78,
+                36,
+                137,
+                241,
+                187,
+                61,
+                16,
+                41,
+                20,
+                142,
+                13,
+                131,
+                11,
+                90,
+                19,
+                153,
+                218,
+                255,
+                16,
+                132,
+                4,
+                142,
+                123,
+                216,
+                219,
+                233,
+                248,
+                89
+              ]
+            }
+          }
+        },
+        {
+          "name": "token_program",
+          "address": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
+        }
+      ],
+      "args": [
+        {
+          "name": "amount",
+          "type": "u64"
+        }
+      ]
+    },
+    {
+      "name": "close",
+      "docs": [
+        "Close the open round at the live Lazer exit price: settle with the",
+        "fixed-point engine, credit the player, and conserve value across the",
+        "player+house ledgers (the 5% edge stays inside the house-favorable",
+        "payout). The settlement record is written into the Round so the result",
+        "is deterministically recomputable from on-chain data alone."
+      ],
+      "discriminator": [
+        98,
+        165,
+        201,
+        177,
+        108,
+        65,
+        206,
+        96
+      ],
+      "accounts": [
+        {
+          "name": "player",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  112,
+                  108,
+                  97,
+                  121,
+                  101,
+                  114
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "player.owner",
+                "account": "PlayerBalance"
+              },
+              {
+                "kind": "account",
+                "path": "mint"
+              }
+            ]
+          }
+        },
+        {
+          "name": "house",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  104,
+                  111,
+                  117,
+                  115,
+                  101
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "mint"
+              }
+            ]
+          }
+        },
+        {
+          "name": "round",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  114,
+                  111,
+                  117,
+                  110,
+                  100
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "player.owner",
+                "account": "PlayerBalance"
+              }
+            ]
+          }
+        },
+        {
+          "name": "mint"
+        },
+        {
+          "name": "price_update",
+          "docs": [
+            "further authenticated (owner + feed_id + staleness) by price::read_fresh()."
+          ],
+          "address": "71wtTRDY8Gxgw56bXFt2oc6qeAbTxzStdNiC425Z51sr"
+        },
+        {
+          "name": "player_authority",
+          "signer": true
+        }
+      ],
+      "args": []
+    },
+    {
+      "name": "commit_and_undelegate",
+      "docs": [
+        "Commit the final state of all three co-delegated PDAs (Player, House,",
+        "Round) and undelegate them back to L1 atomically. After this lands, the",
+        "settled balances are durable on devnet base layer and `withdraw` can pull",
+        "real USDC against the player's restored on-L1 play balance."
+      ],
+      "discriminator": [
+        9,
+        108,
+        132,
+        87,
+        184,
+        76,
+        98,
+        84
+      ],
+      "accounts": [
+        {
+          "name": "payer",
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "player",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  112,
+                  108,
+                  97,
+                  121,
+                  101,
+                  114
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "player.owner",
+                "account": "PlayerBalance"
+              },
+              {
+                "kind": "account",
+                "path": "mint"
+              }
+            ]
+          }
+        },
+        {
+          "name": "house",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  104,
+                  111,
+                  117,
+                  115,
+                  101
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "mint"
+              }
+            ]
+          }
+        },
+        {
+          "name": "round",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  114,
+                  111,
+                  117,
+                  110,
+                  100
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "player.owner",
+                "account": "PlayerBalance"
+              }
+            ]
+          }
+        },
+        {
+          "name": "mint"
+        },
+        {
+          "name": "magic_program",
+          "address": "Magic11111111111111111111111111111111111111"
+        },
+        {
+          "name": "magic_context",
+          "writable": true,
+          "address": "MagicContext1111111111111111111111111111111"
+        }
+      ],
+      "args": []
+    },
+    {
+      "name": "delegate_session",
+      "docs": [
+        "Co-delegate Player + House + Round to the MagicBlock ER in one instruction.",
+        "The validator is passed as the single remaining account (Task-2 proven)."
+      ],
+      "discriminator": [
+        82,
+        83,
+        119,
+        119,
+        196,
+        219,
+        5,
+        197
+      ],
+      "accounts": [
+        {
+          "name": "payer",
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "mint"
+        },
+        {
+          "name": "buffer_player",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  98,
+                  117,
+                  102,
+                  102,
+                  101,
+                  114
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "player"
+              }
+            ],
+            "program": {
+              "kind": "const",
+              "value": [
+                221,
+                247,
+                238,
+                84,
+                62,
+                131,
+                22,
+                31,
+                24,
+                105,
+                72,
+                163,
+                222,
+                221,
+                233,
+                24,
+                127,
+                6,
+                253,
+                187,
+                206,
+                187,
+                171,
+                216,
+                186,
+                215,
+                104,
+                147,
+                253,
+                73,
+                57,
+                13
+              ]
+            }
+          }
+        },
+        {
+          "name": "delegation_record_player",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  100,
+                  101,
+                  108,
+                  101,
+                  103,
+                  97,
+                  116,
+                  105,
+                  111,
+                  110
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "player"
+              }
+            ],
+            "program": {
+              "kind": "account",
+              "path": "delegation_program"
+            }
+          }
+        },
+        {
+          "name": "delegation_metadata_player",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  100,
+                  101,
+                  108,
+                  101,
+                  103,
+                  97,
+                  116,
+                  105,
+                  111,
+                  110,
+                  45,
+                  109,
+                  101,
+                  116,
+                  97,
+                  100,
+                  97,
+                  116,
+                  97
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "player"
+              }
+            ],
+            "program": {
+              "kind": "account",
+              "path": "delegation_program"
+            }
+          }
+        },
+        {
+          "name": "player",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  112,
+                  108,
+                  97,
+                  121,
+                  101,
+                  114
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "payer"
+              },
+              {
+                "kind": "account",
+                "path": "mint"
+              }
+            ]
+          }
+        },
+        {
+          "name": "buffer_house",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  98,
+                  117,
+                  102,
+                  102,
+                  101,
+                  114
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "house"
+              }
+            ],
+            "program": {
+              "kind": "const",
+              "value": [
+                221,
+                247,
+                238,
+                84,
+                62,
+                131,
+                22,
+                31,
+                24,
+                105,
+                72,
+                163,
+                222,
+                221,
+                233,
+                24,
+                127,
+                6,
+                253,
+                187,
+                206,
+                187,
+                171,
+                216,
+                186,
+                215,
+                104,
+                147,
+                253,
+                73,
+                57,
+                13
+              ]
+            }
+          }
+        },
+        {
+          "name": "delegation_record_house",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  100,
+                  101,
+                  108,
+                  101,
+                  103,
+                  97,
+                  116,
+                  105,
+                  111,
+                  110
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "house"
+              }
+            ],
+            "program": {
+              "kind": "account",
+              "path": "delegation_program"
+            }
+          }
+        },
+        {
+          "name": "delegation_metadata_house",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  100,
+                  101,
+                  108,
+                  101,
+                  103,
+                  97,
+                  116,
+                  105,
+                  111,
+                  110,
+                  45,
+                  109,
+                  101,
+                  116,
+                  97,
+                  100,
+                  97,
+                  116,
+                  97
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "house"
+              }
+            ],
+            "program": {
+              "kind": "account",
+              "path": "delegation_program"
+            }
+          }
+        },
+        {
+          "name": "house",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  104,
+                  111,
+                  117,
+                  115,
+                  101
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "mint"
+              }
+            ]
+          }
+        },
+        {
+          "name": "buffer_round",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  98,
+                  117,
+                  102,
+                  102,
+                  101,
+                  114
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "round"
+              }
+            ],
+            "program": {
+              "kind": "const",
+              "value": [
+                221,
+                247,
+                238,
+                84,
+                62,
+                131,
+                22,
+                31,
+                24,
+                105,
+                72,
+                163,
+                222,
+                221,
+                233,
+                24,
+                127,
+                6,
+                253,
+                187,
+                206,
+                187,
+                171,
+                216,
+                186,
+                215,
+                104,
+                147,
+                253,
+                73,
+                57,
+                13
+              ]
+            }
+          }
+        },
+        {
+          "name": "delegation_record_round",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  100,
+                  101,
+                  108,
+                  101,
+                  103,
+                  97,
+                  116,
+                  105,
+                  111,
+                  110
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "round"
+              }
+            ],
+            "program": {
+              "kind": "account",
+              "path": "delegation_program"
+            }
+          }
+        },
+        {
+          "name": "delegation_metadata_round",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  100,
+                  101,
+                  108,
+                  101,
+                  103,
+                  97,
+                  116,
+                  105,
+                  111,
+                  110,
+                  45,
+                  109,
+                  101,
+                  116,
+                  97,
+                  100,
+                  97,
+                  116,
+                  97
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "round"
+              }
+            ],
+            "program": {
+              "kind": "account",
+              "path": "delegation_program"
+            }
+          }
+        },
+        {
+          "name": "round",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  114,
+                  111,
+                  117,
+                  110,
+                  100
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "payer"
+              }
+            ]
+          }
+        },
+        {
+          "name": "owner_program",
+          "address": "FwUNcUaRbYGiWasHa6DA3xQaQJfZWCgH7UhDeBvoJcBv"
+        },
+        {
+          "name": "delegation_program",
+          "address": "DELeGGvXpWV2fqJUhqcF5ZSYMS4JTLjteaAMARRSaeSh"
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
+        }
+      ],
+      "args": []
+    },
+    {
+      "name": "flip",
+      "docs": [
+        "Reverse direction mid-round (owner-authority). Reads the live authenticated",
+        "price; if it already liq/caps or the cap-time has passed, SETTLES instead of",
+        "flipping (matches off-chain terminalAt-before-applyAction). Otherwise realizes",
+        "the current segment into `banked`, re-anchors `entry_raw`, and reverses `dir`.",
+        "",
+        "Mirrors the off-chain engine's `applyAction` flip (packages/engine/src/settle.ts:",
+        "`case \"flip\": return { ...rebank(pos, priceRaw), dir }`): rebank the current",
+        "segment into `banked`, then set `dir = new_dir`. A SAME-direction `new_dir`",
+        "(e.g. `flip(1)` while already long) is a LEGAL re-anchor — it locks the current",
+        "segment into `banked` and resets `entry_raw`, NOT an error — matching the engine,",
+        "which applies `{ ...rebank(pos), dir }` with no same-direction restriction. It is",
+        "conservation-safe (the close payout is still cap-clamped) and equity / liq-distance",
+        "neutral at the flip instant: the terminal-first `fires` check settles any real liq",
+        "BEFORE re-anchoring, so a re-anchor can never let a position escape a liquidation."
+      ],
+      "discriminator": [
+        24,
+        243,
+        78,
+        161,
+        192,
+        246,
+        102,
+        103
+      ],
+      "accounts": [
+        {
+          "name": "player",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  112,
+                  108,
+                  97,
+                  121,
+                  101,
+                  114
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "player.owner",
+                "account": "PlayerBalance"
+              },
+              {
+                "kind": "account",
+                "path": "mint"
+              }
+            ]
+          }
+        },
+        {
+          "name": "house",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  104,
+                  111,
+                  117,
+                  115,
+                  101
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "mint"
+              }
+            ]
+          }
+        },
+        {
+          "name": "round",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  114,
+                  111,
+                  117,
+                  110,
+                  100
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "player.owner",
+                "account": "PlayerBalance"
+              }
+            ]
+          }
+        },
+        {
+          "name": "mint"
+        },
+        {
+          "name": "price_update",
+          "docs": [
+            "further authenticated (owner + feed_id + staleness) by price::read_fresh()."
+          ],
+          "address": "71wtTRDY8Gxgw56bXFt2oc6qeAbTxzStdNiC425Z51sr"
+        },
+        {
+          "name": "player_authority",
+          "signer": true
+        }
+      ],
+      "args": [
+        {
+          "name": "new_dir",
+          "type": "i8"
+        }
+      ]
+    },
+    {
+      "name": "force_close",
+      "docs": [
+        "Liveness backstop: ANY signer can settle a round once it has passed its",
+        "`deadline_ts`. Same settle + conserve + store body as `close` (it calls",
+        "the shared `settle_round`), but it intentionally OMITS the",
+        "`player.owner == authority` check and instead REQUIRES the deadline has",
+        "elapsed. This guarantees a stalled or abandoned round can always be",
+        "unwound by anyone, releasing the house lock and crediting the player —",
+        "no round can escrow the house's capital forever."
+      ],
+      "discriminator": [
+        71,
+        1,
+        6,
+        64,
+        15,
+        200,
+        254,
+        234
+      ],
+      "accounts": [
+        {
+          "name": "player",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  112,
+                  108,
+                  97,
+                  121,
+                  101,
+                  114
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "player.owner",
+                "account": "PlayerBalance"
+              },
+              {
+                "kind": "account",
+                "path": "mint"
+              }
+            ]
+          }
+        },
+        {
+          "name": "house",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  104,
+                  111,
+                  117,
+                  115,
+                  101
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "mint"
+              }
+            ]
+          }
+        },
+        {
+          "name": "round",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  114,
+                  111,
+                  117,
+                  110,
+                  100
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "player.owner",
+                "account": "PlayerBalance"
+              }
+            ]
+          }
+        },
+        {
+          "name": "mint"
+        },
+        {
+          "name": "price_update",
+          "docs": [
+            "further authenticated (owner + feed_id + staleness) by price::read_fresh().",
+            "This pin matters most here: force_close is permissionless, so without it",
+            "any abandoned round would be drainable via a forged feed."
+          ],
+          "address": "71wtTRDY8Gxgw56bXFt2oc6qeAbTxzStdNiC425Z51sr"
+        },
+        {
+          "name": "caller",
+          "signer": true
+        }
+      ],
+      "args": []
+    },
+    {
+      "name": "fund_house",
+      "docs": [
+        "Add real USDC capital to the house bankroll. Transfers `amount` from the",
+        "funder's ATA into the same program-owned vault `buy_in` uses, then credits",
+        "`house.balance`. Permissionless: adding capital is benign (it only ever",
+        "increases the house's free balance, never moves value out).",
+        "",
+        "MUST run on L1 BEFORE `delegate_session` — once the HouseBalance PDA is",
+        "delegated to the ER, L1 can no longer mutate it. Without this, `open`",
+        "always rejects with `HouseUndercapitalized` (init_house leaves balance=0)."
+      ],
+      "discriminator": [
+        175,
+        231,
+        49,
+        44,
+        144,
+        102,
+        41,
+        69
+      ],
+      "accounts": [
+        {
+          "name": "funder",
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "mint"
+        },
+        {
+          "name": "house",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  104,
+                  111,
+                  117,
+                  115,
+                  101
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "mint"
+              }
+            ]
+          }
+        },
+        {
+          "name": "funder_token",
+          "writable": true
+        },
+        {
+          "name": "vault_authority",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  118,
+                  97,
+                  117,
+                  108,
+                  116
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "mint"
+              }
+            ]
+          }
+        },
+        {
+          "name": "vault_token",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "account",
+                "path": "vault_authority"
+              },
+              {
+                "kind": "const",
+                "value": [
+                  6,
+                  221,
+                  246,
+                  225,
+                  215,
+                  101,
+                  161,
+                  147,
+                  217,
+                  203,
+                  225,
+                  70,
+                  206,
+                  235,
+                  121,
+                  172,
+                  28,
+                  180,
+                  133,
+                  237,
+                  95,
+                  91,
+                  55,
+                  145,
+                  58,
+                  140,
+                  245,
+                  133,
+                  126,
+                  255,
+                  0,
+                  169
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "mint"
+              }
+            ],
+            "program": {
+              "kind": "const",
+              "value": [
+                140,
+                151,
+                37,
+                143,
+                78,
+                36,
+                137,
+                241,
+                187,
+                61,
+                16,
+                41,
+                20,
+                142,
+                13,
+                131,
+                11,
+                90,
+                19,
+                153,
+                218,
+                255,
+                16,
+                132,
+                4,
+                142,
+                123,
+                216,
+                219,
+                233,
+                248,
+                89
+              ]
+            }
+          }
+        },
+        {
+          "name": "token_program",
+          "address": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"
+        }
+      ],
+      "args": [
+        {
+          "name": "amount",
+          "type": "u64"
+        }
+      ]
+    },
+    {
+      "name": "init_house",
+      "docs": [
+        "Create the shared HouseBalance ledger PDA + the program-owned vault token",
+        "account (ATA of the `[b\"vault\", mint]` authority PDA) that custodies real USDC."
+      ],
+      "discriminator": [
+        179,
+        199,
+        91,
+        87,
+        163,
+        192,
+        163,
+        183
+      ],
+      "accounts": [
+        {
+          "name": "authority",
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "mint"
+        },
+        {
+          "name": "house",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  104,
+                  111,
+                  117,
+                  115,
+                  101
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "mint"
+              }
+            ]
+          }
+        },
+        {
+          "name": "vault_authority",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  118,
+                  97,
+                  117,
+                  108,
+                  116
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "mint"
+              }
+            ]
+          }
+        },
+        {
+          "name": "vault_token",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "account",
+                "path": "vault_authority"
+              },
+              {
+                "kind": "const",
+                "value": [
+                  6,
+                  221,
+                  246,
+                  225,
+                  215,
+                  101,
+                  161,
+                  147,
+                  217,
+                  203,
+                  225,
+                  70,
+                  206,
+                  235,
+                  121,
+                  172,
+                  28,
+                  180,
+                  133,
+                  237,
+                  95,
+                  91,
+                  55,
+                  145,
+                  58,
+                  140,
+                  245,
+                  133,
+                  126,
+                  255,
+                  0,
+                  169
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "mint"
+              }
+            ],
+            "program": {
+              "kind": "const",
+              "value": [
+                140,
+                151,
+                37,
+                143,
+                78,
+                36,
+                137,
+                241,
+                187,
+                61,
+                16,
+                41,
+                20,
+                142,
+                13,
+                131,
+                11,
+                90,
+                19,
+                153,
+                218,
+                255,
+                16,
+                132,
+                4,
+                142,
+                123,
+                216,
+                219,
+                233,
+                248,
+                89
+              ]
+            }
+          }
+        },
+        {
+          "name": "token_program",
+          "address": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"
+        },
+        {
+          "name": "associated_token_program",
+          "address": "ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL"
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
+        }
+      ],
+      "args": []
+    },
+    {
+      "name": "init_round",
+      "docs": [
+        "Create the per-player Round PDA `[b\"round\", owner]` in the idle state so it",
+        "can be co-delegated to the ER alongside Player + House before `open`."
+      ],
+      "discriminator": [
+        147,
+        244,
+        62,
+        18,
+        218,
+        248,
+        44,
+        234
+      ],
+      "accounts": [
+        {
+          "name": "owner",
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "round",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  114,
+                  111,
+                  117,
+                  110,
+                  100
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "owner"
+              }
+            ]
+          }
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
+        }
+      ],
+      "args": []
+    },
+    {
+      "name": "lever",
+      "docs": [
+        "Change leverage mid-round (owner-authority). Same terminal-first + rebank as",
+        "`flip`, but re-anchors at the new leverage instead of reversing direction.",
+        "",
+        "A SAME-leverage `new_lev` (e.g. lever(currentLev)) is a LEGAL re-anchor — it",
+        "locks the current segment into `banked` and resets `entry_raw`, with `lev`",
+        "unchanged — NOT an error. Mirrors the off-chain engine's `applyAction` lever",
+        "(packages/engine/src/settle.ts: `{ ...rebank(pos), lev }`, no same-leverage",
+        "restriction). It is conservation-safe (the close payout is still cap-clamped)",
+        "and equity / liq-distance neutral at the lever instant: the terminal-first",
+        "`fires` check settles any real liq BEFORE re-anchoring, so a re-anchor can",
+        "never let a position escape a liquidation."
+      ],
+      "discriminator": [
+        134,
+        137,
+        142,
+        89,
+        70,
+        94,
+        123,
+        224
+      ],
+      "accounts": [
+        {
+          "name": "player",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  112,
+                  108,
+                  97,
+                  121,
+                  101,
+                  114
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "player.owner",
+                "account": "PlayerBalance"
+              },
+              {
+                "kind": "account",
+                "path": "mint"
+              }
+            ]
+          }
+        },
+        {
+          "name": "house",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  104,
+                  111,
+                  117,
+                  115,
+                  101
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "mint"
+              }
+            ]
+          }
+        },
+        {
+          "name": "round",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  114,
+                  111,
+                  117,
+                  110,
+                  100
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "player.owner",
+                "account": "PlayerBalance"
+              }
+            ]
+          }
+        },
+        {
+          "name": "mint"
+        },
+        {
+          "name": "price_update",
+          "docs": [
+            "further authenticated (owner + feed_id + staleness) by price::read_fresh()."
+          ],
+          "address": "71wtTRDY8Gxgw56bXFt2oc6qeAbTxzStdNiC425Z51sr"
+        },
+        {
+          "name": "player_authority",
+          "signer": true
+        }
+      ],
+      "args": [
+        {
+          "name": "new_lev",
+          "type": "u32"
+        }
+      ]
+    },
+    {
+      "name": "open",
+      "docs": [
+        "Open a round inside the ER: snapshot the live Lazer entry price, debit the",
+        "player's stake, and PRE-LOCK the house's maximum possible payout so the",
+        "house is provably solvent for this round before any price moves."
+      ],
+      "discriminator": [
+        228,
+        220,
+        155,
+        71,
+        199,
+        189,
+        60,
+        45
+      ],
+      "accounts": [
+        {
+          "name": "player",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  112,
+                  108,
+                  97,
+                  121,
+                  101,
+                  114
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "player.owner",
+                "account": "PlayerBalance"
+              },
+              {
+                "kind": "account",
+                "path": "mint"
+              }
+            ]
+          }
+        },
+        {
+          "name": "house",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  104,
+                  111,
+                  117,
+                  115,
+                  101
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "mint"
+              }
+            ]
+          }
+        },
+        {
+          "name": "round",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  114,
+                  111,
+                  117,
+                  110,
+                  100
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "player.owner",
+                "account": "PlayerBalance"
+              }
+            ]
+          }
+        },
+        {
+          "name": "mint"
+        },
+        {
+          "name": "price_update",
+          "docs": [
+            "further authenticated (owner + feed_id + staleness) by price::read_fresh()."
+          ],
+          "address": "71wtTRDY8Gxgw56bXFt2oc6qeAbTxzStdNiC425Z51sr"
+        },
+        {
+          "name": "player_authority",
+          "signer": true
+        }
+      ],
+      "args": [
+        {
+          "name": "dir",
+          "type": "i8"
+        },
+        {
+          "name": "lev",
+          "type": "u32"
+        },
+        {
+          "name": "stake",
+          "type": "u64"
+        }
+      ]
+    },
+    {
+      "name": "process_undelegation",
+      "discriminator": [
+        196,
+        28,
+        41,
+        206,
+        48,
+        37,
+        51,
+        167
+      ],
+      "accounts": [
+        {
+          "name": "base_account",
+          "writable": true
+        },
+        {
+          "name": "buffer"
+        },
+        {
+          "name": "payer",
+          "writable": true
+        },
+        {
+          "name": "system_program"
+        }
+      ],
+      "args": [
+        {
+          "name": "account_seeds",
+          "type": {
+            "vec": "bytes"
+          }
+        }
+      ]
+    },
+    {
+      "name": "schedule_tick",
+      "docs": [
+        "Arm the native crank: ask the MagicBlock validator to auto-invoke",
+        "`tick_crank` on THIS round every `execution_interval_millis` ms for",
+        "`iterations` runs, with ZERO further client tx. Runs INSIDE the ER (the three",
+        "PDAs are delegated). The scheduled inner ix is the program's own `tick_crank`",
+        "bound to this player/house/round/mint/feed; the validator becomes the",
+        "executor/signer at run time, funded from the schedule payer's MagicBlock",
+        "escrow. Construction is byte-identical to the Task-8 crank-probe spike (a",
+        "direct `invoke_signed` of `bincode(MagicBlockInstruction::ScheduleTask)`,",
+        "sidestepping the SDK wrapper's borrow-lifetime conflicts) — only the scheduled",
+        "inner ix carries raider's 5 accounts instead of the spike's single Counter."
+      ],
+      "discriminator": [
+        197,
+        80,
+        214,
+        198,
+        209,
+        150,
+        211,
+        44
+      ],
+      "accounts": [
+        {
+          "name": "magic_program",
+          "address": "Magic11111111111111111111111111111111111111"
+        },
+        {
+          "name": "payer",
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "player",
+          "writable": true
+        },
+        {
+          "name": "house",
+          "writable": true
+        },
+        {
+          "name": "round",
+          "writable": true
+        },
+        {
+          "name": "mint"
+        },
+        {
+          "name": "price_update",
+          "address": "71wtTRDY8Gxgw56bXFt2oc6qeAbTxzStdNiC425Z51sr"
+        }
+      ],
+      "args": [
+        {
+          "name": "task_id",
+          "type": "i64"
+        },
+        {
+          "name": "execution_interval_millis",
+          "type": "i64"
+        },
+        {
+          "name": "iterations",
+          "type": "i64"
+        }
+      ]
+    },
+    {
+      "name": "tick",
+      "docs": [
+        "Continuous settler. PERMISSIONLESS heartbeat the keeper/crank calls each",
+        "tick: settle ONLY if a terminal (liq/cap) or the 60s time-cap fires at the",
+        "live authenticated price; otherwise a no-op. The program reads the price and",
+        "renders the verdict, so the trigger can NEVER choose an outcome."
+      ],
+      "discriminator": [
+        92,
+        79,
+        44,
+        8,
+        101,
+        80,
+        63,
+        15
+      ],
+      "accounts": [
+        {
+          "name": "player",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  112,
+                  108,
+                  97,
+                  121,
+                  101,
+                  114
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "player.owner",
+                "account": "PlayerBalance"
+              },
+              {
+                "kind": "account",
+                "path": "mint"
+              }
+            ]
+          }
+        },
+        {
+          "name": "house",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  104,
+                  111,
+                  117,
+                  115,
+                  101
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "mint"
+              }
+            ]
+          }
+        },
+        {
+          "name": "round",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  114,
+                  111,
+                  117,
+                  110,
+                  100
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "player.owner",
+                "account": "PlayerBalance"
+              }
+            ]
+          }
+        },
+        {
+          "name": "mint"
+        },
+        {
+          "name": "price_update",
+          "docs": [
+            "further authenticated (owner + feed_id + staleness) by price::read_fresh().",
+            "This pin matters most here: force_close is permissionless, so without it",
+            "any abandoned round would be drainable via a forged feed."
+          ],
+          "address": "71wtTRDY8Gxgw56bXFt2oc6qeAbTxzStdNiC425Z51sr"
+        },
+        {
+          "name": "caller",
+          "signer": true
+        }
+      ],
+      "args": []
+    },
+    {
+      "name": "tick_crank",
+      "docs": [
+        "The instruction the ER validator auto-runs on the schedule (see",
+        "`schedule_tick`). Identical settlement logic to `tick`, but with NO signer:",
+        "the validator is the executor at run time, so `CrankClose` carries no",
+        "`Signer`. It NO-OPs on a non-open round so leftover scheduled iterations that",
+        "fire AFTER the round has already liquidated/settled don't error (the schedule",
+        "runs `iterations` times regardless of when the round actually closes)."
+      ],
+      "discriminator": [
+        207,
+        156,
+        94,
+        205,
+        130,
+        98,
+        19,
+        115
+      ],
+      "accounts": [
+        {
+          "name": "player",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  112,
+                  108,
+                  97,
+                  121,
+                  101,
+                  114
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "player.owner",
+                "account": "PlayerBalance"
+              },
+              {
+                "kind": "account",
+                "path": "mint"
+              }
+            ]
+          }
+        },
+        {
+          "name": "house",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  104,
+                  111,
+                  117,
+                  115,
+                  101
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "mint"
+              }
+            ]
+          }
+        },
+        {
+          "name": "round",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  114,
+                  111,
+                  117,
+                  110,
+                  100
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "player.owner",
+                "account": "PlayerBalance"
+              }
+            ]
+          }
+        },
+        {
+          "name": "mint"
+        },
+        {
+          "name": "price_update",
+          "docs": [
+            "further authenticated (owner + feed_id + staleness) by price::read_fresh()."
+          ],
+          "address": "71wtTRDY8Gxgw56bXFt2oc6qeAbTxzStdNiC425Z51sr"
+        }
+      ],
+      "args": []
+    },
+    {
+      "name": "withdraw",
+      "docs": [
+        "Owner-only withdraw of play balance back to real USDC.",
+        "",
+        "NON-CUSTODIAL INVARIANT: `player` is re-derived from the SIGNER's pubkey",
+        "(seeds `[b\"player\", owner, mint]`), so a non-owner signing this instruction",
+        "derives a DIFFERENT PDA than the victim's and the `seeds`/`has_one` Anchor",
+        "constraints reject the call. The explicit `require_keys_eq!` is belt-and-braces."
+      ],
+      "discriminator": [
+        183,
+        18,
+        70,
+        156,
+        148,
+        109,
+        161,
+        34
+      ],
+      "accounts": [
+        {
+          "name": "owner",
+          "writable": true,
+          "signer": true,
+          "relations": [
+            "player"
+          ]
+        },
+        {
+          "name": "mint"
+        },
+        {
+          "name": "player",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  112,
+                  108,
+                  97,
+                  121,
+                  101,
+                  114
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "owner"
+              },
+              {
+                "kind": "account",
+                "path": "mint"
+              }
+            ]
+          }
+        },
+        {
+          "name": "vault_authority",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  118,
+                  97,
+                  117,
+                  108,
+                  116
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "mint"
+              }
+            ]
+          }
+        },
+        {
+          "name": "vault_token",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "account",
+                "path": "vault_authority"
+              },
+              {
+                "kind": "const",
+                "value": [
+                  6,
+                  221,
+                  246,
+                  225,
+                  215,
+                  101,
+                  161,
+                  147,
+                  217,
+                  203,
+                  225,
+                  70,
+                  206,
+                  235,
+                  121,
+                  172,
+                  28,
+                  180,
+                  133,
+                  237,
+                  95,
+                  91,
+                  55,
+                  145,
+                  58,
+                  140,
+                  245,
+                  133,
+                  126,
+                  255,
+                  0,
+                  169
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "mint"
+              }
+            ],
+            "program": {
+              "kind": "const",
+              "value": [
+                140,
+                151,
+                37,
+                143,
+                78,
+                36,
+                137,
+                241,
+                187,
+                61,
+                16,
+                41,
+                20,
+                142,
+                13,
+                131,
+                11,
+                90,
+                19,
+                153,
+                218,
+                255,
+                16,
+                132,
+                4,
+                142,
+                123,
+                216,
+                219,
+                233,
+                248,
+                89
+              ]
+            }
+          }
+        },
+        {
+          "name": "owner_token",
+          "writable": true
+        },
+        {
+          "name": "token_program",
+          "address": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"
+        }
+      ],
+      "args": [
+        {
+          "name": "amount",
+          "type": "u64"
+        }
+      ]
+    }
+  ],
+  "accounts": [
+    {
+      "name": "HouseBalance",
+      "discriminator": [
+        29,
+        10,
+        76,
+        116,
+        157,
+        112,
+        195,
+        141
+      ]
+    },
+    {
+      "name": "PlayerBalance",
+      "discriminator": [
+        244,
+        128,
+        24,
+        93,
+        212,
+        190,
+        202,
+        111
+      ]
+    },
+    {
+      "name": "Round",
+      "discriminator": [
+        87,
+        127,
+        165,
+        51,
+        73,
+        78,
+        116,
+        174
+      ]
+    }
+  ],
+  "events": [
+    {
+      "name": "RoundEvent",
+      "discriminator": [
+        13,
+        252,
+        78,
+        75,
+        207,
+        163,
+        191,
+        114
+      ]
+    }
+  ],
+  "errors": [
+    {
+      "code": 6000,
+      "name": "StalePrice"
+    },
+    {
+      "code": 6001,
+      "name": "BadPrice"
+    },
+    {
+      "code": 6002,
+      "name": "RoundAlreadyOpen"
+    },
+    {
+      "code": 6003,
+      "name": "NoOpenRound"
+    },
+    {
+      "code": 6004,
+      "name": "InsufficientPlayerBalance"
+    },
+    {
+      "code": 6005,
+      "name": "HouseUndercapitalized"
+    },
+    {
+      "code": 6006,
+      "name": "BadLeverage"
+    },
+    {
+      "code": 6007,
+      "name": "NotOwner"
+    },
+    {
+      "code": 6008,
+      "name": "NotYetExpired"
+    },
+    {
+      "code": 6009,
+      "name": "MathOverflow"
+    },
+    {
+      "code": 6010,
+      "name": "UntrustedFeed"
+    },
+    {
+      "code": 6011,
+      "name": "BadDirection"
+    }
+  ],
+  "types": [
+    {
+      "name": "HouseBalance",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "authority",
+            "type": "pubkey"
+          },
+          {
+            "name": "mint",
+            "type": "pubkey"
+          },
+          {
+            "name": "balance",
+            "type": "u64"
+          },
+          {
+            "name": "locked",
+            "type": "u64"
+          },
+          {
+            "name": "bump",
+            "type": "u8"
+          }
+        ]
+      }
+    },
+    {
+      "name": "PlayerBalance",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "owner",
+            "type": "pubkey"
+          },
+          {
+            "name": "mint",
+            "type": "pubkey"
+          },
+          {
+            "name": "balance",
+            "type": "u64"
+          },
+          {
+            "name": "bump",
+            "type": "u8"
+          }
+        ]
+      }
+    },
+    {
+      "name": "Round",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "owner",
+            "type": "pubkey"
+          },
+          {
+            "name": "dir",
+            "type": "i8"
+          },
+          {
+            "name": "lev",
+            "type": "u32"
+          },
+          {
+            "name": "stake",
+            "type": "u64"
+          },
+          {
+            "name": "entry_raw",
+            "type": "i64"
+          },
+          {
+            "name": "entry_expo",
+            "type": "i32"
+          },
+          {
+            "name": "entry_ts",
+            "type": "i64"
+          },
+          {
+            "name": "banked",
+            "type": "i128"
+          },
+          {
+            "name": "max_payout",
+            "type": "u64"
+          },
+          {
+            "name": "deadline_ts",
+            "type": "i64"
+          },
+          {
+            "name": "status",
+            "type": "u8"
+          },
+          {
+            "name": "bump",
+            "type": "u8"
+          },
+          {
+            "name": "exit_raw",
+            "type": "i64"
+          },
+          {
+            "name": "exit_ts",
+            "type": "i64"
+          },
+          {
+            "name": "payout",
+            "type": "u64"
+          },
+          {
+            "name": "outcome",
+            "type": "u8"
+          }
+        ]
+      }
+    },
+    {
+      "name": "RoundEvent",
+      "docs": [
+        "Emitted on every Round state transition so the entire path is reconstructable",
+        "from chain history (final committed Round + this event stream = provable trail).",
+        "kind: 0 open, 1 flip, 2 lever, 3 settle. price_raw/ts come from the authenticated",
+        "Lazer read. For kind 0/1/2, banked/dir/lev are the values AFTER the transition;",
+        "for kind 3 (settle) they are the final realized-segment values at close (settle",
+        "does not mutate the position). outcome/payout are valid only when kind == 3."
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "owner",
+            "type": "pubkey"
+          },
+          {
+            "name": "kind",
+            "type": "u8"
+          },
+          {
+            "name": "price_raw",
+            "type": "i64"
+          },
+          {
+            "name": "ts",
+            "type": "i64"
+          },
+          {
+            "name": "banked",
+            "type": "i128"
+          },
+          {
+            "name": "dir",
+            "type": "i8"
+          },
+          {
+            "name": "lev",
+            "type": "u32"
+          },
+          {
+            "name": "equity_fp",
+            "type": "i128"
+          },
+          {
+            "name": "outcome",
+            "type": "u8"
+          },
+          {
+            "name": "payout",
+            "type": "u64"
+          }
+        ]
+      }
+    }
+  ]
+}
