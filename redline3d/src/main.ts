@@ -215,7 +215,8 @@ coins.set(upgrades.coins(), false); // no pulse on the persisted balance at load
 
 // wallet page (opened by tapping the balance chip) — shows the player's deposit QR.
 const walletUI = createWallet(hudRoot, {
-  address: () => connectedWalletAddress || boundWalletAddress,
+  // the wallet shown for funding is the on-chain session wallet (Privy embedded / dev keypair)
+  address: () => session.address() || connectedWalletAddress || boundWalletAddress,
   balance: () => balance,
   walletBalance: () => walletBalance,
   onConnectWallet: async () => { await ensureWalletConnected(); },

@@ -1,14 +1,15 @@
 import { qrMatrix, qrSvg } from "./qr";
-import { shortWallet } from "./auth-ui";
 
 /**
  * Wallet page — a full-screen synthwave overlay opened from the balance chip.
- *   • Connected wallet USDC balance hero
- *   • Add connected-wallet USDC to the play balance
- *   • Receive — connected wallet QR + copy
  *
- * The balance and wallet address run through callbacks so main owns auth and
- * on-chain reads.
+ * SOL-native, on-chain only: the player funds their own wallet (the Privy embedded wallet,
+ * or the dev keypair) by sending native SOL to the address shown here (QR + copy). The first
+ * GO wraps that SOL into the on-chain play balance. The panel shows the play balance and the
+ * End-session / Withdraw controls. There is no "connect wallet" — you're already signed in via
+ * the on-chain session — and no off-chain USDC deposit.
+ *
+ * The address + balance run through callbacks so main owns auth and on-chain reads.
  */
 export interface Wallet {
   open(): void;
@@ -18,62 +19,41 @@ export interface Wallet {
 }
 
 export interface WalletOpts {
-  /** Current deposit address — CALLED on every open so it reflects a wallet that only exists
-   *  after login. Returns "" when there is no real wallet yet (dev/guest, or pre-login). */
+  /** The on-chain session wallet address — CALLED on every open (a Privy wallet only exists
+   *  after login). Returns "" before the wallet is ready (pre-login). */
   address: () => string;
+  /** Displayed balance in centi-SOL units (1 unit = 0.01 SOL) — the on-chain play balance. */
   balance: () => number;
-  /** on-chain USDC currently held by the connected wallet, in cents */
-  walletBalance?: () => number | null;
-  onConnectWallet?: () => Promise<void>;
   /** sign the player out — when omitted (dev/guest) the account row stays hidden */
   onLogout?: () => void;
-  /** re-fetch the on-chain connected-wallet USDC balance, in cents */
-  onWalletPoll?: () => Promise<number>;
-  /** Sweep the whole connected-wallet USDC into the in-game play balance. Resolves when credited. */
-  onAddToPlay?: () => Promise<void>;
   /**
-   * On-chain (Slice 4) session controls. When present the panel shows a play-balance + End/Withdraw
-   * footer and hides the off-chain deposit CTAs. `status()` is read on every open/refresh.
+   * On-chain session controls. `status()` is read on every open/refresh: `delegated` =
+   * a round/session is live; `playCents` = the on-chain play balance in centi-SOL units.
    */
-  onchain?: {
+  onchain: {
     status: () => { delegated: boolean; playCents: number };
     end: () => Promise<void>;
     withdraw: () => Promise<void>;
   };
+  // ── legacy off-chain fields (no longer rendered; kept optional so callers compile) ──
+  walletBalance?: () => number | null;
+  onConnectWallet?: () => Promise<void>;
+  onWalletPoll?: () => Promise<number>;
+  onAddToPlay?: () => Promise<void>;
 }
 
 const ICONS = {
-  plus: '<path d="M12 5v14M5 12h14"/>',
-  qr: '<rect x="4" y="4" width="6" height="6" rx="1"/><rect x="14" y="4" width="6" height="6" rx="1"/><rect x="4" y="14" width="6" height="6" rx="1"/><path d="M14 14h2v2M20 14v6M14 18v2h2"/>',
   copy: '<rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V5a2 2 0 0 1 2-2h10"/>',
   check: '<path d="M5 12.5l4.2 4.2L19 7"/>',
 } as const;
 const svg = (d: string, size = 16) =>
   `<svg viewBox="0 0 24 24" width="${size}" height="${size}" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round">${d}</svg>`;
-// the USDC token glyph (filled coin) — drawn so it reads even at small sizes
-const usdcCoin = (size = 22) =>
-  `<svg viewBox="0 0 24 24" width="${size}" height="${size}"><circle cx="12" cy="12" r="11" fill="#2775ca"/><path d="M12 5.4v1.1m0 11v1.1" stroke="#fff" stroke-width="1.3" stroke-linecap="round"/><path d="M12 7.2c-1.7 0-3 .9-3 2.3 0 1.2.9 1.8 2.7 2.2 1.8.4 2.3.8 2.3 1.5 0 .8-.8 1.3-2 1.3-1.4 0-2.2-.6-2.4-1.6M12 7.2c1.3 0 2.1.5 2.4 1.5M12 7.2V6m0 10.8c1.7 0 3-.9 3-2.3" stroke="#fff" stroke-width="1.3" fill="none" stroke-linecap="round" stroke-linejoin="round"/></svg>`;
+// Solana mark — three slanted bars in the brand teal→purple gradient
+const solCoin = (size = 22) =>
+  `<svg viewBox="0 0 24 24" width="${size}" height="${size}"><defs><linearGradient id="solg" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#9945ff"/><stop offset="1" stop-color="#19fb9b"/></linearGradient></defs><circle cx="12" cy="12" r="11" fill="#0b0820"/><g fill="url(#solg)"><path d="M7 8.6c.1-.1.3-.2.4-.2h8.2c.2 0 .3.3.2.4l-1.4 1.5c-.1.1-.3.2-.4.2H6c-.2 0-.3-.3-.2-.4z"/><path d="M7 15.4c.1-.1.3-.2.4-.2h8.2c.2 0 .3.3.2.4l-1.4 1.5c-.1.1-.3.2-.4.2H6c-.2 0-.3-.3-.2-.4z" transform="translate(0,-3.4)"/><path d="M17 12.6c-.1.1-.3.2-.4.2H8.4c-.2 0-.3-.3-.2-.4l1.4-1.5c.1-.1.3-.2.4-.2h8.2c.2 0 .3.3.2.4z"/></g></svg>`;
 
 const shortAddr = (a: string) => (a.length > 12 ? `${a.slice(0, 6)}…${a.slice(-6)}` : a);
 const fmt = (n: number) => n.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-const connectErrorLabel = (error: unknown) => {
-  const details = error as { name?: unknown; message?: unknown; code?: unknown; bodyError?: unknown; status?: unknown };
-  const text = [
-    error instanceof Error ? `${error.name} ${error.message}` : String(error),
-    details.code,
-    details.bodyError,
-    details.status,
-  ].filter(Boolean).join(" ");
-  const lower = text.toLowerCase();
-  if (/wallet_port_loading/.test(lower)) return "Wallet loading";
-  if (/wallet_already_bound/.test(lower)) return "Wallet already linked";
-  if (/no_solana_wallet_installed|wallet.*not.*found|not.*found.*wallet|no.*wallet/.test(lower)) return "No wallet found";
-  if (/reject|denied|cancel/.test(lower)) return "Connect canceled";
-  if (/wallet_sign_message_unsupported/.test(lower)) return "Wallet can't sign";
-  if (/invalid_wallet_signature/.test(lower)) return "Signature rejected";
-  if (/wallet_mismatch|walletmismatch/.test(lower)) return "Wallet mismatch";
-  return "Connect failed";
-};
 
 let stylesInjected = false;
 function injectStyles() {
@@ -92,43 +72,24 @@ function injectStyles() {
     .wlt-hero{position:relative;border-radius:15px;padding:17px 18px 16px;overflow:hidden;isolation:isolate;flex:0 0 auto;
       border:1.5px solid transparent;
       background:linear-gradient(165deg,#1a1547,#241a63 48%,#3a1d63) padding-box,
-        linear-gradient(135deg,#27e7ff,#ff39c0 55%,#2775ca) border-box;
+        linear-gradient(135deg,#27e7ff,#9945ff 55%,#19fb9b) border-box;
       box-shadow:0 10px 30px rgba(39,231,255,.16),inset 0 1px 0 rgba(255,255,255,.08)}
     .wlt-hero-glow{position:absolute;inset:-40% -20%;z-index:-1;pointer-events:none;opacity:.5;
       background:radial-gradient(40% 60% at 22% 12%,rgba(39,231,255,.5),transparent 70%),
-        radial-gradient(46% 60% at 86% 96%,rgba(255,57,192,.45),transparent 72%);
+        radial-gradient(46% 60% at 86% 96%,rgba(153,69,255,.45),transparent 72%);
       animation:wltDrift 9s ease-in-out infinite alternate}
     @keyframes wltDrift{0%{transform:translate(0,0)}100%{transform:translate(-6%,5%)}}
     .wlt-hero-top{display:flex;align-items:center;gap:8px;margin-bottom:7px}
-    .wlt-hero-top svg{filter:drop-shadow(0 0 6px rgba(39,118,202,.7))}
+    .wlt-hero-top svg{filter:drop-shadow(0 0 6px rgba(153,69,255,.7))}
     .wlt-hero-lbl{font:700 10px/1 'Chakra Petch',ui-monospace,monospace;letter-spacing:.16em;text-transform:uppercase;color:rgba(216,222,255,.78)}
-    .wlt-bal{display:flex;align-items:baseline;gap:1px;font:800 42px/1 'Chakra Petch',ui-monospace,monospace;
+    .wlt-bal{display:flex;align-items:baseline;gap:6px;font:800 42px/1 'Chakra Petch',ui-monospace,monospace;
       color:#fff;letter-spacing:-.01em;font-variant-numeric:tabular-nums;text-shadow:0 0 22px rgba(39,231,255,.45);transform-origin:left center}
-    .wlt-bal-cur{font-size:24px;color:rgba(255,255,255,.7);margin-right:2px;align-self:flex-start;margin-top:4px}
+    .wlt-bal-cur{font-size:22px;color:rgba(255,255,255,.7)}
     .wlt-bal.bump{animation:wltBump .5s cubic-bezier(.2,.8,.3,1)}
     @keyframes wltBump{0%{transform:scale(1)}30%{transform:scale(1.09);text-shadow:0 0 30px rgba(46,230,166,.8)}100%{transform:scale(1)}}
     .wlt-hero-sub{margin-top:6px;font:600 11px/1 'Chakra Petch',ui-monospace,monospace;letter-spacing:.04em;color:rgba(216,222,255,.62)}
-    .wlt-play-bal{margin-top:8px;font:700 10px/1.2 'Chakra Petch',ui-monospace,monospace;text-transform:uppercase;letter-spacing:.12em;color:rgba(95,240,192,.74)}
 
-    /* Buy / Receive segmented control */
-    .wlt-seg{display:flex;gap:6px;padding:4px;border-radius:12px;background:rgba(7,5,18,.6);border:1px solid rgba(132,150,224,.2)}
-    .wlt-tab{flex:1;display:flex;align-items:center;justify-content:center;gap:7px;padding:10px 0;border:0;cursor:pointer;border-radius:9px;
-      font:700 12px/1 'Chakra Petch',ui-monospace,monospace;letter-spacing:.06em;text-transform:uppercase;
-      color:var(--mut);background:transparent;transition:color .15s,background .15s}
-    .wlt-tab.on{color:#04101a;background:linear-gradient(180deg,#54e0ff,#27a7e7);box-shadow:0 4px 14px rgba(39,167,231,.35)}
     .wlt-view{display:flex;flex-direction:column;gap:13px}
-    .wlt-view[hidden]{display:none}
-
-    /* CTAs — chamfered arcade buttons in USDC blue→cyan */
-    .wlt-cta{width:100%;border:0;padding:15px;cursor:pointer;position:relative;
-      font:800 16px/1 'Chakra Petch',ui-monospace,monospace;letter-spacing:.08em;text-transform:uppercase;color:#04101a;
-      background:linear-gradient(180deg,#5fe3ff,#2775ca);
-      clip-path:polygon(13px 0,100% 0,100% calc(100% - 13px),calc(100% - 13px) 100%,0 100%,0 13px);
-      filter:drop-shadow(0 9px 20px rgba(39,118,202,.42));transition:transform .06s ease,filter .15s}
-    .wlt-cta::after{content:"";position:absolute;inset:0;clip-path:inherit;pointer-events:none;
-      background:linear-gradient(180deg,rgba(255,255,255,.38),transparent 46%)}
-    .wlt-cta:active{transform:translateY(1px)}
-    .wlt-cta.ok{background:linear-gradient(180deg,#5ff0c0,#15c78c);filter:drop-shadow(0 9px 20px rgba(46,230,166,.45))}
 
     .wlt-note{font:500 10.5px/1.5 'Chakra Petch',ui-monospace,monospace;letter-spacing:.02em;color:rgba(216,222,255,.55);text-align:center}
     .wlt-note.wlt-warn{color:rgba(255,209,102,.82)}
@@ -148,22 +109,8 @@ function injectStyles() {
       color:var(--cyan);background:rgba(39,231,255,.12);border:1px solid rgba(39,231,255,.38);transition:.13s}
     .wlt-copy:hover{background:rgba(39,231,255,.2)}
     .wlt-copy.done{color:#04130d;background:linear-gradient(180deg,#5ff0c0,#15c78c);border-color:transparent}
-    /* Account row — signed-in address + log out (hidden for dev/guest) */
-    .wlt-acct{display:flex;align-items:center;gap:10px;padding:11px 12px;border-radius:11px;
-      background:rgba(7,5,18,.6);border:1px solid rgba(132,150,224,.2)}
-    .wlt-acct-info{flex:1;min-width:0;display:flex;flex-direction:column;gap:3px}
-    .wlt-acct-lbl{font:700 8.5px/1 'Chakra Petch',ui-monospace,monospace;letter-spacing:.14em;text-transform:uppercase;color:var(--mut)}
-    .wlt-acct-addr{font:600 13px/1 'Chakra Petch',ui-monospace,monospace;letter-spacing:.03em;color:var(--ink);
-      overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-    .wlt-logout{flex:0 0 auto;border:0;cursor:pointer;border-radius:8px;padding:8px 12px;
-      font:700 11px/1 'Chakra Petch',ui-monospace,monospace;letter-spacing:.06em;text-transform:uppercase;
-      color:rgba(255,209,102,.9);background:rgba(255,209,102,.1);border:1px solid rgba(255,209,102,.35);transition:.13s}
-    .wlt-logout:hover{background:rgba(255,209,102,.18)}
+
     .wlt-oc{display:flex;flex-direction:column;gap:10px;padding-top:4px;border-top:1px solid rgba(132,150,224,.18)}
-    .wlt-oc-row{display:flex;align-items:center;gap:10px;padding:11px 12px;border-radius:11px;
-      background:rgba(7,5,18,.6);border:1px solid rgba(132,150,224,.2)}
-    .wlt-oc-row .lbl{flex:1;font:700 9px/1.3 'Chakra Petch',ui-monospace,monospace;letter-spacing:.14em;text-transform:uppercase;color:var(--mut)}
-    .wlt-oc-row .val{font:800 16px/1 'Chakra Petch',ui-monospace,monospace;color:var(--ink);font-variant-numeric:tabular-nums}
     .wlt-oc-btns{display:flex;gap:8px}
     .wlt-oc-btn{flex:1;border:0;cursor:pointer;border-radius:9px;padding:12px 0;
       font:700 12px/1 'Chakra Petch',ui-monospace,monospace;letter-spacing:.06em;text-transform:uppercase;transition:.13s}
@@ -189,140 +136,38 @@ export function createWallet(parent: HTMLElement, opts: WalletOpts): Wallet {
   panel.innerHTML =
     `<div class="wlt-head"><span class="lbl">wallet</span><button class="wlt-x" data-act="close" aria-label="Close">✕</button></div>` +
     `<div class="wlt-hero"><div class="wlt-hero-glow"></div>
-       <div class="wlt-hero-top">${usdcCoin(22)}<span class="wlt-hero-lbl" id="wltHeroLbl">Connected wallet balance</span></div>
-       <div class="wlt-bal"><span class="wlt-bal-cur">$</span><span id="wltBal">0.00</span></div>
-       <div class="wlt-hero-sub"><span id="wltUsdc">0.00</span> USDC · Solana</div>
-       <div class="wlt-play-bal" id="wltPlayRow">Play balance $<span id="wltPlayBal">0.00</span></div>
+       <div class="wlt-hero-top">${solCoin(22)}<span class="wlt-hero-lbl">Play balance</span></div>
+       <div class="wlt-bal"><span id="wltBal">0.00</span><span class="wlt-bal-cur">SOL</span></div>
+       <div class="wlt-hero-sub">Solana · devnet</div>
      </div>` +
-    `<div class="wlt-seg">
-       <button class="wlt-tab on" data-tab="buy">${svg(ICONS.plus, 15)}Fund</button>
-       <button class="wlt-tab" data-tab="recv">${svg(ICONS.qr, 15)}Receive</button>
-     </div>` +
-    `<div class="wlt-view" data-view="buy">
-       <div id="wltBuyConnect"></div>
-       <button class="wlt-cta ok" id="wltAddPlay">Add to play balance</button>
-       <div class="wlt-note" id="wltAddNote">Move your wallet USDC into your play balance — then GO is instant.</div>
-       <button class="wlt-cta wlt-receive-cta" id="wltReceiveCta">Receive USDC</button>
-       <div class="wlt-note">Send USDC to your connected wallet, then add it to play.</div>
-     </div>` +
-    // recv view + account row are filled live by renderAddressUI() on each open — the deposit
-    // address only exists AFTER login, so it must be read fresh, never snapshotted at build time.
-    `<div class="wlt-view" data-view="recv" hidden></div>` +
-    `<div id="wltAcct"></div>` +
-    `<div id="wltOnchain" hidden></div>`;
+    // recv view is filled live by renderAddressUI() on each open — a Privy address only exists
+    // AFTER login, so it must be read fresh, never snapshotted at build time.
+    `<div class="wlt-view" id="wltRecv"></div>` +
+    `<div id="wltOnchain"></div>`;
 
   const q = <T extends HTMLElement>(s: string) => panel.querySelector(s) as T;
-  const balEl = q("#wltBal"), usdcEl = q("#wltUsdc");
-  const heroLbl = q("#wltHeroLbl"), playRow = q("#wltPlayRow"), playBalEl = q("#wltPlayBal");
-  const views = Array.from(panel.querySelectorAll<HTMLElement>(".wlt-view"));
-  const tabs = Array.from(panel.querySelectorAll<HTMLElement>(".wlt-tab"));
+  const balEl = q("#wltBal");
 
   let busy = false;
 
   const renderBalance = (bump = false) => {
-    const totalCents = opts.balance();
-    const walletCents = opts.address() ? opts.walletBalance?.() ?? null : null;
-    const hasWalletBalance = walletCents != null;
-    const heroCents = hasWalletBalance ? walletCents : totalCents;
-    const playCents = hasWalletBalance ? Math.max(0, totalCents - walletCents) : 0;
-    const hero = heroCents / 100; // balance is in cents (1 coin = $0.01)
-    heroLbl.textContent = hasWalletBalance ? "Connected wallet balance" : "Available balance";
-    balEl.textContent = fmt(hero);
-    usdcEl.textContent = fmt(hero);
-    playRow.hidden = !hasWalletBalance;
-    playBalEl.textContent = fmt(playCents / 100);
+    balEl.textContent = fmt(opts.balance() / 100); // centi-SOL units → SOL
     if (bump) { balEl.parentElement!.classList.remove("bump"); void balEl.offsetWidth; balEl.parentElement!.classList.add("bump"); }
   };
-  const refreshBalance = async () => {
-    if (!opts.onWalletPoll) return;
-    try { await opts.onWalletPoll(); renderBalance(); }
-    catch { /* keep the last displayed balance */ }
-  };
 
-  const showTab = (tab: string) => {
-    tabs.forEach((t) => t.classList.toggle("on", t.dataset.tab === tab));
-    views.forEach((v) => (v.hidden = v.dataset.view !== (tab === "recv" ? "recv" : "buy")));
-  };
-  tabs.forEach((t) => (t.onclick = () => showTab(t.dataset.tab!)));
-
-  const receiveCta = q<HTMLButtonElement>("#wltReceiveCta");
-  receiveCta.onclick = () => showTab("recv");
-
-  const renderConnectButtons = () => {
-    const addr = opts.address();
-    const buyConnect = q<HTMLElement>("#wltBuyConnect");
-
-    buyConnect.innerHTML = addr ? "" : `<button class="wlt-cta wlt-connect">Connect wallet</button>`;
-    addPlayBtn.disabled = !addr;
-    receiveCta.disabled = !addr;
-    addPlayBtn.style.display = addr ? "" : "none";
-    receiveCta.style.display = addr ? "" : "none";
-    addNote.textContent = addr
-      ? "Move your wallet USDC into your play balance — then GO is instant."
-      : "Connect a wallet to add USDC to play.";
-
-    const connectButtons = panel.querySelectorAll<HTMLButtonElement>(".wlt-connect");
-    for (const connectBtn of connectButtons) {
-      connectBtn.onclick = async () => {
-        if (!opts.onConnectWallet) return;
-        connectBtn.disabled = true;
-        connectBtn.textContent = "Connecting...";
-        try {
-          await opts.onConnectWallet();
-          renderAddressUI();
-          renderConnectButtons();
-          renderBalance();
-        } catch (error) {
-          connectBtn.textContent = connectErrorLabel(error);
-          window.setTimeout(() => {
-            connectBtn.textContent = "Connect wallet";
-            connectBtn.disabled = false;
-          }, 1400);
-          return;
-        }
-        connectBtn.disabled = false;
-      };
-    }
-  };
-
-  const addPlayBtn = q<HTMLButtonElement>("#wltAddPlay");
-  const addNote = q<HTMLElement>("#wltAddNote");
-  let adding = false;
-  addPlayBtn.onclick = async () => {
-    if (adding || !opts.onAddToPlay) return;
-    adding = true;
-    addPlayBtn.disabled = true;
-    const original = addPlayBtn.textContent;
-    addPlayBtn.textContent = "Adding…";
-    addNote.textContent = "Funds on the way — they'll appear shortly.";
-    try {
-      await opts.onAddToPlay();
-      renderBalance(true);
-      addPlayBtn.textContent = "✓ Added to play balance";
-      addNote.textContent = "Ready — press GO to race.";
-    } catch {
-      addPlayBtn.textContent = original ?? "Add to play balance";
-      addNote.textContent = "Couldn't add funds. Make sure your wallet holds USDC, then try again.";
-    } finally {
-      adding = false;
-      addPlayBtn.disabled = false;
-      window.setTimeout(() => { if (!adding) addPlayBtn.textContent = "Add to play balance"; }, 2000);
-    }
-  };
-
-  // Re-render the Receive QR/address + the account row from the live address on every open.
-  // A real address only exists after login, so a build-time snapshot would never appear. Empty
-  // address → no QR, no sendable address, just a connect prompt.
+  // Re-render the Receive QR + address from the live wallet address on every open. A Privy
+  // address only exists after login, so a build-time snapshot would never appear; an empty
+  // address shows a "wallet loading" hint instead of a sendable address.
   const renderAddressUI = () => {
     const addr = opts.address();
-    const recv = q<HTMLElement>('.wlt-view[data-view="recv"]');
+    const recv = q<HTMLElement>("#wltRecv");
     if (addr) {
       const qr = qrSvg(qrMatrix(addr, "M"), { dark: "#0a0820", light: "#ffffff", margin: 3 });
       recv.innerHTML =
         `<div class="wlt-qr-wrap"><div class="wlt-qr">${qr}</div></div>` +
-        `<div class="wlt-net">${usdcCoin(15)} USDC · Solana network</div>` +
+        `<div class="wlt-net">${solCoin(15)} SOL · Solana devnet</div>` +
         `<div class="wlt-addr"><span title="${addr}">${shortAddr(addr)}</span><button class="wlt-copy" id="wltCopy">${svg(ICONS.copy, 13)}Copy</button></div>` +
-        `<div class="wlt-note wlt-warn">This QR is your connected wallet. Send only USDC (SPL) on Solana. Add to play balance when the funds arrive.</div>`;
+        `<div class="wlt-note wlt-warn">Send SOL to this address to fund your wallet. Your first GO wraps it into your play balance.</div>`;
       const copyBtn = recv.querySelector<HTMLButtonElement>("#wltCopy");
       if (copyBtn) {
         let copyTimer = 0;
@@ -334,39 +179,18 @@ export function createWallet(parent: HTMLElement, opts: WalletOpts): Wallet {
           copyTimer = window.setTimeout(() => { copyBtn.classList.remove("done"); copyBtn.innerHTML = `${svg(ICONS.copy, 13)}Copy`; }, 1400);
         };
       }
-      void refreshBalance();
     } else {
       recv.innerHTML =
-        `<button class="wlt-cta wlt-connect">Connect wallet</button>` +
-        `<div class="wlt-note wlt-warn">Connect a wallet to get your personal deposit address.</div>`;
-    }
-    const acct = q<HTMLElement>("#wltAcct");
-    if (addr && opts.onLogout) {
-      acct.innerHTML =
-        `<div class="wlt-acct"><div class="wlt-acct-info"><span class="wlt-acct-lbl">Account</span>` +
-        `<span class="wlt-acct-addr" title="${addr}">${shortWallet(addr)}</span></div>` +
-        `<button class="wlt-logout" id="wltLogout">Log out</button></div>`;
-      const logoutBtn = acct.querySelector<HTMLButtonElement>("#wltLogout");
-      if (logoutBtn) logoutBtn.onclick = () => { setOpen(false); opts.onLogout?.(); };
-    } else {
-      acct.innerHTML = "";
+        `<div class="wlt-note wlt-warn">Setting up your wallet… sign in if prompted, then reopen this panel to see your deposit address.</div>`;
     }
   };
 
   const ocEl = q<HTMLElement>("#wltOnchain");
   let ocBusy = false;
   const renderOnchain = () => {
-    if (!opts.onchain) { ocEl.hidden = true; return; }
-    // on-chain mode: the auto buy-in + Receive QR fund the table, so hide the off-chain deposit CTAs
-    const addPlay = panel.querySelector<HTMLElement>("#wltAddPlay");
-    const addNoteEl = panel.querySelector<HTMLElement>("#wltAddNote");
-    if (addPlay) addPlay.style.display = "none";
-    if (addNoteEl) addNoteEl.style.display = "none";
     const { delegated, playCents } = opts.onchain.status();
-    ocEl.hidden = false;
     ocEl.innerHTML =
       `<div class="wlt-oc">
-         <div class="wlt-oc-row"><span class="lbl">Play balance</span><span class="val">${fmt(playCents / 100)} SOL</span></div>
          <div class="wlt-oc-btns">
            <button class="wlt-oc-btn end" id="wltOcEnd" ${delegated ? "" : "disabled"}>End session</button>
            <button class="wlt-oc-btn wd" id="wltOcWd" ${!delegated && playCents > 0 ? "" : "disabled"}>Withdraw</button>
@@ -380,8 +204,8 @@ export function createWallet(parent: HTMLElement, opts: WalletOpts): Wallet {
       try { await fn(); } catch { /* surfaced by main's status line */ }
       finally { ocBusy = false; btn.textContent = prev ?? ""; renderOnchain(); renderBalance(); }
     };
-    if (endBtn) endBtn.onclick = () => void run(endBtn, "Ending…", opts.onchain!.end);
-    if (wdBtn) wdBtn.onclick = () => void run(wdBtn, "Withdrawing…", opts.onchain!.withdraw);
+    if (endBtn) endBtn.onclick = () => void run(endBtn, "Ending…", opts.onchain.end);
+    if (wdBtn) wdBtn.onclick = () => void run(wdBtn, "Withdrawing…", opts.onchain.withdraw);
   };
 
   const setOpen = (open: boolean) => {
@@ -389,10 +213,7 @@ export function createWallet(parent: HTMLElement, opts: WalletOpts): Wallet {
     if (open) {
       renderBalance();
       renderAddressUI();
-      renderConnectButtons();
       renderOnchain();
-      showTab("buy");
-      void refreshBalance();
     }
   };
   overlay.onclick = (e) => {

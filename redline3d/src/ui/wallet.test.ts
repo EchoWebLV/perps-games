@@ -174,6 +174,13 @@ function installFakeDom() {
   vi.stubGlobal("addEventListener", vi.fn());
 }
 
+const makeOnchain = (status = { delegated: false, playCents: 0 }) => ({
+  status: () => status,
+  end: vi.fn(async () => {}),
+  withdraw: vi.fn(async () => {}),
+});
+const ADDR = "Wallet1111111111111111111111111111111111";
+
 describe("createWallet", () => {
   beforeEach(() => {
     vi.useFakeTimers();
@@ -185,112 +192,48 @@ describe("createWallet", () => {
     vi.unstubAllGlobals();
   });
 
-  it("renders connect wallet buttons when no wallet is connected and connects from the button path", async () => {
+  it("renders the deposit QR + address + copy for the session wallet (SOL framing)", () => {
     const parent = new FakeElement("div");
-    let address = "";
-    const onConnectWallet = vi.fn(async () => {
-      address = "Wallet1111111111111111111111111111111111";
-    });
-
     const wallet = createWallet(parent as unknown as HTMLElement, {
-      address: () => address,
+      address: () => ADDR,
       balance: () => 0,
-      onConnectWallet,
+      onchain: makeOnchain(),
     });
 
     wallet.open();
 
     const overlay = parent.children[0];
-    const connectButtons = overlay.querySelectorAll<FakeElement>(".wlt-connect");
-    expect(connectButtons).toHaveLength(2);
-
-    await connectButtons[0].onclick?.(undefined);
-
-    expect(onConnectWallet).toHaveBeenCalledTimes(1);
-    const recv = overlay.querySelector<FakeElement>('.wlt-view[data-view="recv"]');
-    expect(recv?.innerHTML).toContain("This QR is your connected wallet.");
+    const recv = overlay.querySelector<FakeElement>("#wltRecv");
+    expect(recv?.innerHTML).toContain("Send SOL to this address");
+    expect(recv?.innerHTML).toContain("Solana devnet");
     expect(recv?.querySelector("#wltCopy")).toBeTruthy();
   });
 
-  it("shows a no-wallet message when connect has no Solana provider", async () => {
+  it("shows a setup hint (no QR) when the wallet address is not ready yet", () => {
     const parent = new FakeElement("div");
-    const onConnectWallet = vi.fn(async () => {
-      throw new Error("no_solana_wallet_installed");
-    });
-
     const wallet = createWallet(parent as unknown as HTMLElement, {
       address: () => "",
       balance: () => 0,
-      onConnectWallet,
+      onchain: makeOnchain(),
     });
 
     wallet.open();
 
     const overlay = parent.children[0];
-    const connectButtons = overlay.querySelectorAll<FakeElement>(".wlt-connect");
-
-    await connectButtons[0].onclick?.(undefined);
-
-    expect(connectButtons[0].textContent).toBe("No wallet found");
-    expect(connectButtons[0].disabled).toBe(true);
-
-    vi.runAllTimers();
-    expect(connectButtons[0].textContent).toBe("Connect wallet");
-    expect(connectButtons[0].disabled).toBe(false);
+    const recv = overlay.querySelector<FakeElement>("#wltRecv");
+    expect(recv?.innerHTML).toContain("Setting up your wallet");
+    expect(recv?.querySelector("#wltCopy")).toBeNull();
   });
 
-  it("shows a loading message when wallet adapter preload is not ready yet", async () => {
-    const parent = new FakeElement("div");
-    const onConnectWallet = vi.fn(async () => {
-      throw new Error("wallet_port_loading");
-    });
-
-    const wallet = createWallet(parent as unknown as HTMLElement, {
-      address: () => "",
-      balance: () => 0,
-      onConnectWallet,
-    });
-
-    wallet.open();
-
-    const overlay = parent.children[0];
-    const connectButtons = overlay.querySelectorAll<FakeElement>(".wlt-connect");
-
-    await connectButtons[0].onclick?.(undefined);
-
-    expect(connectButtons[0].textContent).toBe("Wallet loading");
-  });
-
-  it("uses API body errors when mapping wallet connect failures", async () => {
-    const parent = new FakeElement("div");
-    const onConnectWallet = vi.fn(async () => {
-      throw { name: "ApiError", message: "round_already_open", bodyError: "wallet_already_bound" };
-    });
-
-    const wallet = createWallet(parent as unknown as HTMLElement, {
-      address: () => "",
-      balance: () => 0,
-      onConnectWallet,
-    });
-
-    wallet.open();
-
-    const overlay = parent.children[0];
-    const connectButtons = overlay.querySelectorAll<FakeElement>(".wlt-connect");
-
-    await connectButtons[0].onclick?.(undefined);
-
-    expect(connectButtons[0].textContent).toBe("Wallet already linked");
-  });
-
-  it("copies the connected wallet address from Receive", async () => {
+  it("copies the deposit address", async () => {
     const parent = new FakeElement("div");
     const writeText = vi.fn(async () => {});
     vi.stubGlobal("navigator", { clipboard: { writeText } });
 
     const wallet = createWallet(parent as unknown as HTMLElement, {
-      address: () => "Wallet1111111111111111111111111111111111",
+      address: () => ADDR,
       balance: () => 0,
+      onchain: makeOnchain(),
     });
 
     wallet.open();
@@ -301,45 +244,68 @@ describe("createWallet", () => {
 
     await copyBtn?.onclick?.();
 
-    expect(writeText).toHaveBeenCalledWith("Wallet1111111111111111111111111111111111");
+    expect(writeText).toHaveBeenCalledWith(ADDR);
     expect(copyBtn?.innerHTML).toContain("Copied");
   });
 
-  it("shows the connected wallet balance in the hero and play balance separately", () => {
+  it("shows the play balance in SOL in the hero (centi-SOL units → SOL)", () => {
     const parent = new FakeElement("div");
     const wallet = createWallet(parent as unknown as HTMLElement, {
-      address: () => "Wallet1111111111111111111111111111111111",
-      balance: () => 17500,
-      walletBalance: () => 10000,
+      address: () => ADDR,
+      balance: () => 25, // 25 centi-SOL units = 0.25 SOL
+      onchain: makeOnchain(),
     });
 
     wallet.open();
 
     const overlay = parent.children[0];
-    expect(overlay.querySelector<FakeElement>("#wltBal")?.textContent).toBe("100.00");
-    expect(overlay.querySelector<FakeElement>("#wltPlayBal")?.textContent).toBe("75.00");
+    expect(overlay.querySelector<FakeElement>("#wltBal")?.textContent).toBe("0.25");
   });
 
-  it("does not render fake buy amounts and routes funding to Receive", async () => {
+  it("enables End while a session is live and disables Withdraw", async () => {
+    const parent = new FakeElement("div");
+    const onchain = { status: () => ({ delegated: true, playCents: 10 }), end: vi.fn(async () => {}), withdraw: vi.fn(async () => {}) };
+    const wallet = createWallet(parent as unknown as HTMLElement, { address: () => ADDR, balance: () => 10, onchain });
+
+    wallet.open();
+
+    const overlay = parent.children[0];
+    expect(overlay.querySelector<FakeElement>("#wltOcEnd")?.attrs.disabled).toBeUndefined(); // delegated → End enabled
+    expect(overlay.querySelector<FakeElement>("#wltOcWd")?.attrs.disabled).toBe("");          // delegated → Withdraw disabled
+
+    await overlay.querySelector<FakeElement>("#wltOcEnd")?.onclick?.(undefined);
+    expect(onchain.end).toHaveBeenCalledTimes(1);
+  });
+
+  it("enables Withdraw only when idle with a non-zero balance", () => {
     const parent = new FakeElement("div");
     const wallet = createWallet(parent as unknown as HTMLElement, {
-      address: () => "Wallet1111111111111111111111111111111111",
-      balance: () => 0,
+      address: () => ADDR,
+      balance: () => 10,
+      onchain: makeOnchain({ delegated: false, playCents: 10 }),
     });
 
     wallet.open();
 
     const overlay = parent.children[0];
-    expect(overlay.querySelector<FakeElement>(".wlt-amts")).toBeNull();
-    expect(overlay.querySelector<FakeElement>("#wltBuy")).toBeNull();
+    expect(overlay.querySelector<FakeElement>("#wltOcEnd")?.attrs.disabled).toBe("");          // idle → End disabled
+    expect(overlay.querySelector<FakeElement>("#wltOcWd")?.attrs.disabled).toBeUndefined();     // idle + balance → Withdraw enabled
+  });
 
-    const receiveCta = overlay.querySelector<FakeElement>(".wlt-receive-cta");
-    const recv = overlay.querySelector<FakeElement>('.wlt-view[data-view="recv"]');
-    expect(receiveCta).toBeTruthy();
-    expect(recv?.hidden).toBe(true);
+  it("drops the legacy connect-wallet / USDC / add-to-play UI", () => {
+    const parent = new FakeElement("div");
+    const wallet = createWallet(parent as unknown as HTMLElement, {
+      address: () => ADDR,
+      balance: () => 0,
+      onchain: makeOnchain(),
+    });
 
-    await receiveCta?.onclick?.(undefined);
+    wallet.open();
 
-    expect(recv?.hidden).toBe(false);
+    const overlay = parent.children[0];
+    expect(overlay.querySelector(".wlt-connect")).toBeNull();
+    expect(overlay.querySelector("#wltAddPlay")).toBeNull();
+    expect(overlay.querySelector(".wlt-seg")).toBeNull();
+    expect(overlay.querySelector<FakeElement>("#wltRecv")?.innerHTML).not.toContain("USDC");
   });
 });
