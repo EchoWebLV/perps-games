@@ -14,13 +14,8 @@ import { createControls } from "./ui/controls";
 import { connectFeed } from "./core/feed";
 import { createPriceSource } from "./core/price-source";
 import { RoundEngine } from "./core/round";
-import { createApi } from "./core/api";
-import { createDevAuth } from "./core/auth-dev";
-import { createSessionAuth } from "./core/auth-session";
-import type { AuthProvider } from "./core/auth";
 import { sol } from "./core/money";
 import { clampInt } from "./core/round-sync";
-import { displayCashBalance } from "./core/wallet-balance-model";
 import { niceLev, tToLev } from "./core/leverage";
 import { liqPriceOf } from "./core/economics";
 import { createUpgrades } from "./ui/upgrades";
@@ -41,11 +36,6 @@ import { createMapButton } from "./ui/mapbutton";
 import { createLobbyHud } from "./ui/lobbyhud";
 import { step as driveStep, DRIVE, type DriveState } from "./core/freedrive";
 import { entranceHit, LOT_BOUNDS, type BuildingKind } from "./core/lobby-layout";
-import { createWalletPortPreloader, loadSolanaWalletPort, type SolanaWalletPort } from "./core/solana-wallet";
-import { connectAndBindWallet } from "./core/wallet-binding";
-import { sweepToPlayBalance } from "./core/play-funding";
-import { ensureWalletConnection, hydrateBoundWallet, isRecoverableWalletBalanceError, submitDeposit } from "./core/wallet-connection";
-import { createReconnectLoop } from "./core/session-reconnect";
 import { PublicKey } from "@solana/web3.js";
 import { CHAIN } from "./chain/config";
 import { createGameSession } from "./chain/game-session";
@@ -104,77 +94,9 @@ function syncOnchainBalance() {
   walletUI.setBalance(balance);
 }
 void session.init().then(() => syncOnchainBalance()).catch(() => {});
-const useDevAuth = (import.meta.env?.VITE_AUTH as string) === "dev";
-const auth: AuthProvider = useDevAuth ? createDevAuth() : createSessionAuth();
-
-const api = createApi({ auth });
-const sessionReconnect = createReconnectLoop();
-// Sign-in is now the anonymous client session. `signedIn` flips true once the session-backed
-// identity loads and /v1/me succeeds.
-let signedIn = false;
-function triggerSignIn() { void startSessionInit(); }
-let balance = 0;                   // displayed cash balance, sourced from the connected wallet when available
-let serverBalance = 0;             // hidden round-accounting balance used by the existing server engine
-let walletBalance: number | null = null; // on-chain USDC in the connected wallet; null until we have a bound wallet
-let walletPort: SolanaWalletPort | null = null;
-let boundWalletAddress = "";
-let connectedWalletAddress = "";
-const walletPortPreloader = createWalletPortPreloader(() => loadSolanaWalletPort("auto"));
-void walletPortPreloader.preload().catch(() => {});
-const syncDisplayedBalance = () => {
-  // corner balance = on-chain wallet + in-game ledger, so a recovered/stuck deposit
-  // sitting in the ledger is never hidden behind a near-empty wallet read.
-  balance = displayCashBalance({ walletBalance, inGameBalance: serverBalance });
-  hud.setBalance(balance);
-};
-
-async function refreshWalletBalance(): Promise<void> {
-  if (!boundWalletAddress) {
-    walletBalance = null;
-    return;
-  }
-  const res = await hydrateBoundWallet({ walletBalance: () => api.walletBalance() });
-  boundWalletAddress = res.boundWalletAddress;
-  walletBalance = res.walletBalance;
-  if (connectedWalletAddress && boundWalletAddress && connectedWalletAddress !== boundWalletAddress) {
-    throw new Error("wallet_mismatch");
-  }
-}
-
-async function ensureWalletConnected(): Promise<SolanaWalletPort> {
-  const ensured = await ensureWalletConnection({
-    walletPort,
-    connectedWalletAddress,
-    boundWalletAddress,
-    loadWalletPort: () => walletPort ?? walletPortPreloader.requireReady(),
-    connectAndBindWallet: async (port) => {
-      const bound = await connectAndBindWallet({ port, api });
-      if (bound.session) {
-        auth.adoptSession?.(bound.session);
-        signedIn = true;
-      }
-      return bound;
-    },
-  });
-  walletPort = ensured.walletPort;
-  connectedWalletAddress = ensured.connectedWalletAddress;
-  boundWalletAddress = ensured.boundWalletAddress;
-  try {
-    await refreshWalletBalance();
-  } catch (error) {
-    if (!isRecoverableWalletBalanceError(error)) throw error;
-    walletBalance = null;
-  }
-  syncDisplayedBalance();
-  walletUI.setBalance(balance);
-  return ensured.walletPort;
-}
-
-async function doLogout() {
-  signedIn = false;
-  try { await auth.logout?.(); } catch {}
-  location.reload();
-}
+// The game is fully on-chain: the SOL play balance + round loop live in `session` (the ER round).
+// `balance` is the displayed cash chip, sourced only from the on-chain play balance (centi-SOL units).
+let balance = 0;
 
 // price feeds — BTC / ETH / SOL (subscribe to all; the active one drives the game)
 const ASSETS = [
@@ -216,35 +138,8 @@ coins.set(upgrades.coins(), false); // no pulse on the persisted balance at load
 // wallet page (opened by tapping the balance chip) — shows the player's deposit QR.
 const walletUI = createWallet(hudRoot, {
   // the wallet shown for funding is the on-chain session wallet (Privy embedded / dev keypair)
-  address: () => session.address() || connectedWalletAddress || boundWalletAddress,
+  address: () => session.address(),
   balance: () => balance,
-  walletBalance: () => walletBalance,
-  onConnectWallet: async () => { await ensureWalletConnected(); },
-  onWalletPoll: async () => {
-    await refreshWalletBalance();
-    syncDisplayedBalance();
-    return walletBalance ?? balance;
-  },
-  onAddToPlay: async () => {
-    const port = walletPort ?? await ensureWalletConnected();
-    const walletCents = walletBalance ?? 0;
-    serverBalance = await sweepToPlayBalance({
-      walletBalanceCents: walletCents,
-      startingServerBalance: serverBalance,
-      buildDepositTx: async (amountCents) => api.depositBuild(amountCents),
-      signAndSend: async (deposit) => submitDeposit({ port, deposit, api }),
-      pollServerBalance: async () => {
-        const me = await api.me();
-        serverBalance = me.balance;
-        try { await refreshWalletBalance(); } catch {}
-        syncDisplayedBalance();
-        walletUI.setBalance(balance);
-        return serverBalance;
-      },
-    });
-    syncDisplayedBalance();
-    walletUI.setBalance(balance);
-  },
   onchain: {
     status: () => ({ delegated: session.delegated(), playCents: baseToUnits(session.balance()) }),
     end: async () => {
@@ -263,49 +158,6 @@ const walletUI = createWallet(hudRoot, {
   // Log out moved to the menu (settings); the wallet page is deposit-only now.
 });
 hud.onWallet(() => { if (engine.getPhase() !== "live") walletUI.open(); });
-
-// Session init: seed the server-owned balance + settle any dangling round once the client session is
-// ready. Dev auth behaves the same through the narrower auth interface.
-function markSessionDisconnected() {
-  signedIn = false;
-  hud.setStatus("Can't reach the server. Reconnecting...");
-  sessionReconnect.schedule(() => { void startSessionInit(); });
-}
-
-async function startSessionInit() {
-  try {
-    await auth.ready();
-    await initSession();
-  } catch {
-    markSessionDisconnected();
-  }
-}
-
-async function initSession() {
-  if (signedIn) return;
-  try {
-    const me = await api.me();
-    serverBalance = me.balance;
-    signedIn = true;
-    try {
-      const hydrated = await hydrateBoundWallet({ walletBalance: () => api.walletBalance() });
-      boundWalletAddress = hydrated.boundWalletAddress;
-      walletBalance = hydrated.walletBalance;
-    } catch {
-      walletBalance = null;
-    }
-    syncOnchainBalance(); // cash chip = on-chain play balance, never the server faucet
-    const refreshed = await api.me();
-    serverBalance = refreshed.balance;
-    try { await refreshWalletBalance(); } catch { /* keep the last wallet read */ }
-    syncOnchainBalance(); // cash chip = on-chain play balance, never the server faucet
-    sessionReconnect.reset();
-    hud.setStatus("");
-  } catch {
-    markSessionDisconnected();
-  }
-}
-void startSessionInit();
 
 // car picker — swap the GLB model live + apply the card's special ability
 let ability: CarAbility | undefined;
@@ -338,7 +190,7 @@ const garage = createCarPicker(hudRoot, [
 ], (c) => { car.setModel(c.url, c.scale, c.yaw); setAbility(c.ability); }, () => upgrades.open(), [
   { label: "Music", sub: "synthwave radio", glyph: "♫", get: () => radio.isOn(), set: (on) => radio.setOn(on) },
   { label: "SFX", sub: "engine & coins", glyph: "🔊", get: () => audio.isEnabled(), set: (on) => audio.setEnabled(on) },
-], auth.logout ? doLogout : undefined, () => {
+], undefined, () => {
   // closed from the lobby Garage building → re-hide the hamburger chrome and restore the lobby back button
   if (mode === "lobby") { garage.el.style.display = "none"; lobbyHud.show(); }
 }); // Log out in the menu
@@ -408,7 +260,6 @@ function triggerBuilding(kind: BuildingKind) {
 
 const mapBtn = createMapButton(hudRoot, () => {
   if (mode !== "race") return;
-  if (!signedIn) { triggerSignIn(); return; } // the lobby requires sign-in
   enterLobby();
 });
 const lobbyHud = createLobbyHud(hudRoot, () => exitLobby());
