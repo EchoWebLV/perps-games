@@ -42,6 +42,8 @@ Privy React island (PrivyProvider + login)  ──bridge──▶  PrivyWalletPo
 
 **Record the decision** (`RESOLVED <date>: Option A/B`) in this spec before building the port. The rest of the slice is identical either way except where the signature comes from.
 
+**BUILT FOR Option A (2026-06-30):** against the installed `@privy-io/react-auth@3.32.2`, the island (`src/chain/privy-island.tsx`) mounts `PrivyProvider` with `embeddedWallets: { solana: { createOnLogin: "users-without-wallets" }, showWalletUIs: false }` — `showWalletUIs:false` is the SDK's documented per-signature-prompt suppressor (`index.d.ts:1084` "the signature will [not prompt]"). Signing is **sign-only** via `useSignTransaction` (`@privy-io/react-auth/solana`), returning the signed wire bytes for our existing HTTP-poll `send()` to broadcast — so the provider needs **no RPC/cluster config** (dropped the old `@solana/kit` `rpcs` block). tsc-clean against real SDK types; the build/no-regression of the default dev-keypair path is verified. **The decisive zero-popup proof (a real login + a sequence of ER signs with NO modal) can only be confirmed by the Task-10 manual user pass** — Privy email/social login can't be driven in Claude Preview. So Option A is *implemented and type-correct*, pending that one manual confirmation; if a modal appears per tx, fall back to Option B.
+
 ## Components
 
 ### New — Privy wallet port (`redline3d/src/chain/`)
