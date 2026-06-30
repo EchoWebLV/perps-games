@@ -49,6 +49,7 @@ import { createReconnectLoop } from "./core/session-reconnect";
 import { PublicKey } from "@solana/web3.js";
 import { CHAIN } from "./chain/config";
 import { createGameSession } from "./chain/game-session";
+import { selectChainWalletPort } from "./chain/wallet-select";
 
 const canvas = document.getElementById("gl") as HTMLCanvasElement;
 const hudRoot = document.getElementById("hud") as HTMLElement;
@@ -94,6 +95,7 @@ let opening = false;     // the GO handler (ensureSession+open) is mid-flight
 const session = createGameSession({
   mint: new PublicKey(CHAIN.STAKE_MINT),
   onSettled: (info) => finalizeSettled(info), // terminal-first background lever
+  port: selectChainWalletPort(), // dev-keypair by default; Privy under VITE_WALLET=privy
 });
 // The cash chip + wallet hero read the on-chain play balance (centi-SOL units). Single writer.
 function syncOnchainBalance() {

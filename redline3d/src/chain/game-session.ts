@@ -1,4 +1,5 @@
 import { PublicKey } from "@solana/web3.js";
+import type { SolanaWalletPort } from "../core/solana-wallet";
 import { createDevKeypairPort } from "./dev-keypair-port";
 import { portToAnchorWallet } from "./anchor-wallet";
 import { createChainRound, type ChainRound, type OpenedRound, type SettledRound, type ActionResult, type RoundSnap, type AssetSym } from "./chain-round";
@@ -31,10 +32,11 @@ export interface GameSession {
 export function createGameSession(opts: {
   mint: PublicKey;
   onSettled: (info: SettledInfo) => void;
+  port?: SolanaWalletPort;            // the on-chain signer (defaults to dev-keypair)
   injectChain?: ChainRound;
   injectAddress?: string;
 }): GameSession {
-  const port = opts.injectChain ? null : createDevKeypairPort();
+  const port = opts.injectChain ? null : (opts.port ?? createDevKeypairPort());
   let chain: ChainRound | null = opts.injectChain ?? null;
   let isDelegated = false;
   let armed = false;
