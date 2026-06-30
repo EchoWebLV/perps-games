@@ -121,10 +121,17 @@ no `Round::SIZE` change** (so no post-upgrade fresh-wallet migration).
   - **`open` / `Close` / `Flip` / `Lever` / `Tick` / `ForceClose` / `ScheduleTick` /
     `TickCrank`** — the `house` account becomes the **till** (`seeds=[HOUSE_SEED, mint, owner]`,
     `owner` = signer or `round.owner`). Settle math is **unchanged**.
-  - **`commit_and_undelegate` (`SessionCommit`):** after committing Player+Till+Round to L1,
-    **sweep** the till into the master on L1 (`master.balance += till.balance; till.balance =
-    0`). Context regains the master house. Till may be left at 0 (rent kept for reuse) or
-    closed (rent reclaimed) — implementation choice in the plan; default: keep for reuse.
+  - **`commit_and_undelegate` (`SessionCommit`):** commits Player+**Till**+Round to L1 and
+    undelegates them (house seed → till). It does **not** itself sweep: this instruction runs
+    **inside the ER**, where the master pot (L1-only, never delegated) is unreachable and
+    undelegation is async, so the master can't be mutated here.
+  - **New `sweep_till()` (L1, permissionless, post-undelegate):** the actual sweep —
+    `master.balance += till.balance; till.balance = 0` (requires `till.locked == 0`). Called by
+    the client right after `commit_and_undelegate` lands, and reusable by a keeper to reclaim an
+    abandoned session's slice. Permissionless because returning a till to the pot can only
+    consolidate value in, never extract it. Till is kept at 0 for reuse (rent retained).
+    `slice_from_pot` also folds any unswept leftover back before re-slicing (self-healing), so a
+    skipped sweep can never double-spend.
   - **`fund_house`** — unchanged; stacks the **master** pot.
   - **`init_house`** — unchanged shape; used to create the master pot (operator-signed).
 - **`settle.rs` / `price.rs`** — unchanged.
@@ -142,7 +149,8 @@ no `Round::SIZE` change** (so no post-upgrade fresh-wallet migration).
 - **Session start (`ensureSession` / `delegate`)** — call `slice_from_pot` (L1) before
   `delegate_session`; surface `HouseUndercapitalized` as "Tables are full right now — the
   bankroll is fully in play, try again in a moment."
-- **Session end (`commitAndUndelegate`)** — unchanged call; the program sweeps the till back.
+- **Session end (`commitAndUndelegate` then `sweepTill`)** — after the undelegate lands,
+  the client calls the permissionless L1 `sweep_till` to return the till to the master pot.
 - **`classifyDelegateState` / `DelegateBusyError`** — the per-session till can never be held
   by a *foreign* wallet, so the cross-player "busy" case disappears; only the player's own
   stale-but-live session remains ("reuse"). Keep as a safety net; update doc comment.
@@ -170,8 +178,9 @@ no `Round::SIZE` change** (so no post-upgrade fresh-wallet migration).
    session touches it.
 4. **Settle (ER):** `player.balance += payout`; `till.balance += stake − payout`;
    `till.locked −= max_payout`.
-5. **End:** `commit_and_undelegate` commits Player+Till+Round to L1, then **sweeps**
-   `master.balance += till.balance`. The next player's slice can now draw on it.
+5. **End:** `commit_and_undelegate` commits Player+Till+Round to L1; then a separate L1
+   `sweep_till` does `master.balance += till.balance` (it can't be done inside the ER commit —
+   the master is L1-only). The next player's slice can now draw on it.
 6. **Withdraw:** player.balance → real SOL (unwrap), unchanged.
 
 Two players running 2–5 simultaneously touch disjoint delegated accounts (their own
