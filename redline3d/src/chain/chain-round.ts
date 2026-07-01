@@ -246,7 +246,7 @@ export function createChainRound(deps: { wallet: AnchorWalletLike; mint: PublicK
           owner, mint, master: pdas.master, till: pdas.till, systemProgram: SystemProgram.programId,
         }));
       } catch (e) {
-        if (String((e as Error).message).includes("HouseUndercapitalized") || String((e as Error).message).includes("0x6")) {
+        if (String((e as Error).message).includes("HouseUndercapitalized")) {
           throw new BankrollFullError("Tables are full right now — the bankroll is fully in play. Try again in a moment.");
         }
         throw e;

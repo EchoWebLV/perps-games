@@ -188,6 +188,19 @@ describe("raider — flip-after-settle race guard (NoOpenRound)", function () {
       [Buffer.from("round"), session.publicKey.toBuffer()],
       program.programId
     );
+    // House sharding: the funded master pot is `[house, mint]` (housePda above); this
+    // session's till `[house, mint, session]` is what co-delegates with player+round.
+    const till = PublicKey.findProgramAddressSync(
+      [Buffer.from("house"), mint.toBuffer(), session.publicKey.toBuffer()],
+      program.programId
+    )[0];
+    // Multi-asset registry `[b"feeds"]` (open binds asset->feed; asset 0 = BTC).
+    const [feedRegistry] = PublicKey.findProgramAddressSync(
+      [Buffer.from("feeds")],
+      program.programId
+    );
+    const ASSET_BTC = 0;
+    const SLICE = Number((BigInt(STAKE) * 25_000_000n * 950_000n) / 1_000_000n / 1_000_000n); // maxPayout(STAKE) = 23_750_000
     const ownerAta = await getOrCreateAssociatedTokenAccount(
       conn,
       funder.payer,
@@ -223,6 +236,17 @@ describe("raider — flip-after-settle race guard (NoOpenRound)", function () {
         systemProgram: SystemProgram.programId,
       })
       .rpc({ skipPreflight: true });
+    // Carve this session's bet-sized till off the master pot BEFORE delegating (L1).
+    await pAs.methods
+      .sliceFromPot(new BN(SLICE))
+      .accounts({
+        owner: session.publicKey,
+        mint,
+        master: housePda,
+        till,
+        systemProgram: SystemProgram.programId,
+      })
+      .rpc({ skipPreflight: true });
     // HTTP-confirm the heavy delegate CPI (WS confirmation is flaky for this tx).
     await sendIxHttp(
       conn,
@@ -232,7 +256,7 @@ describe("raider — flip-after-settle race guard (NoOpenRound)", function () {
           payer: session.publicKey,
           mint,
           player: playerPda,
-          house: housePda,
+          house: till,
           round: roundPda,
         })
         .remainingAccounts([
@@ -256,13 +280,14 @@ describe("raider — flip-after-settle race guard (NoOpenRound)", function () {
 
     // ---- open long 10x (low lev: will not terminate on price within the window) ----
     await programER.methods
-      .open(1, 10, new BN(STAKE))
+      .open(ASSET_BTC, 1, 10, new BN(STAKE))
       .accounts({
         player: playerPda,
-        house: housePda,
+        house: till,
         round: roundPda,
         mint,
         priceUpdate: BTC_FEED,
+        registry: feedRegistry,
         playerAuthority: session.publicKey,
       })
       .signers([session])
@@ -281,7 +306,7 @@ describe("raider — flip-after-settle race guard (NoOpenRound)", function () {
       .forceClose()
       .accounts({
         player: playerPda,
-        house: housePda,
+        house: till,
         round: roundPda,
         mint,
         priceUpdate: BTC_FEED,
@@ -304,7 +329,7 @@ describe("raider — flip-after-settle race guard (NoOpenRound)", function () {
       .flip(-1)
       .accounts({
         player: playerPda,
-        house: housePda,
+        house: till,
         round: roundPda,
         mint,
         priceUpdate: BTC_FEED,
