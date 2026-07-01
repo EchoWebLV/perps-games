@@ -49,6 +49,8 @@ const {
   VALIDATOR,
   sleep,
   settleSeq,
+  deriveTill,
+  maxPayout,
 } = require("./helpers");
 const DELEGATION_PROGRAM = new PublicKey("DELeGGvXpWV2fqJUhqcF5ZSYMS4JTLjteaAMARRSaeSh");
 
@@ -99,7 +101,13 @@ describe("raider — canonical end-to-end loop (L1 <-> ER, real USDC, provable f
 
     // ---- createMint(6 dec) ----
     const mint = await createMint(conn, funder.payer, funder.publicKey, null, 6);
-    const [housePda] = PublicKey.findProgramAddressSync([Buffer.from("house"), mint.toBuffer()], program.programId);
+    const [masterPda] = PublicKey.findProgramAddressSync([Buffer.from("house"), mint.toBuffer()], program.programId);
+    const till = deriveTill(program.programId, mint, session.publicKey); // per-session till (was the shared house)
+    // Multi-asset feed registry PDA `[b"feeds"]` (admin-owned, already set on devnet). open()
+    // binds asset -> feed via it; asset 0 = BTC = BTC_FEED. (Deployed program upgraded past the
+    // 3-arg open this test was written against — open now takes (asset,dir,lev,stake) + registry.)
+    const [feedRegistry] = PublicKey.findProgramAddressSync([Buffer.from("feeds")], program.programId);
+    const ASSET_BTC = 0;
     const [vaultAuthority] = PublicKey.findProgramAddressSync([Buffer.from("vault"), mint.toBuffer()], program.programId);
     const vaultToken = getAssociatedTokenAddressSync(mint, vaultAuthority, true);
     const [playerPda] = PublicKey.findProgramAddressSync(
@@ -108,11 +116,11 @@ describe("raider — canonical end-to-end loop (L1 <-> ER, real USDC, provable f
       [Buffer.from("round"), session.publicKey.toBuffer()], program.programId);
     console.log("session :", session.publicKey.toBase58());
     console.log("mint    :", mint.toBase58());
-    console.log("PDAs    : player", playerPda.toBase58(), "| house", housePda.toBase58(), "| round", roundPda.toBase58());
+    console.log("PDAs    : player", playerPda.toBase58(), "| house", masterPda.toBase58(), "| till", till.toBase58(), "| round", roundPda.toBase58());
 
     // ---- init_house ----
     await program.methods.initHouse().accounts({
-      authority: funder.publicKey, mint, house: housePda, vaultAuthority, vaultToken,
+      authority: funder.publicKey, mint, house: masterPda, vaultAuthority, vaultToken,
       tokenProgram: TOKEN_PROGRAM_ID, associatedTokenProgram: ASSOCIATED_TOKEN_PROGRAM_ID,
       systemProgram: SystemProgram.programId,
     }).rpc({ skipPreflight: true });
@@ -122,7 +130,7 @@ describe("raider — canonical end-to-end loop (L1 <-> ER, real USDC, provable f
     const funderAta = await getOrCreateAssociatedTokenAccount(conn, funder.payer, mint, funder.publicKey);
     await mintTo(conn, funder.payer, mint, funderAta.address, funder.publicKey, HOUSE_FUND);
     await program.methods.fundHouse(new BN(HOUSE_FUND)).accounts({
-      funder: funder.publicKey, mint, house: housePda, funderToken: funderAta.address,
+      funder: funder.publicKey, mint, house: masterPda, funderToken: funderAta.address,
       vaultAuthority, vaultToken, tokenProgram: TOKEN_PROGRAM_ID,
     }).rpc({ skipPreflight: true });
 
@@ -140,14 +148,22 @@ describe("raider — canonical end-to-end loop (L1 <-> ER, real USDC, provable f
       owner: session.publicKey, round: roundPda, systemProgram: SystemProgram.programId,
     }).rpc({ skipPreflight: true });
 
-    // ---- delegate_session (co-delegate all three to the ER) ----
+    // ---- slice_from_pot (carve this session's bet-sized till off the master, L1, PRE-delegate) ----
+    // The master `[house, mint]` is the funded bankroll; slice max_payout(STAKE) into the till
+    // `[house, mint, session]`, which is what delegate_session co-delegates to the ER.
+    await programAsSession.methods.sliceFromPot(new BN(maxPayout(STAKE))).accounts({
+      owner: session.publicKey, mint, master: masterPda, till, systemProgram: SystemProgram.programId,
+    }).rpc({ skipPreflight: true });
+
+    // ---- delegate_session (co-delegate player + till + round to the ER) ----
     await programAsSession.methods.delegateSession().accounts({
-      payer: session.publicKey, mint, player: playerPda, house: housePda, round: roundPda,
+      payer: session.publicKey, mint, player: playerPda, house: till, round: roundPda,
     }).remainingAccounts([{ pubkey: VALIDATOR, isSigner: false, isWritable: false }])
       .rpc({ skipPreflight: true });
 
     // --- ASSERT 1a: all three owners flip to the delegation program ---
-    const targets = { player: playerPda, house: housePda, round: roundPda };
+    // NB: it's the per-session TILL (not the master pot) that co-delegates with player+round.
+    const targets = { player: playerPda, house: till, round: roundPda };
     let flipped = {};
     for (let i = 0; i < 25; i++) {
       flipped = {};
@@ -168,9 +184,10 @@ describe("raider — canonical end-to-end loop (L1 <-> ER, real USDC, provable f
       new anchor.Wallet(session), { commitment: "confirmed" });
     const programER = new anchor.Program(idl, erProvider);
 
+    // The house-side ledger the ER settles against is the delegated TILL, not the master.
     const sumBalances = async () => {
       const p = await programER.account.playerBalance.fetch(playerPda);
-      const h = await programER.account.houseBalance.fetch(housePda);
+      const h = await programER.account.houseBalance.fetch(till);
       return BigInt(p.balance.toString()) + BigInt(h.balance.toString()) + BigInt(h.locked.toString());
     };
 
@@ -179,14 +196,14 @@ describe("raider — canonical end-to-end loop (L1 <-> ER, real USDC, provable f
     const playerBeforeOpen = BigInt((await programER.account.playerBalance.fetch(playerPda)).balance.toString());
     console.log("total (player+house.balance+house.locked) BEFORE open:", totalBefore.toString());
 
-    // ---- open(long, 100x, 1 USDC) on the ER ----
-    await programER.methods.open(1, 100, new BN(STAKE)).accounts({
-      player: playerPda, house: housePda, round: roundPda, mint,
-      priceUpdate: BTC_FEED, playerAuthority: session.publicKey,
+    // ---- open(BTC, long, 100x, 1 USDC) on the ER ----
+    await programER.methods.open(ASSET_BTC, 1, 100, new BN(STAKE)).accounts({
+      player: playerPda, house: till, round: roundPda, mint,
+      priceUpdate: BTC_FEED, registry: feedRegistry, playerAuthority: session.publicKey,
     }).signers([session]).rpc({ skipPreflight: true });
 
     const opened = await programER.account.round.fetch(roundPda);
-    const houseOpen = await programER.account.houseBalance.fetch(housePda);
+    const houseOpen = await programER.account.houseBalance.fetch(till);
     const playerAfterOpen = BigInt((await programER.account.playerBalance.fetch(playerPda)).balance.toString());
     const entryUsd = opened.entryRaw.toNumber() * Math.pow(10, -Math.abs(opened.entryExpo));
     console.log(`opened: status=${opened.status} dir=${opened.dir} lev=${opened.lev} ` +
@@ -205,7 +222,7 @@ describe("raider — canonical end-to-end loop (L1 <-> ER, real USDC, provable f
 
     // ---- close on the ER ----
     await programER.methods.close().accounts({
-      player: playerPda, house: housePda, round: roundPda, mint,
+      player: playerPda, house: till, round: roundPda, mint,
       priceUpdate: BTC_FEED, playerAuthority: session.publicKey,
     }).signers([session]).rpc({ skipPreflight: true });
 
@@ -241,17 +258,17 @@ describe("raider — canonical end-to-end loop (L1 <-> ER, real USDC, provable f
     console.log("total (player+house.balance+house.locked) AFTER close:", totalAfterClose.toString());
     assert.equal(totalAfterClose.toString(), totalBefore.toString(),
       "[3] value conserved across player+house (before open == after close)");
-    const houseClose = await programER.account.houseBalance.fetch(housePda);
+    const houseClose = await programER.account.houseBalance.fetch(till);
     assert.equal(houseClose.locked.toString(), "0", "[3] house lock must be released after close");
     console.log("[3] close conserved value AND matches the BigInt settle.rs recompute");
 
-    // Snapshot the ER's final committed values for the L1 cross-check.
+    // Snapshot the ER's final committed values for the L1 cross-check (till, not master).
     const erPlayerFinal = BigInt((await programER.account.playerBalance.fetch(playerPda)).balance.toString());
-    const erHouseFinal = await programER.account.houseBalance.fetch(housePda);
+    const erHouseFinal = await programER.account.houseBalance.fetch(till);
 
     // ---- commit_and_undelegate (land final ER state on L1, restore ownership) ----
     await programER.methods.commitAndUndelegate().accounts({
-      payer: session.publicKey, player: playerPda, house: housePda, round: roundPda, mint,
+      payer: session.publicKey, player: playerPda, house: till, round: roundPda, mint,
     }).signers([session]).rpc({ skipPreflight: true });
 
     // --- ASSERT 1b: all three owners restore to the raider program on L1 ---
@@ -270,8 +287,11 @@ describe("raider — canonical end-to-end loop (L1 <-> ER, real USDC, provable f
     console.log("[1b] all three PDAs undelegated (owner restored to raider program)");
 
     // --- ASSERT 4: final balances durable on L1 (fetched from base provider) ---
+    // The committed house ledger is the TILL (what was delegated); the master pot is the
+    // untouched-on-L1 remainder of the bankroll (fetched too, for the 4b reconciliation).
     const l1Player = BigInt((await program.account.playerBalance.fetch(playerPda)).balance.toString());
-    const l1House = await program.account.houseBalance.fetch(housePda);
+    const l1House = await program.account.houseBalance.fetch(till);
+    const l1Master = await program.account.houseBalance.fetch(masterPda);
     const l1Round = await program.account.round.fetch(roundPda);
     console.log(`L1 after commit: player=${l1Player.toString()} house.balance=${l1House.balance.toString()} ` +
       `house.locked=${l1House.locked.toString()} round.status=${l1Round.status} round.payout=${l1Round.payout.toString()}`);
@@ -284,15 +304,33 @@ describe("raider — canonical end-to-end loop (L1 <-> ER, real USDC, provable f
 
     // --- ASSERT 4b: VAULT RECONCILIATION — real custody covers the ledger ---
     // The program-owned USDC vault token balance must be >= the sum of every
-    // play-balance claim against it (player.balance + house.balance). The ledger
-    // can never promise more USDC than is actually custodied. (house.locked is a
-    // RESERVATION of house.balance, not an extra claim, so it is not added here.)
+    // play-balance claim against it (player.balance + the whole house side). Under the
+    // till model the house side is split master + till, so BOTH count as claims. The
+    // ledger can never promise more USDC than is actually custodied. (house.locked is a
+    // RESERVATION of till.balance, not an extra claim, so it is not added here.)
     const vaultCustody = BigInt((await getAccount(conn, vaultToken)).amount.toString());
-    const ledgerClaims = l1Player + BigInt(l1House.balance.toString());
-    console.log(`[4b] vault custody=${vaultCustody.toString()} >= ledger claims (player+house.balance)=${ledgerClaims.toString()}`);
+    const ledgerClaims = l1Player + BigInt(l1Master.balance.toString()) + BigInt(l1House.balance.toString());
+    console.log(`[4b] vault custody=${vaultCustody.toString()} >= ledger claims (player+master+till.balance)=${ledgerClaims.toString()}`);
     assert.ok(vaultCustody >= ledgerClaims,
       `[4b] vault custody (${vaultCustody}) must be >= ledger claims (${ledgerClaims})`);
     console.log("[4b] vault reconciliation OK — real USDC custody >= the play-balance ledger");
+
+    // --- ASSERT 4c: SWEEP the till back into the master; conservation across the pot ---
+    // Session over → fold the whole till (slice ± this session's house P&L) back into the
+    // master. till.balance goes to 0; master regains the leftover. Signed by the owner
+    // (session); permissionless payer path is exercised in the devnet integration test.
+    const masterBefore = (await program.account.houseBalance.fetch(masterPda)).balance;
+    await programAsSession.methods.sweepTill().accounts({
+      payer: session.publicKey, mint, owner: session.publicKey, master: masterPda, till,
+    }).rpc({ skipPreflight: true });
+    const tillAfter = (await program.account.houseBalance.fetch(till)).balance;
+    const masterAfter = (await program.account.houseBalance.fetch(masterPda)).balance;
+    console.log(`[4c] sweep: master ${masterBefore.toString()} -> ${masterAfter.toString()} | till -> ${tillAfter.toString()}`);
+    assert.equal(tillAfter.toNumber(), 0, "[4c] till must be zeroed after sweep");
+    // master regained the till's leftover (slice ± this session's P&L)
+    assert.ok(masterAfter.toNumber() > masterBefore.toNumber(),
+      `[4c] master must regain the till leftover (before ${masterBefore.toString()} < after ${masterAfter.toString()})`);
+    console.log("[4c] sweep_till folded the leftover back into the master pot (conserved)");
 
     // --- ASSERT 5: withdraw returns real USDC to the owner (owner-only) ---
     const WITHDRAW = STAKE; // pull 1 USDC of play balance back to real USDC

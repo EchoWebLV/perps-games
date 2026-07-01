@@ -107,6 +107,19 @@ function settleSeq(stake, dir0, lev0, entry0, actions, exitRaw) {
   return { outcome: t.code, payout: payoutFp(BigInt(stake), t.settled) };
 }
 
+// Per-session till PDA `[b"house", mint, owner]` (the master pot is `[b"house", mint]`).
+function deriveTill(programId, mint, owner) {
+  return PublicKey.findProgramAddressSync(
+    [Buffer.from("house"), mint.toBuffer(), owner.toBuffer()],
+    programId
+  )[0];
+}
+
+// Mirror settle::max_payout — floor(stake * 23.75) — the bet-sized slice carved off the pot.
+function maxPayout(stake) {
+  return Number((BigInt(stake) * 25_000_000n * 950_000n) / 1_000_000n / 1_000_000n);
+}
+
 module.exports = {
   BASE_RPC,
   BASE_WS,
@@ -125,4 +138,6 @@ module.exports = {
   terminal,
   payoutFp,
   settleSeq,
+  deriveTill,
+  maxPayout,
 };
