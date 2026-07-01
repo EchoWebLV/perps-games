@@ -58,7 +58,16 @@ Known adjustments for the production script (found by prototype):
 - **Browser caches old GLBs** after rewrite: same filenames kept; bust via preview restart in dev; add `?v=` query to model URLs if needed for deployed clients.
 - **Perf:** +4–6 draw calls for the active car only; per-frame cost is rotating ≤6 nodes. GLB sizes unchanged (same triangles, a few extra nodes).
 
-## Out of scope
+## Revision 2026-07-02 (v2, after in-browser feedback "tires too small / glitching")
+
+The single circle-fit didn't survive contact with all 13 models. Final shipped detection is **four paths**, selected per model:
+
+- **ground-contact + coverage fit** (clown-car, skull, pink-rod, six-wheeler, shopping-cart, slot-machine, starter, helmet): the density-scored fit locked onto rim circles (undersized wheels); replaced with *largest ground-tangent circle whose inside band has full 360° angular coverage* (a tire is a full circle, a fender arc isn't; band just inside the edge kills the nested wheel-arch circle, which is also ground-tangent), cross-checked by the *vertical column above the contact point* (solid tire → air gap = true diameter).
+- **tagged joints** (delorean — the whole car is a skinned mesh; wheels are bones) and **tagged nodes** (flintstone rollers, orion `wheel_f`/`wheel_b` axle pairs): extras stamped in place, rest pose preserved; the runtime composes rest × steer(up) × spin(axle) from node-local axes in the extras.
+- **node-shape** (cybertruck): wheels are separate unnamed mesh nodes (tire + rim per wheel = 8 nodes / 4 wheel groups); the node IS the wheel.
+- **island split** (vaporwave): wheels are 4 disjoint triangle islands inside one merged-by-material mesh; union-find capture is exact.
+
+Two bugs found only by visual verification: the cut rebase used R instead of R⁻¹ for Z-axle wheels (every cut wheel rendered 180°-flipped around its hub — the "glitch all over the place"), and the six-wheeler's middle axle steered (front-axle z-tolerance 25% → 12%). **Verification that worked:** re-baking the garage card art (`npm run bake:cards`) from the rigged GLBs and diffing against the originals — pixel-identical = 1:1 cut; the adversarial offline pass flagged "leftover tires in the body," which turned out to be dead (unreferenced) vertices in the position buffers — not rendered, only file bloat. Roll direction proven on live data (Δangle = speed·dt/r about car −X).
 
 - Caster swivel on shopping-cart (spin only, like every other wheel).
 - Suspension/bounce animation.
