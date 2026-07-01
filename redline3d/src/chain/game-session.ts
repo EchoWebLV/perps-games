@@ -2,7 +2,7 @@ import { PublicKey } from "@solana/web3.js";
 import type { SolanaWalletPort } from "../core/solana-wallet";
 import { createDevKeypairPort } from "./dev-keypair-port";
 import { portToAnchorWallet } from "./anchor-wallet";
-import { createChainRound, type ChainRound, type OpenedRound, type SettledRound, type ActionResult, type RoundSnap, type AssetSym } from "./chain-round";
+import { createChainRound, maxPayoutBase, type ChainRound, type OpenedRound, type SettledRound, type ActionResult, type RoundSnap, type AssetSym } from "./chain-round";
 import { createLeverSync } from "./lever-sync";
 
 /** The settled shape main.ts needs to finalize a round in the HUD. */
@@ -15,7 +15,7 @@ export interface GameSession {
   balance(): bigint;
   init(): Promise<bigint>;
   refreshBalance(onEr?: boolean): Promise<bigint>;
-  ensureSession(buyInBase: number): Promise<void>;
+  ensureSession(buyInBase: number, stakeBase: number): Promise<void>;
   open(asset: AssetSym, dir: 1 | -1, lev: number, stakeBase: number): Promise<OpenedRound>;
   noteLeverage(lev: number): void;
   flip(dir: 1 | -1): Promise<ActionResult>;
@@ -76,12 +76,15 @@ export function createGameSession(opts: {
       return bal;
     },
 
-    async ensureSession(buyInBase) {
+    async ensureSession(buyInBase, stakeBase) {
       const c = need();
       if (isDelegated) return;
       const onL1 = await c.readPlayerBalance(false);
       if (onL1 === 0n) { await c.wrapForBuyIn(buyInBase); await c.buyIn(buyInBase); }
       await c.ensureRoundInited();
+      // Carve a bet-sized till off the master pot BEFORE delegating it (throws
+      // BankrollFullError if the pot can't cover the slice).
+      await c.sliceFromPot(maxPayoutBase(stakeBase));
       await c.delegate(); // hardened: reuses a stale-but-live same-wallet session, else throws DelegateBusyError
       isDelegated = true;
       bal = await c.readPlayerBalance(true);
@@ -114,9 +117,14 @@ export function createGameSession(opts: {
     },
 
     async endSession() {
-      await need().commitAndUndelegate();
+      const c = need();
+      await c.commitAndUndelegate();
+      // Return the till's leftover to the master pot so losses fund the next player
+      // (self-smoothing). Tolerate a rare locked till (abandoned open round) — the
+      // undelegate already landed; reclaim happens on the next slice or via a keeper.
+      try { await c.sweepTill(); } catch (e) { console.warn("sweep_till skipped:", e); }
       isDelegated = false;
-      bal = await need().readPlayerBalance(false);
+      bal = await c.readPlayerBalance(false);
     },
 
     async withdraw() {

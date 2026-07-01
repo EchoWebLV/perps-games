@@ -1,7 +1,7 @@
 import { describe, it, expect, vi } from "vitest";
 import { PublicKey } from "@solana/web3.js";
 import { createGameSession } from "./game-session";
-import type { ChainRound } from "./chain-round";
+import { maxPayoutBase, type ChainRound } from "./chain-round";
 
 const tick = () => new Promise<void>((r) => setTimeout(r, 0));
 const MINT = new PublicKey("8tZXkKuat9KoisUjFkq4kBUa1p746Mn4tj4i3st5Th1Y");
@@ -15,6 +15,8 @@ function fakeChain(over: Partial<ChainRound> = {}): ChainRound {
     buyIn: vi.fn(async () => {}),
     ensureRoundInited: vi.fn(async () => {}),
     delegate: vi.fn(async () => {}),
+    sliceFromPot: vi.fn(async () => {}),
+    sweepTill: vi.fn(async () => {}),
     open: vi.fn(async () => ({ entryRaw: 0n, entryExpo: 8, entryHuman: 60000, deadlineTs: 0, feed: "71wtTRDY8Gxgw56bXFt2oc6qeAbTxzStdNiC425Z51sr" })),
     close: vi.fn(async () => ({ outcome: 0, outcomeName: "cashout", payout: 1_500_000n, exitRaw: 0n, exitHuman: 0, balance: 4_500_000n })),
     flip: vi.fn(async () => ({ settled: false as const, banked: 0n, dir: -1, lev: 100, entryHuman: 60000 })),
@@ -42,7 +44,7 @@ describe("createGameSession", () => {
     const chain = fakeChain();
     const s = createGameSession({ mint: MINT, onSettled: vi.fn(), injectChain: chain, injectAddress: "Fake111" });
     await s.init();
-    await s.ensureSession(2_000_000);
+    await s.ensureSession(2_000_000, 1_000_000);
     expect(chain.buyIn).toHaveBeenCalledWith(2_000_000);
     expect(chain.ensureRoundInited).toHaveBeenCalled();
     expect(chain.delegate).toHaveBeenCalled();
@@ -53,8 +55,8 @@ describe("createGameSession", () => {
     const chain = fakeChain();
     const s = createGameSession({ mint: MINT, onSettled: vi.fn(), injectChain: chain, injectAddress: "Fake111" });
     await s.init();
-    await s.ensureSession(2_000_000);
-    await s.ensureSession(2_000_000);
+    await s.ensureSession(2_000_000, 1_000_000);
+    await s.ensureSession(2_000_000, 1_000_000);
     expect(chain.delegate).toHaveBeenCalledTimes(1);
     expect(chain.buyIn).toHaveBeenCalledTimes(1);
   });
@@ -63,7 +65,7 @@ describe("createGameSession", () => {
     const chain = fakeChain({ readPlayerBalance: vi.fn(async () => 3_000_000n) });
     const s = createGameSession({ mint: MINT, onSettled: vi.fn(), injectChain: chain, injectAddress: "Fake111" });
     await s.init();
-    await s.ensureSession(2_000_000);
+    await s.ensureSession(2_000_000, 1_000_000);
     expect(chain.buyIn).not.toHaveBeenCalled();
     expect(chain.delegate).toHaveBeenCalled();
   });
@@ -90,7 +92,7 @@ describe("createGameSession", () => {
     const chain = fakeChain();
     const s = createGameSession({ mint: MINT, onSettled: vi.fn(), injectChain: chain, injectAddress: "Fake111" });
     await s.init();
-    await s.ensureSession(2_000_000);
+    await s.ensureSession(2_000_000, 1_000_000);
     s.noteLeverage(1000);
     await tick(); await tick();
     expect(chain.lever).toHaveBeenCalledWith(1000);
@@ -112,7 +114,7 @@ describe("createGameSession", () => {
     });
     const s = createGameSession({ mint: MINT, onSettled, injectChain: chain, injectAddress: "Fake111" });
     await s.init();
-    await s.ensureSession(2_000_000);
+    await s.ensureSession(2_000_000, 1_000_000);
     s.noteLeverage(2000);
     await tick(); await tick();
     expect(onSettled).toHaveBeenCalledWith(expect.objectContaining({ outcome: 2, outcomeName: "liq", payout: 0n }));
@@ -131,9 +133,22 @@ describe("createGameSession", () => {
     const chain = fakeChain();
     const s = createGameSession({ mint: MINT, onSettled: vi.fn(), injectChain: chain, injectAddress: "Fake111" });
     await s.init();
-    await s.ensureSession(2_000_000);
+    await s.ensureSession(2_000_000, 1_000_000);
     await s.endSession();
     expect(chain.commitAndUndelegate).toHaveBeenCalled();
     expect(s.delegated()).toBe(false);
+  });
+
+  it("slices the bet's worst-case payout off the pot before delegating, sweeps after undelegate", async () => {
+    const chain = fakeChain();
+    const s = createGameSession({ mint: MINT, onSettled: vi.fn(), injectChain: chain, injectAddress: "Fake111" });
+    await s.init();
+    await s.ensureSession(50_000_000, 10_000_000); // buy-in 0.05 SOL, bet 0.01 SOL
+    expect(chain.sliceFromPot).toHaveBeenCalledWith(maxPayoutBase(10_000_000)); // 237_500_000
+    expect((chain.sliceFromPot as any).mock.invocationCallOrder[0])
+      .toBeLessThan((chain.delegate as any).mock.invocationCallOrder[0]);
+    await s.endSession();
+    expect((chain.commitAndUndelegate as any).mock.invocationCallOrder[0])
+      .toBeLessThan((chain.sweepTill as any).mock.invocationCallOrder[0]);
   });
 });
