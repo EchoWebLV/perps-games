@@ -116,6 +116,10 @@ export interface ChainRound {
   readRound(onEr?: boolean): Promise<RoundSnap | null>;
   buyIn(amount: number): Promise<void>;
   ensureRoundInited(): Promise<void>;
+  /** Classify the session PDAs' L1 owners — the ONLY sound "is a session live?" signal.
+   *  (The ER keeps serving a stale copy of the Round after an undelegate, so an ER read
+   *  is NOT a liveness check.) "reuse" = all delegated · "fresh" = none · "busy" = torn. */
+  delegationState(): Promise<DelegateState>;
   delegate(): Promise<void>;
   sliceFromPot(slice: number): Promise<void>;
   sweepTill(): Promise<void>;
@@ -185,6 +189,17 @@ export function createChainRound(deps: { wallet: AnchorWalletLike; mint: PublicK
     throw new Error(`${label}: PDAs did not reach owner ${target.toBase58()} in time`);
   }
 
+  // L1 owners of the three session PDAs → reuse / fresh / busy. Shared by delegate()
+  // (skip-or-throw hardening) and the public delegationState() liveness check.
+  async function delegationState(): Promise<DelegateState> {
+    const [pi, ti, ri] = await Promise.all([
+      baseConn.getAccountInfo(pdas.player),
+      baseConn.getAccountInfo(pdas.till),
+      baseConn.getAccountInfo(pdas.round),
+    ]);
+    return classifyDelegateState({ player: pi?.owner ?? null, till: ti?.owner ?? null, round: ri?.owner ?? null });
+  }
+
   return {
     address: owner.toBase58(),
 
@@ -212,16 +227,13 @@ export function createChainRound(deps: { wallet: AnchorWalletLike; mint: PublicK
       await send(baseConn, program.methods.initRound().accountsPartial({ owner, round: pdas.round, systemProgram: SystemProgram.programId }));
     },
 
+    delegationState,
+
     async delegate() {
-      const [pi, ti, ri] = await Promise.all([
-        baseConn.getAccountInfo(pdas.player),
-        baseConn.getAccountInfo(pdas.till),
-        baseConn.getAccountInfo(pdas.round),
-      ]);
-      const state = classifyDelegateState({ player: pi?.owner ?? null, till: ti?.owner ?? null, round: ri?.owner ?? null });
+      const state = await delegationState();
       if (state === "reuse") return;
       if (state === "busy") {
-        throw new DelegateBusyError("Session busy — end your previous session and try again.");
+        throw new DelegateBusyError("You're still in a race — finish it, then try again.");
       }
       try {
         await send(baseConn, program.methods.delegateSession().accountsPartial({
@@ -229,7 +241,7 @@ export function createChainRound(deps: { wallet: AnchorWalletLike; mint: PublicK
         }).remainingAccounts([{ pubkey: CHAIN.VALIDATOR, isSigner: false, isWritable: false }]), 400_000);
       } catch (e) {
         if (String((e as Error).message).includes("ExternalAccountDataModified")) {
-          throw new DelegateBusyError("Session busy — try again in a moment.");
+          throw new DelegateBusyError("Still getting you on track — try again in a moment.");
         }
         throw e;
       }
@@ -242,7 +254,7 @@ export function createChainRound(deps: { wallet: AnchorWalletLike; mint: PublicK
       // between this read and the send is caught below as a fallback).
       const master = await program.account.houseBalance.fetchNullable(pdas.master);
       if (!master || BigInt(master.balance.toString()) < BigInt(slice)) {
-        throw new BankrollFullError("Tables are full right now — the bankroll is fully in play. Try again in a moment.");
+        throw new BankrollFullError("Tables are full right now — try again in a moment.");
       }
       try {
         await send(baseConn, program.methods.sliceFromPot(new BN(slice)).accountsPartial({
@@ -250,7 +262,7 @@ export function createChainRound(deps: { wallet: AnchorWalletLike; mint: PublicK
         }));
       } catch (e) {
         if (String((e as Error).message).includes("HouseUndercapitalized")) {
-          throw new BankrollFullError("Tables are full right now — the bankroll is fully in play. Try again in a moment.");
+          throw new BankrollFullError("Tables are full right now — try again in a moment.");
         }
         throw e;
       }

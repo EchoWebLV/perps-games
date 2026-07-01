@@ -3,7 +3,7 @@ import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader.js";
 import { RoomEnvironment } from "three/examples/jsm/environments/RoomEnvironment.js";
 
 /** a car's special ability id; drives in-game effects when that card is selected */
-export type CarAbility = "laneBet" | "nitro" | "rainbow" | "skull";
+export type CarAbility = "laneBet" | "nitro" | "rainbow" | "skull" | "pinkRod";
 /** card-face display of the car's power (the ability shown on the card) */
 export interface CarPower { name: string; desc: string; icon: string }
 export interface CarOption {
@@ -40,6 +40,7 @@ const ICONS: Record<string, string> = {
   level: '<path d="M6 13l6-6 6 6"/><path d="M6 18l6-6 6 6"/>',
   logout: '<path d="M9 4H6a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h3"/><path d="M16 12H9"/><path d="M13 8l4 4-4 4"/>',
   skull: '<path d="M12 3c-4.4 0-7 3-7 6.6 0 2.3 1.2 3.5 2 4.3V16a1.5 1.5 0 0 0 1.5 1.5h7A1.5 1.5 0 0 0 17 15.9v-2c.8-.8 2-2 2-4.3C19 6 16.4 3 12 3Z"/><circle cx="9.3" cy="10.2" r="1.7"/><circle cx="14.7" cy="10.2" r="1.7"/><path d="M10 17.5v2M12 17.5v2.2M14 17.5v2"/>',
+  target: '<circle cx="12" cy="12" r="8"/><circle cx="12" cy="12" r="3.2"/><path d="M12 2.5v3M12 18.5v3M2.5 12h3M18.5 12h3"/>',
 };
 const icon = (id: string, size = 15) =>
   `<svg viewBox="0 0 24 24" width="${size}" height="${size}" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">${ICONS[id] || ""}</svg>`;

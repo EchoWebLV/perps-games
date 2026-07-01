@@ -89,13 +89,19 @@ export function createGameSession(opts: {
     async ensureSession(buyInBase, stakeBase) {
       const c = need();
       if (isDelegated) return;
-      // Adopt an already-delegated session (page reload / log-out→log-in mid-session): the
-      // Round lives on the ER ONLY while delegated, so a successful ER read means a prior
-      // session is still live. Reuse it — the till is already sliced, so do NOT buy in or
+      // Adopt an already-delegated session (page reload / log-out→log-in mid-session) — but
+      // ONLY when the L1 owners say the PDAs are actually delegated ("reuse"). The ER keeps
+      // serving a stale copy of the Round after an undelegate, so a bare ER read is NOT a
+      // liveness signal: adopting on it skips buy-in/slice/delegate and every subsequent
+      // open fails HouseUndercapitalized against the empty till (the End→GO wedge).
+      // When genuinely live, reuse it — the till is already sliced, so do NOT buy in or
       // re-slice (the delegated till is program-locked; re-slicing fails and can drain the
       // pot). open() settles any leftover open round before starting the new one.
-      const existing = await c.readRound(true).catch(() => null);
-      if (existing) { isDelegated = true; bal = await c.readPlayerBalance(true); return; }
+      const state = await c.delegationState().catch(() => "fresh" as const);
+      if (state === "reuse") { isDelegated = true; bal = await c.readPlayerBalance(true); return; }
+      // Torn mid-delegation: delegate() renders the friendly DelegateBusyError (don't let
+      // the fresh path's sliceFromPot hit the half-delegated till with a raw tx error).
+      if (state === "busy") await c.delegate();
       // Fresh session: buy in if the play balance is empty, carve a bet-sized till, delegate.
       const onL1 = await c.readPlayerBalance(false);
       if (onL1 === 0n) { if (isWsol) await c.wrapForBuyIn(buyInBase); await c.buyIn(buyInBase); }

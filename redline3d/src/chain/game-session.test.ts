@@ -12,6 +12,7 @@ function fakeChain(over: Partial<ChainRound> = {}): ChainRound {
     readPlayerBalance: vi.fn(async () => 0n),
     readRoundStatus: vi.fn(async () => 0),
     readRound: vi.fn(async () => null),
+    delegationState: vi.fn(async () => "fresh" as const),
     buyIn: vi.fn(async () => {}),
     ensureRoundInited: vi.fn(async () => {}),
     delegate: vi.fn(async () => {}),
@@ -59,6 +60,35 @@ describe("createGameSession", () => {
     await s.ensureSession(2_000_000, 1_000_000);
     expect(chain.delegate).toHaveBeenCalledTimes(1);
     expect(chain.buyIn).toHaveBeenCalledTimes(1);
+  });
+
+  it("does NOT adopt a stale ER round when L1 says undelegated (End→GO wedge regression)", async () => {
+    // After endSession the ER keeps serving a stale copy of the settled Round for a while,
+    // so a bare ER read is NOT a liveness signal. Adopting on it skips buy-in/slice/delegate
+    // and every subsequent open fails HouseUndercapitalized against the empty till.
+    const chain = fakeChain({
+      delegationState: vi.fn(async () => "fresh" as const),
+      readRound: vi.fn(async () => ({
+        status: 2, outcome: 3, outcomeName: "time", payout: 47_139_000n, banked: 0n,
+        dir: 1, lev: 50, entryRaw: 0n, entryExpo: 8, entryHuman: 0, exitRaw: 0n, exitHuman: 0, deadlineTs: 0,
+      })),
+    });
+    const s = createGameSession({ mint: MINT, onSettled: vi.fn(), injectChain: chain, injectAddress: "Fake111" });
+    await s.init();
+    await s.ensureSession(2_000_000, 1_000_000);
+    expect(chain.sliceFromPot).toHaveBeenCalled();
+    expect(chain.delegate).toHaveBeenCalled();
+  });
+
+  it("adopts a genuinely live session (L1 owners delegated) without re-buying or re-slicing", async () => {
+    const chain = fakeChain({ delegationState: vi.fn(async () => "reuse" as const) });
+    const s = createGameSession({ mint: MINT, onSettled: vi.fn(), injectChain: chain, injectAddress: "Fake111" });
+    await s.init();
+    await s.ensureSession(2_000_000, 1_000_000);
+    expect(chain.buyIn).not.toHaveBeenCalled();
+    expect(chain.sliceFromPot).not.toHaveBeenCalled();
+    expect(chain.delegate).not.toHaveBeenCalled();
+    expect(s.delegated()).toBe(true);
   });
 
   it("ensureSession skips buy-in when the player already has a balance", async () => {

@@ -26,6 +26,7 @@ import { createCarPicker, type CarAbility } from "./ui/carpicker";
 import { createAuthGate } from "./ui/auth-gate";
 import { createFx } from "./ui/fx";
 import { createDeathsDoor } from "./ui/deaths-door";
+import { createAutoExit } from "./ui/pinkrod";
 import { createJoystick } from "./ui/joystick";
 import { createAudio } from "./core/audio";
 import { createRadio } from "./ui/radio";
@@ -128,6 +129,9 @@ const controls = createControls(hud.ctrlMount, hud.goMount, hud.pedalMount);
 const minimap = createMinimap(hud.miniCanvas);
 const fx = createFx();
 const deathsDoor = createDeathsDoor(); // Skull car: near-death sequence at the liq floor
+// Pink Rod's Auto-Exit (stop-loss / take-profit) panel — appended into the pre-round control
+// stack AFTER createControls set its innerHTML; values are stamped on-chain at GO.
+const autoExit = createAutoExit(hud.ctrlMount);
 const joystick = createJoystick();
 const audio = createAudio();
 const coins = createCoinCounter(hudRoot);
@@ -155,17 +159,15 @@ const walletUI = createWallet(hudRoot, {
   balance: () => balance,
   onchain: {
     status: () => ({ delegated: session.delegated(), playCents: baseToUnits(session.balance()) }),
-    end: async () => {
-      hud.setStatus("Ending session…");
-      await session.endSession();
-      syncOnchainBalance();
-      hud.setStatus("Session ended. Withdraw to your wallet, or press GO to start a new one.");
-    },
-    withdraw: async () => {
-      hud.setStatus("Withdrawing…");
+    // One player action. "Cash out" quietly undelegates the ER session (if one is live) and THEN
+    // withdraws to the wallet — the player never sees the delegate/undelegate lifecycle, they just
+    // move their balance to their wallet in a single tap.
+    cashOut: async () => {
+      hud.setStatus("Cashing out…");
+      if (session.delegated()) await session.endSession(); // undelegate under the hood
       await session.withdraw();
       syncOnchainBalance();
-      hud.setStatus("Withdrew your play balance to the wallet.");
+      hud.setStatus("Cashed out to your wallet.");
     },
   },
   // Log out moved to the menu (settings); the wallet page is deposit-only now.
@@ -181,6 +183,7 @@ const setAbility = (a?: CarAbility) => {
   nitro.setEnabled(a === "nitro");        // Orion shows the Nitro Overdrive button
   pickups.setRainbow(a === "rainbow");    // Vaporwave: rainbow coins + value multipliers
   deathsDoor.setEnabled(a === "skull");   // Skull: near-death sequence when equity hits the floor
+  autoExit.setEnabled(a === "pinkRod");   // Pink Rod: pre-round stop-loss / take-profit sliders
 };
 // synthwave radio — streams on the first gesture; its on/off toggle lives in the menu (below)
 const radio = createRadio(hudRoot);
@@ -198,7 +201,7 @@ const garage = createCarPicker(hudRoot, [
   // descriptive-renamed placeholders (were Car 5–8 / Default) — same pack, length-on-X → yaw +π/2.
   { name: "Cart Rod", url: "/models/shopping-cart.glb", yaw: Math.PI / 2, power: { name: "New Ride", desc: "ability TBD", icon: "car" } },
   { name: "Helmet", url: "/models/helmet.glb", yaw: Math.PI / 2, power: { name: "New Ride", desc: "ability TBD", icon: "car" } },
-  { name: "Pink Rod", url: "/models/pink-rod.glb", yaw: Math.PI / 2, power: { name: "New Ride", desc: "ability TBD", icon: "car" } },
+  { name: "Pink Rod", url: "/models/pink-rod.glb", yaw: Math.PI / 2, ability: "pinkRod", power: { name: "Auto-Exit", desc: "set a stop-loss / take-profit", icon: "target" } },
   { name: "Six Wheeler", url: "/models/six-wheeler.glb", yaw: Math.PI / 2, power: { name: "New Ride", desc: "ability TBD", icon: "car" } },
   { name: "Starter", url: "/models/starter.glb", yaw: Math.PI / 2, power: { name: "New Ride", desc: "ability TBD", icon: "car" } },
 ], (c) => { car.setModel(c.url, c.scale, c.yaw); setAbility(c.ability); carBaseLev = c.baseLev ?? 0; tach.rebuild(effRmax()); }, () => upgrades.open(), [
@@ -352,6 +355,7 @@ function finalizeSettled(info: { outcome: number; outcomeName: string; payout: b
   const payoutUnits = Number(info.payout) / BASE_PER_UNIT; // un-floored centi-SOL → true 3-decimal SOL
   nearDeath = false;
   if (liq) deathsDoor.kill(); else deathsDoor.clear(); // Skull: shatter on liq, stand down otherwise (no-op off-Skull)
+  autoExit.setLive(false); // Pink Rod panel: unlock for the next round
   // reset UI
   releaseHold();
   throttle = 34; game.equity = 1; chase.setDriving(false);
@@ -398,13 +402,13 @@ controls.onLaunch(async () => {
   // (driven off priceSource for `asset`) reads the same feed the chain settles against.
   try {
     // First GO auto-starts the ER session (buy-in if empty + slice the bankroll + delegate).
-    const playAmount = controls.playAmount(); // 0.01-SOL units — sizes the bankroll slice
-    hud.setStatus("Starting session…");
+    const playAmount = controls.playAmount(); // 0.01-SOL units — sizes the house slice for the round
+    hud.setStatus("Getting on track…");
     try {
       await session.ensureSession(BUY_IN_BASE, unitsToBase(playAmount));
     } catch (e: any) {
       const friendly = e?.code === "delegate_busy" || e?.code === "bankroll_full";
-      hud.setStatus(friendly ? e.message : "Couldn't start the session. Try again.");
+      hud.setStatus(friendly ? e.message : "Couldn't start the round. Try again.");
       return;
     }
     await session.refreshBalance(true); syncOnchainBalance();
@@ -425,18 +429,28 @@ controls.onLaunch(async () => {
       // Skull "Death's Door": pass a 2s on-chain liq-grace so the crank holds a sub-floor
       // dip for 2s (the Death's-Door animation) instead of liquidating on the first breach —
       // recover within the window and you survive. Every other car passes 0 (immediate liq).
-      // slFp/tpFp (Pink Rod stop-loss / take-profit) stay 0 until that car's SL/TP UI ships.
+      // Pink Rod "Auto-Exit": the panel's stop-loss / take-profit thresholds (SCALE units,
+      // 0 = OFF) — the crank auto-cashes-out when equity crosses one. Other cars send 0/0.
       const graceSecs = ability === "skull" ? 2 : 0;
-      opened = await session.open(asset, dir, lev, unitsToBase(playAmount), Math.round(CONFIG.MAXSEC), Math.round(CONFIG.LIQ * 1_000_000), graceSecs, 0, 0);
+      const { slFp, tpFp } = ability === "pinkRod" ? autoExit.values() : { slFp: 0, tpFp: 0 };
+      opened = await session.open(asset, dir, lev, unitsToBase(playAmount), Math.round(CONFIG.MAXSEC), Math.round(CONFIG.LIQ * 1_000_000), graceSecs, slFp, tpFp);
     } catch (e: any) {
       console.error("on-chain open failed", e);
       // HouseUndercapitalized is RaiderError #6005 — the on-chain error arrives as the raw
       // custom code ({"Custom":6005}), not the name, so match both.
       const emsg = String(e?.message ?? "");
       const drained = emsg.includes("HouseUndercapitalized") || emsg.includes("6005");
-      hud.setStatus(drained
-        ? "This session's bankroll is spent — End your session, then press GO to start fresh."
-        : "Couldn't start the round. Try again.");
+      if (drained) {
+        // The house pot backing THIS run is spent (a hot streak drained it). Tear it down under
+        // the hood so the next GO carves a fresh one — the player only ever sees "press GO", never
+        // the session lifecycle. Best-effort: if the teardown fails, the next GO's adopt/reslice
+        // path still recovers it.
+        try { await session.endSession(); } catch (err) { console.warn("auto-reset after spent pot failed:", err); }
+        syncOnchainBalance();
+        hud.setStatus("Hot streak — that table's tapped out. Press GO for a fresh one.");
+      } else {
+        hud.setStatus("Couldn't start the round. Try again.");
+      }
       controls.setLive(false, "GO!");
       return;
     }
@@ -447,6 +461,7 @@ controls.onLaunch(async () => {
     engine.launch({ dir, lev, stake: playAmount, entryRaw: opened.entryHuman, startMs: roundStartMs });
     roundActive = true;
     nearDeath = false; deathsDoor.clear(); // fresh round → drop any lingering Skull near-death state
+    autoExit.setLive(true); // Pink Rod panel: armed + locked (values stamped on-chain at open)
     chase.setDriving(true);
     controls.setLive(true, "CASH OUT");
     garage.setBusy(true); mapBtn.setVisible(false); upgrades.setBusy(true); walletUI.setBusy(true);

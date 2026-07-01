@@ -27,13 +27,14 @@ export interface WalletOpts {
   /** sign the player out — when omitted (dev/guest) the account row stays hidden */
   onLogout?: () => void;
   /**
-   * On-chain session controls. `status()` is read on every open/refresh: `delegated` =
-   * a round/session is live; `playCents` = the on-chain play balance in centi-SOL units.
+   * On-chain controls. `status()` is read on every open/refresh: `playCents` = the on-chain play
+   * balance in centi-SOL units; `delegated` is kept for internal bookkeeping only (NOT surfaced to
+   * the player). `cashOut()` is the single player action — it quietly undelegates any live ER
+   * session and withdraws to the wallet, so the player never sees the session lifecycle.
    */
   onchain: {
     status: () => { delegated: boolean; playCents: number };
-    end: () => Promise<void>;
-    withdraw: () => Promise<void>;
+    cashOut: () => Promise<void>;
   };
   // ── legacy off-chain fields (no longer rendered; kept optional so callers compile) ──
   walletBalance?: () => number | null;
@@ -188,24 +189,23 @@ export function createWallet(parent: HTMLElement, opts: WalletOpts): Wallet {
   const ocEl = q<HTMLElement>("#wltOnchain");
   let ocBusy = false;
   const renderOnchain = () => {
-    const { delegated, playCents } = opts.onchain.status();
+    const { playCents } = opts.onchain.status();
+    // One button. "Cash out" moves the whole play balance to the wallet; it handles undelegating a
+    // live session under the hood (see main's onchain.cashOut), so there is no player-facing "End".
     ocEl.innerHTML =
       `<div class="wlt-oc">
          <div class="wlt-oc-btns">
-           <button class="wlt-oc-btn end" id="wltOcEnd" ${delegated ? "" : "disabled"}>End session</button>
-           <button class="wlt-oc-btn wd" id="wltOcWd" ${!delegated && playCents > 0 ? "" : "disabled"}>Withdraw</button>
+           <button class="wlt-oc-btn wd" id="wltOcCash" ${playCents > 0 ? "" : "disabled"}>Cash out to wallet</button>
          </div>
        </div>`;
-    const endBtn = ocEl.querySelector<HTMLButtonElement>("#wltOcEnd");
-    const wdBtn = ocEl.querySelector<HTMLButtonElement>("#wltOcWd");
+    const cashBtn = ocEl.querySelector<HTMLButtonElement>("#wltOcCash");
     const run = async (btn: HTMLButtonElement, label: string, fn: () => Promise<void>) => {
       if (ocBusy) return;
       ocBusy = true; btn.disabled = true; const prev = btn.textContent; btn.textContent = label;
       try { await fn(); } catch { /* surfaced by main's status line */ }
       finally { ocBusy = false; btn.textContent = prev ?? ""; renderOnchain(); renderBalance(); }
     };
-    if (endBtn) endBtn.onclick = () => void run(endBtn, "Ending…", opts.onchain.end);
-    if (wdBtn) wdBtn.onclick = () => void run(wdBtn, "Withdrawing…", opts.onchain.withdraw);
+    if (cashBtn) cashBtn.onclick = () => void run(cashBtn, "Cashing out…", opts.onchain.cashOut);
   };
 
   const setOpen = (open: boolean) => {

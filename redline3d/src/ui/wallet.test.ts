@@ -176,8 +176,7 @@ function installFakeDom() {
 
 const makeOnchain = (status = { delegated: false, playCents: 0 }) => ({
   status: () => status,
-  end: vi.fn(async () => {}),
-  withdraw: vi.fn(async () => {}),
+  cashOut: vi.fn(async () => {}),
 });
 const ADDR = "Wallet1111111111111111111111111111111111";
 
@@ -263,34 +262,34 @@ describe("createWallet", () => {
     expect(overlay.querySelector<FakeElement>("#wltBal")?.textContent).toBe("0.250");
   });
 
-  it("enables End while a session is live and disables Withdraw", async () => {
+  it("shows a single Cash out (no player-facing 'End session') that works even mid-session", async () => {
     const parent = new FakeElement("div");
-    const onchain = { status: () => ({ delegated: true, playCents: 10 }), end: vi.fn(async () => {}), withdraw: vi.fn(async () => {}) };
+    // delegated (a live ER session) — Cash out must still be enabled; it undelegates under the hood.
+    const onchain = { status: () => ({ delegated: true, playCents: 10 }), cashOut: vi.fn(async () => {}) };
     const wallet = createWallet(parent as unknown as HTMLElement, { address: () => ADDR, balance: () => 10, onchain });
 
     wallet.open();
 
     const overlay = parent.children[0];
-    expect(overlay.querySelector<FakeElement>("#wltOcEnd")?.attrs.disabled).toBeUndefined(); // delegated → End enabled
-    expect(overlay.querySelector<FakeElement>("#wltOcWd")?.attrs.disabled).toBe("");          // delegated → Withdraw disabled
+    expect(overlay.querySelector("#wltOcEnd")).toBeNull();                                       // no session leak
+    expect(overlay.querySelector<FakeElement>("#wltOcCash")?.attrs.disabled).toBeUndefined();    // balance → Cash out enabled
 
-    await overlay.querySelector<FakeElement>("#wltOcEnd")?.onclick?.(undefined);
-    expect(onchain.end).toHaveBeenCalledTimes(1);
+    await overlay.querySelector<FakeElement>("#wltOcCash")?.onclick?.(undefined);
+    expect(onchain.cashOut).toHaveBeenCalledTimes(1);
   });
 
-  it("enables Withdraw only when idle with a non-zero balance", () => {
+  it("disables Cash out when there is no balance to move", () => {
     const parent = new FakeElement("div");
     const wallet = createWallet(parent as unknown as HTMLElement, {
       address: () => ADDR,
-      balance: () => 10,
-      onchain: makeOnchain({ delegated: false, playCents: 10 }),
+      balance: () => 0,
+      onchain: makeOnchain({ delegated: false, playCents: 0 }),
     });
 
     wallet.open();
 
     const overlay = parent.children[0];
-    expect(overlay.querySelector<FakeElement>("#wltOcEnd")?.attrs.disabled).toBe("");          // idle → End disabled
-    expect(overlay.querySelector<FakeElement>("#wltOcWd")?.attrs.disabled).toBeUndefined();     // idle + balance → Withdraw enabled
+    expect(overlay.querySelector<FakeElement>("#wltOcCash")?.attrs.disabled).toBe(""); // no balance → disabled
   });
 
   it("drops the legacy connect-wallet / USDC / add-to-play UI", () => {
