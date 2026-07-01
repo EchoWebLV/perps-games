@@ -377,17 +377,18 @@ controls.onLaunch(async () => {
   // round to that asset's feed and `hud.onAsset` blocks switching once live, so the local engine's ×
   // (driven off priceSource for `asset`) reads the same feed the chain settles against.
   try {
-    // First GO auto-starts the ER session (buy-in if empty + delegate).
+    // First GO auto-starts the ER session (buy-in if empty + slice the bankroll + delegate).
+    const playAmount = controls.playAmount(); // 0.01-SOL units — sizes the bankroll slice
     hud.setStatus("Starting session…");
     try {
-      await session.ensureSession(BUY_IN_BASE);
+      await session.ensureSession(BUY_IN_BASE, unitsToBase(playAmount));
     } catch (e: any) {
-      hud.setStatus(e?.code === "delegate_busy" ? e.message : "Couldn't start the session. Try again.");
+      const friendly = e?.code === "delegate_busy" || e?.code === "bankroll_full";
+      hud.setStatus(friendly ? e.message : "Couldn't start the session. Try again.");
       return;
     }
     await session.refreshBalance(true); syncOnchainBalance();
 
-    const playAmount = controls.playAmount(); // 0.01-SOL units
     if (session.balance() < BigInt(unitsToBase(playAmount))) {
       hud.setStatus("Add SOL to your play balance to race.");
       walletUI.open();
@@ -399,9 +400,12 @@ controls.onLaunch(async () => {
     let opened;
     try {
       opened = await session.open(asset, dir, lev, unitsToBase(playAmount));
-    } catch (e) {
+    } catch (e: any) {
       console.error("on-chain open failed", e);
-      hud.setStatus("Couldn't start the round. Try again.");
+      const drained = String(e?.message ?? "").includes("HouseUndercapitalized");
+      hud.setStatus(drained
+        ? "This session's bankroll is spent — End your session, then press GO to start fresh."
+        : "Couldn't start the round. Try again.");
       controls.setLive(false, "GO!");
       return;
     }
