@@ -237,7 +237,125 @@ function detectByName(doc, prims) {
   return wheels;
 }
 
-function rigModel() { throw new Error("rigModel: implemented in Task 2"); } // placeholder
+// ---------- rigging ----------
+// Tag path: the wheel already lives on its own node/joint — stamp extras with
+// the node-LOCAL axle/up directions and rename. Cut path: extract the wheel
+// triangles into a new node (pivot at hub, local +X = axle, identity axes).
+// Cut rule: a triangle belongs to a wheel when its scene-space centroid is
+// inside the wheel cylinder: |along axle − hub| < halfWidth×1.15 + 2%r and
+// radial distance in the rolling plane < radius×1.08.
+function rigModel(doc, prims, wheels) {
+  const buffer = doc.getRoot().listBuffers()[0];
+  const scene = doc.getRoot().getDefaultScene() ?? doc.getRoot().listScenes()[0];
+  // 90° yaw quaternion maps local +X to scene +Z (for axleAxis===2 cut wheels)
+  const YAW90 = [0, Math.SQRT1_2, 0, Math.SQRT1_2];
+  // scene-space point -> wheel-local (undo hub translation, undo yaw)
+  const toLocal = (w, p) => {
+    const x = p[0] - w.hub[0], y = p[1] - w.hub[1], z = p[2] - w.hub[2];
+    return w.axleAxis === 0 ? [x, y, z] : [z, y, -x]; // inverse of +90° yaw
+  };
+  const dirToLocal = (w, v) => (w.axleAxis === 0 ? v : [v[2], v[1], -v[0]]);
+
+  // --- tag path ---
+  wheels.forEach((w, wi) => {
+    if (!w.tagNode) return;
+    const wm = w.tagNode.getWorldMatrix();
+    const axleScene = w.axleAxis === 0 ? [1, 0, 0] : [0, 0, 1];
+    w.tagNode.setName(`wheel_${wi}`);
+    w.tagNode.setExtras({
+      ...(w.tagNode.getExtras() ?? {}),
+      perpsWheel: {
+        radius: w.radius,
+        axle: sceneDirToLocal(wm, axleScene),
+        up: sceneDirToLocal(wm, [0, 1, 0]),
+      },
+    });
+  });
+  const cutWheels = wheels.filter((w) => !w.tagNode);
+  if (!cutWheels.length) return;
+
+  // --- cut path ---
+  // per-wheel accumulator: one new primitive per (wheel, source primitive)
+  const buckets = cutWheels.map(() => new Map()); // srcPrim entry -> {pos,nrm,uv,idx,remap}
+  for (const p of prims) {
+    const keep = [];
+    const hasN = !!p.prim.getAttribute("NORMAL");
+    const hasUV = !!p.prim.getAttribute("TEXCOORD_0");
+    const nrmArr = hasN ? p.prim.getAttribute("NORMAL").getArray() : null;
+    const uvArr = hasUV ? p.prim.getAttribute("TEXCOORD_0").getArray() : null;
+    for (let t = 0; t < p.idx.length; t += 3) {
+      const ia = p.idx[t], ib = p.idx[t + 1], ic = p.idx[t + 2];
+      let cx = 0, cy = 0, cz = 0;
+      for (const ii of [ia, ib, ic]) {
+        const w = xform(p.matrix, p.pos[ii * 3], p.pos[ii * 3 + 1], p.pos[ii * 3 + 2]);
+        cx += w[0] / 3; cy += w[1] / 3; cz += w[2] / 3;
+      }
+      let hit = -1;
+      for (let wi = 0; wi < cutWheels.length; wi++) {
+        const w = cutWheels[wi];
+        const axle = w.axleAxis === 0 ? cx : cz;
+        const len = w.axleAxis === 0 ? cz : cx;
+        const axleHub = w.axleAxis === 0 ? w.hub[0] : w.hub[2];
+        const lenHub = w.axleAxis === 0 ? w.hub[2] : w.hub[0];
+        if (Math.abs(axle - axleHub) > w.halfWidth * 1.15 + w.radius * 0.02) continue;
+        if (Math.hypot(cy - w.hub[1], len - lenHub) > w.radius * 1.08) continue;
+        hit = wi; break;
+      }
+      if (hit < 0) { keep.push(ia, ib, ic); continue; }
+      // move this triangle into the wheel bucket (rebased into wheel-local frame)
+      const w = cutWheels[hit];
+      let b = buckets[hit].get(p);
+      if (!b) { b = { pos: [], nrm: hasN ? [] : null, uv: hasUV ? [] : null, idx: [], remap: new Map() }; buckets[hit].set(p, b); }
+      for (const ii of [ia, ib, ic]) {
+        let ni = b.remap.get(ii);
+        if (ni === undefined) {
+          ni = b.pos.length / 3; b.remap.set(ii, ni);
+          const sp = xform(p.matrix, p.pos[ii * 3], p.pos[ii * 3 + 1], p.pos[ii * 3 + 2]);
+          b.pos.push(...toLocal(w, sp));
+          if (hasN) {
+            const n = nrmArr, m = p.nmat;
+            const nx = m[0] * n[ii * 3] + m[3] * n[ii * 3 + 1] + m[6] * n[ii * 3 + 2];
+            const ny = m[1] * n[ii * 3] + m[4] * n[ii * 3 + 1] + m[7] * n[ii * 3 + 2];
+            const nz = m[2] * n[ii * 3] + m[5] * n[ii * 3 + 1] + m[8] * n[ii * 3 + 2];
+            const d = Math.hypot(nx, ny, nz) || 1;
+            b.nrm.push(...dirToLocal(w, [nx / d, ny / d, nz / d]));
+          }
+          if (hasUV) b.uv.push(uvArr[ii * 2], uvArr[ii * 2 + 1]);
+        }
+        b.idx.push(ni);
+      }
+    }
+    // shrink the source primitive to the kept triangles (vertex buffers untouched);
+    // dispose the replaced index accessor or it stays in the file as dead weight
+    if (keep.length !== p.idx.length) {
+      const old = p.prim.getIndices();
+      const acc = doc.createAccessor().setType("SCALAR").setBuffer(buffer)
+        .setArray(p.pos.length / 3 > 65535 ? new Uint32Array(keep) : new Uint16Array(keep));
+      p.prim.setIndices(acc);
+      if (old && !old.listParents().some((par) => par.propertyType === "Primitive")) old.dispose();
+    }
+  }
+  // build the wheel nodes
+  cutWheels.forEach((w, wi) => {
+    const mesh = doc.createMesh(`wheel_${wi}_mesh`);
+    for (const [srcP, b] of buckets[wi]) {
+      const prim = doc.createPrimitive().setMode(4).setMaterial(srcP.prim.getMaterial());
+      prim.setAttribute("POSITION", doc.createAccessor().setType("VEC3").setBuffer(buffer).setArray(new Float32Array(b.pos)));
+      if (b.nrm) prim.setAttribute("NORMAL", doc.createAccessor().setType("VEC3").setBuffer(buffer).setArray(new Float32Array(b.nrm)));
+      if (b.uv) prim.setAttribute("TEXCOORD_0", doc.createAccessor().setType("VEC2").setBuffer(buffer).setArray(new Float32Array(b.uv)));
+      prim.setIndices(doc.createAccessor().setType("SCALAR").setBuffer(buffer)
+        .setArray(b.pos.length / 3 > 65535 ? new Uint32Array(b.idx) : new Uint16Array(b.idx)));
+      mesh.addPrimitive(prim);
+    }
+    if (!mesh.listPrimitives().length) throw new Error(`wheel_${wi}: cut produced no triangles`);
+    const node = doc.createNode(`wheel_${wi}`)
+      .setTranslation(w.hub)
+      .setRotation(w.axleAxis === 2 ? YAW90 : [0, 0, 0, 1])
+      .setMesh(mesh)
+      .setExtras({ perpsWheel: { radius: w.radius, axle: [1, 0, 0], up: [0, 1, 0] } });
+    scene.addChild(node);
+  });
+}
 
 // ---------- per-model driver ----------
 async function processModel(io, file, { dry }) {
