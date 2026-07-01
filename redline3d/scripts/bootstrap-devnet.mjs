@@ -1,7 +1,7 @@
-// Operator one-time devnet bootstrap: create a stable test-USDC mint (or reuse one
-// passed as argv[2]), init_house + fund_house for it, and print the mint pubkey to
-// paste into src/chain/config.ts (STAKE_MINT). Run:
-//   ANCHOR_WALLET=~/.config/solana/lazer-probe.json node scripts/bootstrap-devnet.mjs
+// Operator one-time devnet bootstrap: create/reuse a stake mint, init the MASTER POT
+// (HouseBalance `[house, mint]` — the single shared bankroll; per-session tills are
+// carved off it automatically by slice_from_pot), fund it, and set up the feed registry.
+//   ANCHOR_WALLET=~/.config/solana/lazer-probe.json HOUSE_FUND=10000000000 node scripts/bootstrap-devnet.mjs
 import anchor from "@coral-xyz/anchor";
 import { PublicKey, SystemProgram, Connection, Transaction } from "@solana/web3.js";
 import { createMint, getOrCreateAssociatedTokenAccount, getAssociatedTokenAddressSync, mintTo, createAssociatedTokenAccountInstruction, createSyncNativeInstruction, TOKEN_PROGRAM_ID, ASSOCIATED_TOKEN_PROGRAM_ID } from "@solana/spl-token";
@@ -9,7 +9,7 @@ import { readFileSync } from "node:fs";
 import idl from "../src/chain/idl/raider.json" with { type: "json" };
 
 const RPC = process.env.BASE_RPC || "https://api.devnet.solana.com";
-const HOUSE_FUND = Number(process.env.HOUSE_FUND || 50_000_000); // 50 USDC bankroll
+const HOUSE_FUND = Number(process.env.HOUSE_FUND || 10_000_000_000); // 10 SOL master-pot bankroll (wSOL base units)
 const conn = new Connection(RPC, { commitment: "confirmed" });
 const wpath = process.env.ANCHOR_WALLET || `${process.env.HOME}/.config/solana/lazer-probe.json`;
 const funder = anchor.web3.Keypair.fromSecretKey(new Uint8Array(JSON.parse(readFileSync(wpath, "utf8"))));
