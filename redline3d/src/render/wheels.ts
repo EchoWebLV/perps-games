@@ -33,7 +33,8 @@ export function collectWheels(root: THREE.Object3D): THREE.Object3D[] {
 export function pickFrontWheels(wheels: THREE.Object3D[]): THREE.Object3D[] {
   const zs = wheels.map((w) => new THREE.Vector3().setFromMatrixPosition(w.matrixWorld).z);
   const minZ = Math.min(...zs), maxZ = Math.max(...zs);
-  const tol = Math.max((maxZ - minZ) * 0.25, 1e-6);
+  // tight enough to exclude a 3-axle truck's middle axle (~25-50% of span back)
+  const tol = Math.max((maxZ - minZ) * 0.12, 1e-6);
   return wheels.filter((_, i) => zs[i] - minZ < tol);
 }
 

@@ -105,10 +105,13 @@ export function createCar(onReady?: () => void): Car {
   // wheel rig (spin + front-axle steer) built from the wheel_N nodes the
   // offline rig script stamped into every car GLB
   let rig: WheelRig | null = null;
+  let loadGen = 0; // 40MB GLBs race: only the LATEST pick may win, not the last to finish
   const loadModel = (url: string, scaleMul = 1, yawAdd = 0) => {
+    const gen = ++loadGen;
     loader.load(
       url,
       (gltf) => {
+        if (gen !== loadGen) return; // a newer pick superseded this load
         const model = gltf.scene;
         // scale to our footprint (× per-model tweak), center horizontally, sit wheels on the ground
         const box = new THREE.Box3().setFromObject(model);

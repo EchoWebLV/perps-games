@@ -25,14 +25,22 @@ const MODELS_DIR = resolve(dirname(fileURLToPath(import.meta.url)), "../public/m
 // Regression table — detection must find exactly this many wheels per model.
 const EXPECTED = {
   "clown-car": 4, cybertruck: 4, delorean: 4, flintstone: 2, helmet: 4,
-  orion: 4, "pink-rod": 4, "shopping-cart": 4, "six-wheeler": 6,
+  orion: 2, "pink-rod": 4, "shopping-cart": 4, "six-wheeler": 6,
   skull: 4, "slot-machine": 4, starter: 4, vaporwave: 4,
 };
 // delorean/flintstone: welded-detection fails (0 / noisy clusters) but they
-// have proper wheel nodes/joints — the named path handles them.
-const NAMED_PATH = new Set(["delorean", "flintstone"]);
+// have proper wheel nodes/joints — the named path handles them. orion's
+// wheel_f/wheel_b are coaxial AXLE-PAIR nodes (2 nodes, 4 tires): tagging
+// them is 1:1 by construction, better than any fit.
+const NAMED_PATH = new Set(["delorean", "flintstone", "orion"]);
+// cybertruck: wheels are separate (unnamed) mesh nodes — the node IS the
+// wheel, so shape-test nodes instead of fitting circles.
+const NODE_SHAPE_PATH = new Set(["cybertruck"]);
+// vaporwave: wheels are 4 disjoint triangle ISLANDS inside one merged mesh —
+// connected-component split finds them exactly.
+const ISLAND_PATH = new Set(["vaporwave"]);
 const WHEEL_NAME = /wheel|tire|tyre/i;
-const NOT_WHEEL = /steering/i;
+const NOT_WHEEL = /steering|body/i;
 
 // ---------- linear algebra helpers (column-major mat4, like glTF) ----------
 const xform = (m, x, y, z) => [
@@ -140,38 +148,78 @@ function detectByGround(wv, mn, mx) {
   const spread = (k) => Math.max(...hubs.map((h) => h[k])) - Math.min(...hubs.map((h) => h[k]));
   const lengthAxis = spread("x") >= spread("z") ? 0 : 2; // 0=x, 2=z
   const axleAxis = lengthAxis === 0 ? 2 : 0;
-  // circle fit per hub, in the (lengthAxis, y) plane, slab along axleAxis
+  // circle fit per hub, in the (lengthAxis, y) plane, slab along axleAxis.
+  // A tire is a FULL circle tangent to the ground; a fender arc or a rim ring
+  // is not. Scan r from large to small and take the LARGEST circle with full
+  // angular coverage — that is the tire's outer edge (1:1 with the model),
+  // not the rim circle a density score would lock onto.
+  const BAND = 0.012 * L;
   const wheels = [];
   for (const h of hubs) {
     const ha = axleAxis === 0 ? h.x : h.z;   // hub coord along axle
     const hl = lengthAxis === 0 ? h.x : h.z; // hub coord along length
-    let best = { score: -1 };
-    for (let r = 0.008 * L; r <= 0.28 * L; r += 0.003 * L) {
-      for (let dl = -0.03 * L; dl <= 0.03 * L; dl += 0.01 * L) {
-        const y0 = mn[1] + r, l0 = hl + dl;
-        let inl = 0, amn = 1e9, amx = -1e9;
-        for (let i = 0; i < nv; i++) {
-          const a = wv[i * 3 + axleAxis];
-          if (Math.abs(a - ha) > Math.max(0.06 * L, r)) continue;
-          const dy = wv[i * 3 + 1] - y0, dll = wv[i * 3 + lengthAxis] - l0;
-          if (Math.abs(Math.hypot(dy, dll) - r) < 0.012 * L) {
-            inl++; if (a < amn) amn = a; if (a > amx) amx = a;
-          }
+    // slab verts once per hub: [l, y, a]
+    const pts = [];
+    for (let i = 0; i < nv; i++) {
+      if (Math.abs(wv[i * 3 + axleAxis] - ha) > 0.06 * L) continue;
+      if (Math.abs(wv[i * 3 + lengthAxis] - hl) > 0.34 * L) continue;
+      pts.push(wv[i * 3 + lengthAxis], wv[i * 3 + 1], wv[i * 3 + axleAxis]);
+    }
+    let best = null;
+    for (let r = 0.30 * L; r >= 0.008 * L && !best; r -= 0.002 * L) {
+      for (let dl = -0.03 * L; dl <= 0.03 * L; dl += 0.006 * L) {
+        const y0 = mn[1] + r, l0 = hl + dl; // tangent to the ground by construction
+        // coverage counts the band just INSIDE the circle: inside a tire's
+        // outer edge there is tread in every direction; inside a wheel-arch
+        // circle (also ground-tangent — they nest!) there is mostly air.
+        let inl = 0;
+        const bins = new Array(24).fill(0);
+        for (let k = 0; k < pts.length; k += 3) {
+          const dll = pts[k] - l0, dy = pts[k + 1] - y0;
+          const d = Math.hypot(dy, dll);
+          if (d > r + BAND * 0.25 || d < r - BAND * 2) continue;
+          inl++;
+          bins[Math.floor(((Math.atan2(dy, dll) + Math.PI) / (2 * Math.PI)) * 24) % 24]++;
         }
-        const score = inl / r;
-        if (score > best.score) best = { score, r, l0, y0, inl, halfWidth: (amx - amn) / 2 };
+        const coverage = bins.filter((b) => b >= 2).length;
+        if (inl >= 80 && coverage >= 21) { best = { r, l0, y0, inl }; break; }
       }
     }
-    if (best.score <= 0 || best.inl < 60) continue;
-    const hub = [0, best.y0, 0]; hub[axleAxis] = ha; hub[lengthAxis] = best.l0;
-    wheels.push({ hub, radius: best.r, axleAxis, halfWidth: Math.max(best.halfWidth, best.r * 0.15), inliers: best.inl });
+    if (!best) continue;
+    // acceptance extends up to ~2×BAND past the true edge — bias-center it
+    let r = best.r - BAND;
+    // independent cross-check, immune to side-junk: walking straight UP from
+    // the contact point, the tire is a solid column until its top, then the
+    // wheel-well air gap — first sustained gap height = true diameter
+    const colYs = [];
+    for (let k = 0; k < pts.length; k += 3) {
+      if (Math.abs(pts[k] - best.l0) < 0.035 * L) colYs.push(pts[k + 1]);
+    }
+    colYs.sort((a, b) => a - b);
+    let rVert = null;
+    for (let k = 1; k < colYs.length; k++) {
+      if (colYs[k] - colYs[k - 1] > 0.025 * L) { rVert = (colYs[k - 1] - mn[1]) / 2; break; }
+    }
+    if (rVert && rVert > 0.02 * L && Math.abs(r - rVert) > 0.15 * Math.max(r, rVert)) r = rVert;
+    best = { ...best, r, y0: mn[1] + r };
+    // wheel width: axle extent of everything inside the wheel cylinder
+    // (2nd–98th percentile so a stray weld can't stretch it)
+    const axleCoords = [];
+    for (let k = 0; k < pts.length; k += 3) {
+      if (Math.hypot(pts[k] - best.l0, pts[k + 1] - best.y0) < best.r * 0.99) axleCoords.push(pts[k + 2]);
+    }
+    axleCoords.sort((a, b) => a - b);
+    const lo = axleCoords[Math.floor(axleCoords.length * 0.02)] ?? ha;
+    const hi = axleCoords[Math.floor(axleCoords.length * 0.98)] ?? ha;
+    const hub = [0, best.y0, 0]; hub[axleAxis] = (lo + hi) / 2; hub[lengthAxis] = best.l0;
+    wheels.push({ hub, radius: best.r, axleAxis, halfWidth: Math.max((hi - lo) / 2, best.r * 0.15), inliers: best.inl });
   }
   // merge overlapping candidates (shopping-cart double-detects its casters):
   // two hubs closer than ~the larger radius = the same wheel; keep the better fit
   wheels.sort((a, b) => b.inliers - a.inliers);
   const merged = [];
   for (const w of wheels) {
-    if (merged.some((m) => Math.hypot(m.hub[0] - w.hub[0], m.hub[1] - w.hub[1], m.hub[2] - w.hub[2]) < Math.max(m.radius, w.radius) * 1.2)) continue;
+    if (merged.some((m) => Math.hypot(m.hub[0] - w.hub[0], m.hub[1] - w.hub[1], m.hub[2] - w.hub[2]) < (m.radius + w.radius) * 0.5)) continue;
     merged.push(w);
   }
   return merged;
@@ -184,10 +232,12 @@ function detectByGround(wv, mn, mx) {
 // members' bbox height; axle = the horizontal dim that does NOT match dy.
 function detectByName(doc, prims) {
   const roots = new Map(); // wheel node -> member scene-space verts (array of [x,y,z])
+  const rootPrims = new Map(); // wheel node -> prim entries (plain nodes only; joints have none)
   // plain-node members
   for (const p of prims) {
     if (!p.wheelRoot) continue;
-    if (!roots.has(p.wheelRoot)) roots.set(p.wheelRoot, []);
+    if (!roots.has(p.wheelRoot)) { roots.set(p.wheelRoot, []); rootPrims.set(p.wheelRoot, []); }
+    rootPrims.get(p.wheelRoot).push(p);
     const list = roots.get(p.wheelRoot);
     for (let i = 0; i < p.pos.length; i += 3) list.push(xform(p.matrix, p.pos[i], p.pos[i + 1], p.pos[i + 2]));
   }
@@ -228,11 +278,55 @@ function detectByName(doc, prims) {
     const center = [(mn[0] + mx[0]) / 2, (mn[1] + mx[1]) / 2, (mn[2] + mx[2]) / 2];
     const wm = node.getWorldMatrix();
     const pivot = [wm[12], wm[13], wm[14]];
-    // the node must already pivot at the hub (it does for these models — they
-    // steer today); gate rather than silently rig a wobbling wheel
+    // tag in place when the node already pivots at the hub; otherwise the
+    // rig extracts its geometry into a fresh hub-pivoted node. Joints can't
+    // be extracted (skinned verts) — a joint with a bad pivot is fatal.
     const off = Math.hypot(pivot[0] - center[0], pivot[1] - center[1], pivot[2] - center[2]);
-    if (off > dy * 0.35) throw new Error(`${node.getName()}: pivot ${off.toFixed(2)} off hub (dy=${dy.toFixed(2)})`);
-    wheels.push({ hub: center, radius: dy / 2, axleAxis, halfWidth: (axleAxis === 0 ? dx : dz) / 2, tagNode: node });
+    const isJoint = !rootPrims.has(node);
+    if (off <= dy * 0.35) {
+      wheels.push({ hub: center, radius: dy / 2, axleAxis, halfWidth: (axleAxis === 0 ? dx : dz) / 2, tagNode: node });
+    } else if (isJoint) {
+      throw new Error(`${node.getName()}: joint pivot ${off.toFixed(2)} off hub (dy=${dy.toFixed(2)}) — cannot extract skinned verts`);
+    } else {
+      wheels.push({ hub: center, radius: dy / 2, axleAxis, halfWidth: (axleAxis === 0 ? dx : dz) / 2, srcPrims: rootPrims.get(node), srcNode: node });
+    }
+  }
+  return wheels;
+}
+
+// ---------- node-shape detection (cybertruck, vaporwave) ----------
+// Wheels live on their own (unnamed) mesh nodes: shape-test each node's
+// scene-space bbox — round side profile, thinner along one horizontal axis,
+// sitting at the ground line. The node IS the wheel: 1:1 by construction.
+function detectByNodeShape(prims, mn, mx) {
+  const H = mx[1] - mn[1], L = Math.max(mx[0] - mn[0], mx[2] - mn[2]);
+  const byNode = new Map();
+  for (const p of prims) {
+    if (!byNode.has(p.node)) byNode.set(p.node, []);
+    byNode.get(p.node).push(p);
+  }
+  const wheels = [];
+  for (const [node, list] of byNode) {
+    let bmn = [1e9, 1e9, 1e9], bmx = [-1e9, -1e9, -1e9];
+    let count = 0;
+    for (const p of list) for (let i = 0; i < p.pos.length; i += 3) {
+      const w = xform(p.matrix, p.pos[i], p.pos[i + 1], p.pos[i + 2]);
+      count++;
+      for (let k = 0; k < 3; k++) { if (w[k] < bmn[k]) bmn[k] = w[k]; if (w[k] > bmx[k]) bmx[k] = w[k]; }
+    }
+    if (count < 40) continue;
+    const dx = bmx[0] - bmn[0], dy = bmx[1] - bmn[1], dz = bmx[2] - bmn[2];
+    const rolling = Math.max(dx, dz), width = Math.min(dx, dz);
+    if (Math.min(dy, rolling) / Math.max(dy, rolling) < 0.8) continue; // round side profile
+    if (width > 0.9 * dy) continue;                                    // has a thin axle axis
+    if (dy < 0.04 * L || dy > 0.4 * L) continue;                       // sane size
+    if (bmn[1] - mn[1] > 0.12 * H) continue;                           // touches the ground line
+    const axleAxis = dx < dz ? 0 : 2;
+    const center = [(bmn[0] + bmx[0]) / 2, (bmn[1] + bmx[1]) / 2, (bmn[2] + bmx[2]) / 2];
+    const wm = node.getWorldMatrix();
+    const off = Math.hypot(wm[12] - center[0], wm[13] - center[1], wm[14] - center[2]);
+    if (off <= dy * 0.35) wheels.push({ hub: center, radius: dy / 2, axleAxis, halfWidth: width / 2, tagNode: node });
+    else wheels.push({ hub: center, radius: dy / 2, axleAxis, halfWidth: width / 2, srcPrims: list, srcNode: node });
   }
   return wheels;
 }
@@ -249,12 +343,14 @@ function rigModel(doc, prims, wheels) {
   const scene = doc.getRoot().getDefaultScene() ?? doc.getRoot().listScenes()[0];
   // 90° yaw quaternion maps local +X to scene +Z (for axleAxis===2 cut wheels)
   const YAW90 = [0, Math.SQRT1_2, 0, Math.SQRT1_2];
-  // scene-space point -> wheel-local (undo hub translation, undo yaw)
+  // scene-space point -> wheel-local (undo hub translation, undo the node's
+  // +90° yaw). R⁻¹ for +90° about Y maps (x,y,z) -> (-z, y, x); using R here
+  // instead renders every Z-axle wheel 180°-flipped around its hub.
   const toLocal = (w, p) => {
     const x = p[0] - w.hub[0], y = p[1] - w.hub[1], z = p[2] - w.hub[2];
-    return w.axleAxis === 0 ? [x, y, z] : [z, y, -x]; // inverse of +90° yaw
+    return w.axleAxis === 0 ? [x, y, z] : [-z, y, x];
   };
-  const dirToLocal = (w, v) => (w.axleAxis === 0 ? v : [v[2], v[1], -v[0]]);
+  const dirToLocal = (w, v) => (w.axleAxis === 0 ? v : [-v[2], v[1], v[0]]);
 
   // --- tag path ---
   wheels.forEach((w, wi) => {
@@ -277,6 +373,10 @@ function rigModel(doc, prims, wheels) {
   // --- cut path ---
   // per-wheel accumulator: one new primitive per (wheel, source primitive)
   const buckets = cutWheels.map(() => new Map()); // srcPrim entry -> {pos,nrm,uv,idx,remap}
+  // whole-node wheels (srcPrims): every triangle of those prims belongs to
+  // that wheel — no cylinder test, no leftover risk
+  const srcOwner = new Map();
+  cutWheels.forEach((w, wi) => { for (const p of w.srcPrims ?? []) srcOwner.set(p, wi); });
   for (const p of prims) {
     const keep = [];
     const hasN = !!p.prim.getAttribute("NORMAL");
@@ -290,15 +390,17 @@ function rigModel(doc, prims, wheels) {
         const w = xform(p.matrix, p.pos[ii * 3], p.pos[ii * 3 + 1], p.pos[ii * 3 + 2]);
         cx += w[0] / 3; cy += w[1] / 3; cz += w[2] / 3;
       }
-      let hit = -1;
-      for (let wi = 0; wi < cutWheels.length; wi++) {
+      let hit = srcOwner.has(p) ? srcOwner.get(p) : -1;
+      for (let wi = 0; hit < 0 && wi < cutWheels.length; wi++) {
         const w = cutWheels[wi];
+        if (w.srcPrims) continue; // whole-node wheels take only their own prims
+        if (w.belongs) { if (w.belongs(p, ia)) { hit = wi; break; } continue; } // exact island capture
         const axle = w.axleAxis === 0 ? cx : cz;
         const len = w.axleAxis === 0 ? cz : cx;
         const axleHub = w.axleAxis === 0 ? w.hub[0] : w.hub[2];
         const lenHub = w.axleAxis === 0 ? w.hub[2] : w.hub[0];
-        if (Math.abs(axle - axleHub) > w.halfWidth * 1.15 + w.radius * 0.02) continue;
-        if (Math.hypot(cy - w.hub[1], len - lenHub) > w.radius * 1.08) continue;
+        if (Math.abs(axle - axleHub) > w.halfWidth * 1.12 + w.radius * 0.02) continue;
+        if (Math.hypot(cy - w.hub[1], len - lenHub) > w.radius * 1.05) continue;
         hit = wi; break;
       }
       if (hit < 0) { keep.push(ia, ib, ic); continue; }
@@ -326,7 +428,9 @@ function rigModel(doc, prims, wheels) {
       }
     }
     // shrink the source primitive to the kept triangles (vertex buffers untouched);
-    // dispose the replaced index accessor or it stays in the file as dead weight
+    // dispose the replaced index accessor or it stays in the file as dead weight.
+    // Whole-node prims skip this — their node is disposed below.
+    if (srcOwner.has(p)) continue;
     if (keep.length !== p.idx.length) {
       const old = p.prim.getIndices();
       const acc = doc.createAccessor().setType("SCALAR").setBuffer(buffer)
@@ -335,6 +439,32 @@ function rigModel(doc, prims, wheels) {
       if (old && !old.listParents().some((par) => par.propertyType === "Primitive")) old.dispose();
     }
   }
+  // 1:1 completeness gate — nothing tire-like may remain in the body below
+  // the hub: a leftover ring there is exactly the "static tire around a
+  // spinning disc" glitch. (Above the hub, fender lips legitimately overlap.)
+  cutWheels.forEach((w, wi) => {
+    if (w.srcPrims || w.belongs) return; // exact captures cannot leave tire behind
+    let leftover = 0, moved = 0;
+    for (const p of prims) {
+      if (srcOwner.has(p)) continue;
+      const idx = p.prim.getIndices() ? p.prim.getIndices().getArray() : null;
+      const seen = new Set(idx ?? []);
+      for (const ii of seen.size ? seen : []) {
+        const sp = xform(p.matrix, p.pos[ii * 3], p.pos[ii * 3 + 1], p.pos[ii * 3 + 2]);
+        const axle = w.axleAxis === 0 ? sp[0] : sp[2];
+        const len = w.axleAxis === 0 ? sp[2] : sp[0];
+        const axleHub = w.axleAxis === 0 ? w.hub[0] : w.hub[2];
+        const lenHub = w.axleAxis === 0 ? w.hub[2] : w.hub[0];
+        if (Math.abs(axle - axleHub) > w.halfWidth * 0.9) continue;
+        if (sp[1] > w.hub[1] - w.radius * 0.1) continue; // below-hub zone only
+        if (Math.hypot(sp[1] - w.hub[1], len - lenHub) < w.radius * 0.92) leftover++;
+      }
+    }
+    for (const b of buckets[wi].values()) moved += b.pos.length / 3;
+    if (!moved) throw new Error(`wheel_${wi}: cut produced no vertices`);
+    if (leftover > moved * 0.02)
+      throw new Error(`wheel_${wi}: ${leftover} body verts left inside the tire (moved ${moved}) — cut incomplete`);
+  });
   // build the wheel nodes
   cutWheels.forEach((w, wi) => {
     const mesh = doc.createMesh(`wheel_${wi}_mesh`);
@@ -354,7 +484,100 @@ function rigModel(doc, prims, wheels) {
       .setMesh(mesh)
       .setExtras({ perpsWheel: { radius: w.radius, axle: [1, 0, 0], up: [0, 1, 0] } });
     scene.addChild(node);
+    // whole-node wheels: drop the emptied source node + its now-unused data
+    if (w.srcNode) {
+      const oldMesh = w.srcNode.getMesh();
+      w.srcNode.dispose();
+      if (oldMesh && !oldMesh.listParents().some((par) => par.propertyType === "Node")) {
+        const accs = [];
+        for (const prim of oldMesh.listPrimitives()) {
+          accs.push(prim.getIndices(), ...prim.listAttributes());
+        }
+        oldMesh.dispose();
+        for (const a of accs) {
+          if (a && !a.listParents().some((par) => par.propertyType === "Primitive")) a.dispose();
+        }
+      }
+    }
   });
+}
+
+// ---------- island detection (vaporwave) ----------
+// Wheels are disjoint triangle islands inside a merged mesh: weld by position,
+// union-find over triangles, shape-test each island. Capture is exact — a
+// triangle belongs to a wheel iff its island root matches.
+class UF {
+  constructor(n) { this.p = new Int32Array(n); for (let i = 0; i < n; i++) this.p[i] = i; }
+  find(x) { let r = x; while (this.p[r] !== r) r = this.p[r]; while (this.p[x] !== r) { const n = this.p[x]; this.p[x] = r; x = n; } return r; }
+  union(a, b) { const ra = this.find(a), rb = this.find(b); if (ra !== rb) this.p[ra] = rb; }
+}
+function detectByIsland(prims, mn, mx) {
+  const L = Math.max(mx[0] - mn[0], mx[2] - mn[2]), H = mx[1] - mn[1];
+  let total = 0;
+  for (const p of prims) total += p.pos.length / 3;
+  const wpos = new Float64Array(total * 3);
+  const baseOf = new Map();
+  let o = 0;
+  for (const p of prims) {
+    baseOf.set(p, o);
+    for (let i = 0; i < p.pos.length; i += 3) {
+      const w = xform(p.matrix, p.pos[i], p.pos[i + 1], p.pos[i + 2]);
+      wpos[o * 3] = w[0]; wpos[o * 3 + 1] = w[1]; wpos[o * 3 + 2] = w[2]; o++;
+    }
+  }
+  const cell = L * 1e-5;
+  const weld = new Map(); const wid = new Int32Array(total);
+  for (let i = 0; i < total; i++) {
+    const k = `${Math.round(wpos[i * 3] / cell)},${Math.round(wpos[i * 3 + 1] / cell)},${Math.round(wpos[i * 3 + 2] / cell)}`;
+    let w = weld.get(k);
+    if (w === undefined) { w = i; weld.set(k, w); }
+    wid[i] = w;
+  }
+  const uf = new UF(total);
+  for (const p of prims) {
+    const b = baseOf.get(p);
+    for (let t = 0; t < p.idx.length; t += 3) {
+      uf.union(wid[b + p.idx[t]], wid[b + p.idx[t + 1]]);
+      uf.union(wid[b + p.idx[t + 1]], wid[b + p.idx[t + 2]]);
+    }
+  }
+  const comps = new Map();
+  for (let i = 0; i < total; i++) {
+    const r = uf.find(wid[i]);
+    let c = comps.get(r);
+    if (!c) { c = { n: 0, mn: [1e9, 1e9, 1e9], mx: [-1e9, -1e9, -1e9] }; comps.set(r, c); }
+    c.n++;
+    for (let k = 0; k < 3; k++) { const v = wpos[i * 3 + k]; if (v < c.mn[k]) c.mn[k] = v; if (v > c.mx[k]) c.mx[k] = v; }
+  }
+  const wheels = [];
+  for (const [root, c] of comps) {
+    if (c.n < 40) continue;
+    const dx = c.mx[0] - c.mn[0], dy = c.mx[1] - c.mn[1], dz = c.mx[2] - c.mn[2];
+    const rolling = Math.max(dx, dz), width = Math.min(dx, dz);
+    if (Math.min(dy, rolling) / Math.max(dy, rolling) < 0.8) continue;
+    if (width > 0.9 * dy) continue;
+    if (dy < 0.04 * L || dy > 0.4 * L) continue;
+    if (c.mn[1] - mn[1] > 0.12 * H) continue;
+    wheels.push({
+      hub: [(c.mn[0] + c.mx[0]) / 2, (c.mn[1] + c.mx[1]) / 2, (c.mn[2] + c.mx[2]) / 2],
+      radius: dy / 2,
+      axleAxis: dx < dz ? 0 : 2,
+      halfWidth: width / 2,
+      belongs: (p, ia) => uf.find(wid[baseOf.get(p) + ia]) === root,
+    });
+  }
+  return wheels;
+}
+
+// cluster wheels by hub proximity: co-located nodes (tire+rim) = one wheel
+function groupWheels(wheels) {
+  const groups = [];
+  for (const w of wheels) {
+    const g = groups.find((g) => g.some((m) =>
+      Math.hypot(m.hub[0] - w.hub[0], m.hub[1] - w.hub[1], m.hub[2] - w.hub[2]) < Math.max(m.radius, w.radius) * 0.5));
+    if (g) g.push(w); else groups.push([w]);
+  }
+  return groups;
 }
 
 // ---------- per-model driver ----------
@@ -364,18 +587,25 @@ async function processModel(io, file, { dry }) {
   const { prims, mn, mx } = gatherPrims(doc);
   const wheels = NAMED_PATH.has(name)
     ? detectByName(doc, prims)
-    : detectByGround(worldVerts(prims), mn, mx);
+    : NODE_SHAPE_PATH.has(name)
+      ? detectByNodeShape(prims, mn, mx)
+      : ISLAND_PATH.has(name)
+        ? detectByIsland(prims, mn, mx)
+        : detectByGround(worldVerts(prims), mn, mx);
   if (!NAMED_PATH.has(name) && doc.getRoot().listSkins().length)
     throw new Error(`${name}: skinned mesh on the geometry path — unsupported`);
   const exp = EXPECTED[name];
   const L = Math.max(mx[0] - mn[0], mx[2] - mn[2]);
-  console.log(`\n=== ${name}: ${wheels.length} wheels (expected ${exp})`);
+  // a physical wheel may be several co-located nodes (cybertruck: tire+rim) —
+  // count hub-proximity GROUPS against EXPECTED, rig every member
+  const groups = groupWheels(wheels);
+  console.log(`\n=== ${name}: ${groups.length} wheels / ${wheels.length} nodes (expected ${exp})`);
   for (const w of wheels)
     console.log(`  wheel hub=[${w.hub.map((v) => v.toFixed(2)).join(", ")}] r=${w.radius.toFixed(3)} (${(100 * w.radius / L).toFixed(1)}%L) axle=${w.axleAxis === 0 ? "X" : "Z"} halfW=${w.halfWidth.toFixed(3)}${w.tagNode ? ` tag:${w.tagNode.getName()}` : ""}`);
-  if (wheels.length !== exp) throw new Error(`${name}: found ${wheels.length} wheels, expected ${exp}`);
-  // sanity: one shared axle axis; radii within a sane family ratio
+  if (groups.length !== exp) throw new Error(`${name}: found ${groups.length} wheels, expected ${exp}`);
+  // sanity: one shared axle axis; group radii within a sane family ratio
   if (new Set(wheels.map((w) => w.axleAxis)).size !== 1) throw new Error(`${name}: mixed axle axes`);
-  const rs = wheels.map((w) => w.radius);
+  const rs = groups.map((g) => Math.max(...g.map((w) => w.radius)));
   if (Math.max(...rs) / Math.min(...rs) > 3.5) throw new Error(`${name}: radius spread too large`);
   if (!dry) {
     rigModel(doc, prims, wheels);
@@ -391,13 +621,19 @@ async function verifyModel(io, file) {
   const doc = await io.read(file);
   const rigged = doc.getRoot().listNodes().filter((n) => /^wheel_\d+$/.test(n.getName()));
   const exp = EXPECTED[name];
-  if (rigged.length !== exp) throw new Error(`${name}: ${rigged.length} wheel_N nodes, expected ${exp}`);
   for (const n of rigged) {
     const pw = n.getExtras()?.perpsWheel;
     if (!(pw?.radius > 0) || pw.axle?.length !== 3 || pw.up?.length !== 3)
       throw new Error(`${name}/${n.getName()}: bad extras.perpsWheel ${JSON.stringify(pw)}`);
   }
-  console.log(`OK ${name}: ${rigged.length} wheels rigged`);
+  // group co-located nodes (tire+rim) the same way the rig counted them
+  const asWheels = rigged.map((n) => {
+    const wm = n.getWorldMatrix();
+    return { hub: [wm[12], wm[13], wm[14]], radius: n.getExtras().perpsWheel.radius };
+  });
+  const groups = groupWheels(asWheels);
+  if (groups.length !== exp) throw new Error(`${name}: ${groups.length} wheel groups (${rigged.length} nodes), expected ${exp}`);
+  console.log(`OK ${name}: ${groups.length} wheels rigged (${rigged.length} nodes)`);
 }
 
 // ---------- main ----------
