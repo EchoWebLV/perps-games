@@ -10,7 +10,7 @@ import { detectQuality } from "./platform/perf";
 import { createPost } from "./render/post";
 import { createHud } from "./ui/hud";
 import { createTach } from "./ui/tach";
-import { createControls } from "./ui/controls";
+import { createControls, DEFAULT_PLAY_CAP } from "./ui/controls";
 import { connectFeed } from "./core/feed";
 import { createPriceSource } from "./core/price-source";
 import { RoundEngine } from "./core/round";
@@ -21,7 +21,7 @@ import { liqPriceOf } from "./core/economics";
 import { createUpgrades } from "./ui/upgrades";
 import { CONFIG } from "./core/config";
 import { createMinimap } from "./ui/minimap";
-import { createPickups } from "./render/pickups";
+import { CART_COIN_RATE, createPickups } from "./render/pickups";
 import { createCarPicker, type CarAbility } from "./ui/carpicker";
 import { createAuthGate } from "./ui/auth-gate";
 import { createFx } from "./ui/fx";
@@ -141,7 +141,13 @@ hud.setBalance(balance);
 // Effective leverage ceiling = the upgrade-driven CONFIG.RMAX, raised to a car's base if higher
 // (the Cybertruck starts at 1500). Nitro (Orion) then doubles the live leverage on top of this.
 let carBaseLev = 0;
-const effRmax = () => Math.max(CONFIG.RMAX, carBaseLev);
+let ability: CarAbility | undefined;
+// Six Wheeler "Heavy Load": hauls more, revs slower — 0.25 SOL max bet, +50% round time, half
+// the tach ceiling. Pure client trade: `open` passes the longer dur (the program clamps it
+// ≤180s) and the lower ceiling only caps what leverage the throttle can reach.
+const HEAVY_PLAY_CAP = 25, HEAVY_DUR = 1.5, HEAVY_LEV = 0.5;
+const effRmax = () => Math.round(Math.max(CONFIG.RMAX, carBaseLev) * (ability === "sixWheeler" ? HEAVY_LEV : 1));
+const effMaxSec = () => Math.round(CONFIG.MAXSEC * (ability === "sixWheeler" ? HEAVY_DUR : 1));
 // persistent coin balance + the upgrade tree; buying spends coins. Turbo Kit (max leverage) and
 // Long-Range Tank (round time) apply live now that the on-chain program honors both.
 const upgrades = createUpgrades(hudRoot, {
@@ -175,15 +181,16 @@ const walletUI = createWallet(hudRoot, {
 hud.onWallet(() => { if (engine.getPhase() !== "live") walletUI.open(); });
 
 // car picker — swap the GLB model live + apply the card's special ability
-let ability: CarAbility | undefined;
 const setAbility = (a?: CarAbility) => {
   ability = a;
   world.setLaneBet(a === "laneBet");      // Clown Car colors the road green/red
   controls.setLaneMode(a === "laneBet");  // keep LONG/SHORT visible as a live readout
   nitro.setEnabled(a === "nitro");        // Orion shows the Nitro Overdrive button
   pickups.setRainbow(a === "rainbow");    // Vaporwave: rainbow coins + value multipliers
+  pickups.setCoinRate(a === "cartRod" ? CART_COIN_RATE : 1); // Cart Rod: +33% coins on the road
   deathsDoor.setEnabled(a === "skull");   // Skull: near-death sequence when equity hits the floor
   autoExit.setEnabled(a === "pinkRod");   // Pink Rod: pre-round stop-loss / take-profit sliders
+  controls.setPlayCap(a === "sixWheeler" ? HEAVY_PLAY_CAP : DEFAULT_PLAY_CAP); // Six Wheeler hauls a bigger max bet
 };
 // synthwave radio — streams on the first gesture; its on/off toggle lives in the menu (below)
 const radio = createRadio(hudRoot);
@@ -199,10 +206,10 @@ const garage = createCarPicker(hudRoot, [
   { name: "Skull", url: "/models/skull.glb", yaw: Math.PI / 2, ability: "skull", power: { name: "Death's Door", desc: "survive a liq for 2s", icon: "skull" } },
   { name: "Slot Machine", url: "/models/slot-machine.glb", yaw: Math.PI / 2, power: { name: "New Ride", desc: "ability TBD", icon: "car" } },
   // descriptive-renamed placeholders (were Car 5–8 / Default) — same pack, length-on-X → yaw +π/2.
-  { name: "Cart Rod", url: "/models/shopping-cart.glb", yaw: Math.PI / 2, power: { name: "New Ride", desc: "ability TBD", icon: "car" } },
+  { name: "Cart Rod", url: "/models/shopping-cart.glb", yaw: Math.PI / 2, ability: "cartRod", power: { name: "Coin Scoop", desc: "+33% coins on the road", icon: "coin" } },
   { name: "Helmet", url: "/models/helmet.glb", yaw: Math.PI / 2, power: { name: "New Ride", desc: "ability TBD", icon: "car" } },
   { name: "Pink Rod", url: "/models/pink-rod.glb", yaw: Math.PI / 2, ability: "pinkRod", power: { name: "Auto-Exit", desc: "set a stop-loss / take-profit", icon: "target" } },
-  { name: "Six Wheeler", url: "/models/six-wheeler.glb", yaw: Math.PI / 2, power: { name: "New Ride", desc: "ability TBD", icon: "car" } },
+  { name: "Six Wheeler", url: "/models/six-wheeler.glb", yaw: Math.PI / 2, ability: "sixWheeler", power: { name: "Heavy Load", desc: "bigger bets · more time · slower ×", icon: "weight" } },
   { name: "Starter", url: "/models/starter.glb", yaw: Math.PI / 2, power: { name: "New Ride", desc: "ability TBD", icon: "car" } },
 ], (c) => { car.setModel(c.url, c.scale, c.yaw); setAbility(c.ability); carBaseLev = c.baseLev ?? 0; tach.rebuild(effRmax()); }, () => upgrades.open(), [
   { label: "Music", sub: "synthwave radio", glyph: "♫", get: () => radio.isOn(), set: (on) => radio.setOn(on) },
@@ -297,6 +304,7 @@ let solEMA = 0;    // slow average; price vs this drives the terrain elevation
 const priceHist: number[] = [];
 let carX = 0, carXTarget = 0;
 let roundStartMs = 0;
+let roundMaxSec = 0; // this round's time cap, frozen at GO (Heavy Load runs longer than CONFIG.MAXSEC)
 const round = { entryPx: 0, dir: 1 as 1 | -1 };
 
 // asset switching (BTC/ETH/SOL) — blocked mid-bet; resets the chart for the new asset
@@ -360,7 +368,7 @@ function finalizeSettled(info: { outcome: number; outcomeName: string; payout: b
   releaseHold();
   throttle = 34; game.equity = 1; chase.setDriving(false);
   garage.setBusy(false); mapBtn.setVisible(true); upgrades.setBusy(false); walletUI.setBusy(false);
-  hud.setTimer(CONFIG.MAXSEC, false);
+  hud.setTimer(effMaxSec(), false);
   controls.setLive(false, "GO!");
   hud.setMultiplier(Math.max(0, liq ? 0 : finalEq), liq ? "liquidated" : "settled");
   if (liq) {
@@ -405,8 +413,10 @@ controls.onLaunch(async () => {
     const playAmount = controls.playAmount(); // 0.01-SOL units — sizes the house slice for the round
     hud.setStatus("Getting on track…");
     try {
-      await session.ensureSession(BUY_IN_BASE, unitsToBase(playAmount));
+      // buy in at least the bet: a Heavy-Load bet can exceed the standard 0.1 SOL buy-in
+      await session.ensureSession(Math.max(BUY_IN_BASE, unitsToBase(playAmount)), unitsToBase(playAmount));
     } catch (e: any) {
+      console.error("session start failed", e); // the open() catch logs too — keep this path debuggable
       const friendly = e?.code === "delegate_busy" || e?.code === "bankroll_full";
       hud.setStatus(friendly ? e.message : "Couldn't start the round. Try again.");
       return;
@@ -420,6 +430,7 @@ controls.onLaunch(async () => {
     }
     const dir = controls.dir();
     const lev = clampInt(game.lev, 10, 3000); // on-chain RMAX=3000
+    roundMaxSec = effMaxSec(); // freeze this round's time cap (Heavy Load: +50%)
     hud.setStatus("Launching…");
     let opened;
     try {
@@ -433,7 +444,7 @@ controls.onLaunch(async () => {
       // 0 = OFF) — the crank auto-cashes-out when equity crosses one. Other cars send 0/0.
       const graceSecs = ability === "skull" ? 2 : 0;
       const { slFp, tpFp } = ability === "pinkRod" ? autoExit.values() : { slFp: 0, tpFp: 0 };
-      opened = await session.open(asset, dir, lev, unitsToBase(playAmount), Math.round(CONFIG.MAXSEC), Math.round(CONFIG.LIQ * 1_000_000), graceSecs, slFp, tpFp);
+      opened = await session.open(asset, dir, lev, unitsToBase(playAmount), roundMaxSec, Math.round(CONFIG.LIQ * 1_000_000), graceSecs, slFp, tpFp);
     } catch (e: any) {
       console.error("on-chain open failed", e);
       // HouseUndercapitalized is RaiderError #6005 — the on-chain error arrives as the raw
@@ -458,7 +469,7 @@ controls.onLaunch(async () => {
     round.dir = dir;
     lastStakeUnits = playAmount;
     roundStartMs = Date.now();
-    engine.launch({ dir, lev, stake: playAmount, entryRaw: opened.entryHuman, startMs: roundStartMs });
+    engine.launch({ dir, lev, stake: playAmount, entryRaw: opened.entryHuman, startMs: roundStartMs, maxSec: roundMaxSec });
     roundActive = true;
     nearDeath = false; deathsDoor.clear(); // fresh round → drop any lingering Skull near-death state
     autoExit.setLive(true); // Pink Rod panel: armed + locked (values stamped on-chain at open)
@@ -504,7 +515,7 @@ function frame() {
     const steer = Math.max(-1, Math.min(1, (holding ? steerNorm : 0) + kSteer));
     drive = driveStep(drive, { throttle, steer }, dt, LOT_BOUNDS);
 
-    car.update(dt);
+    car.update(dt, drive.speed);
     car.setEquity("idle", 1);
     car.group.position.set(drive.x, 0, drive.z);
     // -heading: Three's +Y rotation mirrors X vs the physics/camera (sin,-cos) convention,
@@ -576,14 +587,14 @@ function frame() {
       else if (nearDeath && snap.buffer >= 0.22) nearDeath = false;
       deathsDoor.danger(nearDeath);
     }
-    hud.setTimer(CONFIG.MAXSEC - (nowMs - roundStartMs) / 1000, true);
+    hud.setTimer(roundMaxSec - (nowMs - roundStartMs) / 1000, true);
     car.setEquity("live", Math.max(0, snap.equity));
     controls.setLive(true, `${snap.equity >= 1 ? "CASH OUT" : "BAIL"} ${sol3(snap.payout)}`, snap.equity < 1);
-    // Local 60s backstop: the native crank normally settles first; this closes on-chain if it lags.
-    if (roundActive && !settling && (nowMs - roundStartMs) / 1000 >= CONFIG.MAXSEC) void closeRound("expire");
+    // Local time-cap backstop: the native crank normally settles first; this closes on-chain if it lags.
+    if (roundActive && !settling && (nowMs - roundStartMs) / 1000 >= roundMaxSec) void closeRound("expire");
   } else {
     car.setEquity("idle", 1);
-    hud.setTimer(CONFIG.MAXSEC, false);
+    hud.setTimer(effMaxSec(), false);
   }
 
   // lateral steering — only while playing; the parked car re-centres in the showroom
@@ -618,7 +629,7 @@ function frame() {
   // car hugs the road: ride the surface height + pitch to the local slope, lean into turns
   const carY = world.surfaceY(-12);
   const aheadY = world.surfaceY(-15.4), behindY = world.surfaceY(-8.6);
-  car.update(dt);
+  car.update(dt, speed);
   car.group.position.x = carX;
   car.group.position.y = carY;
   car.group.rotation.x = Math.max(-0.4, Math.min(0.4, Math.atan2(aheadY - behindY, 6.8)));

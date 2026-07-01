@@ -1,11 +1,13 @@
 import * as THREE from "three";
 import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader.js";
+import { buildWheelRig, type WheelRig } from "./wheels";
 
 export interface Car {
   group: THREE.Group;
   /** color by equity state: idle blue, winning green, losing red */
   setEquity(phase: "idle" | "live", equity: number): void;
-  update(dt: number): void;
+  /** advance animations; speed = world units/sec (road speed / lobby drive speed) */
+  update(dt: number, speed?: number): void;
   /** swap the GLB model (car picker); scale multiplies the footprint, yaw adds to the facing */
   setModel(url: string, scale?: number, yaw?: number): void;
   /** turn the front wheels for steering (−1 full left … 0 straight … +1 full right) */
@@ -100,8 +102,9 @@ export function createCar(onReady?: () => void): Car {
   // ---- model loading / swapping (car picker) ----
   const loader = new GLTFLoader();
   let current: THREE.Object3D | null = null;
-  // front-wheel nodes (+ their rest rotation) so steering is an offset, not absolute
-  let frontWheels: { o: THREE.Object3D; baseY: number }[] = [];
+  // wheel rig (spin + front-axle steer) built from the wheel_N nodes the
+  // offline rig script stamped into every car GLB
+  let rig: WheelRig | null = null;
   const loadModel = (url: string, scaleMul = 1, yawAdd = 0) => {
     loader.load(
       url,
@@ -116,11 +119,9 @@ export function createCar(onReady?: () => void): Car {
         const c = box2.getCenter(new THREE.Vector3());
         model.position.set(-c.x, -box2.min.y, -c.z);
 
-        // collect tintable materials + the steerable front-wheel nodes
+        // collect tintable materials
         const mats: THREE.MeshStandardMaterial[] = [];
-        const wheels: { o: THREE.Object3D; baseY: number }[] = [];
         model.traverse((o) => {
-          if (/wheel.*front/i.test(o.name)) wheels.push({ o, baseY: o.rotation.y });
           const mesh = o as THREE.Mesh;
           if (!mesh.isMesh) return;
           const list = Array.isArray(mesh.material) ? mesh.material : [mesh.material];
@@ -130,7 +131,7 @@ export function createCar(onReady?: () => void): Car {
         });
         if (current) group.remove(current);
         current = model;
-        frontWheels = wheels;
+        rig = buildWheelRig(model, model.scale.x); // uniform scalar → world-unit radii
         modelMats = mats.length ? mats : null;
         placeholder.visible = false;
         group.add(model);
@@ -144,21 +145,24 @@ export function createCar(onReady?: () => void): Car {
   loadModel(MODEL_URL);
 
   let t = 0;
-  return {
+  const api: Car = {
     group,
     setEquity(phase, equity) {
       phaseS = phase;
       eqS = equity;
       applyTint();
     },
-    update(dt) {
+    update(dt, speed = 0) {
       t += dt;
       glow.intensity = 2 + Math.sin(t * 3) * 0.5; // faint underglow breathing
+      rig?.spin(dt, speed);
     },
     setSteer(angle) {
       const a = Math.max(-1, Math.min(1, angle)) * MAX_STEER;
-      for (const w of frontWheels) w.o.rotation.y = w.baseY + a;
+      rig?.steer(a);
     },
     setModel: loadModel,
   };
+  if (import.meta.env.DEV) (window as any).__car = api; // preview probe (Task 6 verification)
+  return api;
 }
