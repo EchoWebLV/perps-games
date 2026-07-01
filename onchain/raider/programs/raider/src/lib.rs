@@ -17,6 +17,7 @@ use ephemeral_rollups_sdk::ephem::commit_and_undelegate_accounts;
 
 declare_id!("FwUNcUaRbYGiWasHa6DA3xQaQJfZWCgH7UhDeBvoJcBv");
 
+pub mod house;
 pub mod price;
 pub mod settle;
 pub mod state;
