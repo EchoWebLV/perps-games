@@ -1887,6 +1887,14 @@ export type Raider = {
         {
           "name": "stake",
           "type": "u64"
+        },
+        {
+          "name": "dur",
+          "type": "i64"
+        },
+        {
+          "name": "liq",
+          "type": "u32"
         }
       ]
     },
@@ -2953,6 +2961,10 @@ export type Raider = {
           {
             "name": "deadlineTs",
             "type": "i64"
+          },
+          {
+            "name": "liqFp",
+            "type": "u32"
           },
           {
             "name": "status",

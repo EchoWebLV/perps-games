@@ -3,15 +3,16 @@ import { CONFIG } from "../core/config";
 export interface Tach {
   /** drive the gauge from the throttle (0..1) + current leverage */
   setThrottle(frac: number, lev: number): void;
-  /** redraw the RMAX-dependent rim ticks + red-zone arc (after a Turbo Kit upgrade) */
-  rebuild(): void;
+  /** redraw the rim ticks + red-zone arc for the effective max leverage. Pass the effective RMAX
+   *  (upgrade-driven CONFIG.RMAX, or a car's higher base); omit to fall back to CONFIG.RMAX. */
+  rebuild(rmax?: number): void;
 }
 
 const CX = 160, CY = 170, R = 132;
 // read CONFIG live (not destructured) so a Turbo Kit RMAX bump rescales the gauge
 
-function lf(l: number): number {
-  return Math.log(l / CONFIG.RMIN) / Math.log(CONFIG.RMAX / CONFIG.RMIN);
+function lf(l: number, rmax: number = CONFIG.RMAX): number {
+  return Math.log(l / CONFIG.RMIN) / Math.log(rmax / CONFIG.RMIN);
 }
 function pt(f: number, rad: number): [number, number] {
   const a = Math.PI * (1 - f);
@@ -26,12 +27,12 @@ function arc(f0: number, f1: number, rad: number, n: number): string {
   }
   return d;
 }
-function gcol(f: number): string {
-  return f >= lf(CONFIG.REDLINE) ? "#ff4d6d" : f >= 0.42 ? "#ffd166" : "#2ee6a6";
+function gcol(f: number, rmax: number = CONFIG.RMAX): string {
+  return f >= lf(CONFIG.REDLINE, rmax) ? "#ff4d6d" : f >= 0.42 ? "#ffd166" : "#2ee6a6";
 }
 /** graduation marks around the rim — hot (red) inside the redline zone */
-function ticks(): string {
-  const red = lf(CONFIG.REDLINE);
+function ticks(rmax: number = CONFIG.RMAX): string {
+  const red = lf(CONFIG.REDLINE, rmax);
   let s = "";
   for (let i = 0; i <= 10; i++) {
     const f = i / 10;
@@ -46,6 +47,7 @@ function ticks(): string {
 
 /** Curved redline tachometer — a live, glowing readout of the throttle/leverage. */
 export function createTach(mount: HTMLElement): Tach {
+  let rmax = CONFIG.RMAX; // effective max leverage the gauge is scaled to (upgrade or car base)
   mount.innerHTML = `
     <svg viewBox="0 0 320 190" style="width:100%;display:block;overflow:visible">
       <defs>
@@ -60,12 +62,12 @@ export function createTach(mount: HTMLElement): Tach {
           <stop offset="1" stop-color="#ff4d6d"/>
         </linearGradient>
       </defs>
-      <g id="tticks">${ticks()}</g>
+      <g id="tticks">${ticks(rmax)}</g>
       <path d="${arc(0, 1, R, 56)}" fill="none" stroke="#13182b" stroke-width="16" stroke-linecap="round"/>
       <path d="${arc(0, 1, R, 56)}" fill="none" stroke="url(#trev)" stroke-width="16" stroke-linecap="round" opacity="0.13"/>
       <circle cx="${CX}" cy="${CY}" r="16" fill="#0a0820" stroke="rgba(255,255,255,.16)" stroke-width="2"/>
       <g filter="url(#tglow)">
-        <path id="tredzone" d="${arc(lf(CONFIG.REDLINE), 1, R, 22)}" fill="none" stroke="#ff4d6d" stroke-width="16" stroke-linecap="round" opacity="0.5"/>
+        <path id="tredzone" d="${arc(lf(CONFIG.REDLINE, rmax), 1, R, 22)}" fill="none" stroke="#ff4d6d" stroke-width="16" stroke-linecap="round" opacity="0.5"/>
         <path id="tfill" fill="none" stroke="url(#trev)" stroke-width="16" stroke-linecap="round"/>
         <line id="tneedle" x1="${CX}" y1="${CY}" x2="${CX}" y2="46" stroke="#fff" stroke-width="4.5" stroke-linecap="round"/>
         <circle id="thub" cx="${CX}" cy="${CY}" r="7" fill="#2ee6a6"/>
@@ -82,7 +84,7 @@ export function createTach(mount: HTMLElement): Tach {
   return {
     setThrottle(frac, lev) {
       const f = Math.max(0, Math.min(1, frac));
-      const c = gcol(f);
+      const c = gcol(f, rmax);
       fill.setAttribute("d", arc(0, Math.max(0.001, f), R, Math.max(2, Math.round(f * 56))));
       const tip = pt(f, R - 30);
       needle.setAttribute("x2", tip[0].toFixed(1));
@@ -91,9 +93,10 @@ export function createTach(mount: HTMLElement): Tach {
       val.textContent = lev + "×";
       val.setAttribute("fill", c);
     },
-    rebuild() {
-      tticks.innerHTML = ticks();
-      redzone.setAttribute("d", arc(lf(CONFIG.REDLINE), 1, R, 22));
+    rebuild(newRmax?: number) {
+      rmax = newRmax ?? CONFIG.RMAX;
+      tticks.innerHTML = ticks(rmax);
+      redzone.setAttribute("d", arc(lf(CONFIG.REDLINE, rmax), 1, R, 22));
     },
   };
 }

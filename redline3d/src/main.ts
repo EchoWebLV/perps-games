@@ -14,7 +14,7 @@ import { createControls } from "./ui/controls";
 import { connectFeed } from "./core/feed";
 import { createPriceSource } from "./core/price-source";
 import { RoundEngine } from "./core/round";
-import { sol } from "./core/money";
+import { sol3 } from "./core/money";
 import { clampInt } from "./core/round-sync";
 import { niceLev, tToLev } from "./core/leverage";
 import { liqPriceOf } from "./core/economics";
@@ -23,6 +23,7 @@ import { CONFIG } from "./core/config";
 import { createMinimap } from "./ui/minimap";
 import { createPickups } from "./render/pickups";
 import { createCarPicker, type CarAbility } from "./ui/carpicker";
+import { createAuthGate } from "./ui/auth-gate";
 import { createFx } from "./ui/fx";
 import { createJoystick } from "./ui/joystick";
 import { createAudio } from "./core/audio";
@@ -35,7 +36,7 @@ import { createLobbyCam } from "./render/lobbycam";
 import { createMapButton } from "./ui/mapbutton";
 import { createLobbyHud } from "./ui/lobbyhud";
 import { step as driveStep, DRIVE, type DriveState } from "./core/freedrive";
-import { entranceHit, LOT_BOUNDS, type BuildingKind } from "./core/lobby-layout";
+import { entranceHit, LOT_BOUNDS, LOBBY_SPAWN, type BuildingKind } from "./core/lobby-layout";
 import { PublicKey } from "@solana/web3.js";
 import { CHAIN } from "./chain/config";
 import { createGameSession } from "./chain/game-session";
@@ -89,11 +90,15 @@ const session = createGameSession({
 });
 // The cash chip + wallet hero read the on-chain play balance (centi-SOL units). Single writer.
 function syncOnchainBalance() {
-  balance = baseToUnits(session.balance());
+  // Un-floored centi-SOL (base lamports / BASE_PER_UNIT) so the balance shows true 3-decimal
+  // SOL — the floored `baseToUnits` would drop sub-0.01 SOL that a cash-out leaves behind.
+  // Display-only: money logic reads `session.balance()` (base units) directly.
+  balance = Number(session.balance()) / BASE_PER_UNIT;
   hud.setBalance(balance);
   walletUI.setBalance(balance);
 }
-void session.init().then(() => syncOnchainBalance()).catch(() => {});
+// NOTE: the login gate is created near the END of setup (createHud does
+// `hudRoot.innerHTML = …`, which would wipe a gate added here). See `authGate` below.
 // The game is fully on-chain: the SOL play balance + round loop live in `session` (the ER round).
 // `balance` is the displayed cash chip, sourced only from the on-chain play balance (centi-SOL units).
 let balance = 0;
@@ -126,11 +131,16 @@ const coins = createCoinCounter(hudRoot);
 // Orion's Nitro Overdrive — 2× leverage burst; the button fires it, main applies the boost
 const nitro = createNitro(hudRoot, () => { fx.nitro(); chase.shake(0.7); navigator.vibrate?.([0, 30, 20, 40]); });
 hud.setBalance(balance);
-// persistent coin balance + the upgrade tree (Turbo / Tank / Suspension); buying spends coins
+// Effective leverage ceiling = the upgrade-driven CONFIG.RMAX, raised to a car's base if higher
+// (the Cybertruck starts at 1500). Nitro (Orion) then doubles the live leverage on top of this.
+let carBaseLev = 0;
+const effRmax = () => Math.max(CONFIG.RMAX, carBaseLev);
+// persistent coin balance + the upgrade tree; buying spends coins. Turbo Kit (max leverage) and
+// Long-Range Tank (round time) apply live now that the on-chain program honors both.
 const upgrades = createUpgrades(hudRoot, {
   onCoins: (n) => coins.set(n),
-  onApply: () => tach.rebuild(),
-  economicEffects: false,
+  onApply: () => tach.rebuild(effRmax()),
+  economicEffects: true,
   onClose: () => { if (mode === "lobby") lobbyHud.show(); }, // returning to the lobby town → restore the back button
 });
 coins.set(upgrades.coins(), false); // no pulse on the persisted balance at load
@@ -172,7 +182,7 @@ const setAbility = (a?: CarAbility) => {
 const radio = createRadio(hudRoot);
 const garage = createCarPicker(hudRoot, [
   { name: "DeLorean", url: "/models/delorean.glb", power: { name: "Flux Brake", desc: "freeze your P&L ~4s", icon: "clock" } },
-  { name: "Cybertruck", url: "/models/cybertruck.glb", scale: 1.3, power: { name: "Exoskeleton", desc: "survive deeper drops", icon: "shield" } },
+  { name: "Cybertruck", url: "/models/cybertruck.glb", scale: 1.3, baseLev: 1500, power: { name: "Overclocked", desc: "starts at 1500× leverage", icon: "gauge" } },
   { name: "Orion", url: "/models/orion.glb", yaw: -Math.PI / 2, ability: "nitro", power: { name: "Nitro Overdrive", desc: "2× leverage · 3s", icon: "flame" } },
   { name: "Vaporwave", url: "/models/vaporwave.glb", ability: "rainbow", power: { name: "Rainbow Coins", desc: "×2 ×3 ×5 coin drops", icon: "magnet" } },
   { name: "Flintstone", url: "/models/flintstone.glb", scale: 0.7, power: { name: "Stone-Age Airbag", desc: "keep play amount on liq", icon: "chute" } },
@@ -187,13 +197,17 @@ const garage = createCarPicker(hudRoot, [
   { name: "Pink Rod", url: "/models/pink-rod.glb", yaw: Math.PI / 2, power: { name: "New Ride", desc: "ability TBD", icon: "car" } },
   { name: "Six Wheeler", url: "/models/six-wheeler.glb", yaw: Math.PI / 2, power: { name: "New Ride", desc: "ability TBD", icon: "car" } },
   { name: "Starter", url: "/models/starter.glb", yaw: Math.PI / 2, power: { name: "New Ride", desc: "ability TBD", icon: "car" } },
-], (c) => { car.setModel(c.url, c.scale, c.yaw); setAbility(c.ability); }, () => upgrades.open(), [
+], (c) => { car.setModel(c.url, c.scale, c.yaw); setAbility(c.ability); carBaseLev = c.baseLev ?? 0; tach.rebuild(effRmax()); }, () => upgrades.open(), [
   { label: "Music", sub: "synthwave radio", glyph: "♫", get: () => radio.isOn(), set: (on) => radio.setOn(on) },
   { label: "SFX", sub: "engine & coins", glyph: "🔊", get: () => audio.isEnabled(), set: (on) => audio.setEnabled(on) },
-], undefined, () => {
+], () => {
+  // Log out (garage menu → account): sign out the session and return to the sign-in gate.
+  void session.logout().then(() => syncOnchainBalance());
+  authGate.show();
+}, () => {
   // closed from the lobby Garage building → re-hide the hamburger chrome and restore the lobby back button
   if (mode === "lobby") { garage.el.style.display = "none"; lobbyHud.show(); }
-}); // Log out in the menu
+});
 
 // ── lobby: the economy-hub town ─────────────────────────────────────────────
 // the map button drops you into a giant drivable neon lot with 4 functional buildings —
@@ -202,7 +216,7 @@ const lobby = createLobby();
 ctx.scene.add(lobby.group);
 const lobbyCam = createLobbyCam();
 let mode: "race" | "lobby" = "race";
-let drive: DriveState = { x: 0, z: LOT_BOUNDS.z - 8, heading: 0, speed: 0, steer: 0 };
+let drive: DriveState = { x: LOBBY_SPAWN.x, z: LOBBY_SPAWN.z, heading: 0, speed: 0, steer: 0 };
 let doorDwell = 0;
 let doorArmed = true; // disarmed after entering a building until the car leaves every doorway (no instant re-open)
 let steerNorm = 0; // steering from the pointer drag (-1..1), shared with the lobby
@@ -220,7 +234,7 @@ function setRaceHudVisible(visible: boolean) {
 function enterLobby() {
   if (engine.getPhase() === "live") return;
   mode = "lobby";
-  drive = { x: 0, z: LOT_BOUNDS.z - 8, heading: 0, speed: 0, steer: 0 };
+  drive = { x: LOBBY_SPAWN.x, z: LOBBY_SPAWN.z, heading: 0, speed: 0, steer: 0 };
   doorDwell = 0;
   doorArmed = true;
   lobbyCam.reset();
@@ -331,7 +345,7 @@ function finalizeSettled(info: { outcome: number; outcomeName: string; payout: b
   if (engine.getPhase() === "live") engine.cashout(price, now); // freeze the visual at the live value
   const finalEq = engine.snapshot(price, now).equity;
   const liq = info.outcome === 2; // 0 cashout · 1 cap · 2 liq · 3 time
-  const payoutUnits = baseToUnits(info.payout);
+  const payoutUnits = Number(info.payout) / BASE_PER_UNIT; // un-floored centi-SOL → true 3-decimal SOL
   // reset UI
   releaseHold();
   throttle = 34; game.equity = 1; chase.setDriving(false);
@@ -343,7 +357,7 @@ function finalizeSettled(info: { outcome: number; outcomeName: string; payout: b
     hud.setStatus("💥 Liquidated. Lost the play amount.");
     fx.liquidate(); audio.liquidate(); navigator.vibrate?.([30, 40, 30, 40, 90]);
   } else {
-    hud.setStatus(`Settled at ×${finalEq.toFixed(2)}. Banked ${sol(payoutUnits)}.`);
+    hud.setStatus(`Settled at ×${finalEq.toFixed(2)}. Banked ${sol3(payoutUnits)}.`);
     fx.confetti(); audio.cashout(); navigator.vibrate?.(35);
   }
   void session.refreshBalance(session.delegated()).then(() => syncOnchainBalance()).catch(() => {});
@@ -395,14 +409,20 @@ controls.onLaunch(async () => {
       return;
     }
     const dir = controls.dir();
-    const lev = clampInt(game.lev, 10, 2000); // on-chain RMAX=2000
+    const lev = clampInt(game.lev, 10, 3000); // on-chain RMAX=3000
     hud.setStatus("Launching…");
     let opened;
     try {
-      opened = await session.open(asset, dir, lev, unitsToBase(playAmount));
+      // liq floor in on-chain SCALE units (1e6): CONFIG.LIQ is 0.20 by default and drops toward
+      // 0.10 as the Suspension upgrade is bought. The program clamps to [100_000, 200_000] and
+      // stamps it on the round, so settlement liquidates at the player's own upgraded floor.
+      opened = await session.open(asset, dir, lev, unitsToBase(playAmount), Math.round(CONFIG.MAXSEC), Math.round(CONFIG.LIQ * 1_000_000));
     } catch (e: any) {
       console.error("on-chain open failed", e);
-      const drained = String(e?.message ?? "").includes("HouseUndercapitalized");
+      // HouseUndercapitalized is RaiderError #6005 — the on-chain error arrives as the raw
+      // custom code ({"Custom":6005}), not the name, so match both.
+      const emsg = String(e?.message ?? "");
+      const drained = emsg.includes("HouseUndercapitalized") || emsg.includes("6005");
       hud.setStatus(drained
         ? "This session's bankroll is spent — End your session, then press GO to start fresh."
         : "Couldn't start the round. Try again.");
@@ -510,7 +530,7 @@ function frame() {
     throttle = Math.max(0, Math.min(100, throttle));
   }
   const boost = nitro.update(dt, drivable); // Orion Nitro Overdrive: 2× for 3s, else 1
-  game.lev = clampInt(niceLev(tToLev(throttle)) * boost, 10, 2000); // on-chain RMAX=2000
+  game.lev = clampInt(niceLev(tToLev(throttle, effRmax())) * boost, 10, 3000); // car base (≤1500) × nitro (2×), on-chain RMAX=3000
   tach.setThrottle(Math.min(1, (throttle / 100) * boost), game.lev); // needle pegs during nitro
   audio.engine(throttle / 100, gasOn || drivable); // rev drone tracks leverage (live only)
   if (drivable) { engine.setLeverage(game.lev, roundPrice); session.noteLeverage(game.lev); } // instant local + coalesced on-chain
@@ -525,8 +545,7 @@ function frame() {
     controls.setBuffer(Math.max(0, Math.min(1, snap.buffer)));
     hud.setTimer(CONFIG.MAXSEC - (nowMs - roundStartMs) / 1000, true);
     car.setEquity("live", Math.max(0, snap.equity));
-    const payC = Math.floor(snap.payout);
-    controls.setLive(true, `${snap.equity >= 1 ? "CASH OUT" : "BAIL"} ${sol(payC)}`, snap.equity < 1);
+    controls.setLive(true, `${snap.equity >= 1 ? "CASH OUT" : "BAIL"} ${sol3(snap.payout)}`, snap.equity < 1);
     // Local 60s backstop: the native crank normally settles first; this closes on-chain if it lags.
     if (roundActive && !settling && (nowMs - roundStartMs) / 1000 >= CONFIG.MAXSEC) void closeRound("expire");
   } else {
@@ -618,4 +637,19 @@ setInterval(async () => {
 }, 650);
 
 requestAnimationFrame(frame);
+// Login gate — created LAST so createHud's `hudRoot.innerHTML = …` can't wipe it. The
+// wallet connects + the session starts ONLY on "Sign in"; Log out (garage menu) re-shows it.
+const authGate = createAuthGate(document.body);
+authGate.onSignIn(async () => {
+  authGate.setBusy(true);
+  try {
+    await session.init();
+    syncOnchainBalance();
+    authGate.hide();
+  } catch (e) {
+    console.error("sign-in failed", e);
+    authGate.setError("Sign-in failed — check your connection and try again.");
+  }
+});
+
 console.log("redline3d render up");

@@ -1,5 +1,6 @@
 import * as THREE from "three";
 import { BUILDINGS, LOT_BOUNDS } from "../core/lobby-layout";
+import { buildBuilding } from "./buildings";
 
 export interface RemoteCarState { id: string; x: number; z: number; heading: number }
 
@@ -42,7 +43,7 @@ export function createLobby(): Lobby {
   group.add(floor);
 
   // neon grid over the floor
-  const grid = new THREE.GridHelper(Math.max(LOT_BOUNDS.x, LOT_BOUNDS.z) * 2, 30, 0xff4dd2, 0x6a2bd9);
+  const grid = new THREE.GridHelper(Math.max(LOT_BOUNDS.x, LOT_BOUNDS.z) * 2, 60, 0xff4dd2, 0x6a2bd9);
   const gm = grid.material as THREE.Material & { opacity: number };
   gm.transparent = true; gm.opacity = 0.32;
   grid.position.y = 0.02;
@@ -58,24 +59,24 @@ export function createLobby(): Lobby {
   addWall(wallGeoLR, -LOT_BOUNDS.x, 0); addWall(wallGeoLR, LOT_BOUNDS.x, 0);
   addWall(wallGeoFB, 0, -LOT_BOUNDS.z); addWall(wallGeoFB, 0, LOT_BOUNDS.z);
 
-  // buildings
+  // buildings — each corner gets a themed structure (garage bay / start gate / upgrade tower /
+  // container yard). The builder makes it in local space with the entrance on +Z; we position it
+  // in its corner and rotate `b.rot` so that +Z faces the plaza, then float the neon sign + a lamp
+  // out in front. Any animated greebles register an `animate(t)` we drive from update().
+  const animators: Array<(t: number) => void> = [];
   for (const b of BUILDINGS) {
-    const bg = new THREE.Group(); bg.position.set(b.x, 0, b.z);
+    const bg = new THREE.Group(); bg.position.set(b.x, 0, b.z); bg.rotation.y = b.rot;
     const hex = "#" + b.color.toString(16).padStart(6, "0");
 
-    const bodyGeo = track(new THREE.BoxGeometry(b.w, 18, b.d));
-    const bodyMat = track(new THREE.MeshStandardMaterial({ color: 0x120a28, emissive: b.color, emissiveIntensity: 0.16, metalness: 0.4, roughness: 0.55 }));
-    const body = new THREE.Mesh(bodyGeo, bodyMat); body.position.y = 9; bg.add(body);
-
-    const doorGeo = track(new THREE.BoxGeometry(b.w * 0.3, 6, 0.5));
-    const doorMat = track(new THREE.MeshStandardMaterial({ color: b.color, emissive: b.color, emissiveIntensity: 1.5 }));
-    const door = new THREE.Mesh(doorGeo, doorMat); door.position.set(0, 3, b.d / 2 + 0.2); bg.add(door);
+    const built = buildBuilding(b.kind, b.color, track);
+    bg.add(built.group);
+    if (built.animate) animators.push(built.animate);
 
     const signGeo = track(new THREE.PlaneGeometry(b.w * 0.92, b.w * 0.92 / 4));
     const signMat = track(new THREE.MeshBasicMaterial({ map: track(signTexture(b.name, hex)), transparent: true, depthWrite: false }));
-    const sign = new THREE.Mesh(signGeo, signMat); sign.position.set(0, 19.5, b.d / 2 + 0.1); bg.add(sign);
+    const sign = new THREE.Mesh(signGeo, signMat); sign.position.set(0, built.signY, built.frontZ + 0.1); bg.add(sign);
 
-    const lamp = new THREE.PointLight(b.color, 7, 34, 2); lamp.position.set(0, 5, b.d / 2 + 4); bg.add(lamp);
+    const lamp = new THREE.PointLight(b.color, 7, 34, 2); lamp.position.set(0, 5, built.frontZ + 3); bg.add(lamp);
     group.add(bg);
   }
 
@@ -103,7 +104,7 @@ export function createLobby(): Lobby {
       }
       for (const [id, m] of remoteMap) if (!seen.has(id)) { remoteGroup.remove(m); remoteMap.delete(id); }
     },
-    update(dt) { t += dt; void t; },
+    update(dt) { t += dt; for (const a of animators) a(t); },
     dispose() {
       for (const d of disposables) d.dispose();
       remoteMap.clear();

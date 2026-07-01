@@ -17,6 +17,9 @@ interface TrackDef {
   key: Track; name: string; sub: string; icon: string;
   field: "MAXSEC" | "RMAX" | "LIQ"; step: number;
   fmt: (v: number) => string;
+  /** wired end-to-end (the on-chain program honors it). Non-live tracks are hidden until the
+   *  program supports them per-round — showing them would spend coins for no real effect. */
+  live: boolean;
 }
 
 const ICONS: Record<string, string> = {
@@ -29,10 +32,12 @@ const svg = (id: string, size = 18) =>
   `<svg viewBox="0 0 24 24" width="${size}" height="${size}" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">${ICONS[id] || ""}</svg>`;
 
 const TRACKS: TrackDef[] = [
-  { key: "turbo", name: "Turbo Kit", sub: "max leverage", icon: "gauge", field: "RMAX", step: 50, fmt: (v) => `${Math.round(v)}×` },
-  { key: "tank", name: "Long-Range Tank", sub: "round time", icon: "clock", field: "MAXSEC", step: 6, fmt: (v) => `${Math.round(v)}s` },
-  { key: "suspension", name: "Suspension", sub: "liquidation floor", icon: "shield", field: "LIQ", step: -0.01, fmt: (v) => `${Math.round(v * 100)}%` },
+  { key: "turbo", name: "Turbo Kit", sub: "max leverage", icon: "gauge", field: "RMAX", step: 50, fmt: (v) => `${Math.round(v)}×`, live: true },
+  { key: "tank", name: "Long-Range Tank", sub: "round time", icon: "clock", field: "MAXSEC", step: 6, fmt: (v) => `${Math.round(v)}s`, live: true },
+  { key: "suspension", name: "Suspension", sub: "liquidation floor", icon: "shield", field: "LIQ", step: -0.01, fmt: (v) => `${Math.round(v * 100)}%`, live: true },
 ];
+// Only the tracks the on-chain program actually honors are shown + applied.
+const ACTIVE = TRACKS.filter((t) => t.live);
 
 const STORE_KEY = "redline.garage.v1";
 type Saved = { coins: number; levels: Record<Track, number> };
@@ -108,9 +113,9 @@ export function createUpgrades(
 
   const apply = () => {
     if (opts.economicEffects) {
-      for (const t of TRACKS) CONFIG[t.field] = trackValue(base[t.field], t.step, saved.levels[t.key]);
+      for (const t of ACTIVE) CONFIG[t.field] = trackValue(base[t.field], t.step, saved.levels[t.key]);
     }
-    opts.onApply?.(); // gauge still rescales/redraws; with effects off it stays at base RMAX
+    opts.onApply?.(); // gauge rescales/redraws to the new RMAX
   };
   const persist = () => { try { localStorage.setItem(STORE_KEY, JSON.stringify(saved)); } catch { /* ignore */ } };
   apply();
@@ -127,7 +132,7 @@ export function createUpgrades(
   const coinChip = `<span class="upg-coins">◈ <span id="upgCoins">0</span></span>`;
   panel.innerHTML =
     `<div class="upg-head"><span class="lbl">upgrades</span>${coinChip}<button class="upg-x" aria-label="Close">✕</button></div>` +
-    TRACKS.map((t) => `
+    ACTIVE.map((t) => `
       <div class="upg-row" data-row="${t.key}">
         <div class="upg-top">
           <span class="upg-ic">${svg(t.icon)}</span>
@@ -142,7 +147,7 @@ export function createUpgrades(
 
   const render = () => {
     coinsEl.textContent = String(saved.coins);
-    for (const t of TRACKS) {
+    for (const t of ACTIVE) {
       const lvl = saved.levels[t.key];
       const val = trackValue(base[t.field], t.step, lvl);
       (panel.querySelector(`[data-val="${t.key}"]`) as HTMLElement).textContent = t.fmt(val);

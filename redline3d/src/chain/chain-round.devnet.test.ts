@@ -48,7 +48,7 @@ describe.skipIf(!RUN)("chain-round devnet loop", () => {
     await chain.sliceFromPot(maxPayoutBase(1_000_000));
     await chain.delegate();
 
-    const opened = await chain.open("BTC", 1, 100, 1_000_000); // long, 100x, 1 USDC
+    const opened = await chain.open("BTC", 1, 100, 1_000_000, 60, 200_000); // long, 100x, 1 USDC
     expect(opened.entryHuman).toBeGreaterThan(1000); // BTC in the tens of thousands
     expect(await chain.readRoundStatus(true)).toBe(1); // open on ER
 
@@ -100,7 +100,7 @@ describe.skipIf(!RUN)("chain-round devnet loop", () => {
     await chain.delegate();
 
     // open 2000x, exercise the mid-round actions, then arm the crank
-    await chain.open("BTC", 1, 2000, 1_000_000);
+    await chain.open("BTC", 1, 2000, 1_000_000, 60, 200_000);
     expect(await chain.readRoundStatus(true)).toBe(1);
     const afterFlip = await chain.flip(-1);
     if (!afterFlip.settled) expect(afterFlip.dir).toBe(-1); // 2000x could terminal-first; both are valid
@@ -179,7 +179,7 @@ describe.skipIf(!RUN)("chain-round devnet loop", () => {
 
     // each plays a round + settles + sweeps its till back
     const playAndSettle = async (p: ReturnType<typeof createChainRound>) => {
-      await p.open("BTC", 1, 100, STAKE);
+      await p.open("BTC", 1, 100, STAKE, 60, 200_000);
       await sleep(6000);
       const settled = await p.close();
       expect(["cashout", "cap", "liq", "time"]).toContain(settled.outcomeName);
@@ -231,7 +231,7 @@ describe.skipIf(!RUN)("chain-round devnet loop", () => {
     await chain.sliceFromPot(maxPayoutBase(1_000_000));
     await chain.delegate();
 
-    const opened = await chain.open("ETH", 1, 100, 1_000_000); // long, 100x, 1 USDC on ETH
+    const opened = await chain.open("ETH", 1, 100, 1_000_000, 60, 200_000); // long, 100x, 1 USDC on ETH
     expect(opened.feed).toBe("5vaYr1hpv8yrSpu8w3K95x22byYxUJCCNCSYJtqVWPvG"); // bound to the ETH feed
     expect(opened.entryHuman).toBeGreaterThan(500); // ETH in the hundreds–thousands, not BTC's tens of thousands
     expect(opened.entryHuman).toBeLessThan(20_000);
@@ -253,7 +253,7 @@ describe.skipIf(!RUN)("chain-round devnet loop", () => {
     await chain.sliceFromPot(maxPayoutBase(1_000_000));
     await chain.delegate();
 
-    const opened = await chain.open("SOL", 1, 2000, 1_000_000); // long, 2000x on SOL
+    const opened = await chain.open("SOL", 1, 2000, 1_000_000, 60, 200_000); // long, 2000x on SOL
     expect(opened.feed).toBe("ENYwebBThHzmzwPLAQvCucUTsjyfBSZdD9ViXksS4jPu"); // bound to SOL
     expect(opened.entryHuman).toBeGreaterThan(10); // SOL in the tens, not BTC/ETH
     expect(opened.entryHuman).toBeLessThan(2_000);
@@ -289,7 +289,7 @@ describe.skipIf(!RUN)("chain-round devnet loop", () => {
     const erProgram = new anchor.Program(idl as anchor.Idl, erProvider);
     const pdas = deriveRaiderPdas(CHAIN.PROGRAM_ID, player.publicKey, mint);
     const registry = deriveFeedRegistry(CHAIN.PROGRAM_ID);
-    const tx = await erProgram.methods.open(1, 1, 100, new anchor.BN(1_000_000)).accountsPartial({
+    const tx = await erProgram.methods.open(1, 1, 100, new anchor.BN(1_000_000), new anchor.BN(60), 200_000).accountsPartial({
       player: pdas.player, house: pdas.till, round: pdas.round, mint,
       priceUpdate: CHAIN.FEEDS.BTC, registry, playerAuthority: player.publicKey, // BTC feed on an ETH (asset 1) round
     }).transaction();
@@ -331,7 +331,7 @@ describe.skipIf(!RUN)("chain-round devnet loop", () => {
     await chain.ensureRoundInited();
     await chain.sliceFromPot(maxPayoutBase(50_000_000));
     await chain.delegate();
-    await chain.open("SOL", 1, 50, 50_000_000); // 0.05 SOL stake on the SOL feed
+    await chain.open("SOL", 1, 50, 50_000_000, 60, 200_000); // 0.05 SOL stake on the SOL feed
     expect(await chain.readRoundStatus(true)).toBe(1);
     await sleep(6000);
     const settled = await chain.close();

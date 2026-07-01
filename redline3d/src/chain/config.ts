@@ -23,9 +23,12 @@ export const CHAIN = {
   DELEGATION_PROGRAM: new PublicKey("DELeGGvXpWV2fqJUhqcF5ZSYMS4JTLjteaAMARRSaeSh"),
   // MagicBlock native task-scheduler program — schedule_tick CPIs the crank to this.
   MAGIC_PROGRAM: new PublicKey("Magic11111111111111111111111111111111111111"),
-  // Stake mint. wSOL (So111…112) so the mint-agnostic program plays in SOL with no
-  // program change; the client wraps/unwraps around buy_in/withdraw. USDC later = swap this.
-  STAKE_MINT: "So11111111111111111111111111111111111111112",
+  // Stake mint. Normally wSOL (So111…112) so the mint-agnostic program plays in SOL with
+  // no program change (client wraps/unwraps around buy_in/withdraw). TEMPORARILY pointed at
+  // a fresh devnet TEST mint for the working-now flow test: the wSOL master pot is stuck
+  // delegated from a pre-upgrade session, so a fresh house on a new mint is the only
+  // un-stuck bankroll without a fresh program deploy. Revert to wSOL once that pot clears.
+  STAKE_MINT: "BY8FrowrZpDqnn53fjhyCkcLcWDEBZe2njeTykLcPrwo",
   STAKE_DECIMALS: 9,
 } as const;
 

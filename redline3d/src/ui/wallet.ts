@@ -53,7 +53,7 @@ const solCoin = (size = 22) =>
   `<svg viewBox="0 0 24 24" width="${size}" height="${size}"><defs><linearGradient id="solg" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#9945ff"/><stop offset="1" stop-color="#19fb9b"/></linearGradient></defs><circle cx="12" cy="12" r="11" fill="#0b0820"/><g fill="url(#solg)"><path d="M7 8.6c.1-.1.3-.2.4-.2h8.2c.2 0 .3.3.2.4l-1.4 1.5c-.1.1-.3.2-.4.2H6c-.2 0-.3-.3-.2-.4z"/><path d="M7 15.4c.1-.1.3-.2.4-.2h8.2c.2 0 .3.3.2.4l-1.4 1.5c-.1.1-.3.2-.4.2H6c-.2 0-.3-.3-.2-.4z" transform="translate(0,-3.4)"/><path d="M17 12.6c-.1.1-.3.2-.4.2H8.4c-.2 0-.3-.3-.2-.4l1.4-1.5c.1-.1.3-.2.4-.2h8.2c.2 0 .3.3.2.4z"/></g></svg>`;
 
 const shortAddr = (a: string) => (a.length > 12 ? `${a.slice(0, 6)}…${a.slice(-6)}` : a);
-const fmt = (n: number) => n.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+const fmt = (n: number) => n.toLocaleString("en-US", { minimumFractionDigits: 3, maximumFractionDigits: 3 });
 
 let stylesInjected = false;
 function injectStyles() {
@@ -137,7 +137,7 @@ export function createWallet(parent: HTMLElement, opts: WalletOpts): Wallet {
     `<div class="wlt-head"><span class="lbl">wallet</span><button class="wlt-x" data-act="close" aria-label="Close">✕</button></div>` +
     `<div class="wlt-hero"><div class="wlt-hero-glow"></div>
        <div class="wlt-hero-top">${solCoin(22)}<span class="wlt-hero-lbl">Play balance</span></div>
-       <div class="wlt-bal"><span id="wltBal">0.00</span><span class="wlt-bal-cur">SOL</span></div>
+       <div class="wlt-bal"><span id="wltBal">0.000</span><span class="wlt-bal-cur">SOL</span></div>
        <div class="wlt-hero-sub">Solana · devnet</div>
      </div>` +
     // recv view is filled live by renderAddressUI() on each open — a Privy address only exists

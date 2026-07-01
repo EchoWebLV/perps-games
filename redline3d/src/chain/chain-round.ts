@@ -119,7 +119,7 @@ export interface ChainRound {
   delegate(): Promise<void>;
   sliceFromPot(slice: number): Promise<void>;
   sweepTill(): Promise<void>;
-  open(asset: AssetSym, dir: 1 | -1, lev: number, stake: number): Promise<OpenedRound>;
+  open(asset: AssetSym, dir: 1 | -1, lev: number, stake: number, durationSecs: number, liqFp: number): Promise<OpenedRound>;
   close(): Promise<SettledRound>;
   flip(newDir: 1 | -1): Promise<ActionResult>;
   lever(newLev: number): Promise<ActionResult>;
@@ -259,8 +259,8 @@ export function createChainRound(deps: { wallet: AnchorWalletLike; mint: PublicK
       }));
     },
 
-    async open(asset, dir, lev, stake) {
-      await send(erConn, programER.methods.open(CHAIN.ASSET_ID[asset], dir, lev, new BN(stake)).accountsPartial({
+    async open(asset, dir, lev, stake, durationSecs, liqFp) {
+      await send(erConn, programER.methods.open(CHAIN.ASSET_ID[asset], dir, lev, new BN(stake), new BN(durationSecs), liqFp).accountsPartial({
         player: pdas.player, house: pdas.till, round: pdas.round, mint, priceUpdate: feedFor(asset), registry, playerAuthority: owner,
       }));
       const r = await programER.account.round.fetch(pdas.round);

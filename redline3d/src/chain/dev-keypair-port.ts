@@ -23,9 +23,18 @@ const browserStore: Store = {
  */
 export function createDevKeypairPort(opts?: { secretKey?: Uint8Array; store?: Store }): SolanaWalletPort & { keypair: Keypair } {
   const store = opts?.store ?? browserStore;
+  // Devnet-only: VITE_DEV_SECRET (base64) lets `npm run dev` load a KNOWN pre-funded dev
+  // wallet so the login → start-game flow works with no per-browser funding step. Ignored
+  // in tests / non-Vite contexts (where import.meta.env is absent).
+  // Written as the exact `import.meta.env?.VITE_*` form Vite static-replaces at transform
+  // (a cast around import.meta blocks that replacement). Absent in tests → falls through.
+  let envSecret: string | undefined;
+  try { envSecret = (import.meta.env?.VITE_DEV_SECRET as string | undefined) || undefined; } catch { /* non-vite */ }
   let kp: Keypair;
   if (opts?.secretKey) {
     kp = Keypair.fromSecretKey(opts.secretKey);
+  } else if (envSecret) {
+    kp = Keypair.fromSecretKey(Buffer.from(envSecret, "base64"));
   } else {
     const saved = store.get(STORE_KEY);
     if (saved) {

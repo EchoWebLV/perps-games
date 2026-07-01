@@ -16,3 +16,12 @@ export function usd(coins: number): string {
 export function sol(units: number): string {
   return (units / 100).toFixed(2) + " SOL";
 }
+
+/**
+ * Like `sol()` but with 3 decimals — for small SOL amounts (the cash-out / bail payout and
+ * the play balance) where 2-decimal cent rounding hides sub-0.01 SOL. `units` is centi-SOL
+ * and may be fractional (pass the un-floored value so the extra digit is meaningful).
+ */
+export function sol3(units: number): string {
+  return (units / 100).toFixed(3) + " SOL";
+}

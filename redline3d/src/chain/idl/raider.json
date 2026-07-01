@@ -1881,6 +1881,14 @@
         {
           "name": "stake",
           "type": "u64"
+        },
+        {
+          "name": "dur",
+          "type": "i64"
+        },
+        {
+          "name": "liq",
+          "type": "u32"
         }
       ]
     },
@@ -2947,6 +2955,10 @@
           {
             "name": "deadline_ts",
             "type": "i64"
+          },
+          {
+            "name": "liq_fp",
+            "type": "u32"
           },
           {
             "name": "status",

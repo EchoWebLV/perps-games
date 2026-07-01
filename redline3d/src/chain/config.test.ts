@@ -8,7 +8,9 @@ describe("CHAIN config", () => {
     expect(CHAIN.VALIDATOR.toBase58()).toBe("MAS1Dt9qreoRMQ14YQuhg8UTZMMzDdKhmkZMECCzk57");
     expect(CHAIN.DELEGATION_PROGRAM.toBase58()).toBe("DELeGGvXpWV2fqJUhqcF5ZSYMS4JTLjteaAMARRSaeSh");
     expect(CHAIN.ER_RPC).toBe("https://devnet.magicblock.app");
-    expect(CHAIN.STAKE_MINT).toBe("So11111111111111111111111111111111111111112");
+    // LOCAL working-now devnet TEST mint (the wSOL master pot is stuck-delegated pre-upgrade).
+    // Revert this + config.ts STAKE_MINT to wSOL (So111…112) together once that pot clears.
+    expect(CHAIN.STAKE_MINT).toBe("BY8FrowrZpDqnn53fjhyCkcLcWDEBZe2njeTykLcPrwo");
     expect(CHAIN.STAKE_DECIMALS).toBe(9);
   });
 

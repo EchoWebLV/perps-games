@@ -248,7 +248,7 @@ describe("createWallet", () => {
     expect(copyBtn?.innerHTML).toContain("Copied");
   });
 
-  it("shows the play balance in SOL in the hero (centi-SOL units → SOL)", () => {
+  it("shows the play balance in SOL in the hero at 3 decimals (centi-SOL units → SOL)", () => {
     const parent = new FakeElement("div");
     const wallet = createWallet(parent as unknown as HTMLElement, {
       address: () => ADDR,
@@ -259,7 +259,8 @@ describe("createWallet", () => {
     wallet.open();
 
     const overlay = parent.children[0];
-    expect(overlay.querySelector<FakeElement>("#wltBal")?.textContent).toBe("0.25");
+    // 3 decimals so small SOL balances (a cash-out leaves sub-0.01 SOL) stay visible.
+    expect(overlay.querySelector<FakeElement>("#wltBal")?.textContent).toBe("0.250");
   });
 
   it("enables End while a session is live and disables Withdraw", async () => {

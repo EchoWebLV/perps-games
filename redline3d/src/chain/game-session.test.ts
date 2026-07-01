@@ -1,6 +1,6 @@
 import { describe, it, expect, vi } from "vitest";
 import { PublicKey } from "@solana/web3.js";
-import { createGameSession } from "./game-session";
+import { createGameSession, SESSION_TILL_ROUNDS } from "./game-session";
 import { maxPayoutBase, type ChainRound } from "./chain-round";
 
 const tick = () => new Promise<void>((r) => setTimeout(r, 0));
@@ -74,7 +74,7 @@ describe("createGameSession", () => {
     const chain = fakeChain();
     const s = createGameSession({ mint: MINT, onSettled: vi.fn(), injectChain: chain, injectAddress: "Fake111" });
     await s.init();
-    const opened = await s.open("BTC", 1, 2000, 1_000_000);
+    const opened = await s.open("BTC", 1, 2000, 1_000_000, 60, 200_000);
     expect(opened.entryHuman).toBe(60000);
     expect(chain.scheduleCrank).toHaveBeenCalled();
     expect(s.crankArmed()).toBe(true);
@@ -84,7 +84,7 @@ describe("createGameSession", () => {
     const chain = fakeChain({ scheduleCrank: vi.fn(async () => { throw new Error("escrow underfunded"); }) });
     const s = createGameSession({ mint: MINT, onSettled: vi.fn(), injectChain: chain, injectAddress: "Fake111" });
     await s.init();
-    await s.open("BTC", 1, 2000, 1_000_000);
+    await s.open("BTC", 1, 2000, 1_000_000, 60, 200_000);
     expect(s.crankArmed()).toBe(false);
   });
 
@@ -144,7 +144,7 @@ describe("createGameSession", () => {
     const s = createGameSession({ mint: MINT, onSettled: vi.fn(), injectChain: chain, injectAddress: "Fake111" });
     await s.init();
     await s.ensureSession(50_000_000, 10_000_000); // buy-in 0.05 SOL, bet 0.01 SOL
-    expect(chain.sliceFromPot).toHaveBeenCalledWith(maxPayoutBase(10_000_000)); // 237_500_000
+    expect(chain.sliceFromPot).toHaveBeenCalledWith(maxPayoutBase(10_000_000) * SESSION_TILL_ROUNDS); // session bankroll = N × one round's max payout
     expect((chain.sliceFromPot as any).mock.invocationCallOrder[0])
       .toBeLessThan((chain.delegate as any).mock.invocationCallOrder[0]);
     await s.endSession();

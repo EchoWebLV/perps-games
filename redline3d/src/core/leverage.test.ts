@@ -20,4 +20,19 @@ describe("leverage", () => {
     expect(niceLev(777)).toBe(800);     // >=500 → nearest 50
     expect(niceLev(1000)).toBe(1000);
   });
+
+  it("tToLev/levFrac top out at the passed rmax (Cybertruck base / Turbo upgrade)", () => {
+    expect(tToLev(100, 1500)).toBeCloseTo(1500, 6); // Cybertruck's 1500 base
+    expect(tToLev(100, 3000)).toBeCloseTo(3000, 6);
+    expect(tToLev(0, 1500)).toBeCloseTo(10, 6);     // RMIN floor unchanged
+    expect(levFrac(1500, 1500)).toBeCloseTo(1, 6);
+    expect(levFrac(10, 1500)).toBeCloseTo(0, 6);
+  });
+
+  it("the leverage stack peaks at 3000 (1500 base × 2× nitro)", () => {
+    const NITRO = 2; // Orion / Cybertruck Nitro Overdrive multiplier
+    expect(niceLev(tToLev(100, 1500)) * NITRO).toBe(3000); // Cybertruck (1500) + nitro
+    expect(niceLev(tToLev(100, 1000)) * NITRO).toBe(2000); // default base (1000) + nitro
+    expect(niceLev(tToLev(100, 1500))).toBe(1500);         // Cybertruck, no nitro
+  });
 });

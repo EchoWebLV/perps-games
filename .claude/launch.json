@@ -8,6 +8,12 @@
       "port": 8766
     },
     {
+      "name": "journey",
+      "runtimeExecutable": "python3",
+      "runtimeArgs": ["-m", "http.server", "8767", "--directory", "journey"],
+      "port": 8767
+    },
+    {
       "name": "redline3d",
       "runtimeExecutable": "npm",
       "runtimeArgs": ["run", "dev", "--", "--port", "4000", "--strictPort", "--host"],

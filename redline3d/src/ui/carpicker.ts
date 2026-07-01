@@ -9,6 +9,7 @@ export interface CarPower { name: string; desc: string; icon: string }
 export interface CarOption {
   name: string; url: string; scale?: number; yaw?: number;
   ability?: CarAbility; power?: CarPower;
+  baseLev?: number;         // car's base max leverage (raises the dial ceiling, e.g. Cybertruck 1500)
   rarity?: 1 | 2 | 3;       // collectible tier (gems on the card)
   locked?: boolean;         // not yet owned → shown sealed in the collection
 }

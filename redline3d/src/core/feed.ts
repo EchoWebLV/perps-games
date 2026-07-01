@@ -35,7 +35,7 @@ export interface FeedHandle { state: FeedStatus; stop: () => void; }
 // ---- paste-here config (URL params override these) ------------------------
 // SECURITY: burner token, ships in the bundle (parity with prototype). Before any
 // public release move it server-side via the relay (see spec §7 / lazer-relay.mjs).
-const LAZER_TOKEN = "CgTXPJKhpxcSrZNBZaaRMT56CR5c2uZrZHNT2ZziA3TV";   // BURNER token, hardcoded per user request — rotate/remove before any public push
+const LAZER_TOKEN = "";   // burner token got de-entitled from the crypto feeds → default to the free, no-token Hermes feed (still real Pyth). Re-add a valid token here, or use ?lazer=… / the relay, for low-latency Lazer.
 const LAZER_RELAY = "";   // <-- or a relay ws url (token stays server-side)
 const DEFAULT_CHANNEL = "real_time";
 const HERMES_FALLBACK = true;
@@ -120,9 +120,15 @@ export function connectFeed(opts: FeedOpts): FeedHandle {
         return;
       }
       if (d.type === "subscriptionError") {                 // every feed in this sub unsupported at its channel
+        const err = String(d.error || "");
+        // An ENTITLEMENT failure (the token can't access these feeds — e.g. an expired/downgraded
+        // burner) won't be fixed by a slower channel. Drop straight to the free Hermes feed instead
+        // of looping on the dead Lazer subscription, which would otherwise strand the game on its sim.
+        const entitlement = /insufficient access|not entitled|not accessible|allowed types/i.test(err);
         const sids = subFeeds[d.subscriptionId] || [], slower2 = nextSlower(subChannel[d.subscriptionId] || CHANNEL);
-        if (sids.length && slower2) subscribeFeeds(sids, slower2);
-        else console.warn("[Lazer] subscriptionError:", d.error);
+        if (!entitlement && sids.length && slower2) { subscribeFeeds(sids, slower2); return; }
+        console.warn("[Lazer] subscriptionError → falling back to Hermes:", err);
+        if (HERMES_FALLBACK) startHermes();
         return;
       }
       const p = d.parsed || (d.streamUpdated && d.streamUpdated.parsed) || null;
