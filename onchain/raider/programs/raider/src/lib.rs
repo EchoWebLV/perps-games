@@ -326,6 +326,23 @@ pub mod raider {
         Ok(())
     }
 
+    /// Session end (L1, AFTER undelegate): return this player's till balance to the
+    /// master bankroll, so losses fund the next player and the freed slice is available
+    /// again (the single-pot / self-smoothing property). PERMISSIONLESS: moving a till's
+    /// balance into the master can only consolidate value into the pot, never extract it,
+    /// so anyone may call it — the player's own client at session end, or a keeper
+    /// reclaiming an abandoned session's slice. The till must be fully settled
+    /// (locked == 0) and undelegated (program-owned — a live session's delegated till is
+    /// owned by the delegation program and fails the typed-account check here).
+    pub fn sweep_till(ctx: Context<SweepTill>) -> Result<()> {
+        require!(ctx.accounts.till.locked == 0, RaiderError::RoundAlreadyOpen);
+        ctx.accounts.master.balance =
+            house::sweep(ctx.accounts.master.balance, ctx.accounts.till.balance)
+                .map_err(|_| RaiderError::MathOverflow)?;
+        ctx.accounts.till.balance = 0;
+        Ok(())
+    }
+
     // ---- Task 7: open a round on the ER -------------------------------------
 
     /// Open a round inside the ER: snapshot the live Lazer entry price, debit the
@@ -1096,6 +1113,32 @@ pub struct SliceFromPot<'info> {
     )]
     pub till: Account<'info, HouseBalance>,
     pub system_program: Program<'info, System>,
+}
+
+// sweep_till consolidates a till back into the master on L1, AFTER the session
+// undelegated. Permissionless: `payer` is any signer (pays only the tx fee). `owner` is
+// the session owner whose till is swept — an AccountInfo used ONLY to derive the till
+// PDA (not a signer), so a keeper can reclaim an abandoned session's slice while the
+// normal path passes payer == owner == the player.
+#[derive(Accounts)]
+pub struct SweepTill<'info> {
+    #[account(mut)]
+    pub payer: Signer<'info>,
+    pub mint: Account<'info, Mint>,
+    /// CHECK: session owner whose till is swept — used only to derive the till PDA seed.
+    pub owner: AccountInfo<'info>,
+    #[account(
+        mut,
+        seeds = [HOUSE_SEED, mint.key().as_ref()],
+        bump = master.bump,
+    )]
+    pub master: Account<'info, HouseBalance>,
+    #[account(
+        mut,
+        seeds = [HOUSE_SEED, mint.key().as_ref(), owner.key().as_ref()],
+        bump = till.bump,
+    )]
+    pub till: Account<'info, HouseBalance>,
 }
 
 // open/close mutate the three CO-DELEGATED ledger PDAs together inside the ER.
