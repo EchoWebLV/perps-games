@@ -27,6 +27,7 @@ const {
 const assert = require("assert");
 const idl = require("../target/idl/raider.json");
 const { BN } = anchor;
+const { deriveTill, maxPayout } = require("./helpers");
 
 const BASE_RPC = process.env.BASE_RPC || "https://api.devnet.solana.com";
 const ER_RPC = process.env.ER_RPC || "https://devnet.magicblock.app";
@@ -37,6 +38,7 @@ const DELEGATION_PROGRAM = new PublicKey("DELeGGvXpWV2fqJUhqcF5ZSYMS4JTLjteaAMAR
 
 const STAKE = 1_000_000; // 1 USDC (6 decimals)
 const MAX_PAYOUT = 23_750_000; // max_payout(1e6) = stake * 25 * 0.95 = 23.75 USDC
+const ASSET_BTC = 0; // multi-asset: 0 = BTC = BTC_FEED
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 // ---------------------------------------------------------------------------
@@ -44,7 +46,7 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 // buy_in -> init_round -> delegate_session. Returns everything `open` needs.
 // `houseFund` lets the under-funded scenario starve the house on purpose.
 // ---------------------------------------------------------------------------
-async function buildScenario({ funder, baseProvider, program, houseFund, buyInAmount }) {
+async function buildScenario({ funder, baseProvider, program, houseFund, buyInAmount, sliceAmount, expectSliceReject }) {
   const session = Keypair.generate();
   const conn = baseProvider.connection;
 
@@ -69,6 +71,8 @@ async function buildScenario({ funder, baseProvider, program, houseFund, buyInAm
   const mint = await createMint(conn, funder.payer, funder.publicKey, null, 6);
   const [housePda] = PublicKey.findProgramAddressSync(
     [Buffer.from("house"), mint.toBuffer()], program.programId);
+  const till = deriveTill(program.programId, mint, session.publicKey); // per-session till (was the shared house)
+  const [feedRegistry] = PublicKey.findProgramAddressSync([Buffer.from("feeds")], program.programId);
   const [vaultAuthority] = PublicKey.findProgramAddressSync(
     [Buffer.from("vault"), mint.toBuffer()], program.programId);
   const vaultToken = getAssociatedTokenAddressSync(mint, vaultAuthority, true);
@@ -107,14 +111,34 @@ async function buildScenario({ funder, baseProvider, program, houseFund, buyInAm
     owner: session.publicKey, round: roundPda, systemProgram: SystemProgram.programId,
   }).rpc({ skipPreflight: true });
 
-  // Co-delegate all three to the ER.
+  // slice_from_pot: carve this session's till off the master pot BEFORE delegating it.
+  // Under-capitalization is now caught HERE (the pot can't cover the slice) rather than
+  // at open — the under-funded scenario passes expectSliceReject to assert this.
+  const slice = sliceAmount != null ? sliceAmount : maxPayout(STAKE);
+  if (expectSliceReject) {
+    let rejected = false, errMsg = "";
+    try {
+      await programAsSession.methods.sliceFromPot(new BN(slice)).accounts({
+        owner: session.publicKey, mint, master: housePda, till, systemProgram: SystemProgram.programId,
+      }).rpc();
+    } catch (e) {
+      rejected = true;
+      errMsg = (e && e.toString()) || "";
+    }
+    return { session, mint, housePda, till, feedRegistry, vaultAuthority, vaultToken, playerPda, roundPda, sliceRejected: rejected, sliceErr: errMsg };
+  }
+  await programAsSession.methods.sliceFromPot(new BN(slice)).accounts({
+    owner: session.publicKey, mint, master: housePda, till, systemProgram: SystemProgram.programId,
+  }).rpc({ skipPreflight: true });
+
+  // Co-delegate all three (player + TILL + round) to the ER.
   await programAsSession.methods.delegateSession().accounts({
-    payer: session.publicKey, mint, player: playerPda, house: housePda, round: roundPda,
+    payer: session.publicKey, mint, player: playerPda, house: till, round: roundPda,
   }).remainingAccounts([{ pubkey: VALIDATOR, isSigner: false, isWritable: false }])
     .rpc({ skipPreflight: true });
 
   // Poll until all three flip to the delegation program.
-  const targets = { player: playerPda, house: housePda, round: roundPda };
+  const targets = { player: playerPda, house: till, round: roundPda };
   let flipped = {};
   for (let i = 0; i < 25; i++) {
     flipped = {};
@@ -128,7 +152,7 @@ async function buildScenario({ funder, baseProvider, program, houseFund, buyInAm
   assert.ok(flipped.player && flipped.house && flipped.round,
     `not all delegated: ${JSON.stringify(flipped)}`);
 
-  return { session, mint, housePda, vaultAuthority, vaultToken, playerPda, roundPda };
+  return { session, mint, housePda, till, feedRegistry, vaultAuthority, vaultToken, playerPda, roundPda };
 }
 
 describe("raider open (entry snapshot + house max-payout pre-lock, on ER)", function () {
@@ -164,14 +188,14 @@ describe("raider open (entry snapshot + house max-payout pre-lock, on ER)", func
 
     const playerBefore = (await programER.account.playerBalance.fetch(sc.playerPda)).balance;
 
-    // open(dir=long, lev=100, stake=1e6) on the ER.
-    await programER.methods.open(1, 100, new BN(STAKE)).accounts({
-      player: sc.playerPda, house: sc.housePda, round: sc.roundPda, mint: sc.mint,
-      priceUpdate: BTC_FEED, playerAuthority: sc.session.publicKey,
+    // open(asset=BTC, dir=long, lev=100, stake=1e6) on the ER — settles against the TILL.
+    await programER.methods.open(ASSET_BTC, 1, 100, new BN(STAKE)).accounts({
+      player: sc.playerPda, house: sc.till, round: sc.roundPda, mint: sc.mint,
+      priceUpdate: BTC_FEED, registry: sc.feedRegistry, playerAuthority: sc.session.publicKey,
     }).signers([sc.session]).rpc({ skipPreflight: true });
 
     const round = await programER.account.round.fetch(sc.roundPda);
-    const house = await programER.account.houseBalance.fetch(sc.housePda);
+    const house = await programER.account.houseBalance.fetch(sc.till);
     const playerAfter = (await programER.account.playerBalance.fetch(sc.playerPda)).balance;
 
     const usd = round.entryRaw.toNumber() * Math.pow(10, -Math.abs(round.entryExpo));
@@ -196,41 +220,26 @@ describe("raider open (entry snapshot + house max-payout pre-lock, on ER)", func
     assert.equal(round.payout.toNumber(), 0, "payout zero while open");
   });
 
-  it("open is REJECTED when the house cannot cover max_payout (HouseUndercapitalized)", async () => {
-    // Fund the house with 1 USDC less than one round's worst case.
+  it("a round is REJECTED when the pot cannot cover its slice (HouseUndercapitalized)", async () => {
+    // Under the till model the house-solvency gate moves EARLIER: slice_from_pot
+    // (pre-delegate, L1) rejects when the master pot can't cover this round's
+    // max_payout slice — so the round can never even delegate/open under-capitalized.
+    // Fund the pot with 1 USDC less than one round's worst-case slice.
     const sc = await buildScenario({
       funder, baseProvider, program,
-      houseFund: MAX_PAYOUT - 1_000_000, // 22.75 USDC < 23.75 needed
+      houseFund: MAX_PAYOUT - 1_000_000, // 22.75 USDC < 23.75 slice needed
       buyInAmount: 5_000_000,
+      expectSliceReject: true,
     });
     console.log("under-funded session:", sc.session.publicKey.toBase58());
 
-    const erProvider = new anchor.AnchorProvider(
-      new anchor.web3.Connection(ER_RPC, { wsEndpoint: ER_WS, commitment: "confirmed" }),
-      new anchor.Wallet(sc.session), { commitment: "confirmed" });
-    const programER = new anchor.Program(idl, erProvider);
+    assert.ok(sc.sliceRejected, "slice_from_pot MUST reject when the pot is under-funded");
+    assert.ok(/HouseUndercapitalized/i.test(sc.sliceErr),
+      "rejection must be HouseUndercapitalized, got:\n" + sc.sliceErr.split("\n").slice(0, 6).join("\n  "));
+    console.log("under-funded pot REJECTED the slice with HouseUndercapitalized as required");
 
-    let rejected = false, errMsg = "";
-    try {
-      // Preflight ON so the program error surfaces with its code instead of an
-      // opaque processed-tx failure.
-      await programER.methods.open(1, 100, new BN(STAKE)).accounts({
-        player: sc.playerPda, house: sc.housePda, round: sc.roundPda, mint: sc.mint,
-        priceUpdate: BTC_FEED, playerAuthority: sc.session.publicKey,
-      }).signers([sc.session]).rpc();
-    } catch (e) {
-      rejected = true;
-      errMsg = (e && e.toString()) || "";
-    }
-    assert.ok(rejected, "open MUST reject when the house is under-funded");
-    assert.ok(/HouseUndercapitalized/i.test(errMsg),
-      "rejection must be HouseUndercapitalized, got:\n" + errMsg.split("\n").slice(0, 6).join("\n  "));
-    console.log("under-funded house REJECTED with HouseUndercapitalized as required");
-
-    // And the round never opened (player not debited, house not locked).
-    const round = await programER.account.round.fetch(sc.roundPda);
-    const house = await programER.account.houseBalance.fetch(sc.housePda);
-    assert.equal(round.status, 0, "round must stay idle after a rejected open");
-    assert.equal(house.locked.toString(), "0", "house must not lock on a rejected open");
+    // And the round never opened — it was never delegated (still program-owned + idle).
+    const round = await program.account.round.fetch(sc.roundPda);
+    assert.equal(round.status, 0, "round must stay idle after a rejected slice");
   });
 });

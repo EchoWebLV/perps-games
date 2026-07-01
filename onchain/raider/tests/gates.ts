@@ -23,6 +23,7 @@ const {
 const assert = require("assert");
 const idl = require("../target/idl/raider.json");
 const { BN } = anchor;
+const { deriveTill, maxPayout } = require("./helpers");
 
 const BASE_RPC = process.env.BASE_RPC || "https://api.devnet.solana.com";
 const ER_RPC = process.env.ER_RPC || "https://devnet.magicblock.app";
@@ -34,6 +35,7 @@ const DELEGATION_PROGRAM = new PublicKey("DELeGGvXpWV2fqJUhqcF5ZSYMS4JTLjteaAMAR
 const STAKE = 1_000_000; // 1 USDC
 const MAX_PAYOUT = 23_750_000;
 const RMAX = 2000;
+const ASSET_BTC = 0; // multi-asset: 0 = BTC = BTC_FEED
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 // init_house -> fund_house -> buy_in -> init_round. If `delegate`, also
@@ -52,6 +54,8 @@ async function buildScenario({ funder, baseProvider, program, delegate, buyInAmo
   const programAsSession = new anchor.Program(idl, sessionProvider);
   const mint = await createMint(conn, funder.payer, funder.publicKey, null, 6);
   const [housePda] = PublicKey.findProgramAddressSync([Buffer.from("house"), mint.toBuffer()], program.programId);
+  const till = deriveTill(program.programId, mint, session.publicKey); // per-session till (was the shared house)
+  const [feedRegistry] = PublicKey.findProgramAddressSync([Buffer.from("feeds")], program.programId);
   const [vaultAuthority] = PublicKey.findProgramAddressSync([Buffer.from("vault"), mint.toBuffer()], program.programId);
   const vaultToken = getAssociatedTokenAddressSync(mint, vaultAuthority, true);
   const [playerPda] = PublicKey.findProgramAddressSync(
@@ -83,16 +87,21 @@ async function buildScenario({ funder, baseProvider, program, delegate, buyInAmo
     owner: session.publicKey, round: roundPda, systemProgram: SystemProgram.programId,
   }).rpc({ skipPreflight: true });
 
-  const out = { session, mint, housePda, vaultAuthority, vaultToken, playerPda, roundPda,
+  const out = { session, mint, housePda, till, feedRegistry, vaultAuthority, vaultToken, playerPda, roundPda,
     ownerAta: ownerAta.address, programAsSession };
 
   if (delegate) {
+    // slice_from_pot: carve this session's till off the master pot BEFORE delegating it
+    // (the till, not the master, is what co-delegates with player+round).
+    await programAsSession.methods.sliceFromPot(new BN(maxPayout(STAKE))).accounts({
+      owner: session.publicKey, mint, master: housePda, till, systemProgram: SystemProgram.programId,
+    }).rpc({ skipPreflight: true });
     // delegate_session can intermittently surface a transient confirmation hiccup
     // ("Unknown action 'undefined'") on the public ER; retry a couple of times.
     for (let tryN = 1; ; tryN++) {
       try {
         await programAsSession.methods.delegateSession().accounts({
-          payer: session.publicKey, mint, player: playerPda, house: housePda, round: roundPda,
+          payer: session.publicKey, mint, player: playerPda, house: till, round: roundPda,
         }).remainingAccounts([{ pubkey: VALIDATOR, isSigner: false, isWritable: false }])
           .rpc({ skipPreflight: true });
         break;
@@ -101,7 +110,7 @@ async function buildScenario({ funder, baseProvider, program, delegate, buyInAmo
         await sleep(1500);
       }
     }
-    const targets = { player: playerPda, house: housePda, round: roundPda };
+    const targets = { player: playerPda, house: till, round: roundPda };
     let flipped = {};
     for (let i = 0; i < 25; i++) {
       flipped = {};
@@ -146,38 +155,48 @@ describe("raider negative gates — deterministic rejections", function () {
     const sc = await buildScenario({ funder, baseProvider, program, delegate: true });
     console.log("session :", sc.session.publicKey.toBase58());
     const pER = sc.programER;
+    // open takes the feed registry (multi-asset); close/other settle paths do not.
     const openAcc = {
-      player: sc.playerPda, house: sc.housePda, round: sc.roundPda, mint: sc.mint,
+      player: sc.playerPda, house: sc.till, round: sc.roundPda, mint: sc.mint,
+      priceUpdate: BTC_FEED, registry: sc.feedRegistry, playerAuthority: sc.session.publicKey,
+    };
+    const closeAcc = {
+      player: sc.playerPda, house: sc.till, round: sc.roundPda, mint: sc.mint,
       priceUpdate: BTC_FEED, playerAuthority: sc.session.publicKey,
     };
 
     // --- lev > RMAX -> BadLeverage ---
     await expectReject(
-      () => pER.methods.open(1, RMAX + 1, new BN(STAKE)).accounts(openAcc).signers([sc.session]).rpc(),
+      () => pER.methods.open(ASSET_BTC, 1, RMAX + 1, new BN(STAKE)).accounts(openAcc).signers([sc.session]).rpc(),
       /BadLeverage|6006/i, "open(lev=2001)");
 
     // --- dir = 0 -> BadLeverage ---
     await expectReject(
-      () => pER.methods.open(0, 100, new BN(STAKE)).accounts(openAcc).signers([sc.session]).rpc(),
+      () => pER.methods.open(ASSET_BTC, 0, 100, new BN(STAKE)).accounts(openAcc).signers([sc.session]).rpc(),
       /BadLeverage|6006/i, "open(dir=0)");
 
     // The round must still be idle after the two rejected opens.
     let r = await pER.account.round.fetch(sc.roundPda);
     assert.equal(r.status, 0, "round must stay idle after rejected opens");
 
-    // --- close with NO open round -> NoOpenRound ---
+    // --- close with NO open round -> REJECTED ---
+    // On the multi-asset program, close validates `price_update == round.feed` BEFORE
+    // the open-state gate. An IDLE round (status 0) never had `open` stamp round.feed,
+    // so that field is the default pubkey and the real BTC_FEED trips the feed check
+    // (UntrustedFeed) first — before NoOpenRound is reached. Either rejection proves
+    // the same intent: a close against a round with no open position is gated.
     await expectReject(
-      () => pER.methods.close().accounts(openAcc).signers([sc.session]).rpc(),
-      /NoOpenRound|6003/i, "close(no open round)");
+      () => pER.methods.close().accounts(closeAcc).signers([sc.session]).rpc(),
+      /NoOpenRound|6003|UntrustedFeed|6010/i, "close(no open round)");
 
     // --- a valid open succeeds, then double-open -> RoundAlreadyOpen ---
-    await pER.methods.open(1, 100, new BN(STAKE)).accounts(openAcc).signers([sc.session]).rpc({ skipPreflight: true });
+    await pER.methods.open(ASSET_BTC, 1, 100, new BN(STAKE)).accounts(openAcc).signers([sc.session]).rpc({ skipPreflight: true });
     r = await pER.account.round.fetch(sc.roundPda);
     assert.equal(r.status, 1, "first open must succeed");
     console.log("  first open OK (status=1)");
 
     await expectReject(
-      () => pER.methods.open(1, 100, new BN(STAKE)).accounts(openAcc).signers([sc.session]).rpc(),
+      () => pER.methods.open(ASSET_BTC, 1, 100, new BN(STAKE)).accounts(openAcc).signers([sc.session]).rpc(),
       /RoundAlreadyOpen|6002/i, "double-open");
 
     console.log("ER-side gates OK: BadLeverage (lev & dir), NoOpenRound, RoundAlreadyOpen");

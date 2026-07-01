@@ -46,8 +46,11 @@ const {
   VALIDATOR,
   sleep,
   sendIxHttp,
+  deriveTill,
+  maxPayout,
 } = require("./helpers");
 const STAKE = 1_000_000;
+const ASSET_BTC = 0; // multi-asset: 0 = BTC = BTC_FEED
 // Keeper window per attempt + how many fresh windows to try. MAX_TICKS (@200ms each)
 // MUST be sized to the DEPLOYED round time-cap so the keeper observes a full window
 // (and re-opens AFTER it settles). Pick MAX_TICKS via env to match the build:
@@ -100,6 +103,10 @@ describe("raider — continuous 2000x liquidation via tick (keeper-driven)", fun
       );
       const [housePda] = PublicKey.findProgramAddressSync(
         [Buffer.from("house"), mint.toBuffer()],
+        program.programId
+      );
+      const [feedRegistry] = PublicKey.findProgramAddressSync(
+        [Buffer.from("feeds")],
         program.programId
       );
       const [vaultAuthority] = PublicKey.findProgramAddressSync(
@@ -181,6 +188,7 @@ describe("raider — continuous 2000x liquidation via tick (keeper-driven)", fun
         [Buffer.from("round"), session.publicKey.toBuffer()],
         program.programId
       );
+      const till = deriveTill(program.programId, mint, session.publicKey); // per-session till (was the shared house)
       const ownerAta = await getOrCreateAssociatedTokenAccount(
         conn,
         funder.payer,
@@ -216,6 +224,17 @@ describe("raider — continuous 2000x liquidation via tick (keeper-driven)", fun
           systemProgram: SystemProgram.programId,
         })
         .rpc({ skipPreflight: true });
+      // slice_from_pot: carve this session's till off the master pot BEFORE delegating it.
+      await pAs.methods
+        .sliceFromPot(new BN(maxPayout(STAKE)))
+        .accounts({
+          owner: session.publicKey,
+          mint,
+          master: housePda,
+          till,
+          systemProgram: SystemProgram.programId,
+        })
+        .rpc({ skipPreflight: true });
       // HTTP-confirm the delegate CPI (WS confirmation is flaky for this heavy tx).
       await sendIxHttp(
         conn,
@@ -225,7 +244,7 @@ describe("raider — continuous 2000x liquidation via tick (keeper-driven)", fun
             payer: session.publicKey,
             mint,
             player,
-            house: housePda,
+            house: till,
             round,
           })
           .remainingAccounts([
@@ -247,13 +266,14 @@ describe("raider — continuous 2000x liquidation via tick (keeper-driven)", fun
       // The `open` is deferred so both sides open together with fresh deadlines.
       const open = () =>
         programER.methods
-          .open(dir, 2000, new BN(STAKE))
+          .open(ASSET_BTC, dir, 2000, new BN(STAKE))
           .accounts({
             player,
-            house: housePda,
+            house: till,
             round,
             mint,
             priceUpdate: BTC_FEED,
+            registry: feedRegistry,
             playerAuthority: session.publicKey,
           })
           .signers([session])
@@ -262,8 +282,9 @@ describe("raider — continuous 2000x liquidation via tick (keeper-driven)", fun
         session,
         programER,
         housePda,
+        till,
         open,
-        accounts: { player, house: housePda, round, mint, btcFeed: BTC_FEED },
+        accounts: { player, house: till, round, mint, btcFeed: BTC_FEED },
       };
     }
 
@@ -293,9 +314,9 @@ describe("raider — continuous 2000x liquidation via tick (keeper-driven)", fun
     // from any prior time-settled attempts (house balance changes each settle).
     let longBalBeforeOpen, shortBalBeforeOpen;
     for (let attempt = 1; attempt <= ATTEMPTS; attempt++) {
-      const lh = await long.programER.account.houseBalance.fetch(long.housePda);
+      const lh = await long.programER.account.houseBalance.fetch(long.till);
       const sh = await short.programER.account.houseBalance.fetch(
-        short.housePda
+        short.till
       );
       longBalBeforeOpen = BigInt(lh.balance.toString());
       shortBalBeforeOpen = BigInt(sh.balance.toString());
@@ -317,12 +338,12 @@ describe("raider — continuous 2000x liquidation via tick (keeper-driven)", fun
       // Each side's house pre-locked exactly one 2000x round's max-payout (23.75).
       const longLockedAfterOpen = BigInt(
         (
-          await long.programER.account.houseBalance.fetch(long.housePda)
+          await long.programER.account.houseBalance.fetch(long.till)
         ).locked.toString()
       );
       const shortLockedAfterOpen = BigInt(
         (
-          await short.programER.account.houseBalance.fetch(short.housePda)
+          await short.programER.account.houseBalance.fetch(short.till)
         ).locked.toString()
       );
       assert.equal(
@@ -383,7 +404,7 @@ describe("raider — continuous 2000x liquidation via tick (keeper-driven)", fun
       const r = side === long ? lr : sr;
       if (!(r.status === 2 && r.outcome === 2)) continue;
       const balBefore = side === long ? longBalBeforeOpen : shortBalBeforeOpen;
-      const h = await side.programER.account.houseBalance.fetch(side.housePda);
+      const h = await side.programER.account.houseBalance.fetch(side.till);
       assert.equal(
         h.locked.toString(),
         "0",

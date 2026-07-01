@@ -30,7 +30,9 @@ const {
 const assert = require("assert");
 const idl = require("../target/idl/raider.json");
 const { runKeeper } = require("./keeper");
+const { deriveTill, maxPayout } = require("./helpers");
 const { BN } = anchor;
+const ASSET_BTC = 0; // multi-asset: 0 = BTC = BTC_FEED
 
 const BASE_RPC = process.env.BASE_RPC || "https://api.devnet.solana.com";
 // Pin the base-layer WS endpoint. web3.js auto-derives the WS URL from BASE_RPC, but
@@ -114,6 +116,10 @@ describe("raider — 60s time-cap (deterministic clock terminal, outcome=Time)",
       [Buffer.from("house"), mint.toBuffer()],
       program.programId
     );
+    const [feedRegistry] = PublicKey.findProgramAddressSync(
+      [Buffer.from("feeds")],
+      program.programId
+    );
     const [vaultAuthority] = PublicKey.findProgramAddressSync(
       [Buffer.from("vault"), mint.toBuffer()],
       program.programId
@@ -189,6 +195,7 @@ describe("raider — 60s time-cap (deterministic clock terminal, outcome=Time)",
       [Buffer.from("round"), session.publicKey.toBuffer()],
       program.programId
     );
+    const till = deriveTill(program.programId, mint, session.publicKey); // per-session till (was the shared house)
     const ownerAta = await getOrCreateAssociatedTokenAccount(
       conn,
       funder.payer,
@@ -224,6 +231,17 @@ describe("raider — 60s time-cap (deterministic clock terminal, outcome=Time)",
         systemProgram: SystemProgram.programId,
       })
       .rpc({ skipPreflight: true });
+    // slice_from_pot: carve this session's till off the master pot BEFORE delegating it.
+    await pAs.methods
+      .sliceFromPot(new BN(maxPayout(STAKE)))
+      .accounts({
+        owner: session.publicKey,
+        mint,
+        master: housePda,
+        till,
+        systemProgram: SystemProgram.programId,
+      })
+      .rpc({ skipPreflight: true });
     // HTTP-confirm the heavy delegate CPI (WS confirmation is flaky for this tx).
     await sendIxHttp(
       conn,
@@ -233,7 +251,7 @@ describe("raider — 60s time-cap (deterministic clock terminal, outcome=Time)",
           payer: session.publicKey,
           mint,
           player: playerPda,
-          house: housePda,
+          house: till,
           round: roundPda,
         })
         .remainingAccounts([
@@ -257,13 +275,14 @@ describe("raider — 60s time-cap (deterministic clock terminal, outcome=Time)",
     // ---- open long 10x: cannot liq (needs ~-8% in 8s) nor cap (needs ~+240%);
     //      the ONLY terminal that can fire in the cap window is TIME ----
     await programER.methods
-      .open(1, 10, new BN(STAKE))
+      .open(ASSET_BTC, 1, 10, new BN(STAKE))
       .accounts({
         player: playerPda,
-        house: housePda,
+        house: till,
         round: roundPda,
         mint,
         priceUpdate: BTC_FEED,
+        registry: feedRegistry,
         playerAuthority: session.publicKey,
       })
       .signers([session])
@@ -274,7 +293,7 @@ describe("raider — 60s time-cap (deterministic clock terminal, outcome=Time)",
 
     // House lock taken while the round is open (released only on settle).
     const lockedOpen = BigInt(
-      (await programER.account.houseBalance.fetch(housePda)).locked.toString()
+      (await programER.account.houseBalance.fetch(till)).locked.toString()
     );
     assert.ok(lockedOpen > 0n, "house lock taken while round open");
 
@@ -282,7 +301,7 @@ describe("raider — 60s time-cap (deterministic clock terminal, outcome=Time)",
     // 60 ticks * 300ms = ~18s of wall time, comfortably past the 8s deadline.
     const accounts = {
       player: playerPda,
-      house: housePda,
+      house: till,
       round: roundPda,
       mint,
       btcFeed: BTC_FEED,
@@ -299,7 +318,7 @@ describe("raider — 60s time-cap (deterministic clock terminal, outcome=Time)",
       "time settle pays the current (non-liq) equity"
     );
     const houseLocked = BigInt(
-      (await programER.account.houseBalance.fetch(housePda)).locked.toString()
+      (await programER.account.houseBalance.fetch(till)).locked.toString()
     );
     assert.equal(
       houseLocked.toString(),

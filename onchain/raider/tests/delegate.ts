@@ -21,10 +21,12 @@ const {
 const assert = require("assert");
 const idl = require("../target/idl/raider.json");
 const { BN } = anchor;
+const { deriveTill, maxPayout } = require("./helpers");
 
 const BASE_RPC = process.env.BASE_RPC || "https://api.devnet.solana.com";
 const VALIDATOR = new PublicKey(process.env.ER_VALIDATOR || "MAS1Dt9qreoRMQ14YQuhg8UTZMMzDdKhmkZMECCzk57");
 const DELEGATION_PROGRAM = new PublicKey("DELeGGvXpWV2fqJUhqcF5ZSYMS4JTLjteaAMARRSaeSh");
+const STAKE = 1_000_000; // 1 USDC — the slice is sized to the eventual open stake
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 describe("raider delegate_session (co-delegate player+house+round)", function () {
@@ -40,7 +42,7 @@ describe("raider delegate_session (co-delegate player+house+round)", function ()
   anchor.setProvider(provider);
   const program = new anchor.Program(idl, provider);
 
-  let mint, housePda, vaultAuthority, vaultToken, playerPda, roundPda, ownerToken;
+  let mint, housePda, till, vaultAuthority, vaultToken, playerPda, roundPda, ownerToken;
 
   before(async () => {
     console.log("base   :", BASE_RPC);
@@ -62,6 +64,7 @@ describe("raider delegate_session (co-delegate player+house+round)", function ()
     mint = await createMint(provider.connection, funder.payer, funder.publicKey, null, 6);
     [housePda] = PublicKey.findProgramAddressSync(
       [Buffer.from("house"), mint.toBuffer()], program.programId);
+    till = deriveTill(program.programId, mint, session.publicKey); // per-session till (was the shared house)
     [vaultAuthority] = PublicKey.findProgramAddressSync(
       [Buffer.from("vault"), mint.toBuffer()], program.programId);
     vaultToken = getAssociatedTokenAddressSync(mint, vaultAuthority, true);
@@ -75,6 +78,16 @@ describe("raider delegate_session (co-delegate player+house+round)", function ()
       authority: funder.publicKey, mint, house: housePda, vaultAuthority, vaultToken,
       tokenProgram: TOKEN_PROGRAM_ID, associatedTokenProgram: ASSOCIATED_TOKEN_PROGRAM_ID,
       systemProgram: SystemProgram.programId,
+    }).signers([funder.payer]).rpc({ skipPreflight: true });
+
+    // Fund the master pot so slice_from_pot can carve this session's till off it.
+    const HOUSE_FUND = 30_000_000; // 30 USDC, headroom over one round's 23.75 slice
+    const funderAta = await getOrCreateAssociatedTokenAccount(
+      provider.connection, funder.payer, mint, funder.publicKey);
+    await mintTo(provider.connection, funder.payer, mint, funderAta.address, funder.publicKey, HOUSE_FUND);
+    await program.methods.fundHouse(new BN(HOUSE_FUND)).accounts({
+      funder: funder.publicKey, mint, house: housePda, funderToken: funderAta.address,
+      vaultAuthority, vaultToken, tokenProgram: TOKEN_PROGRAM_ID,
     }).signers([funder.payer]).rpc({ skipPreflight: true });
 
     const ownerAta = await getOrCreateAssociatedTokenAccount(
@@ -105,19 +118,26 @@ describe("raider delegate_session (co-delegate player+house+round)", function ()
 
   it("delegate_session flips all three PDAs' owner to the delegation program", async () => {
     const PROG = program.programId.toBase58();
+
+    // Carve a bet-sized till off the master pot BEFORE delegating it (the till, not
+    // the master `[house, mint]`, is what co-delegates with player+round).
+    await program.methods.sliceFromPot(new BN(maxPayout(STAKE))).accounts({
+      owner: session.publicKey, mint, master: housePda, till, systemProgram: SystemProgram.programId,
+    }).rpc({ skipPreflight: true });
+
     // pre-condition: all three fresh + program-owned
-    for (const [name, pda] of [["player", playerPda], ["house", housePda], ["round", roundPda]]) {
+    for (const [name, pda] of [["player", playerPda], ["house", till], ["round", roundPda]]) {
       const o = (await provider.connection.getAccountInfo(pda)).owner.toBase58();
       assert.equal(o, PROG, `${name} should start program-owned`);
     }
 
     await program.methods.delegateSession().accounts({
-      payer: session.publicKey, mint, player: playerPda, house: housePda, round: roundPda,
+      payer: session.publicKey, mint, player: playerPda, house: till, round: roundPda,
     }).remainingAccounts([{ pubkey: VALIDATOR, isSigner: false, isWritable: false }])
       .rpc({ skipPreflight: true });
 
     // poll until ALL THREE owners flip to the delegation program (~20s budget)
-    const targets = { player: playerPda, house: housePda, round: roundPda };
+    const targets = { player: playerPda, house: till, round: roundPda };
     let flipped = {};
     for (let i = 0; i < 20; i++) {
       flipped = {};

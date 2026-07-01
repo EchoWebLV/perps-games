@@ -34,12 +34,15 @@ const {
   BTC_FEED,
   VALIDATOR,
   sleep,
+  deriveTill,
+  maxPayout,
 } = require("./helpers");
 const DELEGATION_PROGRAM = new PublicKey("DELeGGvXpWV2fqJUhqcF5ZSYMS4JTLjteaAMARRSaeSh");
 
 const STAKE = 1_000_000; // 1 USDC
 const MAX_PAYOUT = 23_750_000;
 const RMAX = 2000;
+const ASSET_BTC = 0; // multi-asset: 0 = BTC = BTC_FEED
 
 // init_house -> fund_house -> buy_in -> init_round -> delegate_session.
 async function buildScenario({ funder, baseProvider, program }) {
@@ -56,6 +59,8 @@ async function buildScenario({ funder, baseProvider, program }) {
   const programAsSession = new anchor.Program(idl, sessionProvider);
   const mint = await createMint(conn, funder.payer, funder.publicKey, null, 6);
   const [housePda] = PublicKey.findProgramAddressSync([Buffer.from("house"), mint.toBuffer()], program.programId);
+  const till = deriveTill(program.programId, mint, session.publicKey); // per-session till (was the shared house)
+  const [feedRegistry] = PublicKey.findProgramAddressSync([Buffer.from("feeds")], program.programId);
   const [vaultAuthority] = PublicKey.findProgramAddressSync([Buffer.from("vault"), mint.toBuffer()], program.programId);
   const vaultToken = getAssociatedTokenAddressSync(mint, vaultAuthority, true);
   const [playerPda] = PublicKey.findProgramAddressSync(
@@ -87,12 +92,17 @@ async function buildScenario({ funder, baseProvider, program }) {
     owner: session.publicKey, round: roundPda, systemProgram: SystemProgram.programId,
   }).rpc({ skipPreflight: true });
 
+  // slice_from_pot: carve this session's till off the master pot BEFORE delegating it.
+  await programAsSession.methods.sliceFromPot(new BN(maxPayout(STAKE))).accounts({
+    owner: session.publicKey, mint, master: housePda, till, systemProgram: SystemProgram.programId,
+  }).rpc({ skipPreflight: true });
+
   await programAsSession.methods.delegateSession().accounts({
-    payer: session.publicKey, mint, player: playerPda, house: housePda, round: roundPda,
+    payer: session.publicKey, mint, player: playerPda, house: till, round: roundPda,
   }).remainingAccounts([{ pubkey: VALIDATOR, isSigner: false, isWritable: false }])
     .rpc({ skipPreflight: true });
 
-  const targets = { player: playerPda, house: housePda, round: roundPda };
+  const targets = { player: playerPda, house: till, round: roundPda };
   let flipped = {};
   for (let i = 0; i < 25; i++) {
     flipped = {};
@@ -109,13 +119,13 @@ async function buildScenario({ funder, baseProvider, program }) {
     new anchor.web3.Connection(ER_RPC, { wsEndpoint: ER_WS, commitment: "confirmed" }),
     new anchor.Wallet(session), { commitment: "confirmed" });
   const programER = new anchor.Program(idl, erProvider);
-  return { session, mint, housePda, vaultAuthority, vaultToken, playerPda, roundPda, programER };
+  return { session, mint, housePda, till, feedRegistry, vaultAuthority, vaultToken, playerPda, roundPda, programER };
 }
 
 // Sum the three ledgers (conservation check) on a given scenario's ER view.
 async function sumLedgers(sc) {
   const p = await sc.programER.account.playerBalance.fetch(sc.playerPda);
-  const h = await sc.programER.account.houseBalance.fetch(sc.housePda);
+  const h = await sc.programER.account.houseBalance.fetch(sc.till);
   return BigInt(p.balance.toString()) + BigInt(h.balance.toString()) + BigInt(h.locked.toString());
 }
 
@@ -169,14 +179,14 @@ describe("raider LIQ outcome — a real on-chain liquidation at RMAX against the
       const totalLongBefore = await sumLedgers(scLong);
       const totalShortBefore = await sumLedgers(scShort);
 
-      // Open both at ~the same mark: LONG 2000x and SHORT 2000x.
-      await scLong.programER.methods.open(1, RMAX, new BN(STAKE)).accounts({
-        player: scLong.playerPda, house: scLong.housePda, round: scLong.roundPda, mint: scLong.mint,
-        priceUpdate: BTC_FEED, playerAuthority: scLong.session.publicKey,
+      // Open both at ~the same mark: LONG 2000x and SHORT 2000x — each settles against its own TILL.
+      await scLong.programER.methods.open(ASSET_BTC, 1, RMAX, new BN(STAKE)).accounts({
+        player: scLong.playerPda, house: scLong.till, round: scLong.roundPda, mint: scLong.mint,
+        priceUpdate: BTC_FEED, registry: scLong.feedRegistry, playerAuthority: scLong.session.publicKey,
       }).signers([scLong.session]).rpc({ skipPreflight: true });
-      await scShort.programER.methods.open(-1, RMAX, new BN(STAKE)).accounts({
-        player: scShort.playerPda, house: scShort.housePda, round: scShort.roundPda, mint: scShort.mint,
-        priceUpdate: BTC_FEED, playerAuthority: scShort.session.publicKey,
+      await scShort.programER.methods.open(ASSET_BTC, -1, RMAX, new BN(STAKE)).accounts({
+        player: scShort.playerPda, house: scShort.till, round: scShort.roundPda, mint: scShort.mint,
+        priceUpdate: BTC_FEED, registry: scShort.feedRegistry, playerAuthority: scShort.session.publicKey,
       }).signers([scShort.session]).rpc({ skipPreflight: true });
       const oL = await scLong.programER.account.round.fetch(scLong.roundPda);
       const oS = await scShort.programER.account.round.fetch(scShort.roundPda);
@@ -203,11 +213,11 @@ describe("raider LIQ outcome — a real on-chain liquidation at RMAX against the
 
       // Close both.
       await scLong.programER.methods.close().accounts({
-        player: scLong.playerPda, house: scLong.housePda, round: scLong.roundPda, mint: scLong.mint,
+        player: scLong.playerPda, house: scLong.till, round: scLong.roundPda, mint: scLong.mint,
         priceUpdate: BTC_FEED, playerAuthority: scLong.session.publicKey,
       }).signers([scLong.session]).rpc({ skipPreflight: true });
       await scShort.programER.methods.close().accounts({
-        player: scShort.playerPda, house: scShort.housePda, round: scShort.roundPda, mint: scShort.mint,
+        player: scShort.playerPda, house: scShort.till, round: scShort.roundPda, mint: scShort.mint,
         priceUpdate: BTC_FEED, playerAuthority: scShort.session.publicKey,
       }).signers([scShort.session]).rpc({ skipPreflight: true });
 
@@ -229,7 +239,7 @@ describe("raider LIQ outcome — a real on-chain liquidation at RMAX against the
           // payout = 0 on a liquidation.
           assert.equal(settled.payout.toString(), "0", `${label} liq payout must be 0`);
           // house lock fully released.
-          const h = await sc.programER.account.houseBalance.fetch(sc.housePda);
+          const h = await sc.programER.account.houseBalance.fetch(sc.till);
           assert.equal(h.locked.toString(), "0", `${label} house.locked must release on liq`);
           // value conserved across player+house (before open == after close).
           const totalAfter = await sumLedgers(sc);

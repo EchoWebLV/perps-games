@@ -45,6 +45,8 @@ const {
   VALIDATOR,
   sleep,
   sendIxHttp,
+  deriveTill,
+  maxPayout,
 } = require("./helpers");
 
 const MAGIC_PROGRAM_ID = new PublicKey(
@@ -52,6 +54,7 @@ const MAGIC_PROGRAM_ID = new PublicKey(
 );
 
 const STAKE = 1_000_000;
+const ASSET_BTC = 0; // multi-asset: 0 = BTC = BTC_FEED
 // Crank schedule: 1 crank/sec/side covers the 180s round (200 iters ≈ 200s of
 // coverage). Modest crank count keeps the schedule-payer's ER escrow cost low.
 const INTERVAL_MS = Number(process.env.CRANK_INTERVAL_MS || 1000);
@@ -94,6 +97,10 @@ describe("raider — self-driving 2000x liquidation via native crank (zero clien
       );
       const [housePda] = PublicKey.findProgramAddressSync(
         [Buffer.from("house"), mint.toBuffer()],
+        program.programId
+      );
+      const [feedRegistry] = PublicKey.findProgramAddressSync(
+        [Buffer.from("feeds")],
         program.programId
       );
       const [vaultAuthority] = PublicKey.findProgramAddressSync(
@@ -176,6 +183,7 @@ describe("raider — self-driving 2000x liquidation via native crank (zero clien
         [Buffer.from("round"), session.publicKey.toBuffer()],
         program.programId
       );
+      const till = deriveTill(program.programId, mint, session.publicKey); // per-session till (was the shared house)
       const ownerAta = await getOrCreateAssociatedTokenAccount(
         conn,
         funder.payer,
@@ -211,6 +219,17 @@ describe("raider — self-driving 2000x liquidation via native crank (zero clien
           systemProgram: SystemProgram.programId,
         })
         .rpc({ skipPreflight: true });
+      // slice_from_pot: carve this session's till off the master pot BEFORE delegating it.
+      await pAs.methods
+        .sliceFromPot(new BN(maxPayout(STAKE)))
+        .accounts({
+          owner: session.publicKey,
+          mint,
+          master: housePda,
+          till,
+          systemProgram: SystemProgram.programId,
+        })
+        .rpc({ skipPreflight: true });
       // HTTP-confirm the delegate CPI (WS confirmation is flaky for this heavy tx).
       await sendIxHttp(
         conn,
@@ -220,7 +239,7 @@ describe("raider — self-driving 2000x liquidation via native crank (zero clien
             payer: session.publicKey,
             mint,
             player,
-            house: housePda,
+            house: till,
             round,
           })
           .remainingAccounts([
@@ -241,20 +260,22 @@ describe("raider — self-driving 2000x liquidation via native crank (zero clien
       await sleep(8000);
       const open = () =>
         programER.methods
-          .open(dir, 2000, new BN(STAKE))
+          .open(ASSET_BTC, dir, 2000, new BN(STAKE))
           .accounts({
             player,
-            house: housePda,
+            house: till,
             round,
             mint,
             priceUpdate: BTC_FEED,
+            registry: feedRegistry,
             playerAuthority: session.publicKey,
           })
           .signers([session])
           .rpc({ skipPreflight: true });
       // Arm the native crank on the ER: validator auto-runs tick_crank on this
       // round every INTERVAL_MS for ITERATIONS runs. Distinct task_id per call so a
-      // re-open on a later attempt schedules a fresh task.
+      // re-open on a later attempt schedules a fresh task. Pass the TILL as `house`
+      // (the forwarded key); the scheduled tick_crank re-derives the till by seed.
       const schedule = (taskId) =>
         programER.methods
           .scheduleTick(new BN(taskId), new BN(INTERVAL_MS), new BN(ITERATIONS))
@@ -262,7 +283,7 @@ describe("raider — self-driving 2000x liquidation via native crank (zero clien
             magicProgram: MAGIC_PROGRAM_ID,
             payer: session.publicKey,
             player,
-            house: housePda,
+            house: till,
             round,
             mint,
             priceUpdate: BTC_FEED,
@@ -273,9 +294,10 @@ describe("raider — self-driving 2000x liquidation via native crank (zero clien
         session,
         programER,
         housePda,
+        till,
         open,
         schedule,
-        accounts: { player, house: housePda, round, mint, btcFeed: BTC_FEED },
+        accounts: { player, house: till, round, mint, btcFeed: BTC_FEED },
       };
     }
 
@@ -291,9 +313,9 @@ describe("raider — self-driving 2000x liquidation via native crank (zero clien
     let longBalBeforeOpen, shortBalBeforeOpen;
     // task_id namespace: side*1000 + attempt, so every (side, attempt) is unique.
     for (let attempt = 1; attempt <= ATTEMPTS; attempt++) {
-      const lh = await long.programER.account.houseBalance.fetch(long.housePda);
+      const lh = await long.programER.account.houseBalance.fetch(long.till);
       const sh = await short.programER.account.houseBalance.fetch(
-        short.housePda
+        short.till
       );
       longBalBeforeOpen = BigInt(lh.balance.toString());
       shortBalBeforeOpen = BigInt(sh.balance.toString());
@@ -313,12 +335,12 @@ describe("raider — self-driving 2000x liquidation via native crank (zero clien
 
       const longLockedAfterOpen = BigInt(
         (
-          await long.programER.account.houseBalance.fetch(long.housePda)
+          await long.programER.account.houseBalance.fetch(long.till)
         ).locked.toString()
       );
       const shortLockedAfterOpen = BigInt(
         (
-          await short.programER.account.houseBalance.fetch(short.housePda)
+          await short.programER.account.houseBalance.fetch(short.till)
         ).locked.toString()
       );
       assert.equal(
@@ -392,7 +414,7 @@ describe("raider — self-driving 2000x liquidation via native crank (zero clien
       const r = side === long ? lr : sr;
       if (!(r.status === 2 && r.outcome === 2)) continue;
       const balBefore = side === long ? longBalBeforeOpen : shortBalBeforeOpen;
-      const h = await side.programER.account.houseBalance.fetch(side.housePda);
+      const h = await side.programER.account.houseBalance.fetch(side.till);
       assert.equal(
         h.locked.toString(),
         "0",

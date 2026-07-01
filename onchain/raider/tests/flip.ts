@@ -42,8 +42,11 @@ const {
   sleep,
   sendIxHttp,
   settleSeq,
+  deriveTill,
+  maxPayout,
 } = require("./helpers");
 const STAKE = 1_000_000; // 1 USDC
+const ASSET_BTC = 0; // multi-asset: 0 = BTC = BTC_FEED
 
 describe("raider — flip mid-round parity (terminal-first rebank, BigInt sequence mirror)", function () {
   this.timeout(1_000_000);
@@ -71,6 +74,10 @@ describe("raider — flip mid-round parity (terminal-first rebank, BigInt sequen
     );
     const [housePda] = PublicKey.findProgramAddressSync(
       [Buffer.from("house"), mint.toBuffer()],
+      program.programId
+    );
+    const [feedRegistry] = PublicKey.findProgramAddressSync(
+      [Buffer.from("feeds")],
       program.programId
     );
     const [vaultAuthority] = PublicKey.findProgramAddressSync(
@@ -148,6 +155,7 @@ describe("raider — flip mid-round parity (terminal-first rebank, BigInt sequen
       [Buffer.from("round"), session.publicKey.toBuffer()],
       program.programId
     );
+    const till = deriveTill(program.programId, mint, session.publicKey); // per-session till (was the shared house)
     const ownerAta = await getOrCreateAssociatedTokenAccount(
       conn,
       funder.payer,
@@ -183,6 +191,17 @@ describe("raider — flip mid-round parity (terminal-first rebank, BigInt sequen
         systemProgram: SystemProgram.programId,
       })
       .rpc({ skipPreflight: true });
+    // slice_from_pot: carve this session's till off the master pot BEFORE delegating it.
+    await pAs.methods
+      .sliceFromPot(new BN(maxPayout(STAKE)))
+      .accounts({
+        owner: session.publicKey,
+        mint,
+        master: housePda,
+        till,
+        systemProgram: SystemProgram.programId,
+      })
+      .rpc({ skipPreflight: true });
     // HTTP-confirm the heavy delegate CPI (WS confirmation is flaky for this tx).
     await sendIxHttp(
       conn,
@@ -192,7 +211,7 @@ describe("raider — flip mid-round parity (terminal-first rebank, BigInt sequen
           payer: session.publicKey,
           mint,
           player: playerPda,
-          house: housePda,
+          house: till,
           round: roundPda,
         })
         .remainingAccounts([
@@ -215,13 +234,14 @@ describe("raider — flip mid-round parity (terminal-first rebank, BigInt sequen
 
     // ---- open long 50x ----
     await programER.methods
-      .open(1, 50, new BN(STAKE))
+      .open(ASSET_BTC, 1, 50, new BN(STAKE))
       .accounts({
         player: playerPda,
-        house: housePda,
+        house: till,
         round: roundPda,
         mint,
         priceUpdate: BTC_FEED,
+        registry: feedRegistry,
         playerAuthority: session.publicKey,
       })
       .signers([session])
@@ -237,7 +257,7 @@ describe("raider — flip mid-round parity (terminal-first rebank, BigInt sequen
       .flip(-1)
       .accounts({
         player: playerPda,
-        house: housePda,
+        house: till,
         round: roundPda,
         mint,
         priceUpdate: BTC_FEED,
@@ -256,7 +276,7 @@ describe("raider — flip mid-round parity (terminal-first rebank, BigInt sequen
       .close()
       .accounts({
         player: playerPda,
-        house: housePda,
+        house: till,
         round: roundPda,
         mint,
         priceUpdate: BTC_FEED,

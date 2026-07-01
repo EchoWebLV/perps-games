@@ -36,9 +36,12 @@ const {
   VALIDATOR,
   sleep,
   sendIxHttp,
+  deriveTill,
+  maxPayout,
 } = require("./helpers");
 
 const STAKE = 1_000_000;
+const ASSET_BTC = 0; // multi-asset: 0 = BTC = BTC_FEED
 const N = parseInt(process.env.LAT_TICK_N || "30", 10); // measured ticks
 const WARMUP = 3; // discard the first few (cold-account loading)
 const pct = (arr, p) => {
@@ -62,6 +65,7 @@ describe("raider — continuous-tick ER latency (submit -> confirmed p50/p95)", 
     const mint = await createMint(conn, funder.payer, funder.publicKey, null, 6);
     const [housePda] = PublicKey.findProgramAddressSync(
       [Buffer.from("house"), mint.toBuffer()], program.programId);
+    const [feedRegistry] = PublicKey.findProgramAddressSync([Buffer.from("feeds")], program.programId);
     const [vaultAuthority] = PublicKey.findProgramAddressSync(
       [Buffer.from("vault"), mint.toBuffer()], program.programId);
     const vaultToken = getAssociatedTokenAddressSync(mint, vaultAuthority, true);
@@ -91,6 +95,7 @@ describe("raider — continuous-tick ER latency (submit -> confirmed p50/p95)", 
       [Buffer.from("player"), session.publicKey.toBuffer(), mint.toBuffer()], program.programId);
     const [round] = PublicKey.findProgramAddressSync(
       [Buffer.from("round"), session.publicKey.toBuffer()], program.programId);
+    const till = deriveTill(program.programId, mint, session.publicKey); // per-session till (was the shared house)
     const ownerAta = await getOrCreateAssociatedTokenAccount(conn, funder.payer, mint, session.publicKey);
     await mintTo(conn, funder.payer, mint, ownerAta.address, funder.publicKey, 5_000_000);
     await pAs.methods.buyIn(new BN(5_000_000)).accounts({
@@ -100,8 +105,12 @@ describe("raider — continuous-tick ER latency (submit -> confirmed p50/p95)", 
     await pAs.methods.initRound().accounts({
       owner: session.publicKey, round, systemProgram: SystemProgram.programId,
     }).rpc({ skipPreflight: true });
+    // slice_from_pot: carve this session's till off the master pot BEFORE delegating it.
+    await pAs.methods.sliceFromPot(new BN(maxPayout(STAKE))).accounts({
+      owner: session.publicKey, mint, master: housePda, till, systemProgram: SystemProgram.programId,
+    }).rpc({ skipPreflight: true });
     await sendIxHttp(conn, pAs.methods.delegateSession().accounts({
-      payer: session.publicKey, mint, player, house: housePda, round,
+      payer: session.publicKey, mint, player, house: till, round,
     }).remainingAccounts([{ pubkey: VALIDATOR, isSigner: false, isWritable: false }]), session);
 
     // ER connection WITHOUT a wsEndpoint: we time via HTTP getSignatureStatuses
@@ -117,8 +126,8 @@ describe("raider — continuous-tick ER latency (submit -> confirmed p50/p95)", 
     await sleep(8000); // delegation lands
 
     // Open LOW leverage (10x) so no tick fires during the measurement window.
-    await programER.methods.open(1, 10, new BN(STAKE)).accounts({
-      player, house: housePda, round, mint, priceUpdate: BTC_FEED, playerAuthority: session.publicKey,
+    await programER.methods.open(ASSET_BTC, 1, 10, new BN(STAKE)).accounts({
+      player, house: till, round, mint, priceUpdate: BTC_FEED, registry: feedRegistry, playerAuthority: session.publicKey,
     }).signers([session]).rpc({ skipPreflight: true });
 
     // Build + sign + send a tick over HTTP, timing submit -> first signature status
@@ -126,7 +135,7 @@ describe("raider — continuous-tick ER latency (submit -> confirmed p50/p95)", 
     // tx's signature unique (tick has no nonce; a reused blockhash would dedup).
     async function tickTimed() {
       const tx = await programER.methods.tick().accounts({
-        player, house: housePda, round, mint, priceUpdate: BTC_FEED, caller: session.publicKey,
+        player, house: till, round, mint, priceUpdate: BTC_FEED, caller: session.publicKey,
       }).transaction();
       tx.feePayer = session.publicKey;
       tx.recentBlockhash = (await erConn.getLatestBlockhash("confirmed")).blockhash;

@@ -34,6 +34,7 @@ const {
 const assert = require("assert");
 const idl = require("../target/idl/raider.json");
 const { BN } = anchor;
+const { deriveTill, maxPayout } = require("./helpers");
 
 const BASE_RPC = process.env.BASE_RPC || "https://api.devnet.solana.com";
 const ER_RPC = process.env.ER_RPC || "https://devnet.magicblock.app";
@@ -44,6 +45,7 @@ const DELEGATION_PROGRAM = new PublicKey("DELeGGvXpWV2fqJUhqcF5ZSYMS4JTLjteaAMAR
 
 const STAKE = 1_000_000; // 1 USDC
 const MAX_PAYOUT = 23_750_000;
+const ASSET_BTC = 0; // multi-asset: 0 = BTC = BTC_FEED
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 // init_house -> fund_house -> buy_in -> init_round -> delegate_session, all PDAs
@@ -63,6 +65,8 @@ async function buildScenario({ funder, baseProvider, program }) {
   const programAsSession = new anchor.Program(idl, sessionProvider);
   const mint = await createMint(conn, funder.payer, funder.publicKey, null, 6);
   const [housePda] = PublicKey.findProgramAddressSync([Buffer.from("house"), mint.toBuffer()], program.programId);
+  const till = deriveTill(program.programId, mint, session.publicKey); // per-session till (was the shared house)
+  const [feedRegistry] = PublicKey.findProgramAddressSync([Buffer.from("feeds")], program.programId);
   const [vaultAuthority] = PublicKey.findProgramAddressSync([Buffer.from("vault"), mint.toBuffer()], program.programId);
   const vaultToken = getAssociatedTokenAddressSync(mint, vaultAuthority, true);
   const [playerPda] = PublicKey.findProgramAddressSync(
@@ -94,12 +98,17 @@ async function buildScenario({ funder, baseProvider, program }) {
     owner: session.publicKey, round: roundPda, systemProgram: SystemProgram.programId,
   }).rpc({ skipPreflight: true });
 
+  // slice_from_pot: carve this session's till off the master pot BEFORE delegating it.
+  await programAsSession.methods.sliceFromPot(new BN(maxPayout(STAKE))).accounts({
+    owner: session.publicKey, mint, master: housePda, till, systemProgram: SystemProgram.programId,
+  }).rpc({ skipPreflight: true });
+
   await programAsSession.methods.delegateSession().accounts({
-    payer: session.publicKey, mint, player: playerPda, house: housePda, round: roundPda,
+    payer: session.publicKey, mint, player: playerPda, house: till, round: roundPda,
   }).remainingAccounts([{ pubkey: VALIDATOR, isSigner: false, isWritable: false }])
     .rpc({ skipPreflight: true });
 
-  const targets = { player: playerPda, house: housePda, round: roundPda };
+  const targets = { player: playerPda, house: till, round: roundPda };
   let flipped = {};
   for (let i = 0; i < 25; i++) {
     flipped = {};
@@ -111,7 +120,7 @@ async function buildScenario({ funder, baseProvider, program }) {
     await sleep(1000);
   }
   assert.ok(flipped.player && flipped.house && flipped.round, `not all delegated: ${JSON.stringify(flipped)}`);
-  return { session, mint, housePda, vaultAuthority, vaultToken, playerPda, roundPda };
+  return { session, mint, housePda, till, feedRegistry, vaultAuthority, vaultToken, playerPda, roundPda };
 }
 
 // The rejection must be the address pin (2012 / ConstraintAddress / "address")
@@ -152,9 +161,9 @@ describe("raider feed authentication — the unauthenticated-feed house-drain ho
     // --- 1) open() with a FORGED price_update -> REJECTED ---
     let openRejected = false, openErr = "";
     try {
-      await programER.methods.open(1, 2000, new BN(STAKE)).accounts({
-        player: sc.playerPda, house: sc.housePda, round: sc.roundPda, mint: sc.mint,
-        priceUpdate: FAKE_FEED, playerAuthority: sc.session.publicKey,
+      await programER.methods.open(ASSET_BTC, 1, 2000, new BN(STAKE)).accounts({
+        player: sc.playerPda, house: sc.till, round: sc.roundPda, mint: sc.mint,
+        priceUpdate: FAKE_FEED, registry: sc.feedRegistry, playerAuthority: sc.session.publicKey,
       }).signers([sc.session]).rpc(); // preflight ON so the program code surfaces
     } catch (e) {
       openRejected = true;
@@ -162,19 +171,19 @@ describe("raider feed authentication — the unauthenticated-feed house-drain ho
     }
     assert.ok(openRejected, "[1] open with a forged feed MUST be rejected");
     assert.ok(FEED_REJECT.test(openErr),
-      "[1] rejection must be the feed pin/owner check, got:\n  " + openErr.split("\n").slice(0, 6).join("\n  "));
+      "[1] rejection must be the feed pin/registry check, got:\n  " + openErr.split("\n").slice(0, 6).join("\n  "));
     console.log("[1] open(forged feed) REJECTED:", openErr.split("\n")[0]);
 
     // The round must NOT have opened.
     const stillIdle = await programER.account.round.fetch(sc.roundPda);
     assert.equal(stillIdle.status, 0, "[1] round must stay idle after a rejected open");
-    const houseAfterBadOpen = await programER.account.houseBalance.fetch(sc.housePda);
+    const houseAfterBadOpen = await programER.account.houseBalance.fetch(sc.till);
     assert.equal(houseAfterBadOpen.locked.toString(), "0", "[1] house must not lock on a rejected open");
 
     // --- 2) open() LEGITIMATELY (real BTC feed) -> succeeds ---
-    await programER.methods.open(1, 100, new BN(STAKE)).accounts({
-      player: sc.playerPda, house: sc.housePda, round: sc.roundPda, mint: sc.mint,
-      priceUpdate: BTC_FEED, playerAuthority: sc.session.publicKey,
+    await programER.methods.open(ASSET_BTC, 1, 100, new BN(STAKE)).accounts({
+      player: sc.playerPda, house: sc.till, round: sc.roundPda, mint: sc.mint,
+      priceUpdate: BTC_FEED, registry: sc.feedRegistry, playerAuthority: sc.session.publicKey,
     }).signers([sc.session]).rpc({ skipPreflight: true });
     const opened = await programER.account.round.fetch(sc.roundPda);
     assert.equal(opened.status, 1, "[2] legitimate open must succeed");
@@ -186,7 +195,7 @@ describe("raider feed authentication — the unauthenticated-feed house-drain ho
     let closeRejected = false, closeErr = "";
     try {
       await programER.methods.close().accounts({
-        player: sc.playerPda, house: sc.housePda, round: sc.roundPda, mint: sc.mint,
+        player: sc.playerPda, house: sc.till, round: sc.roundPda, mint: sc.mint,
         priceUpdate: FAKE_FEED, playerAuthority: sc.session.publicKey,
       }).signers([sc.session]).rpc();
     } catch (e) {
@@ -203,7 +212,7 @@ describe("raider feed authentication — the unauthenticated-feed house-drain ho
 
     // --- 4) close() LEGITIMATELY (real BTC feed) -> succeeds ---
     await programER.methods.close().accounts({
-      player: sc.playerPda, house: sc.housePda, round: sc.roundPda, mint: sc.mint,
+      player: sc.playerPda, house: sc.till, round: sc.roundPda, mint: sc.mint,
       priceUpdate: BTC_FEED, playerAuthority: sc.session.publicKey,
     }).signers([sc.session]).rpc({ skipPreflight: true });
     const settled = await programER.account.round.fetch(sc.roundPda);

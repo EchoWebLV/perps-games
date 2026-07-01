@@ -31,6 +31,7 @@ const {
 const assert = require("assert");
 const idl = require("../target/idl/raider.json");
 const { BN } = anchor;
+const { deriveTill, maxPayout } = require("./helpers");
 
 const BASE_RPC = process.env.BASE_RPC || "https://api.devnet.solana.com";
 const ER_RPC = process.env.ER_RPC || "https://devnet.magicblock.app";
@@ -41,6 +42,7 @@ const DELEGATION_PROGRAM = new PublicKey("DELeGGvXpWV2fqJUhqcF5ZSYMS4JTLjteaAMAR
 const N = parseInt(process.env.LAT_N || "10", 10); // rounds (2 ER samples each)
 
 const STAKE = 1_000_000;
+const ASSET_BTC = 0; // multi-asset: 0 = BTC = BTC_FEED
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const pct = (arr, p) => {
   if (!arr.length) return NaN;
@@ -92,6 +94,7 @@ describe("raider — ER latency re-measurement (processed + confirmed p50/p95)",
      try {
       const mint = await createMint(conn, funder.payer, funder.publicKey, null, 6);
       const [housePda] = PublicKey.findProgramAddressSync([Buffer.from("house"), mint.toBuffer()], program.programId);
+      const [feedRegistry] = PublicKey.findProgramAddressSync([Buffer.from("feeds")], program.programId);
       const [vaultAuthority] = PublicKey.findProgramAddressSync([Buffer.from("vault"), mint.toBuffer()], program.programId);
       const vaultToken = getAssociatedTokenAddressSync(mint, vaultAuthority, true);
       await program.methods.initHouse().accounts({
@@ -116,6 +119,7 @@ describe("raider — ER latency re-measurement (processed + confirmed p50/p95)",
         [Buffer.from("player"), session.publicKey.toBuffer(), mint.toBuffer()], program.programId);
       const [roundPda] = PublicKey.findProgramAddressSync(
         [Buffer.from("round"), session.publicKey.toBuffer()], program.programId);
+      const till = deriveTill(program.programId, mint, session.publicKey); // per-session till (was the shared house)
 
       const ownerAta = await getOrCreateAssociatedTokenAccount(conn, funder.payer, mint, session.publicKey);
       await mintTo(conn, funder.payer, mint, ownerAta.address, funder.publicKey, 5_000_000);
@@ -126,12 +130,16 @@ describe("raider — ER latency re-measurement (processed + confirmed p50/p95)",
       await programAsSession.methods.initRound().accounts({
         owner: session.publicKey, round: roundPda, systemProgram: SystemProgram.programId,
       }).rpc({ skipPreflight: true });
+      // slice_from_pot: carve this session's till off the master pot BEFORE delegating it.
+      await programAsSession.methods.sliceFromPot(new BN(maxPayout(STAKE))).accounts({
+        owner: session.publicKey, mint, master: housePda, till, systemProgram: SystemProgram.programId,
+      }).rpc({ skipPreflight: true });
       // delegate with one retry on the transient router error
       let delegated = false;
       for (let attempt = 0; attempt < 2 && !delegated; attempt++) {
         try {
           await programAsSession.methods.delegateSession().accounts({
-            payer: session.publicKey, mint, player: playerPda, house: housePda, round: roundPda,
+            payer: session.publicKey, mint, player: playerPda, house: till, round: roundPda,
           }).remainingAccounts([{ pubkey: VALIDATOR, isSigner: false, isWritable: false }]).rpc({ skipPreflight: true });
           delegated = true;
         } catch (e) {
@@ -171,9 +179,9 @@ describe("raider — ER latency re-measurement (processed + confirmed p50/p95)",
 
       // open
       await timeOne(
-        () => programER.methods.open(1, 100, new BN(STAKE)).accounts({
-          player: playerPda, house: housePda, round: roundPda, mint,
-          priceUpdate: BTC_FEED, playerAuthority: session.publicKey,
+        () => programER.methods.open(ASSET_BTC, 1, 100, new BN(STAKE)).accounts({
+          player: playerPda, house: till, round: roundPda, mint,
+          priceUpdate: BTC_FEED, registry: feedRegistry, playerAuthority: session.publicKey,
         }).signers([session]).rpc({ skipPreflight: true, commitment: "confirmed" }),
         openProcessed, openConfirmed);
 
@@ -182,7 +190,7 @@ describe("raider — ER latency re-measurement (processed + confirmed p50/p95)",
       // close
       await timeOne(
         () => programER.methods.close().accounts({
-          player: playerPda, house: housePda, round: roundPda, mint,
+          player: playerPda, house: till, round: roundPda, mint,
           priceUpdate: BTC_FEED, playerAuthority: session.publicKey,
         }).signers([session]).rpc({ skipPreflight: true, commitment: "confirmed" }),
         closeProcessed, closeConfirmed);

@@ -26,6 +26,7 @@ const {
 const assert = require("assert");
 const idl = require("../target/idl/raider.json");
 const { BN } = anchor;
+const { deriveTill, maxPayout } = require("./helpers");
 
 const BASE_RPC = process.env.BASE_RPC || "https://api.devnet.solana.com";
 const ER_RPC = process.env.ER_RPC || "https://devnet.magicblock.app";
@@ -36,6 +37,7 @@ const DELEGATION_PROGRAM = new PublicKey("DELeGGvXpWV2fqJUhqcF5ZSYMS4JTLjteaAMAR
 
 const STAKE = 1_000_000; // 1 USDC
 const MAX_PAYOUT = 23_750_000; // max_payout(1e6)
+const ASSET_BTC = 0; // multi-asset: 0 = BTC = BTC_FEED
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 async function buildAndDelegate({ funder, baseProvider, program, houseFund, buyInAmount }) {
@@ -55,6 +57,8 @@ async function buildAndDelegate({ funder, baseProvider, program, houseFund, buyI
 
   const mint = await createMint(conn, funder.payer, funder.publicKey, null, 6);
   const [housePda] = PublicKey.findProgramAddressSync([Buffer.from("house"), mint.toBuffer()], program.programId);
+  const till = deriveTill(program.programId, mint, session.publicKey); // per-session till (was the shared house)
+  const [feedRegistry] = PublicKey.findProgramAddressSync([Buffer.from("feeds")], program.programId);
   const [vaultAuthority] = PublicKey.findProgramAddressSync([Buffer.from("vault"), mint.toBuffer()], program.programId);
   const vaultToken = getAssociatedTokenAddressSync(mint, vaultAuthority, true);
   const [playerPda] = PublicKey.findProgramAddressSync(
@@ -86,12 +90,17 @@ async function buildAndDelegate({ funder, baseProvider, program, houseFund, buyI
     owner: session.publicKey, round: roundPda, systemProgram: SystemProgram.programId,
   }).rpc({ skipPreflight: true });
 
+  // slice_from_pot: carve this session's till off the master pot BEFORE delegating it.
+  await programAsSession.methods.sliceFromPot(new BN(maxPayout(STAKE))).accounts({
+    owner: session.publicKey, mint, master: housePda, till, systemProgram: SystemProgram.programId,
+  }).rpc({ skipPreflight: true });
+
   await programAsSession.methods.delegateSession().accounts({
-    payer: session.publicKey, mint, player: playerPda, house: housePda, round: roundPda,
+    payer: session.publicKey, mint, player: playerPda, house: till, round: roundPda,
   }).remainingAccounts([{ pubkey: VALIDATOR, isSigner: false, isWritable: false }])
     .rpc({ skipPreflight: true });
 
-  const targets = { player: playerPda, house: housePda, round: roundPda };
+  const targets = { player: playerPda, house: till, round: roundPda };
   let flipped = {};
   for (let i = 0; i < 25; i++) {
     flipped = {};
@@ -104,7 +113,7 @@ async function buildAndDelegate({ funder, baseProvider, program, houseFund, buyI
   }
   assert.ok(flipped.player && flipped.house && flipped.round, `not all delegated: ${JSON.stringify(flipped)}`);
 
-  return { session, mint, housePda, vaultAuthority, vaultToken, playerPda, roundPda };
+  return { session, mint, housePda, till, feedRegistry, vaultAuthority, vaultToken, playerPda, roundPda };
 }
 
 describe("raider force_close (permissionless, time-bounded liveness backstop)", function () {
@@ -156,31 +165,31 @@ describe("raider force_close (permissionless, time-bounded liveness backstop)", 
 
     const sumBalances = async () => {
       const p = await programOwnerER.account.playerBalance.fetch(sc.playerPda);
-      const h = await programOwnerER.account.houseBalance.fetch(sc.housePda);
+      const h = await programOwnerER.account.houseBalance.fetch(sc.till);
       return BigInt(p.balance.toString()) + BigInt(h.balance.toString()) + BigInt(h.locked.toString());
     };
 
     const totalBefore = await sumBalances();
     console.log("total BEFORE open:", totalBefore.toString());
 
-    // --- open(long, 100x, 1 USDC) by the OWNER ---
-    await programOwnerER.methods.open(1, 100, new BN(STAKE)).accounts({
-      player: sc.playerPda, house: sc.housePda, round: sc.roundPda, mint: sc.mint,
-      priceUpdate: BTC_FEED, playerAuthority: sc.session.publicKey,
+    // --- open(BTC, long, 100x, 1 USDC) by the OWNER — settles against the TILL ---
+    await programOwnerER.methods.open(ASSET_BTC, 1, 100, new BN(STAKE)).accounts({
+      player: sc.playerPda, house: sc.till, round: sc.roundPda, mint: sc.mint,
+      priceUpdate: BTC_FEED, registry: sc.feedRegistry, playerAuthority: sc.session.publicKey,
     }).signers([sc.session]).rpc({ skipPreflight: true });
 
     const opened = await programOwnerER.account.round.fetch(sc.roundPda);
     console.log(`opened: status=${opened.status} entry_raw=${opened.entryRaw.toString()} ` +
       `deadline_ts=${opened.deadlineTs.toString()} (now ~${Math.floor(Date.now() / 1000)})`);
     assert.equal(opened.status, 1, "round must be open");
-    const house0 = await programOwnerER.account.houseBalance.fetch(sc.housePda);
+    const house0 = await programOwnerER.account.houseBalance.fetch(sc.till);
     assert.equal(house0.locked.toString(), MAX_PAYOUT.toString(), "house must pre-lock 23.75x");
 
     // --- 1) STRANGER force_close BEFORE deadline -> REJECTED (NotYetExpired) ---
     let rejected = false, errMsg = "";
     try {
       await programStrangerER.methods.forceClose().accounts({
-        player: sc.playerPda, house: sc.housePda, round: sc.roundPda, mint: sc.mint,
+        player: sc.playerPda, house: sc.till, round: sc.roundPda, mint: sc.mint,
         priceUpdate: BTC_FEED, caller: stranger.publicKey,
       }).signers([stranger]).rpc(); // preflight ON so the code surfaces
     } catch (e) {
@@ -204,12 +213,12 @@ describe("raider force_close (permissionless, time-bounded liveness backstop)", 
 
     // --- 2) STRANGER force_close AFTER deadline -> SUCCEEDS ---
     await programStrangerER.methods.forceClose().accounts({
-      player: sc.playerPda, house: sc.housePda, round: sc.roundPda, mint: sc.mint,
+      player: sc.playerPda, house: sc.till, round: sc.roundPda, mint: sc.mint,
       priceUpdate: BTC_FEED, caller: stranger.publicKey,
     }).signers([stranger]).rpc({ skipPreflight: true });
 
     const settled = await programOwnerER.account.round.fetch(sc.roundPda);
-    const house1 = await programOwnerER.account.houseBalance.fetch(sc.housePda);
+    const house1 = await programOwnerER.account.houseBalance.fetch(sc.till);
     // Outcome 3 (time) is the Phase-2 relabel: force_close past the deadline now
     // settles a Cashout-equivalent as `time` (see settle_round's now>=deadline_ts
     // relabel). Include it so the log reads "time" not "undefined".
