@@ -1,21 +1,29 @@
 import { describe, it, expect } from "vitest";
 import { PublicKey } from "@solana/web3.js";
-import { deriveRaiderPdas, rawToHuman, roundToSnap, actionResultFromSnap } from "./chain-round";
+import { deriveRaiderPdas, rawToHuman, roundToSnap, actionResultFromSnap, maxPayoutBase } from "./chain-round";
 import { classifyDelegateState, DelegateBusyError } from "./chain-round";
 import { CHAIN } from "./config";
 
 describe("chain-round pure helpers", () => {
-  it("derives the same PDAs the program expects", () => {
+  it("derives master, till, and the per-player PDAs the program expects", () => {
     const owner = new PublicKey("FP39ztVCx7FDPpou4mfPV6HyXoNVDRLEqZyvKkFgpCCM");
     const mint = new PublicKey("3TDF3grFqPJEdX4BhoCYzZuiRG6wrhKYE89wxoEg5kMX");
     const program = new PublicKey("FwUNcUaRbYGiWasHa6DA3xQaQJfZWCgH7UhDeBvoJcBv");
     const pdas = deriveRaiderPdas(program, owner, mint);
     const [player] = PublicKey.findProgramAddressSync([Buffer.from("player"), owner.toBuffer(), mint.toBuffer()], program);
-    const [house] = PublicKey.findProgramAddressSync([Buffer.from("house"), mint.toBuffer()], program);
+    const [master] = PublicKey.findProgramAddressSync([Buffer.from("house"), mint.toBuffer()], program);
+    const [till] = PublicKey.findProgramAddressSync([Buffer.from("house"), mint.toBuffer(), owner.toBuffer()], program);
     const [round] = PublicKey.findProgramAddressSync([Buffer.from("round"), owner.toBuffer()], program);
     expect(pdas.player.equals(player)).toBe(true);
-    expect(pdas.house.equals(house)).toBe(true);
+    expect(pdas.master.equals(master)).toBe(true);
+    expect(pdas.till.equals(till)).toBe(true);
     expect(pdas.round.equals(round)).toBe(true);
+    expect(pdas.master.equals(pdas.till)).toBe(false); // master and till are distinct accounts
+  });
+
+  it("maxPayoutBase mirrors settle::max_payout (stake × 23.75)", () => {
+    expect(maxPayoutBase(10_000_000)).toBe(237_500_000);   // 0.01 SOL → 0.2375 SOL
+    expect(maxPayoutBase(100_000_000)).toBe(2_375_000_000); // 0.10 SOL → 2.375 SOL
   });
 
   it("converts on-chain raw price + expo to a human float matching the feed scale", () => {
@@ -57,21 +65,17 @@ describe("classifyDelegateState", () => {
   const DEL = CHAIN.DELEGATION_PROGRAM;
   const PROG = CHAIN.PROGRAM_ID;
 
-  it("reuse when all three PDAs are already delegated (our own live session)", () => {
-    expect(classifyDelegateState({ player: DEL, house: DEL, round: DEL })).toBe("reuse");
+  it("reuse when all three delegated accounts are already delegated (our own live session)", () => {
+    expect(classifyDelegateState({ player: DEL, till: DEL, round: DEL })).toBe("reuse");
   });
 
-  it("fresh when none are delegated (fresh wallet / clean state — nulls allowed)", () => {
-    expect(classifyDelegateState({ player: null, house: PROG, round: null })).toBe("fresh");
-    expect(classifyDelegateState({ player: PROG, house: PROG, round: PROG })).toBe("fresh");
+  it("fresh when none are delegated (nulls allowed for not-yet-created PDAs)", () => {
+    expect(classifyDelegateState({ player: null, till: PROG, round: null })).toBe("fresh");
+    expect(classifyDelegateState({ player: PROG, till: PROG, round: PROG })).toBe("fresh");
   });
 
-  it("busy when the shared house is delegated but our PDAs are still on L1", () => {
-    expect(classifyDelegateState({ player: PROG, house: DEL, round: PROG })).toBe("busy");
-  });
-
-  it("busy on a torn mid-delegation state", () => {
-    expect(classifyDelegateState({ player: DEL, house: DEL, round: PROG })).toBe("busy");
+  it("busy only on a torn mid-delegation (the per-session till can't be foreign-held)", () => {
+    expect(classifyDelegateState({ player: DEL, till: DEL, round: PROG })).toBe("busy");
   });
 
   it("DelegateBusyError carries a typed code", () => {

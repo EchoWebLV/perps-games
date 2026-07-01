@@ -10,16 +10,24 @@ import type { AnchorWalletLike } from "./anchor-wallet";
 const { BN } = anchor;
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
-export interface RaiderPdas { player: PublicKey; house: PublicKey; round: PublicKey; vaultAuthority: PublicKey; vaultToken: PublicKey; }
+export interface RaiderPdas { player: PublicKey; master: PublicKey; till: PublicKey; round: PublicKey; vaultAuthority: PublicKey; vaultToken: PublicKey; }
 
-/** Derive the four raider PDAs + the vault ATA for an owner+mint (matches lib.rs seeds). */
+/** Derive the raider PDAs + the vault ATA for an owner+mint (matches lib.rs seeds).
+ *  `master` = singleton bankroll `[house, mint]`; `till` = per-session `[house, mint, owner]`. */
 export function deriveRaiderPdas(programId: PublicKey, owner: PublicKey, mint: PublicKey): RaiderPdas {
   const [player] = PublicKey.findProgramAddressSync([Buffer.from("player"), owner.toBuffer(), mint.toBuffer()], programId);
-  const [house] = PublicKey.findProgramAddressSync([Buffer.from("house"), mint.toBuffer()], programId);
+  const [master] = PublicKey.findProgramAddressSync([Buffer.from("house"), mint.toBuffer()], programId);
+  const [till] = PublicKey.findProgramAddressSync([Buffer.from("house"), mint.toBuffer(), owner.toBuffer()], programId);
   const [round] = PublicKey.findProgramAddressSync([Buffer.from("round"), owner.toBuffer()], programId);
   const [vaultAuthority] = PublicKey.findProgramAddressSync([Buffer.from("vault"), mint.toBuffer()], programId);
   const vaultToken = getAssociatedTokenAddressSync(mint, vaultAuthority, true);
-  return { player, house, round, vaultAuthority, vaultToken };
+  return { player, master, till, round, vaultAuthority, vaultToken };
+}
+
+/** Mirror settle::max_payout — floor(stake × 23.75) (CAP_FP 25e6 × edge 0.95). The
+ *  per-session slice carved off the master pot equals this for the player's bet. */
+export function maxPayoutBase(stake: number): number {
+  return Number((BigInt(stake) * 25_000_000n * 950_000n) / 1_000_000n / 1_000_000n);
 }
 
 /** On-chain Lazer raw mantissa + |expo| → human float (same scale as the client feed). */
@@ -39,21 +47,27 @@ export class DelegateBusyError extends Error {
   constructor(message: string) { super(message); this.name = "DelegateBusyError"; }
 }
 
+/** Session start rejected: the master pot can't cover this bet's slice (bankroll fully in play). */
+export class BankrollFullError extends Error {
+  readonly code = "bankroll_full" as const;
+  constructor(message: string) { super(message); this.name = "BankrollFullError"; }
+}
+
 export type DelegateState = "reuse" | "fresh" | "busy";
 
 /**
- * Classify the three raider PDAs' on-chain owners before delegating:
+ * Classify the three delegated raider PDAs' on-chain owners before delegating (player/till/round):
  *  - all delegated  → "reuse" (our own stale-but-live session; skip the delegate tx)
  *  - none delegated → "fresh" (normal delegate; nulls = not-yet-created PDAs count as not-delegated)
- *  - anything else  → "busy"  (another wallet holds the shared house, or torn mid-delegation)
+ *  - anything else  → "busy"  (torn mid-delegation only — the per-session till can never be foreign-held)
  */
 export function classifyDelegateState(owners: {
-  player: PublicKey | null; house: PublicKey | null; round: PublicKey | null;
+  player: PublicKey | null; till: PublicKey | null; round: PublicKey | null;
 }): DelegateState {
   const del = (o: PublicKey | null) => !!o && o.equals(CHAIN.DELEGATION_PROGRAM);
-  const p = del(owners.player), h = del(owners.house), r = del(owners.round);
-  if (p && h && r) return "reuse";
-  if (!p && !h && !r) return "fresh";
+  const p = del(owners.player), t = del(owners.till), r = del(owners.round);
+  if (p && t && r) return "reuse";
+  if (!p && !t && !r) return "fresh";
   return "busy";
 }
 
@@ -103,6 +117,8 @@ export interface ChainRound {
   buyIn(amount: number): Promise<void>;
   ensureRoundInited(): Promise<void>;
   delegate(): Promise<void>;
+  sliceFromPot(slice: number): Promise<void>;
+  sweepTill(): Promise<void>;
   open(asset: AssetSym, dir: 1 | -1, lev: number, stake: number): Promise<OpenedRound>;
   close(): Promise<SettledRound>;
   flip(newDir: 1 | -1): Promise<ActionResult>;
@@ -159,7 +175,7 @@ export function createChainRound(deps: { wallet: AnchorWalletLike; mint: PublicK
 
   async function pollOwner(target: PublicKey, label: string, tries: number, gapMs: number) {
     for (let i = 0; i < tries; i++) {
-      const infos = await Promise.all([pdas.player, pdas.house, pdas.round].map((p) => baseConn.getAccountInfo(p)));
+      const infos = await Promise.all([pdas.player, pdas.till, pdas.round].map((p) => baseConn.getAccountInfo(p)));
       if (infos.every((info) => info && info.owner.equals(target))) return;
       await sleep(gapMs);
     }
@@ -194,33 +210,58 @@ export function createChainRound(deps: { wallet: AnchorWalletLike; mint: PublicK
     },
 
     async delegate() {
-      const [pi, hi, ri] = await Promise.all([
+      const [pi, ti, ri] = await Promise.all([
         baseConn.getAccountInfo(pdas.player),
-        baseConn.getAccountInfo(pdas.house),
+        baseConn.getAccountInfo(pdas.till),
         baseConn.getAccountInfo(pdas.round),
       ]);
-      const state = classifyDelegateState({ player: pi?.owner ?? null, house: hi?.owner ?? null, round: ri?.owner ?? null });
-      if (state === "reuse") return; // our own session is already live on the ER — nothing to send
+      const state = classifyDelegateState({ player: pi?.owner ?? null, till: ti?.owner ?? null, round: ri?.owner ?? null });
+      if (state === "reuse") return;
       if (state === "busy") {
-        throw new DelegateBusyError("Session busy — another player holds the table, or end your previous session and try again.");
+        throw new DelegateBusyError("Session busy — end your previous session and try again.");
       }
       try {
         await send(baseConn, program.methods.delegateSession().accountsPartial({
-          payer: owner, mint, player: pdas.player, house: pdas.house, round: pdas.round,
+          payer: owner, mint, player: pdas.player, house: pdas.till, round: pdas.round,
         }).remainingAccounts([{ pubkey: CHAIN.VALIDATOR, isSigner: false, isWritable: false }]), 400_000);
       } catch (e) {
-        // race: the house was grabbed between our ownership read and our send.
         if (String((e as Error).message).includes("ExternalAccountDataModified")) {
-          throw new DelegateBusyError("Session busy — the table was just taken. Try again in a moment.");
+          throw new DelegateBusyError("Session busy — try again in a moment.");
         }
         throw e;
       }
       await pollOwner(CHAIN.DELEGATION_PROGRAM, "delegate", 25, 1000);
     },
 
+    async sliceFromPot(slice) {
+      // Pre-check the pot so the common "bankroll fully in play" case fails fast with a
+      // typed error instead of a raw tx failure (a race where the last slice is taken
+      // between this read and the send is caught below as a fallback).
+      const master = await program.account.houseBalance.fetchNullable(pdas.master);
+      if (!master || BigInt(master.balance.toString()) < BigInt(slice)) {
+        throw new BankrollFullError("Tables are full right now — the bankroll is fully in play. Try again in a moment.");
+      }
+      try {
+        await send(baseConn, program.methods.sliceFromPot(new BN(slice)).accountsPartial({
+          owner, mint, master: pdas.master, till: pdas.till, systemProgram: SystemProgram.programId,
+        }));
+      } catch (e) {
+        if (String((e as Error).message).includes("HouseUndercapitalized") || String((e as Error).message).includes("0x6")) {
+          throw new BankrollFullError("Tables are full right now — the bankroll is fully in play. Try again in a moment.");
+        }
+        throw e;
+      }
+    },
+
+    async sweepTill() {
+      await send(baseConn, program.methods.sweepTill().accountsPartial({
+        payer: owner, mint, owner, master: pdas.master, till: pdas.till,
+      }));
+    },
+
     async open(asset, dir, lev, stake) {
       await send(erConn, programER.methods.open(CHAIN.ASSET_ID[asset], dir, lev, new BN(stake)).accountsPartial({
-        player: pdas.player, house: pdas.house, round: pdas.round, mint, priceUpdate: feedFor(asset), registry, playerAuthority: owner,
+        player: pdas.player, house: pdas.till, round: pdas.round, mint, priceUpdate: feedFor(asset), registry, playerAuthority: owner,
       }));
       const r = await programER.account.round.fetch(pdas.round);
       return { entryRaw: BigInt(r.entryRaw.toString()), entryExpo: Number(r.entryExpo), entryHuman: rawToHuman(BigInt(r.entryRaw.toString()), Number(r.entryExpo)), deadlineTs: Number(r.deadlineTs), feed: r.feed.toBase58() };
@@ -228,7 +269,7 @@ export function createChainRound(deps: { wallet: AnchorWalletLike; mint: PublicK
 
     async close() {
       await send(erConn, programER.methods.close().accountsPartial({
-        player: pdas.player, house: pdas.house, round: pdas.round, mint, priceUpdate: await roundFeed(), playerAuthority: owner,
+        player: pdas.player, house: pdas.till, round: pdas.round, mint, priceUpdate: await roundFeed(), playerAuthority: owner,
       }));
       const r = await programER.account.round.fetch(pdas.round);
       const p = await programER.account.playerBalance.fetch(pdas.player);
@@ -237,7 +278,7 @@ export function createChainRound(deps: { wallet: AnchorWalletLike; mint: PublicK
 
     async forceClose() {
       await send(erConn, programER.methods.forceClose().accountsPartial({
-        player: pdas.player, house: pdas.house, round: pdas.round, mint, priceUpdate: await roundFeed(), caller: owner,
+        player: pdas.player, house: pdas.till, round: pdas.round, mint, priceUpdate: await roundFeed(), caller: owner,
       }));
       const r = await programER.account.round.fetch(pdas.round);
       const p = await programER.account.playerBalance.fetch(pdas.player);
@@ -252,7 +293,7 @@ export function createChainRound(deps: { wallet: AnchorWalletLike; mint: PublicK
 
     async flip(newDir) {
       await send(erConn, programER.methods.flip(newDir).accountsPartial({
-        player: pdas.player, house: pdas.house, round: pdas.round, mint, priceUpdate: await roundFeed(), playerAuthority: owner,
+        player: pdas.player, house: pdas.till, round: pdas.round, mint, priceUpdate: await roundFeed(), playerAuthority: owner,
       }));
       const snap = roundToSnap(await programER.account.round.fetch(pdas.round));
       const balance = snap.status === 2 ? BigInt((await programER.account.playerBalance.fetch(pdas.player)).balance.toString()) : 0n;
@@ -261,7 +302,7 @@ export function createChainRound(deps: { wallet: AnchorWalletLike; mint: PublicK
 
     async lever(newLev) {
       await send(erConn, programER.methods.lever(newLev).accountsPartial({
-        player: pdas.player, house: pdas.house, round: pdas.round, mint, priceUpdate: await roundFeed(), playerAuthority: owner,
+        player: pdas.player, house: pdas.till, round: pdas.round, mint, priceUpdate: await roundFeed(), playerAuthority: owner,
       }));
       const snap = roundToSnap(await programER.account.round.fetch(pdas.round));
       const balance = snap.status === 2 ? BigInt((await programER.account.playerBalance.fetch(pdas.player)).balance.toString()) : 0n;
@@ -273,13 +314,13 @@ export function createChainRound(deps: { wallet: AnchorWalletLike; mint: PublicK
       const iterations = opts.iterations ?? 70; // ~70s coverage over the 60s round cap
       const taskId = opts.taskId ?? Date.now(); // unique per round within a session
       await send(erConn, programER.methods.scheduleTick(new BN(taskId), new BN(intervalMs), new BN(iterations)).accountsPartial({
-        magicProgram: CHAIN.MAGIC_PROGRAM, payer: owner, player: pdas.player, house: pdas.house, round: pdas.round, mint, priceUpdate: await roundFeed(),
+        magicProgram: CHAIN.MAGIC_PROGRAM, payer: owner, player: pdas.player, house: pdas.till, round: pdas.round, mint, priceUpdate: await roundFeed(),
       }));
     },
 
     async commitAndUndelegate() {
       await send(erConn, programER.methods.commitAndUndelegate().accountsPartial({
-        payer: owner, player: pdas.player, house: pdas.house, round: pdas.round, mint,
+        payer: owner, player: pdas.player, house: pdas.till, round: pdas.round, mint,
       }));
       await pollOwner(CHAIN.PROGRAM_ID, "undelegate", 40, 2000);
     },
