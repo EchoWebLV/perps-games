@@ -27,6 +27,13 @@ pub const MAX_ROUND_SECS: i64 = 8;
 #[cfg(feature = "test-long-deadline")]
 pub const MAX_ROUND_SECS: i64 = 180;
 
+// Bounds for the client-requested round duration (the Long-Range Tank upgrade extends the round
+// past the base 60s). `open` clamps the requested seconds into this range; MIN stays small enough
+// to keep the `test-short-deadline` (8s) suite valid, HARD_MAX caps abuse well above the Tank's
+// ~120s top. A requested duration of 0 (or less) means "use the default", MAX_ROUND_SECS.
+pub const MIN_ROUND_SECS: i64 = 5;
+pub const HARD_MAX_ROUND_SECS: i64 = 180;
+
 pub const STALE_SECS: i64 = 30; // reject settle against prices older than this
 
 // PDA seeds (kept here so every instruction context derives them identically).
@@ -101,6 +108,11 @@ pub struct Round {
     pub banked: i128, // realized P&L accumulator (SCALE units); mutated by flip/lever
     pub max_payout: u64,
     pub deadline_ts: i64,
+    // Per-round liquidation floor in SCALE units (1e6): equity <= liq_fp => liquidated.
+    // Stamped at `open` (default 0.20 = 200_000; the Suspension upgrade lowers it toward
+    // 0.10 = 100_000). Part of the provable-fairness record — settle honors THIS value,
+    // so a round's liq threshold is fixed and recomputable from on-chain data alone.
+    pub liq_fp: u32,
     pub status: u8,
     pub bump: u8,
     // --- settlement record (written at settle; zero while open/idle) ---
@@ -112,9 +124,10 @@ pub struct Round {
 impl Round {
     // disc(8) + owner(32) + feed(32) + dir(1) + lev(4) + stake(8) + entry_raw(8)
     //  + entry_expo(4) + entry_ts(8) + banked(16) + max_payout(8) + deadline_ts(8)
-    //  + status(1) + bump(1) + exit_raw(8) + exit_ts(8) + payout(8) + outcome(1) = 164
+    //  + liq_fp(4) + status(1) + bump(1) + exit_raw(8) + exit_ts(8) + payout(8)
+    //  + outcome(1) = 168
     pub const SIZE: usize =
-        8 + 32 + 32 + 1 + 4 + 8 + 8 + 4 + 8 + 16 + 8 + 8 + 1 + 1 + 8 + 8 + 8 + 1;
+        8 + 32 + 32 + 1 + 4 + 8 + 8 + 4 + 8 + 16 + 8 + 8 + 4 + 1 + 1 + 8 + 8 + 8 + 1;
 }
 
 #[cfg(test)]
@@ -122,8 +135,8 @@ mod size_tests {
     use super::*;
     #[test]
     fn round_size_includes_feed() {
-        // 132 (old) + 32 (feed: Pubkey) = 164
-        assert_eq!(Round::SIZE, 164);
+        // 132 + 32 (feed: Pubkey) = 164; + 4 (liq_fp: u32) = 168
+        assert_eq!(Round::SIZE, 168);
     }
     #[test]
     fn feed_registry_size_fits_eight_entries() {

@@ -23,7 +23,7 @@ pub mod settle;
 pub mod state;
 
 use state::{FeedRegistry, HouseBalance, PlayerBalance, Round};
-use state::{FEEDS_SEED, HOUSE_SEED, MAX_ROUND_SECS, PLAYER_SEED, ROUND_SEED, STALE_SECS, VAULT_SEED};
+use state::{FEEDS_SEED, HARD_MAX_ROUND_SECS, HOUSE_SEED, MAX_ROUND_SECS, MIN_ROUND_SECS, PLAYER_SEED, ROUND_SEED, STALE_SECS, VAULT_SEED};
 
 // ===========================================================================
 // PROVEN PLUMBING PATTERN — Task 2 (two-account co-delegation), GREEN on devnet
@@ -215,6 +215,7 @@ pub mod raider {
         r.banked = 0;
         r.max_payout = 0;
         r.deadline_ts = 0;
+        r.liq_fp = 0; // set at open (clamped to [MIN_LIQ_FP, LIQ_FP]); never read while idle
         r.status = 0; // idle
         r.bump = ctx.bumps.round;
         Ok(())
@@ -348,7 +349,7 @@ pub mod raider {
     /// Open a round inside the ER: snapshot the live Lazer entry price, debit the
     /// player's stake, and PRE-LOCK the house's maximum possible payout so the
     /// house is provably solvent for this round before any price moves.
-    pub fn open(ctx: Context<OpenRound>, asset: u8, dir: i8, lev: u32, stake: u64) -> Result<()> {
+    pub fn open(ctx: Context<OpenRound>, asset: u8, dir: i8, lev: u32, stake: u64, dur: i64, liq: u32) -> Result<()> {
         require!(
             lev >= settle::RMIN && lev <= settle::RMAX,
             RaiderError::BadLeverage
@@ -414,7 +415,22 @@ pub mod raider {
         round.entry_ts = snap.publish_time;
         round.banked = 0;
         round.max_payout = max_payout;
-        round.deadline_ts = now + MAX_ROUND_SECS;
+        // Round length: the client requests `dur` seconds (the Long-Range Tank upgrade raises it
+        // above the base). 0/negative → the default MAX_ROUND_SECS; anything else is clamped into
+        // [MIN_ROUND_SECS, HARD_MAX_ROUND_SECS] so a longer round can't be forced past the ceiling.
+        // Duration never affects house solvency (max_payout is CAP-bounded, not time-bounded).
+        let secs = if dur <= 0 { MAX_ROUND_SECS } else { dur.clamp(MIN_ROUND_SECS, HARD_MAX_ROUND_SECS) };
+        round.deadline_ts = now + secs;
+        // Liquidation floor: the client requests `liq` in SCALE units (the Suspension upgrade
+        // lowers it below the base). 0 → the default 0.20; anything else is clamped into
+        // [MIN_LIQ_FP, LIQ_FP] (0.10..0.20) so a client can NEVER push the floor below the
+        // Suspension-maxed 0.10 — a lower floor would let a position ride toward zero and drain
+        // the house. Stamped on the round → every settle path honors THIS value (provable fairness).
+        round.liq_fp = if liq == 0 {
+            settle::LIQ_FP as u32
+        } else {
+            (liq as i128).clamp(settle::MIN_LIQ_FP, settle::LIQ_FP) as u32
+        };
         round.status = 1;
         // Clear any stale settlement record from a previous round on this PDA.
         round.exit_raw = 0;
@@ -650,6 +666,7 @@ pub mod raider {
             snap.price,
             now,
             ctx.accounts.round.deadline_ts,
+            ctx.accounts.round.liq_fp as i128,
         ) {
             return settle_round(
                 &mut ctx.accounts.player,
@@ -715,6 +732,7 @@ pub mod raider {
             snap.price,
             now,
             ctx.accounts.round.deadline_ts,
+            ctx.accounts.round.liq_fp as i128,
         ) {
             return settle_round(
                 &mut ctx.accounts.player,
@@ -802,6 +820,7 @@ fn try_settle_tick<'info>(
         snap.price,
         now,
         round.deadline_ts,
+        round.liq_fp as i128,
     );
     if !fires {
         return Ok(()); // heartbeat: nothing crossed, leave the round open
@@ -840,6 +859,7 @@ fn settle_round(
         round.stake,
         round.entry_raw,
         snap.price,
+        round.liq_fp as i128,
     );
     // Defense in depth: a settle can never exceed the pre-locked worst case.
     let payout = payout.min(round.max_payout);
