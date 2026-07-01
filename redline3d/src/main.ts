@@ -25,6 +25,7 @@ import { createPickups } from "./render/pickups";
 import { createCarPicker, type CarAbility } from "./ui/carpicker";
 import { createAuthGate } from "./ui/auth-gate";
 import { createFx } from "./ui/fx";
+import { createDeathsDoor } from "./ui/deaths-door";
 import { createJoystick } from "./ui/joystick";
 import { createAudio } from "./core/audio";
 import { createRadio } from "./ui/radio";
@@ -82,6 +83,7 @@ let lastStakeUnits = 0;
 void lastStakeUnits; // recorded at open for the upcoming wager-history slice; not read on the hot path yet
 let roundActive = false; // a round is open locally (de-dupes finalizeSettled across crank/poll/close)
 let settling = false;    // a close tx is in flight
+let nearDeath = false;   // Skull "Death's Door" danger latch (hysteresis so it doesn't flicker)
 let opening = false;     // the GO handler (ensureSession+open) is mid-flight
 const session = createGameSession({
   mint: new PublicKey(CHAIN.STAKE_MINT),
@@ -125,6 +127,7 @@ const tach = createTach(hud.tachMount);
 const controls = createControls(hud.ctrlMount, hud.goMount, hud.pedalMount);
 const minimap = createMinimap(hud.miniCanvas);
 const fx = createFx();
+const deathsDoor = createDeathsDoor(); // Skull car: near-death sequence at the liq floor
 const joystick = createJoystick();
 const audio = createAudio();
 const coins = createCoinCounter(hudRoot);
@@ -177,6 +180,7 @@ const setAbility = (a?: CarAbility) => {
   controls.setLaneMode(a === "laneBet");  // keep LONG/SHORT visible as a live readout
   nitro.setEnabled(a === "nitro");        // Orion shows the Nitro Overdrive button
   pickups.setRainbow(a === "rainbow");    // Vaporwave: rainbow coins + value multipliers
+  deathsDoor.setEnabled(a === "skull");   // Skull: near-death sequence when equity hits the floor
 };
 // synthwave radio — streams on the first gesture; its on/off toggle lives in the menu (below)
 const radio = createRadio(hudRoot);
@@ -189,7 +193,7 @@ const garage = createCarPicker(hudRoot, [
   { name: "Clown Car", url: "/models/clown-car.glb", yaw: Math.PI / 2, ability: "laneBet", power: { name: "Lane Bet", desc: "steer = LONG / SHORT", icon: "swap" } },
   // headline new cars — abilities still to be designed (brainstorming car-by-car).
   // skull/slot-machine are different model sources; yaw is a guess (+π/2) — fix if a card faces backwards.
-  { name: "Skull", url: "/models/skull.glb", yaw: Math.PI / 2, power: { name: "New Ride", desc: "ability TBD", icon: "car" } },
+  { name: "Skull", url: "/models/skull.glb", yaw: Math.PI / 2, ability: "skull", power: { name: "Death's Door", desc: "survive a liq for 2s", icon: "skull" } },
   { name: "Slot Machine", url: "/models/slot-machine.glb", yaw: Math.PI / 2, power: { name: "New Ride", desc: "ability TBD", icon: "car" } },
   // descriptive-renamed placeholders (were Car 5–8 / Default) — same pack, length-on-X → yaw +π/2.
   { name: "Cart Rod", url: "/models/shopping-cart.glb", yaw: Math.PI / 2, power: { name: "New Ride", desc: "ability TBD", icon: "car" } },
@@ -346,6 +350,8 @@ function finalizeSettled(info: { outcome: number; outcomeName: string; payout: b
   const finalEq = engine.snapshot(price, now).equity;
   const liq = info.outcome === 2; // 0 cashout · 1 cap · 2 liq · 3 time
   const payoutUnits = Number(info.payout) / BASE_PER_UNIT; // un-floored centi-SOL → true 3-decimal SOL
+  nearDeath = false;
+  if (liq) deathsDoor.kill(); else deathsDoor.clear(); // Skull: shatter on liq, stand down otherwise (no-op off-Skull)
   // reset UI
   releaseHold();
   throttle = 34; game.equity = 1; chase.setDriving(false);
@@ -435,6 +441,7 @@ controls.onLaunch(async () => {
     roundStartMs = Date.now();
     engine.launch({ dir, lev, stake: playAmount, entryRaw: opened.entryHuman, startMs: roundStartMs });
     roundActive = true;
+    nearDeath = false; deathsDoor.clear(); // fresh round → drop any lingering Skull near-death state
     chase.setDriving(true);
     controls.setLive(true, "CASH OUT");
     garage.setBusy(true); mapBtn.setVisible(false); upgrades.setBusy(true); walletUI.setBusy(true);
@@ -543,6 +550,12 @@ function frame() {
     game.equity = snap.equity;
     hud.setMultiplier(Math.max(0, snap.equity), "live");
     controls.setBuffer(Math.max(0, Math.min(1, snap.buffer)));
+    // Skull "Death's Door": arm as equity nears the liq floor, disarm once clearly recovered.
+    if (ability === "skull") {
+      if (!nearDeath && snap.buffer <= 0.10) nearDeath = true;
+      else if (nearDeath && snap.buffer >= 0.22) nearDeath = false;
+      deathsDoor.danger(nearDeath);
+    }
     hud.setTimer(CONFIG.MAXSEC - (nowMs - roundStartMs) / 1000, true);
     car.setEquity("live", Math.max(0, snap.equity));
     controls.setLive(true, `${snap.equity >= 1 ? "CASH OUT" : "BAIL"} ${sol3(snap.payout)}`, snap.equity < 1);
