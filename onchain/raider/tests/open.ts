@@ -189,7 +189,7 @@ describe("raider open (entry snapshot + house max-payout pre-lock, on ER)", func
     const playerBefore = (await programER.account.playerBalance.fetch(sc.playerPda)).balance;
 
     // open(asset=BTC, dir=long, lev=100, stake=1e6) on the ER — settles against the TILL.
-    await programER.methods.open(ASSET_BTC, 1, 100, new BN(STAKE)).accounts({
+    await programER.methods.open(ASSET_BTC, 1, 100, new BN(STAKE), new BN(0), 0, 0, 0, 0).accounts({
       player: sc.playerPda, house: sc.till, round: sc.roundPda, mint: sc.mint,
       priceUpdate: BTC_FEED, registry: sc.feedRegistry, playerAuthority: sc.session.publicKey,
     }).signers([sc.session]).rpc({ skipPreflight: true });

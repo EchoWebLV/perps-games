@@ -422,7 +422,12 @@ controls.onLaunch(async () => {
       // liq floor in on-chain SCALE units (1e6): CONFIG.LIQ is 0.20 by default and drops toward
       // 0.10 as the Suspension upgrade is bought. The program clamps to [100_000, 200_000] and
       // stamps it on the round, so settlement liquidates at the player's own upgraded floor.
-      opened = await session.open(asset, dir, lev, unitsToBase(playAmount), Math.round(CONFIG.MAXSEC), Math.round(CONFIG.LIQ * 1_000_000));
+      // Skull "Death's Door": pass a 2s on-chain liq-grace so the crank holds a sub-floor
+      // dip for 2s (the Death's-Door animation) instead of liquidating on the first breach —
+      // recover within the window and you survive. Every other car passes 0 (immediate liq).
+      // slFp/tpFp (Pink Rod stop-loss / take-profit) stay 0 until that car's SL/TP UI ships.
+      const graceSecs = ability === "skull" ? 2 : 0;
+      opened = await session.open(asset, dir, lev, unitsToBase(playAmount), Math.round(CONFIG.MAXSEC), Math.round(CONFIG.LIQ * 1_000_000), graceSecs, 0, 0);
     } catch (e: any) {
       console.error("on-chain open failed", e);
       // HouseUndercapitalized is RaiderError #6005 — the on-chain error arrives as the raw

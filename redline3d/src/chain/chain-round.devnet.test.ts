@@ -289,7 +289,7 @@ describe.skipIf(!RUN)("chain-round devnet loop", () => {
     const erProgram = new anchor.Program(idl as anchor.Idl, erProvider);
     const pdas = deriveRaiderPdas(CHAIN.PROGRAM_ID, player.publicKey, mint);
     const registry = deriveFeedRegistry(CHAIN.PROGRAM_ID);
-    const tx = await erProgram.methods.open(1, 1, 100, new anchor.BN(1_000_000), new anchor.BN(60), 200_000).accountsPartial({
+    const tx = await erProgram.methods.open(1, 1, 100, new anchor.BN(1_000_000), new anchor.BN(60), 200_000, 0, 0, 0).accountsPartial({
       player: pdas.player, house: pdas.till, round: pdas.round, mint,
       priceUpdate: CHAIN.FEEDS.BTC, registry, playerAuthority: player.publicKey, // BTC feed on an ETH (asset 1) round
     }).transaction();

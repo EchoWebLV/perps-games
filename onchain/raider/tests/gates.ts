@@ -167,12 +167,12 @@ describe("raider negative gates — deterministic rejections", function () {
 
     // --- lev > RMAX -> BadLeverage ---
     await expectReject(
-      () => pER.methods.open(ASSET_BTC, 1, RMAX + 1, new BN(STAKE)).accounts(openAcc).signers([sc.session]).rpc(),
+      () => pER.methods.open(ASSET_BTC, 1, RMAX + 1, new BN(STAKE), new BN(0), 0, 0, 0, 0).accounts(openAcc).signers([sc.session]).rpc(),
       /BadLeverage|6006/i, "open(lev=2001)");
 
     // --- dir = 0 -> BadLeverage ---
     await expectReject(
-      () => pER.methods.open(ASSET_BTC, 0, 100, new BN(STAKE)).accounts(openAcc).signers([sc.session]).rpc(),
+      () => pER.methods.open(ASSET_BTC, 0, 100, new BN(STAKE), new BN(0), 0, 0, 0, 0).accounts(openAcc).signers([sc.session]).rpc(),
       /BadLeverage|6006/i, "open(dir=0)");
 
     // The round must still be idle after the two rejected opens.
@@ -190,13 +190,13 @@ describe("raider negative gates — deterministic rejections", function () {
       /NoOpenRound|6003|UntrustedFeed|6010/i, "close(no open round)");
 
     // --- a valid open succeeds, then double-open -> RoundAlreadyOpen ---
-    await pER.methods.open(ASSET_BTC, 1, 100, new BN(STAKE)).accounts(openAcc).signers([sc.session]).rpc({ skipPreflight: true });
+    await pER.methods.open(ASSET_BTC, 1, 100, new BN(STAKE), new BN(0), 0, 0, 0, 0).accounts(openAcc).signers([sc.session]).rpc({ skipPreflight: true });
     r = await pER.account.round.fetch(sc.roundPda);
     assert.equal(r.status, 1, "first open must succeed");
     console.log("  first open OK (status=1)");
 
     await expectReject(
-      () => pER.methods.open(ASSET_BTC, 1, 100, new BN(STAKE)).accounts(openAcc).signers([sc.session]).rpc(),
+      () => pER.methods.open(ASSET_BTC, 1, 100, new BN(STAKE), new BN(0), 0, 0, 0, 0).accounts(openAcc).signers([sc.session]).rpc(),
       /RoundAlreadyOpen|6002/i, "double-open");
 
     console.log("ER-side gates OK: BadLeverage (lev & dir), NoOpenRound, RoundAlreadyOpen");

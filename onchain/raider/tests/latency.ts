@@ -179,7 +179,7 @@ describe("raider — ER latency re-measurement (processed + confirmed p50/p95)",
 
       // open
       await timeOne(
-        () => programER.methods.open(ASSET_BTC, 1, 100, new BN(STAKE)).accounts({
+        () => programER.methods.open(ASSET_BTC, 1, 100, new BN(STAKE), new BN(0), 0, 0, 0, 0).accounts({
           player: playerPda, house: till, round: roundPda, mint,
           priceUpdate: BTC_FEED, registry: feedRegistry, playerAuthority: session.publicKey,
         }).signers([session]).rpc({ skipPreflight: true, commitment: "confirmed" }),

@@ -180,11 +180,11 @@ describe("raider LIQ outcome — a real on-chain liquidation at RMAX against the
       const totalShortBefore = await sumLedgers(scShort);
 
       // Open both at ~the same mark: LONG 2000x and SHORT 2000x — each settles against its own TILL.
-      await scLong.programER.methods.open(ASSET_BTC, 1, RMAX, new BN(STAKE)).accounts({
+      await scLong.programER.methods.open(ASSET_BTC, 1, RMAX, new BN(STAKE), new BN(0), 0, 0, 0, 0).accounts({
         player: scLong.playerPda, house: scLong.till, round: scLong.roundPda, mint: scLong.mint,
         priceUpdate: BTC_FEED, registry: scLong.feedRegistry, playerAuthority: scLong.session.publicKey,
       }).signers([scLong.session]).rpc({ skipPreflight: true });
-      await scShort.programER.methods.open(ASSET_BTC, -1, RMAX, new BN(STAKE)).accounts({
+      await scShort.programER.methods.open(ASSET_BTC, -1, RMAX, new BN(STAKE), new BN(0), 0, 0, 0, 0).accounts({
         player: scShort.playerPda, house: scShort.till, round: scShort.roundPda, mint: scShort.mint,
         priceUpdate: BTC_FEED, registry: scShort.feedRegistry, playerAuthority: scShort.session.publicKey,
       }).signers([scShort.session]).rpc({ skipPreflight: true });

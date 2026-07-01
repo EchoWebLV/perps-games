@@ -1889,6 +1889,18 @@
         {
           "name": "liq",
           "type": "u32"
+        },
+        {
+          "name": "grace",
+          "type": "u16"
+        },
+        {
+          "name": "sl",
+          "type": "u32"
+        },
+        {
+          "name": "tp",
+          "type": "u32"
         }
       ]
     },
@@ -2961,6 +2973,18 @@
             "type": "u32"
           },
           {
+            "name": "grace_secs",
+            "type": "u16"
+          },
+          {
+            "name": "sl_fp",
+            "type": "u32"
+          },
+          {
+            "name": "tp_fp",
+            "type": "u32"
+          },
+          {
             "name": "status",
             "type": "u8"
           },
@@ -2983,6 +3007,10 @@
           {
             "name": "outcome",
             "type": "u8"
+          },
+          {
+            "name": "liq_breach_ts",
+            "type": "i64"
           }
         ]
       }

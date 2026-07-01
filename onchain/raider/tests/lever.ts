@@ -315,7 +315,7 @@ describe("raider — lever mid-round parity (terminal-first rebank, BigInt seque
 
     // ---- open long 100x ----
     await programER.methods
-      .open(ASSET_BTC, 1, 100, new BN(STAKE))
+      .open(ASSET_BTC, 1, 100, new BN(STAKE), new BN(0), 0, 0, 0, 0)
       .accounts({
         player: playerPda,
         house: till,

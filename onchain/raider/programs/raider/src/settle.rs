@@ -24,6 +24,12 @@ pub const MIN_LIQ_FP: i128 = 100_000; // 0.10 — Suspension-maxed (lowest/best 
 pub const CAP_FP: i128 = 25_000_000; // 25.0
 pub const RMIN: u32 = 10;
 pub const RMAX: u32 = 3000;
+// Skull "Death's Door" grace cap (seconds). A round's grace window (the time a
+// sub-floor position may ride before the tick liquidates it) is clamped to this at
+// `open`. Grace is house-negative — some liqs survive — so it is bounded here; the
+// design uses 2s. Zero means no grace (immediate liq), the default for every car
+// except Skull.
+pub const MAX_GRACE_SECS: u16 = 5;
 
 #[derive(Clone, Copy, PartialEq, Debug)]
 pub enum Outcome {
@@ -119,6 +125,90 @@ pub fn fires(
 ) -> bool {
     let (term, _) = terminal(equity_fp(banked_fp, dir, lev, entry_raw, exit_raw), liq_fp);
     term != Outcome::Cashout || now >= deadline_ts
+}
+
+/// What the permissionless tick/crank should do at one mark. This extends the plain
+/// `fires()` terminal check (used by flip/lever) with the Skull grace window and the
+/// Pink Rod SL/TP thresholds, which are TICK-ONLY conveniences — a manual close /
+/// flip / lever still settles at the current mark via the standard path.
+#[derive(Clone, Copy, PartialEq, Debug)]
+pub enum TickAction {
+    /// A terminal (liq/cap/time) OR a Pink Rod SL/TP crossed → settle at this mark.
+    Settle,
+    /// Skull grace: first sub-floor tick of a fresh breach → record `liq_breach_ts = now`.
+    StampBreach,
+    /// Skull grace: climbed back above the floor within the window → reset `liq_breach_ts = 0`.
+    ClearBreach,
+    /// Nothing crossed (benign heartbeat, or breached-but-still-within-grace) → leave open.
+    Hold,
+}
+
+/// Decide the tick's action at this mark. Returns ONLY the decision — the outcome and
+/// payout stay in the shared settle body (`settle_round` → `settle::settle`): an SL/TP
+/// exit settles as a normal Cashout at the observed equity, and a grace-elapsed liq as a
+/// normal Liq, so this function never duplicates the payout math.
+///
+/// Precedence before the deadline:
+///   equity <= liq_fp → liquidation (Skull grace may StampBreach/Hold before it fires)
+///   equity >= CAP_FP → cap (max win)
+///   equity >= tp_fp  → Pink Rod take-profit  (kept below CAP by `open`)
+///   equity <= sl_fp  → Pink Rod stop-loss    (kept above liq_fp by `open`, so a gap
+///                                              THROUGH sl to below the floor liquidates
+///                                              instead — liq is checked first)
+///   otherwise        → ClearBreach if a grace breach was pending, else Hold
+/// At/after `deadline_ts` the round always settles at the mark (grace/SL/TP can't
+/// outlive the round); the shared settle body relabels a plain cashout to Time.
+#[allow(clippy::too_many_arguments)]
+pub fn tick_action(
+    banked_fp: i128,
+    dir: i8,
+    lev: u32,
+    entry_raw: i64,
+    exit_raw: i64,
+    now: i64,
+    deadline_ts: i64,
+    liq_fp: i128,
+    grace_secs: i64,
+    liq_breach_ts: i64,
+    sl_fp: i128,
+    tp_fp: i128,
+) -> TickAction {
+    // The deadline is terminal — settle now, whatever the grace/SL/TP state.
+    if now >= deadline_ts {
+        return TickAction::Settle;
+    }
+
+    let eq = equity_fp(banked_fp, dir, lev, entry_raw, exit_raw);
+
+    // Liquidation, with the Skull grace window layered on top.
+    if eq <= liq_fp {
+        if grace_secs <= 0 {
+            return TickAction::Settle; // no grace: immediate liquidation
+        }
+        if liq_breach_ts == 0 {
+            return TickAction::StampBreach; // first sub-floor tick → enter the window
+        }
+        if now - liq_breach_ts >= grace_secs {
+            return TickAction::Settle; // window elapsed, still under → wiped
+        }
+        return TickAction::Hold; // within the grace window, praying for a recovery
+    }
+
+    // Above the floor.
+    if eq >= CAP_FP {
+        return TickAction::Settle; // cap (max win)
+    }
+    if tp_fp > 0 && eq >= tp_fp {
+        return TickAction::Settle; // Pink Rod take-profit
+    }
+    if sl_fp > 0 && eq <= sl_fp {
+        return TickAction::Settle; // Pink Rod stop-loss
+    }
+    // Nothing crossed. If we were mid-grace, we climbed back out → clear the breach.
+    if liq_breach_ts != 0 {
+        return TickAction::ClearBreach;
+    }
+    TickAction::Hold
 }
 
 #[cfg(test)]
@@ -227,5 +317,85 @@ mod tests {
     fn fires_honors_per_round_floor() {
         assert!(fires(0, 1, 1000, 60_000, 59_949, 100, 1_000_000, LIQ_FP)); // liq at 0.20
         assert!(!fires(0, 1, 1000, 60_000, 59_949, 100, 1_000_000, MIN_LIQ_FP)); // survives at 0.10
+    }
+
+    // --- Skull grace + Pink Rod SL/TP: tick_action decisions ---
+    // Vectors reuse the proven equity marks: 1000x long entry 60_000 exit 59_949 => 0.15x
+    // (sub the 0.20 floor); 100x long +1% => 2.0x; 100x long -0.5% => 0.5x; +0.1% => 1.1x.
+
+    // grace_secs 0 (every non-Skull car) → the classic immediate liq on a sub-floor mark.
+    #[test]
+    fn grace_zero_liquidates_immediately() {
+        let a = tick_action(0, 1, 1000, 60_000, 59_949, 100, 1_000_000, LIQ_FP, 0, 0, 0, 0);
+        assert_eq!(a, TickAction::Settle);
+    }
+
+    // Skull grace (2s): first breach stamps, next tick within the window holds, then once
+    // 2s have elapsed and equity is STILL under the floor it finally liquidates.
+    #[test]
+    fn grace_stamps_then_holds_then_liquidates() {
+        let first = tick_action(0, 1, 1000, 60_000, 59_949, 100, 1_000_000, LIQ_FP, 2, 0, 0, 0);
+        assert_eq!(first, TickAction::StampBreach);
+        let within = tick_action(0, 1, 1000, 60_000, 59_949, 101, 1_000_000, LIQ_FP, 2, 100, 0, 0);
+        assert_eq!(within, TickAction::Hold); // 1s < 2s window
+        let elapsed = tick_action(0, 1, 1000, 60_000, 59_949, 102, 1_000_000, LIQ_FP, 2, 100, 0, 0);
+        assert_eq!(elapsed, TickAction::Settle); // 2s >= window, still under → wiped
+    }
+
+    // Skull grace: a pending breach with equity recovered above the floor → survived.
+    #[test]
+    fn grace_clears_breach_on_recovery() {
+        // exit back to entry → equity 1.0x (> 0.20 floor); breach was stamped at t=100.
+        let a = tick_action(0, 1, 1000, 60_000, 60_000, 101, 1_000_000, LIQ_FP, 2, 100, 0, 0);
+        assert_eq!(a, TickAction::ClearBreach);
+    }
+
+    // The deadline overrides the grace window: a sub-floor mark at/after the deadline
+    // settles immediately even though only 1s of the 2s grace has elapsed.
+    #[test]
+    fn grace_yields_to_deadline() {
+        let a = tick_action(0, 1, 1000, 60_000, 59_949, 200, 200, LIQ_FP, 2, 199, 0, 0);
+        assert_eq!(a, TickAction::Settle);
+    }
+
+    // Pink Rod take-profit: fires once equity reaches the tp threshold, holds below it.
+    #[test]
+    fn take_profit_fires_at_threshold() {
+        // 2.0x equity, tp 1.5x → eq >= tp → Settle (settle_round renders a Cashout at 2.0x).
+        let hit = tick_action(0, 1, 100, 60_000, 60_600, 100, 1_000_000, LIQ_FP, 0, 0, 0, 1_500_000);
+        assert_eq!(hit, TickAction::Settle);
+        // tp 3.0x, equity only 2.0x → not yet.
+        let miss = tick_action(0, 1, 100, 60_000, 60_600, 100, 1_000_000, LIQ_FP, 0, 0, 0, 3_000_000);
+        assert_eq!(miss, TickAction::Hold);
+    }
+
+    // Pink Rod stop-loss: fires once equity falls to the sl threshold (still above the floor).
+    #[test]
+    fn stop_loss_fires_at_threshold() {
+        // 0.5x equity, sl 0.6x → eq <= sl (and > 0.20 floor) → Settle.
+        let hit = tick_action(0, 1, 100, 60_000, 59_700, 100, 1_000_000, LIQ_FP, 0, 0, 600_000, 0);
+        assert_eq!(hit, TickAction::Settle);
+        // sl 0.4x, equity 0.5x → still above the stop → Hold.
+        let miss = tick_action(0, 1, 100, 60_000, 59_700, 100, 1_000_000, LIQ_FP, 0, 0, 400_000, 0);
+        assert_eq!(miss, TickAction::Hold);
+    }
+
+    // A gap straight through the stop-loss to BELOW the liq floor liquidates (payout 0) —
+    // the SL does not rescue a gap-through, because liq is checked first.
+    #[test]
+    fn liq_beats_stop_loss_on_a_gap() {
+        // 0.15x equity, sl 0.6x, grace 0 → immediate liq Settle (not an SL cashout).
+        let no_grace = tick_action(0, 1, 1000, 60_000, 59_949, 100, 1_000_000, LIQ_FP, 0, 0, 600_000, 0);
+        assert_eq!(no_grace, TickAction::Settle);
+        // same gap with grace → enters the grace window (StampBreach), still not an SL exit.
+        let with_grace = tick_action(0, 1, 1000, 60_000, 59_949, 100, 1_000_000, LIQ_FP, 2, 0, 600_000, 0);
+        assert_eq!(with_grace, TickAction::StampBreach);
+    }
+
+    // No thresholds, favorable move, before the deadline → benign heartbeat.
+    #[test]
+    fn benign_tick_holds() {
+        let a = tick_action(0, 1, 100, 60_000, 60_060, 100, 1_000_000, LIQ_FP, 0, 0, 0, 0);
+        assert_eq!(a, TickAction::Hold);
     }
 }

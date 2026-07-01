@@ -119,7 +119,10 @@ export interface ChainRound {
   delegate(): Promise<void>;
   sliceFromPot(slice: number): Promise<void>;
   sweepTill(): Promise<void>;
-  open(asset: AssetSym, dir: 1 | -1, lev: number, stake: number, durationSecs: number, liqFp: number): Promise<OpenedRound>;
+  // graceSecs (Skull "Death's Door" auto-liq grace, seconds), slFp/tpFp (Pink Rod
+  // stop-loss / take-profit equity thresholds in SCALE units) are per-round risk knobs;
+  // 0 = off (the default for every car without that ability). The program clamps them.
+  open(asset: AssetSym, dir: 1 | -1, lev: number, stake: number, durationSecs: number, liqFp: number, graceSecs?: number, slFp?: number, tpFp?: number): Promise<OpenedRound>;
   close(): Promise<SettledRound>;
   flip(newDir: 1 | -1): Promise<ActionResult>;
   lever(newLev: number): Promise<ActionResult>;
@@ -259,8 +262,8 @@ export function createChainRound(deps: { wallet: AnchorWalletLike; mint: PublicK
       }));
     },
 
-    async open(asset, dir, lev, stake, durationSecs, liqFp) {
-      await send(erConn, programER.methods.open(CHAIN.ASSET_ID[asset], dir, lev, new BN(stake), new BN(durationSecs), liqFp).accountsPartial({
+    async open(asset, dir, lev, stake, durationSecs, liqFp, graceSecs = 0, slFp = 0, tpFp = 0) {
+      await send(erConn, programER.methods.open(CHAIN.ASSET_ID[asset], dir, lev, new BN(stake), new BN(durationSecs), liqFp, graceSecs, slFp, tpFp).accountsPartial({
         player: pdas.player, house: pdas.till, round: pdas.round, mint, priceUpdate: feedFor(asset), registry, playerAuthority: owner,
       }));
       const r = await programER.account.round.fetch(pdas.round);

@@ -1895,6 +1895,18 @@ export type Raider = {
         {
           "name": "liq",
           "type": "u32"
+        },
+        {
+          "name": "grace",
+          "type": "u16"
+        },
+        {
+          "name": "sl",
+          "type": "u32"
+        },
+        {
+          "name": "tp",
+          "type": "u32"
         }
       ]
     },
@@ -2967,6 +2979,18 @@ export type Raider = {
             "type": "u32"
           },
           {
+            "name": "graceSecs",
+            "type": "u16"
+          },
+          {
+            "name": "slFp",
+            "type": "u32"
+          },
+          {
+            "name": "tpFp",
+            "type": "u32"
+          },
+          {
             "name": "status",
             "type": "u8"
           },
@@ -2989,6 +3013,10 @@ export type Raider = {
           {
             "name": "outcome",
             "type": "u8"
+          },
+          {
+            "name": "liqBreachTs",
+            "type": "i64"
           }
         ]
       }

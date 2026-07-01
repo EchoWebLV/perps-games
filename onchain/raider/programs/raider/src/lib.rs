@@ -216,8 +216,12 @@ pub mod raider {
         r.max_payout = 0;
         r.deadline_ts = 0;
         r.liq_fp = 0; // set at open (clamped to [MIN_LIQ_FP, LIQ_FP]); never read while idle
+        r.grace_secs = 0; // Skull grace window; set at open (0 = none)
+        r.sl_fp = 0; // Pink Rod stop-loss; set at open (0 = unset)
+        r.tp_fp = 0; // Pink Rod take-profit; set at open (0 = unset)
         r.status = 0; // idle
         r.bump = ctx.bumps.round;
+        r.liq_breach_ts = 0; // Skull grace runtime record; written by the tick
         Ok(())
     }
 
@@ -349,7 +353,18 @@ pub mod raider {
     /// Open a round inside the ER: snapshot the live Lazer entry price, debit the
     /// player's stake, and PRE-LOCK the house's maximum possible payout so the
     /// house is provably solvent for this round before any price moves.
-    pub fn open(ctx: Context<OpenRound>, asset: u8, dir: i8, lev: u32, stake: u64, dur: i64, liq: u32) -> Result<()> {
+    pub fn open(
+        ctx: Context<OpenRound>,
+        asset: u8,
+        dir: i8,
+        lev: u32,
+        stake: u64,
+        dur: i64,
+        liq: u32,
+        grace: u16,
+        sl: u32,
+        tp: u32,
+    ) -> Result<()> {
         require!(
             lev >= settle::RMIN && lev <= settle::RMAX,
             RaiderError::BadLeverage
@@ -431,12 +446,34 @@ pub mod raider {
         } else {
             (liq as i128).clamp(settle::MIN_LIQ_FP, settle::LIQ_FP) as u32
         };
+        // Skull "Death's Door": grace window in seconds (0 = none). Clamped to
+        // MAX_GRACE_SECS so a client can never buy an unbounded survival window (grace is
+        // house-negative). Honored only by the permissionless tick/crank.
+        round.grace_secs = grace.min(settle::MAX_GRACE_SECS);
+        // Pink Rod stop-loss / take-profit (SCALE units; 0 = unset). SL is clamped strictly
+        // ABOVE this round's liq floor and below break-even; TP strictly above break-even and
+        // below CAP. So a gap through SL to under the floor still liquidates (liq is checked
+        // first), and TP can never pre-empt the cap. Both settle as a normal Cashout at the mark.
+        round.sl_fp = if sl == 0 {
+            0
+        } else {
+            (sl as i128).clamp(round.liq_fp as i128 + 1, settle::SCALE - 1) as u32
+        };
+        round.tp_fp = if tp == 0 {
+            0
+        } else {
+            (tp as i128).clamp(settle::SCALE + 1, settle::CAP_FP - 1) as u32
+        };
         round.status = 1;
-        // Clear any stale settlement record from a previous round on this PDA.
+        // Clear any stale settlement record from a previous round on this PDA (this Round
+        // PDA is reused across rounds without re-init). liq_breach_ts MUST reset too, or a
+        // prior grace round's stale breach would make the first sub-floor tick liquidate
+        // immediately (as if the whole window had already elapsed).
         round.exit_raw = 0;
         round.exit_ts = 0;
         round.payout = 0;
         round.outcome = 0;
+        round.liq_breach_ts = 0;
 
         emit!(RoundEvent {
             owner: round.owner,
@@ -812,7 +849,11 @@ fn try_settle_tick<'info>(
         return Ok(()); // not open: no-op (harmless for leftover crank ticks after settle)
     }
     let snap = price::read_fresh(price_update, now)?;
-    let fires = settle::fires(
+    // tick_action layers the Skull grace window + Pink Rod SL/TP over the plain
+    // liq/cap/time terminal check. Stamp/clear write the grace breach timestamp WITHOUT
+    // settling (the round rides on); Settle hands off to the shared settle body, which
+    // renders the outcome/payout (a grace-elapsed liq or an SL/TP cashout at the mark).
+    match settle::tick_action(
         round.banked,
         round.dir,
         round.lev,
@@ -821,11 +862,22 @@ fn try_settle_tick<'info>(
         now,
         round.deadline_ts,
         round.liq_fp as i128,
-    );
-    if !fires {
-        return Ok(()); // heartbeat: nothing crossed, leave the round open
+        round.grace_secs as i64,
+        round.liq_breach_ts,
+        round.sl_fp as i128,
+        round.tp_fp as i128,
+    ) {
+        settle::TickAction::Settle => settle_round(player, house, round, &snap, now),
+        settle::TickAction::StampBreach => {
+            round.liq_breach_ts = now; // enter the Death's-Door window
+            Ok(())
+        }
+        settle::TickAction::ClearBreach => {
+            round.liq_breach_ts = 0; // climbed back above the floor → survived
+            Ok(())
+        }
+        settle::TickAction::Hold => Ok(()), // heartbeat / still within grace: leave open
     }
-    settle_round(player, house, round, &snap, now)
 }
 
 /// Shared settle body for `close`, `force_close`, `flip`/`lever` (terminal-first),

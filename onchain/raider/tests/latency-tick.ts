@@ -126,7 +126,7 @@ describe("raider — continuous-tick ER latency (submit -> confirmed p50/p95)", 
     await sleep(8000); // delegation lands
 
     // Open LOW leverage (10x) so no tick fires during the measurement window.
-    await programER.methods.open(ASSET_BTC, 1, 10, new BN(STAKE)).accounts({
+    await programER.methods.open(ASSET_BTC, 1, 10, new BN(STAKE), new BN(0), 0, 0, 0, 0).accounts({
       player, house: till, round, mint, priceUpdate: BTC_FEED, registry: feedRegistry, playerAuthority: session.publicKey,
     }).signers([session]).rpc({ skipPreflight: true });
 

@@ -197,7 +197,7 @@ describe("raider — canonical end-to-end loop (L1 <-> ER, real USDC, provable f
     console.log("total (player+house.balance+house.locked) BEFORE open:", totalBefore.toString());
 
     // ---- open(BTC, long, 100x, 1 USDC) on the ER ----
-    await programER.methods.open(ASSET_BTC, 1, 100, new BN(STAKE)).accounts({
+    await programER.methods.open(ASSET_BTC, 1, 100, new BN(STAKE), new BN(0), 0, 0, 0, 0).accounts({
       player: playerPda, house: till, round: roundPda, mint,
       priceUpdate: BTC_FEED, registry: feedRegistry, playerAuthority: session.publicKey,
     }).signers([session]).rpc({ skipPreflight: true });

@@ -280,7 +280,7 @@ describe("raider — flip-after-settle race guard (NoOpenRound)", function () {
 
     // ---- open long 10x (low lev: will not terminate on price within the window) ----
     await programER.methods
-      .open(ASSET_BTC, 1, 10, new BN(STAKE))
+      .open(ASSET_BTC, 1, 10, new BN(STAKE), new BN(0), 0, 0, 0, 0)
       .accounts({
         player: playerPda,
         house: till,

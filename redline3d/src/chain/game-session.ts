@@ -21,7 +21,8 @@ export interface GameSession {
   init(): Promise<bigint>;
   refreshBalance(onEr?: boolean): Promise<bigint>;
   ensureSession(buyInBase: number, stakeBase: number): Promise<void>;
-  open(asset: AssetSym, dir: 1 | -1, lev: number, stakeBase: number, durationSecs: number, liqFp: number): Promise<OpenedRound>;
+  // graceSecs / slFp / tpFp: per-round risk knobs (Skull grace, Pink Rod SL/TP); 0 = off.
+  open(asset: AssetSym, dir: 1 | -1, lev: number, stakeBase: number, durationSecs: number, liqFp: number, graceSecs?: number, slFp?: number, tpFp?: number): Promise<OpenedRound>;
   noteLeverage(lev: number): void;
   flip(dir: 1 | -1): Promise<ActionResult>;
   close(): Promise<SettledRound>;
@@ -112,7 +113,7 @@ export function createGameSession(opts: {
       bal = await c.readPlayerBalance(true);
     },
 
-    async open(asset, dir, lev, stakeBase, durationSecs, liqFp) {
+    async open(asset, dir, lev, stakeBase, durationSecs, liqFp, graceSecs = 0, slFp = 0, tpFp = 0) {
       const c = need();
       // Reconcile a leftover OPEN round before starting a new one. After a page reload,
       // a log-out→log-in, or a missed auto-settle (crank), a prior round can still be open
@@ -127,7 +128,7 @@ export function createGameSession(opts: {
           bal = await c.readPlayerBalance(true);
         }
       } catch (e) { console.warn("open: stale-round reconcile skipped:", e); }
-      const opened = await c.open(asset, dir, lev, stakeBase, durationSecs, liqFp);
+      const opened = await c.open(asset, dir, lev, stakeBase, durationSecs, liqFp, graceSecs, slFp, tpFp);
       armed = false;
       try { await c.scheduleCrank(); armed = true; } catch { armed = false; }
       return opened;

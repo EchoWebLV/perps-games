@@ -260,7 +260,7 @@ describe("raider — self-driving 2000x liquidation via native crank (zero clien
       await sleep(8000);
       const open = () =>
         programER.methods
-          .open(ASSET_BTC, dir, 2000, new BN(STAKE))
+          .open(ASSET_BTC, dir, 2000, new BN(STAKE), new BN(0), 0, 0, 0, 0)
           .accounts({
             player,
             house: till,

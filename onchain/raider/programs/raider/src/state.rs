@@ -113,6 +113,22 @@ pub struct Round {
     // 0.10 = 100_000). Part of the provable-fairness record — settle honors THIS value,
     // so a round's liq threshold is fixed and recomputable from on-chain data alone.
     pub liq_fp: u32,
+    // Skull "Death's Door" — auto-liquidation grace window, in SECONDS (0 = none, the
+    // default for every non-Skull car). When set, a tick that finds equity <= liq_fp does
+    // NOT settle immediately: it records the breach (liq_breach_ts) and only liquidates if
+    // equity is STILL under the floor grace_secs later. Recovering above the floor within
+    // the window clears the breach (survived). ONLY the permissionless tick/crank honors
+    // this — a manual close/flip/lever settles at the current mark. House-negative (some
+    // liqs survive), so `open` caps it at MAX_GRACE_SECS.
+    pub grace_secs: u16,
+    // Pink Rod stop-loss / take-profit equity thresholds (SCALE units; 0 = unset). The
+    // permissionless tick/crank auto-cashes-out when equity falls to <= sl_fp (kept strictly
+    // ABOVE the liq floor) or rises to >= tp_fp (kept strictly BELOW cap). Both settle as a
+    // normal Cashout at the observed mark, so they never change the payout math — only WHEN
+    // the round exits. Stamped at `open`, honored only by the tick path, on-chain for the life
+    // of the round (provable).
+    pub sl_fp: u32,
+    pub tp_fp: u32,
     pub status: u8,
     pub bump: u8,
     // --- settlement record (written at settle; zero while open/idle) ---
@@ -120,14 +136,19 @@ pub struct Round {
     pub exit_ts: i64,
     pub payout: u64,
     pub outcome: u8,
+    // Skull grace runtime record: unix ts of the CURRENT (or, once liquidated, the final)
+    // sub-floor breach; 0 = never breached / recovered. Written by the tick (stamp on first
+    // breach, clear on recovery), and NOT reset at settle — so a liquidated grace round proves
+    // the window was honored (exit_ts - liq_breach_ts >= grace_secs). Reset to 0 at `open`.
+    pub liq_breach_ts: i64,
 }
 impl Round {
     // disc(8) + owner(32) + feed(32) + dir(1) + lev(4) + stake(8) + entry_raw(8)
     //  + entry_expo(4) + entry_ts(8) + banked(16) + max_payout(8) + deadline_ts(8)
-    //  + liq_fp(4) + status(1) + bump(1) + exit_raw(8) + exit_ts(8) + payout(8)
-    //  + outcome(1) = 168
+    //  + liq_fp(4) + grace_secs(2) + sl_fp(4) + tp_fp(4) + status(1) + bump(1)
+    //  + exit_raw(8) + exit_ts(8) + payout(8) + outcome(1) + liq_breach_ts(8) = 186
     pub const SIZE: usize =
-        8 + 32 + 32 + 1 + 4 + 8 + 8 + 4 + 8 + 16 + 8 + 8 + 4 + 1 + 1 + 8 + 8 + 8 + 1;
+        8 + 32 + 32 + 1 + 4 + 8 + 8 + 4 + 8 + 16 + 8 + 8 + 4 + 2 + 4 + 4 + 1 + 1 + 8 + 8 + 8 + 1 + 8;
 }
 
 #[cfg(test)]
@@ -135,8 +156,9 @@ mod size_tests {
     use super::*;
     #[test]
     fn round_size_includes_feed() {
-        // 132 + 32 (feed: Pubkey) = 164; + 4 (liq_fp: u32) = 168
-        assert_eq!(Round::SIZE, 168);
+        // 132 + 32 (feed: Pubkey) = 164; + 4 (liq_fp) = 168; + grace_secs(2) + sl_fp(4)
+        // + tp_fp(4) + liq_breach_ts(8) = 186 (Skull grace + Pink Rod SL/TP fields).
+        assert_eq!(Round::SIZE, 186);
     }
     #[test]
     fn feed_registry_size_fits_eight_entries() {

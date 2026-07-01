@@ -161,7 +161,7 @@ describe("raider feed authentication — the unauthenticated-feed house-drain ho
     // --- 1) open() with a FORGED price_update -> REJECTED ---
     let openRejected = false, openErr = "";
     try {
-      await programER.methods.open(ASSET_BTC, 1, 2000, new BN(STAKE)).accounts({
+      await programER.methods.open(ASSET_BTC, 1, 2000, new BN(STAKE), new BN(0), 0, 0, 0, 0).accounts({
         player: sc.playerPda, house: sc.till, round: sc.roundPda, mint: sc.mint,
         priceUpdate: FAKE_FEED, registry: sc.feedRegistry, playerAuthority: sc.session.publicKey,
       }).signers([sc.session]).rpc(); // preflight ON so the program code surfaces
@@ -181,7 +181,7 @@ describe("raider feed authentication — the unauthenticated-feed house-drain ho
     assert.equal(houseAfterBadOpen.locked.toString(), "0", "[1] house must not lock on a rejected open");
 
     // --- 2) open() LEGITIMATELY (real BTC feed) -> succeeds ---
-    await programER.methods.open(ASSET_BTC, 1, 100, new BN(STAKE)).accounts({
+    await programER.methods.open(ASSET_BTC, 1, 100, new BN(STAKE), new BN(0), 0, 0, 0, 0).accounts({
       player: sc.playerPda, house: sc.till, round: sc.roundPda, mint: sc.mint,
       priceUpdate: BTC_FEED, registry: sc.feedRegistry, playerAuthority: sc.session.publicKey,
     }).signers([sc.session]).rpc({ skipPreflight: true });
