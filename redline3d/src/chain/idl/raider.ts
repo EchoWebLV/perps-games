@@ -264,6 +264,11 @@ export type Raider = {
               {
                 "kind": "account",
                 "path": "mint"
+              },
+              {
+                "kind": "account",
+                "path": "player.owner",
+                "account": "playerBalance"
               }
             ]
           }
@@ -374,6 +379,11 @@ export type Raider = {
               {
                 "kind": "account",
                 "path": "mint"
+              },
+              {
+                "kind": "account",
+                "path": "player.owner",
+                "account": "playerBalance"
               }
             ]
           }
@@ -748,6 +758,10 @@ export type Raider = {
               {
                 "kind": "account",
                 "path": "mint"
+              },
+              {
+                "kind": "account",
+                "path": "payer"
               }
             ]
           }
@@ -995,6 +1009,11 @@ export type Raider = {
               {
                 "kind": "account",
                 "path": "mint"
+              },
+              {
+                "kind": "account",
+                "path": "player.owner",
+                "account": "playerBalance"
               }
             ]
           }
@@ -1108,6 +1127,11 @@ export type Raider = {
               {
                 "kind": "account",
                 "path": "mint"
+              },
+              {
+                "kind": "account",
+                "path": "player.owner",
+                "account": "playerBalance"
               }
             ]
           }
@@ -1670,6 +1694,11 @@ export type Raider = {
               {
                 "kind": "account",
                 "path": "mint"
+              },
+              {
+                "kind": "account",
+                "path": "player.owner",
+                "account": "playerBalance"
               }
             ]
           }
@@ -1779,6 +1808,11 @@ export type Raider = {
               {
                 "kind": "account",
                 "path": "mint"
+              },
+              {
+                "kind": "account",
+                "path": "player.owner",
+                "account": "playerBalance"
               }
             ]
           }
@@ -2053,6 +2087,184 @@ export type Raider = {
       ]
     },
     {
+      "name": "sliceFromPot",
+      "docs": [
+        "Session start (L1, BEFORE delegate_session): carve one worst-case payout",
+        "(`slice = max_payout(selected_stake)`, computed by the client) off the master",
+        "bankroll `[house, mint]` into this player's per-session till",
+        "`[house, mint, owner]`, so the delegated round settles against a till that can",
+        "always cover its own payout. The till is then co-delegated to the ER alongside",
+        "Player + Round (NOT the master). Self-healing: any leftover already in the till",
+        "(a skipped end-sweep, or a delegate that failed after a prior slice) is folded",
+        "back into the master first, so re-slicing never double-spends. Rejects with",
+        "HouseUndercapitalized when the pot can't cover the slice (the operator's",
+        "\"bankroll under threshold → not playable\" rule, enforced on-chain)."
+      ],
+      "discriminator": [
+        200,
+        218,
+        117,
+        235,
+        56,
+        16,
+        74,
+        59
+      ],
+      "accounts": [
+        {
+          "name": "owner",
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "mint"
+        },
+        {
+          "name": "master",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  104,
+                  111,
+                  117,
+                  115,
+                  101
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "mint"
+              }
+            ]
+          }
+        },
+        {
+          "name": "till",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  104,
+                  111,
+                  117,
+                  115,
+                  101
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "mint"
+              },
+              {
+                "kind": "account",
+                "path": "owner"
+              }
+            ]
+          }
+        },
+        {
+          "name": "systemProgram",
+          "address": "11111111111111111111111111111111"
+        }
+      ],
+      "args": [
+        {
+          "name": "slice",
+          "type": "u64"
+        }
+      ]
+    },
+    {
+      "name": "sweepTill",
+      "docs": [
+        "Session end (L1, AFTER undelegate): return this player's till balance to the",
+        "master bankroll, so losses fund the next player and the freed slice is available",
+        "again (the single-pot / self-smoothing property). PERMISSIONLESS: moving a till's",
+        "balance into the master can only consolidate value into the pot, never extract it,",
+        "so anyone may call it — the player's own client at session end, or a keeper",
+        "reclaiming an abandoned session's slice. The till must be fully settled",
+        "(locked == 0) and undelegated (program-owned — a live session's delegated till is",
+        "owned by the delegation program and fails the typed-account check here)."
+      ],
+      "discriminator": [
+        156,
+        41,
+        0,
+        166,
+        141,
+        82,
+        6,
+        118
+      ],
+      "accounts": [
+        {
+          "name": "payer",
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "mint"
+        },
+        {
+          "name": "owner"
+        },
+        {
+          "name": "master",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  104,
+                  111,
+                  117,
+                  115,
+                  101
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "mint"
+              }
+            ]
+          }
+        },
+        {
+          "name": "till",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  104,
+                  111,
+                  117,
+                  115,
+                  101
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "mint"
+              },
+              {
+                "kind": "account",
+                "path": "owner"
+              }
+            ]
+          }
+        }
+      ],
+      "args": []
+    },
+    {
       "name": "tick",
       "docs": [
         "Continuous settler. PERMISSIONLESS heartbeat the keeper/crank calls each",
@@ -2117,6 +2329,11 @@ export type Raider = {
               {
                 "kind": "account",
                 "path": "mint"
+              },
+              {
+                "kind": "account",
+                "path": "player.owner",
+                "account": "playerBalance"
               }
             ]
           }
@@ -2224,6 +2441,11 @@ export type Raider = {
               {
                 "kind": "account",
                 "path": "mint"
+              },
+              {
+                "kind": "account",
+                "path": "player.owner",
+                "account": "playerBalance"
               }
             ]
           }
@@ -2627,6 +2849,12 @@ export type Raider = {
     },
     {
       "name": "houseBalance",
+      "docs": [
+        "HouseBalance backs BOTH roles in the sharding model: the singleton master pot",
+        "`[b\"house\", mint]` (the bankroll; never delegated) AND each per-session till",
+        "`[b\"house\", mint, owner]` (carved off the master, co-delegated with Player+Round",
+        "for one ER session, swept back at end). Identical layout/SIZE for both."
+      ],
       "type": {
         "kind": "struct",
         "fields": [
