@@ -284,6 +284,48 @@ pub mod raider {
         Ok(())
     }
 
+    // ---- House sharding: carve a per-session till off the master pot (L1) -------
+
+    /// Session start (L1, BEFORE delegate_session): carve one worst-case payout
+    /// (`slice = max_payout(selected_stake)`, computed by the client) off the master
+    /// bankroll `[house, mint]` into this player's per-session till
+    /// `[house, mint, owner]`, so the delegated round settles against a till that can
+    /// always cover its own payout. The till is then co-delegated to the ER alongside
+    /// Player + Round (NOT the master). Self-healing: any leftover already in the till
+    /// (a skipped end-sweep, or a delegate that failed after a prior slice) is folded
+    /// back into the master first, so re-slicing never double-spends. Rejects with
+    /// HouseUndercapitalized when the pot can't cover the slice (the operator's
+    /// "bankroll under threshold → not playable" rule, enforced on-chain).
+    pub fn slice_from_pot(ctx: Context<SliceFromPot>, slice: u64) -> Result<()> {
+        // A till mid-open (locked > 0, e.g. an abandoned round committed to L1) must be
+        // force_closed before it can be re-sliced — otherwise reclaiming its balance
+        // would strand the open round's lock. Clean tills (settled or fresh) have locked == 0.
+        require!(ctx.accounts.till.locked == 0, RaiderError::RoundAlreadyOpen);
+
+        let (new_master, new_till) = house::reclaim_and_slice(
+            ctx.accounts.master.balance,
+            ctx.accounts.till.balance,
+            slice,
+        )
+        .map_err(|e| match e {
+            house::HouseMathError::Undercapitalized => RaiderError::HouseUndercapitalized,
+            house::HouseMathError::Overflow => RaiderError::MathOverflow,
+        })?;
+
+        ctx.accounts.master.balance = new_master;
+
+        let master_authority = ctx.accounts.master.authority;
+        let mint = ctx.accounts.mint.key();
+        let till = &mut ctx.accounts.till;
+        // init_if_needed zeroes a fresh till; (re)stamp identity + the carved balance.
+        till.authority = master_authority;
+        till.mint = mint;
+        till.balance = new_till;
+        till.locked = 0;
+        till.bump = ctx.bumps.till;
+        Ok(())
+    }
+
     // ---- Task 7: open a round on the ER -------------------------------------
 
     /// Open a round inside the ER: snapshot the live Lazer entry price, debit the
@@ -1028,6 +1070,32 @@ pub struct FundHouse<'info> {
     )]
     pub vault_token: Account<'info, TokenAccount>,
     pub token_program: Program<'info, Token>,
+}
+
+// slice_from_pot moves value master -> till on L1, BEFORE delegation. The master is the
+// singleton `[house, mint]`; the till is the per-player `[house, mint, owner]` (same
+// HouseBalance layout), init_if_needed so the first session of a wallet creates it and
+// later sessions reuse it. Owner-signed (the player starting their own session).
+#[derive(Accounts)]
+pub struct SliceFromPot<'info> {
+    #[account(mut)]
+    pub owner: Signer<'info>,
+    pub mint: Account<'info, Mint>,
+    #[account(
+        mut,
+        seeds = [HOUSE_SEED, mint.key().as_ref()],
+        bump = master.bump,
+    )]
+    pub master: Account<'info, HouseBalance>,
+    #[account(
+        init_if_needed,
+        payer = owner,
+        space = HouseBalance::SIZE,
+        seeds = [HOUSE_SEED, mint.key().as_ref(), owner.key().as_ref()],
+        bump
+    )]
+    pub till: Account<'info, HouseBalance>,
+    pub system_program: Program<'info, System>,
 }
 
 // open/close mutate the three CO-DELEGATED ledger PDAs together inside the ER.
