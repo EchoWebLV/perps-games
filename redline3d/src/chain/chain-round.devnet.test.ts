@@ -6,7 +6,7 @@ import { readFileSync } from "node:fs";
 import idl from "./idl/raider.json";
 import { createDevKeypairPort } from "./dev-keypair-port";
 import { portToAnchorWallet } from "./anchor-wallet";
-import { createChainRound, deriveRaiderPdas } from "./chain-round";
+import { createChainRound, deriveRaiderPdas, maxPayoutBase } from "./chain-round";
 import { CHAIN, deriveFeedRegistry } from "./config";
 
 const RUN = process.env.RAIDER_DEVNET === "1";
@@ -45,6 +45,7 @@ describe.skipIf(!RUN)("chain-round devnet loop", () => {
     await chain.buyIn(5_000_000);
     expect(await chain.readPlayerBalance()).toBe(5_000_000n);
     await chain.ensureRoundInited();
+    await chain.sliceFromPot(maxPayoutBase(1_000_000));
     await chain.delegate();
 
     const opened = await chain.open("BTC", 1, 100, 1_000_000); // long, 100x, 1 USDC
@@ -95,6 +96,7 @@ describe.skipIf(!RUN)("chain-round devnet loop", () => {
 
     await chain.buyIn(5_000_000);
     await chain.ensureRoundInited();
+    await chain.sliceFromPot(maxPayoutBase(1_000_000));
     await chain.delegate();
 
     // open 2000x, exercise the mid-round actions, then arm the crank
@@ -122,7 +124,7 @@ describe.skipIf(!RUN)("chain-round devnet loop", () => {
     expect(await chain.readPlayerBalance(false)).toBe(0n);
   }, 240_000);
 
-  it("delegate() reuses our own live session and rejects a foreign wallet on the shared house", async () => {
+  it("two wallets run concurrent sessions off one pot; conservation holds; a third is rejected", async () => {
     const RPC = process.env.BASE_RPC || "https://api.devnet.solana.com";
     const conn = new Connection(RPC, { commitment: "confirmed" });
     const wpath = process.env.ANCHOR_WALLET || `${process.env.HOME}/.config/solana/lazer-probe.json`;
@@ -130,18 +132,24 @@ describe.skipIf(!RUN)("chain-round devnet loop", () => {
     const provider = new anchor.AnchorProvider(conn, new anchor.Wallet(funder), { commitment: "confirmed" });
     const program = new anchor.Program(idl as anchor.Idl, provider);
 
-    // fresh mint + funded house shared by both players
+    // operator: fresh mint + master pot funded to cover ~2 min slices, NOT 3.
+    // STAKE 1_000_000 -> slice = maxPayoutBase = 23_750_000; fund 50_000_000 (covers 2, not 3).
+    const STAKE = 1_000_000;
+    const SLICE = maxPayoutBase(STAKE); // 23_750_000
     const mint = await createMint(conn, funder, funder.publicKey, null, 6);
-    const [house] = PublicKey.findProgramAddressSync([Buffer.from("house"), mint.toBuffer()], program.programId);
+    const [master] = PublicKey.findProgramAddressSync([Buffer.from("house"), mint.toBuffer()], program.programId);
     const [vaultAuthority] = PublicKey.findProgramAddressSync([Buffer.from("vault"), mint.toBuffer()], program.programId);
     const vaultToken = getAssociatedTokenAddressSync(mint, vaultAuthority, true);
-    await program.methods.initHouse().accounts({ authority: funder.publicKey, mint, house, vaultAuthority, vaultToken, tokenProgram: TOKEN_PROGRAM_ID, associatedTokenProgram: ASSOCIATED_TOKEN_PROGRAM_ID, systemProgram: SystemProgram.programId }).rpc({ skipPreflight: true });
+    await program.methods.initHouse().accounts({ authority: funder.publicKey, mint, house: master, vaultAuthority, vaultToken, tokenProgram: TOKEN_PROGRAM_ID, associatedTokenProgram: ASSOCIATED_TOKEN_PROGRAM_ID, systemProgram: SystemProgram.programId }).rpc({ skipPreflight: true });
     const funderAta = await getOrCreateAssociatedTokenAccount(conn, funder, mint, funder.publicKey);
     await mintTo(conn, funder, mint, funderAta.address, funder.publicKey, 50_000_000);
-    await program.methods.fundHouse(new anchor.BN(50_000_000)).accounts({ funder: funder.publicKey, mint, house, funderToken: funderAta.address, vaultAuthority, vaultToken, tokenProgram: TOKEN_PROGRAM_ID }).rpc({ skipPreflight: true });
+    await program.methods.fundHouse(new anchor.BN(50_000_000)).accounts({ funder: funder.publicKey, mint, house: master, funderToken: funderAta.address, vaultAuthority, vaultToken, tokenProgram: TOKEN_PROGRAM_ID }).rpc({ skipPreflight: true });
+    // program is constructed from the untyped `Idl` (matches this file's other tests); the
+    // account namespace's index type can't be inferred from that, so cast this one read.
+    const houseBalanceAt = (pk: PublicKey) => (program.account as unknown as { houseBalance: { fetch(pk: PublicKey): Promise<{ balance: { toString(): string } }> } }).houseBalance.fetch(pk);
+    const masterStart = Number((await houseBalanceAt(master)).balance.toString());
 
-    // two independent dev-keypair players on the same mint
-    const mkPlayer = async () => {
+    const makePlayer = async () => {
       const kp = Keypair.generate();
       await provider.sendAndConfirm(new anchor.web3.Transaction().add(SystemProgram.transfer({ fromPubkey: funder.publicKey, toPubkey: kp.publicKey, lamports: 0.1 * LAMPORTS_PER_SOL })));
       const ata = await getOrCreateAssociatedTokenAccount(conn, funder, mint, kp.publicKey);
@@ -150,25 +158,42 @@ describe.skipIf(!RUN)("chain-round devnet loop", () => {
       await port.connect();
       return createChainRound({ wallet: portToAnchorWallet(port), mint });
     };
-    const a = await mkPlayer();
-    const b = await mkPlayer();
 
-    // A takes the house
-    await a.buyIn(5_000_000);
-    await a.ensureRoundInited();
-    await a.delegate();
+    const a = await makePlayer();
+    const b = await makePlayer();
 
-    // A re-delegating is a clean reuse (no throw)
-    await expect(a.delegate()).resolves.toBeUndefined();
+    // both buy in + init + slice + delegate CONCURRENTLY — neither gets delegate_busy (per-session tills)
+    const startSession = async (p: ReturnType<typeof createChainRound>) => {
+      await p.buyIn(5_000_000);
+      await p.ensureRoundInited();
+      await p.sliceFromPot(SLICE);
+      await p.delegate();
+    };
+    await Promise.all([startSession(a), startSession(b)]); // headline: concurrent delegate, no busy
 
-    // B can't delegate against the held shared house — typed busy, not a raw revert
-    await b.buyIn(5_000_000);
-    await b.ensureRoundInited();
-    await expect(b.delegate()).rejects.toMatchObject({ code: "delegate_busy" });
+    // pot down by 2 slices -> a THIRD slice must be rejected (bankroll fully in play)
+    const c = await makePlayer();
+    await c.buyIn(5_000_000);
+    await c.ensureRoundInited();
+    await expect(c.sliceFromPot(SLICE)).rejects.toMatchObject({ code: "bankroll_full" });
 
-    // cleanup: A brings the house home so the shared PDA is free for the next run
-    await a.commitAndUndelegate();
-  }, 240_000);
+    // each plays a round + settles + sweeps its till back
+    const playAndSettle = async (p: ReturnType<typeof createChainRound>) => {
+      await p.open("BTC", 1, 100, STAKE);
+      await sleep(6000);
+      const settled = await p.close();
+      expect(["cashout", "cap", "liq", "time"]).toContain(settled.outcomeName);
+      await p.commitAndUndelegate();
+      await p.sweepTill();
+    };
+    await Promise.all([playAndSettle(a), playAndSettle(b)]);
+
+    // conservation across the pot: master net change == -(sum of player net P&L)
+    const aNet = Number(await a.readPlayerBalance(false)) - 5_000_000;
+    const bNet = Number(await b.readPlayerBalance(false)) - 5_000_000;
+    const masterEnd = Number((await houseBalanceAt(master)).balance.toString());
+    expect(masterEnd - masterStart).toBe(-(aNet + bNet));
+  }, 300_000);
 
   // --- multi-asset: the registry must be readable INSIDE the ER (Task 0b probe) ---
   // A fresh mint/house is delegated per test; the GLOBAL [b"feeds"] registry is NOT
@@ -203,6 +228,7 @@ describe.skipIf(!RUN)("chain-round devnet loop", () => {
     const { chain } = await mkEnv();
     await chain.buyIn(5_000_000);
     await chain.ensureRoundInited();
+    await chain.sliceFromPot(maxPayoutBase(1_000_000));
     await chain.delegate();
 
     const opened = await chain.open("ETH", 1, 100, 1_000_000); // long, 100x, 1 USDC on ETH
@@ -224,6 +250,7 @@ describe.skipIf(!RUN)("chain-round devnet loop", () => {
     const { chain } = await mkEnv();
     await chain.buyIn(5_000_000);
     await chain.ensureRoundInited();
+    await chain.sliceFromPot(maxPayoutBase(1_000_000));
     await chain.delegate();
 
     const opened = await chain.open("SOL", 1, 2000, 1_000_000); // long, 2000x on SOL
@@ -252,6 +279,7 @@ describe.skipIf(!RUN)("chain-round devnet loop", () => {
     const { mint, player, chain } = await mkEnv();
     await chain.buyIn(5_000_000);
     await chain.ensureRoundInited();
+    await chain.sliceFromPot(maxPayoutBase(1_000_000));
     await chain.delegate();
 
     // Build a direct ER open(asset=1 ETH) but pass the BTC feed — the registry requires
@@ -262,7 +290,7 @@ describe.skipIf(!RUN)("chain-round devnet loop", () => {
     const pdas = deriveRaiderPdas(CHAIN.PROGRAM_ID, player.publicKey, mint);
     const registry = deriveFeedRegistry(CHAIN.PROGRAM_ID);
     const tx = await erProgram.methods.open(1, 1, 100, new anchor.BN(1_000_000)).accountsPartial({
-      player: pdas.player, house: pdas.house, round: pdas.round, mint,
+      player: pdas.player, house: pdas.till, round: pdas.round, mint,
       priceUpdate: CHAIN.FEEDS.BTC, registry, playerAuthority: player.publicKey, // BTC feed on an ETH (asset 1) round
     }).transaction();
     tx.feePayer = player.publicKey;
@@ -301,6 +329,7 @@ describe.skipIf(!RUN)("chain-round devnet loop", () => {
     await chain.buyIn(100_000_000);
     expect(await chain.readPlayerBalance()).toBe(100_000_000n);
     await chain.ensureRoundInited();
+    await chain.sliceFromPot(maxPayoutBase(50_000_000));
     await chain.delegate();
     await chain.open("SOL", 1, 50, 50_000_000); // 0.05 SOL stake on the SOL feed
     expect(await chain.readRoundStatus(true)).toBe(1);
