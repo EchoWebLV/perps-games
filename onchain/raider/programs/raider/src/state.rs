@@ -48,6 +48,10 @@ impl PlayerBalance {
     pub const SIZE: usize = 8 + 32 + 32 + 8 + 1;
 }
 
+/// HouseBalance backs BOTH roles in the sharding model: the singleton master pot
+/// `[b"house", mint]` (the bankroll; never delegated) AND each per-session till
+/// `[b"house", mint, owner]` (carved off the master, co-delegated with Player+Round
+/// for one ER session, swept back at end). Identical layout/SIZE for both.
 #[account]
 pub struct HouseBalance {
     pub authority: Pubkey,

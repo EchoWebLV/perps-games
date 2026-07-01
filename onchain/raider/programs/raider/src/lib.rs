@@ -237,7 +237,7 @@ pub mod raider {
         )?;
         ctx.accounts.delegate_house(
             &ctx.accounts.payer,
-            &[HOUSE_SEED, mint.as_ref()],
+            &[HOUSE_SEED, mint.as_ref(), owner.as_ref()],
             DelegateConfig {
                 validator,
                 ..Default::default()
@@ -1049,8 +1049,8 @@ pub struct DelegateSession<'info> {
         bump
     )]
     pub player: AccountInfo<'info>,
-    /// CHECK: HouseBalance PDA to delegate
-    #[account(mut, del, seeds = [HOUSE_SEED, mint.key().as_ref()], bump)]
+    /// CHECK: per-session HouseBalance till PDA to delegate
+    #[account(mut, del, seeds = [HOUSE_SEED, mint.key().as_ref(), payer.key().as_ref()], bump)]
     pub house: AccountInfo<'info>,
     /// CHECK: Round PDA to delegate
     #[account(mut, del, seeds = [ROUND_SEED, payer.key().as_ref()], bump)]
@@ -1155,7 +1155,7 @@ pub struct OpenRound<'info> {
     pub player: Account<'info, PlayerBalance>,
     #[account(
         mut,
-        seeds = [HOUSE_SEED, mint.key().as_ref()],
+        seeds = [HOUSE_SEED, mint.key().as_ref(), player.owner.as_ref()],
         bump = house.bump,
     )]
     pub house: Account<'info, HouseBalance>,
@@ -1185,7 +1185,7 @@ pub struct CloseRound<'info> {
     pub player: Account<'info, PlayerBalance>,
     #[account(
         mut,
-        seeds = [HOUSE_SEED, mint.key().as_ref()],
+        seeds = [HOUSE_SEED, mint.key().as_ref(), player.owner.as_ref()],
         bump = house.bump,
     )]
     pub house: Account<'info, HouseBalance>,
@@ -1226,7 +1226,7 @@ pub struct ForceCloseRound<'info> {
     pub player: Account<'info, PlayerBalance>,
     #[account(
         mut,
-        seeds = [HOUSE_SEED, mint.key().as_ref()],
+        seeds = [HOUSE_SEED, mint.key().as_ref(), player.owner.as_ref()],
         bump = house.bump,
     )]
     pub house: Account<'info, HouseBalance>,
@@ -1259,7 +1259,7 @@ pub struct CrankClose<'info> {
     pub player: Account<'info, PlayerBalance>,
     #[account(
         mut,
-        seeds = [HOUSE_SEED, mint.key().as_ref()],
+        seeds = [HOUSE_SEED, mint.key().as_ref(), player.owner.as_ref()],
         bump = house.bump,
     )]
     pub house: Account<'info, HouseBalance>,
@@ -1315,7 +1315,7 @@ pub struct SessionCommit<'info> {
     pub payer: Signer<'info>,
     #[account(mut, seeds = [PLAYER_SEED, player.owner.as_ref(), mint.key().as_ref()], bump = player.bump)]
     pub player: Account<'info, PlayerBalance>,
-    #[account(mut, seeds = [HOUSE_SEED, mint.key().as_ref()], bump = house.bump)]
+    #[account(mut, seeds = [HOUSE_SEED, mint.key().as_ref(), player.owner.as_ref()], bump = house.bump)]
     pub house: Account<'info, HouseBalance>,
     #[account(mut, seeds = [ROUND_SEED, player.owner.as_ref()], bump = round.bump)]
     pub round: Account<'info, Round>,
