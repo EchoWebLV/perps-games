@@ -278,15 +278,18 @@ function detectByName(doc, prims) {
     const center = [(mn[0] + mx[0]) / 2, (mn[1] + mx[1]) / 2, (mn[2] + mx[2]) / 2];
     const wm = node.getWorldMatrix();
     const pivot = [wm[12], wm[13], wm[14]];
-    // tag in place when the node already pivots at the hub; otherwise the
-    // rig extracts its geometry into a fresh hub-pivoted node. Joints can't
-    // be extracted (skinned verts) — a joint with a bad pivot is fatal.
-    const off = Math.hypot(pivot[0] - center[0], pivot[1] - center[1], pivot[2] - center[2]);
+    // A pivot off-center in the ROLLING plane makes the wheel orbit instead of
+    // spin (flintstone's back roller pivots at the log frame, 47% of r off).
+    // Tag only when the pivot truly sits on the axle line; otherwise extract
+    // into a fresh hub-pivoted node. Joints can't be extracted (skinned verts).
+    const rollAxes = axleAxis === 0 ? [1, 2] : [1, 0];
+    const offRoll = Math.hypot(pivot[rollAxes[0]] - center[rollAxes[0]], pivot[rollAxes[1]] - center[rollAxes[1]]);
     const isJoint = !rootPrims.has(node);
-    if (off <= dy * 0.35) {
+    if (isJoint) {
+      if (offRoll > dy * 0.125) throw new Error(`${node.getName()}: joint pivot ${offRoll.toFixed(2)} off the axle line (dy=${dy.toFixed(2)}) — cannot extract skinned verts`);
       wheels.push({ hub: center, radius: dy / 2, axleAxis, halfWidth: (axleAxis === 0 ? dx : dz) / 2, tagNode: node });
-    } else if (isJoint) {
-      throw new Error(`${node.getName()}: joint pivot ${off.toFixed(2)} off hub (dy=${dy.toFixed(2)}) — cannot extract skinned verts`);
+    } else if (offRoll <= dy * 0.025) {
+      wheels.push({ hub: center, radius: dy / 2, axleAxis, halfWidth: (axleAxis === 0 ? dx : dz) / 2, tagNode: node });
     } else {
       wheels.push({ hub: center, radius: dy / 2, axleAxis, halfWidth: (axleAxis === 0 ? dx : dz) / 2, srcPrims: rootPrims.get(node), srcNode: node });
     }
@@ -324,8 +327,10 @@ function detectByNodeShape(prims, mn, mx) {
     const axleAxis = dx < dz ? 0 : 2;
     const center = [(bmn[0] + bmx[0]) / 2, (bmn[1] + bmx[1]) / 2, (bmn[2] + bmx[2]) / 2];
     const wm = node.getWorldMatrix();
-    const off = Math.hypot(wm[12] - center[0], wm[13] - center[1], wm[14] - center[2]);
-    if (off <= dy * 0.35) wheels.push({ hub: center, radius: dy / 2, axleAxis, halfWidth: width / 2, tagNode: node });
+    const pivot = [wm[12], wm[13], wm[14]];
+    const rollAxes = axleAxis === 0 ? [1, 2] : [1, 0];
+    const offRoll = Math.hypot(pivot[rollAxes[0]] - center[rollAxes[0]], pivot[rollAxes[1]] - center[rollAxes[1]]);
+    if (offRoll <= dy * 0.025) wheels.push({ hub: center, radius: dy / 2, axleAxis, halfWidth: width / 2, tagNode: node });
     else wheels.push({ hub: center, radius: dy / 2, axleAxis, halfWidth: width / 2, srcPrims: list, srcNode: node });
   }
   return wheels;
@@ -353,6 +358,7 @@ function rigModel(doc, prims, wheels) {
   const dirToLocal = (w, v) => (w.axleAxis === 0 ? v : [-v[2], v[1], v[0]]);
 
   // --- tag path ---
+  const finalWheels = [];
   wheels.forEach((w, wi) => {
     if (!w.tagNode) return;
     const wm = w.tagNode.getWorldMatrix();
@@ -366,9 +372,10 @@ function rigModel(doc, prims, wheels) {
         up: sceneDirToLocal(wm, [0, 1, 0]),
       },
     });
+    finalWheels.push({ node: w.tagNode, hub: w.hub, radius: w.radius, axleAxis: w.axleAxis });
   });
   const cutWheels = wheels.filter((w) => !w.tagNode);
-  if (!cutWheels.length) return;
+  if (!cutWheels.length) return finalWheels;
 
   // --- cut path ---
   // per-wheel accumulator: one new primitive per (wheel, source primitive)
@@ -465,10 +472,38 @@ function rigModel(doc, prims, wheels) {
     if (leftover > moved * 0.02)
       throw new Error(`wheel_${wi}: ${leftover} body verts left inside the tire (moved ${moved}) — cut incomplete`);
   });
-  // build the wheel nodes
+  // recenter each cut wheel on its CAPTURED geometry — fit error must not
+  // become pivot wobble. Robust extents (0.5–99.5 percentile) so a stray
+  // fender vert can't bias the hub; the measured half-extents replace the
+  // fitted radius (1:1 with what actually spins).
   cutWheels.forEach((w, wi) => {
+    const xs = [], ys = [], zs = [];
+    for (const b of buckets[wi].values()) for (let i = 0; i < b.pos.length; i += 3) {
+      xs.push(b.pos[i]); ys.push(b.pos[i + 1]); zs.push(b.pos[i + 2]);
+    }
+    if (!xs.length) return;
+    const ext = (arr) => { arr.sort((a, b) => a - b); return [arr[Math.floor(arr.length * 0.005)], arr[Math.ceil(arr.length * 0.995) - 1]]; };
+    const [x0, x1] = ext(xs), [y0] = ext(ys), [z0, z1] = ext(zs);
+    // local +X = axle; rolling plane = local (y, z). The tire top may carry
+    // captured fender-lip verts, but the BOTTOM is always clean (road side)
+    // and the length extent is the pure circular diameter — so anchor the
+    // center at bottom + diameter/2 instead of trusting the y midpoint.
+    const d = z1 - z0;
+    const cLoc = [(x0 + x1) / 2, y0 + d / 2, (z0 + z1) / 2];
+    for (const b of buckets[wi].values()) for (let i = 0; i < b.pos.length; i += 3) {
+      b.pos[i] -= cLoc[0]; b.pos[i + 1] -= cLoc[1]; b.pos[i + 2] -= cLoc[2];
+    }
+    w.radius = d / 2;
+    // move the node by the scene-space image of the local recenter offset
+    const sceneOff = w.axleAxis === 0 ? cLoc : [cLoc[2], cLoc[1], -cLoc[0]];
+    w.hub = [w.hub[0] + sceneOff[0], w.hub[1] + sceneOff[1], w.hub[2] + sceneOff[2]];
+  });
+  // build the wheel nodes (numbering continues after the tagged wheels —
+  // tag and cut indices must not collide)
+  cutWheels.forEach((w, cwi) => {
+    const wi = wheels.indexOf(w);
     const mesh = doc.createMesh(`wheel_${wi}_mesh`);
-    for (const [srcP, b] of buckets[wi]) {
+    for (const [srcP, b] of buckets[cwi]) {
       const prim = doc.createPrimitive().setMode(4).setMaterial(srcP.prim.getMaterial());
       prim.setAttribute("POSITION", doc.createAccessor().setType("VEC3").setBuffer(buffer).setArray(new Float32Array(b.pos)));
       if (b.nrm) prim.setAttribute("NORMAL", doc.createAccessor().setType("VEC3").setBuffer(buffer).setArray(new Float32Array(b.nrm)));
@@ -484,11 +519,16 @@ function rigModel(doc, prims, wheels) {
       .setMesh(mesh)
       .setExtras({ perpsWheel: { radius: w.radius, axle: [1, 0, 0], up: [0, 1, 0] } });
     scene.addChild(node);
-    // whole-node wheels: drop the emptied source node + its now-unused data
+    finalWheels.push({ node, hub: w.hub, radius: w.radius, axleAxis: w.axleAxis });
+    // whole-node wheels: drop the emptied source subtree + its now-unused data
+    // (meshes may live on CHILD nodes, e.g. flintstone's "..._wheel_0")
     if (w.srcNode) {
-      const oldMesh = w.srcNode.getMesh();
+      const meshes = [];
+      const collect = (nd) => { if (nd.getMesh()) meshes.push(nd.getMesh()); for (const c of nd.listChildren()) collect(c); };
+      collect(w.srcNode);
       w.srcNode.dispose();
-      if (oldMesh && !oldMesh.listParents().some((par) => par.propertyType === "Node")) {
+      for (const oldMesh of meshes) {
+        if (oldMesh.listParents().some((par) => par.propertyType === "Node")) continue;
         const accs = [];
         for (const prim of oldMesh.listPrimitives()) {
           accs.push(prim.getIndices(), ...prim.listAttributes());
@@ -500,6 +540,7 @@ function rigModel(doc, prims, wheels) {
       }
     }
   });
+  return finalWheels;
 }
 
 // ---------- island detection (vaporwave) ----------
@@ -608,9 +649,29 @@ async function processModel(io, file, { dry }) {
   const rs = groups.map((g) => Math.max(...g.map((w) => w.radius)));
   if (Math.max(...rs) / Math.min(...rs) > 3.5) throw new Error(`${name}: radius spread too large`);
   if (!dry) {
-    rigModel(doc, prims, wheels);
+    const finals = rigModel(doc, prims, wheels) ?? [];
+    // Radius harmonization — wheels that turn together must be stamped with
+    // ONE radius or they visibly spin out of sync:
+    //   1. co-located nodes (tire+rim) take the group MAX (the tire defines
+    //      the roll rate, not the smaller rim)
+    //   2. mirrored wheels on one axle take the mean of their group radii
+    const fGroups = groupWheels(finals);
+    const lengthAxis = finals.length && finals[0].axleAxis === 0 ? 2 : 0;
+    const reps = fGroups.map((g) => ({ g, r: Math.max(...g.map((w) => w.radius)), l: g[0].hub[lengthAxis] }));
+    const axleClusters = [];
+    for (const rep of reps) {
+      const c = axleClusters.find((c) => Math.abs(c[0].l - rep.l) < Math.max(c[0].r, rep.r) * 0.6);
+      if (c) c.push(rep); else axleClusters.push([rep]);
+    }
+    for (const cluster of axleClusters) {
+      const rAxle = cluster.reduce((s, rep) => s + rep.r, 0) / cluster.length;
+      for (const rep of cluster) for (const w of rep.g) {
+        const ex = w.node.getExtras();
+        w.node.setExtras({ ...ex, perpsWheel: { ...ex.perpsWheel, radius: rAxle } });
+      }
+    }
     await io.write(file, doc);
-    console.log(`  rewrote ${file}`);
+    console.log(`  rewrote ${file} (${axleClusters.map((c) => c[0] && (c.reduce((s, r) => s + r.r, 0) / c.length).toFixed(3)).join("/")} per-axle radii)`);
   }
   return wheels.length;
 }
