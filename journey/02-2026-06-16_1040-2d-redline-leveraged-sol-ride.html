@@ -1,0 +1,295 @@
+<!doctype html><html lang="en"><head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover">
+<title>REDLINE — leveraged SOL ride</title>
+<style>
+:root{
+  --bg:#06080f; --line:#1b2540; --line2:#2a3a60;
+  --txt:#eaf0ff; --dim:#8a96b8; --faint:#5a678c;
+  --grn:#2ee6a6; --gold:#ffd166; --red:#ff4d6d; --blu:#4da6ff; --org:#ff7a3c;
+}
+*{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+html,body{margin:0;height:100%}
+body{background:var(--bg);color:var(--txt);font-family:ui-rounded,-apple-system,"SF Pro Rounded",system-ui,sans-serif;overflow:hidden;position:fixed;inset:0}
+#bgfx{position:fixed;inset:0;z-index:0;background:radial-gradient(120% 60% at 50% -10%,#16224a 0%,#0a0f1f 46%,var(--bg) 78%);transition:background .35s}
+#fx{position:fixed;inset:0;z-index:60;pointer-events:none}
+.wrap{position:relative;z-index:2;max-width:440px;margin:0 auto;height:100%;display:flex;flex-direction:column;padding:max(9px,env(safe-area-inset-top)) 14px 12px}
+
+.top{display:flex;align-items:center;justify-content:space-between}
+.brand{font-weight:900;letter-spacing:.14em;font-size:17px}
+.brand b{color:var(--red)}
+.brand span{color:var(--faint);font-weight:700;font-size:9px;letter-spacing:.16em;display:block;margin-top:-2px}
+.bal{text-align:right;font-size:11px;color:var(--dim);font-weight:700}
+.bal b{display:block;color:var(--txt);font-size:18px;font-weight:900}
+.reset{display:inline-block;margin-top:1px;font-size:9px;color:var(--blu);cursor:pointer;border:1px solid var(--line2);border-radius:6px;padding:1px 6px}
+
+.src{display:flex;align-items:center;justify-content:center;gap:7px;font-size:10px;color:var(--faint);font-family:ui-monospace,monospace;margin:3px 0 2px;font-weight:700}
+.src .ok{color:var(--grn)} .src .sim{color:var(--gold)} .src b{color:var(--txt)}
+
+.mcard{text-align:center;padding:2px 0 0}
+.m{font-family:ui-monospace,"SF Mono",monospace;font-weight:800;font-size:50px;line-height:1;color:var(--grn);text-shadow:0 0 24px rgba(46,230,166,.5);transition:color .1s}
+.sub{font-size:11px;color:var(--dim);margin-top:3px;font-weight:600;min-height:14px}
+
+.tachwrap{position:relative;display:flex;justify-content:center;margin:2px 0 0}
+#tach{width:100%;max-width:340px;height:auto;display:block}
+.tline{stroke-linecap:round;fill:none}
+
+.sparkwrap{position:relative;height:50px;margin:2px 0 7px;border:1px solid var(--line);border-radius:11px;overflow:hidden;background:linear-gradient(180deg,rgba(20,30,60,.3),rgba(8,12,24,.15))}
+#spark{width:100%;height:100%;display:block}
+.slab{position:absolute;top:5px;left:9px;font-size:8.5px;letter-spacing:.1em;color:var(--faint);font-weight:800}
+
+.thr{margin-bottom:8px}
+.thr .row{display:flex;align-items:center;justify-content:space-between;margin-bottom:5px}
+.thr .lab{font-size:9px;letter-spacing:.16em;color:var(--faint);font-weight:800}
+.redtag{font-size:9px;font-weight:900;letter-spacing:.12em;color:var(--red);opacity:0;transition:.15s}
+.redtag.on{opacity:1;animation:bl .55s infinite}
+@keyframes bl{50%{opacity:.3}}
+input[type=range]#throttle{-webkit-appearance:none;width:100%;height:18px;border-radius:11px;outline:none;
+  background:linear-gradient(90deg,#1f7d5e 0%,#2ee6a6 30%,var(--gold) 58%,var(--org) 74%,var(--red) 100%);
+  box-shadow:inset 0 0 0 1px var(--line2)}
+input[type=range]#throttle::-webkit-slider-thumb{-webkit-appearance:none;width:28px;height:28px;border-radius:50%;background:radial-gradient(circle at 35% 30%,#fff,#cfd8ee);border:3px solid #0a0f1f;box-shadow:0 0 16px rgba(255,255,255,.55),0 2px 6px rgba(0,0,0,.5);cursor:pointer}
+input[type=range]#throttle::-moz-range-thumb{width:26px;height:26px;border-radius:50%;background:#fff;border:3px solid #0a0f1f;cursor:pointer}
+
+.ctrls{display:flex;gap:9px;margin-bottom:9px}
+.seg{flex:1;border:1px solid var(--line);border-radius:12px;padding:7px 9px;background:rgba(12,18,36,.5)}
+.seg .lab{font-size:9px;letter-spacing:.12em;color:var(--faint);font-weight:800;display:block;margin-bottom:5px}
+.opts{display:flex;gap:6px}
+.opt{flex:1;text-align:center;padding:7px 0;border:1px solid var(--line2);border-radius:9px;font-weight:800;font-size:13px;color:var(--dim);cursor:pointer;transition:.12s;user-select:none}
+.opt.long.on{background:rgba(46,230,166,.16);border-color:var(--grn);color:var(--grn)}
+.opt.short.on{background:rgba(255,77,109,.16);border-color:var(--red);color:var(--red)}
+.stake{display:flex;align-items:center;gap:6px}
+.stk-btn{width:30px;height:30px;border:1px solid var(--line2);border-radius:9px;display:flex;align-items:center;justify-content:center;font-size:17px;font-weight:800;color:var(--txt);cursor:pointer;user-select:none}
+.stk-val{flex:1;text-align:center;font-weight:900;font-size:15px}
+
+.go{width:100%;border:none;border-radius:15px;padding:16px;font-size:18px;font-weight:900;letter-spacing:.04em;color:#06121a;cursor:pointer;
+  background:linear-gradient(180deg,#43f0b0,#13c98a);box-shadow:0 8px 24px rgba(46,230,166,.32);transition:.12s;text-transform:uppercase}
+.go:active{transform:translateY(2px)}
+.go.cash{background:linear-gradient(180deg,#ffe08a,#ffc23d);box-shadow:0 8px 24px rgba(255,200,80,.34)}
+.go.cash.warn{background:linear-gradient(180deg,#ff9aa6,#ff5067);box-shadow:0 8px 24px rgba(255,80,99,.36);color:#fff}
+.go:disabled{filter:grayscale(.6) brightness(.7);box-shadow:none}
+
+.status{text-align:center;font-size:11px;color:var(--dim);margin-top:8px;line-height:1.4;min-height:28px}
+.status.win{color:var(--grn)} .status.lose{color:var(--red)} .status b{color:var(--txt)}
+.foot{text-align:center;font-size:9px;color:var(--faint);margin-top:6px;line-height:1.5}
+</style></head>
+<body>
+<div id="bgfx"></div>
+<canvas id="fx"></canvas>
+<div class="wrap">
+  <div class="top">
+    <div class="brand">RED<b>LINE</b><span>LEVERAGED SOL RIDE</span></div>
+    <div class="bal">balance<b id="bal">$100.00</b><span class="reset" id="reset">↺ clear</span></div>
+  </div>
+
+  <div class="src" id="src">◉ <span class="sim">connecting to Pyth…</span></div>
+
+  <div class="mcard">
+    <div class="m" id="multi">×1.00</div>
+    <div class="sub" id="multiSub">pick a side, rev the throttle, then LAUNCH</div>
+  </div>
+
+  <div class="tachwrap">
+    <svg id="tach" viewBox="0 0 320 214" xmlns="http://www.w3.org/2000/svg">
+      <g id="tachStatic"></g>
+      <g id="needle"><polygon points="155,178 165,178 160,40" fill="#fff"/></g>
+      <circle cx="160" cy="170" r="12" fill="#11182c" stroke="#3a4a72" stroke-width="2"/>
+      <circle cx="160" cy="170" r="4" fill="#fff"/>
+      <text id="levBig" x="160" y="206" text-anchor="middle" font-family="ui-monospace,monospace" font-weight="800" font-size="22" fill="#2ee6a6">60×</text>
+      <text x="160" y="120" text-anchor="middle" font-family="ui-rounded,system-ui" font-weight="800" font-size="8.5" letter-spacing="2" fill="#5a678c">RPM · LEVERAGE</text>
+    </svg>
+  </div>
+
+  <div class="sparkwrap"><span class="slab">EQUITY × · liq ×0.20</span><canvas id="spark"></canvas></div>
+
+  <div class="thr">
+    <div class="row">
+      <span class="lab">🏁 THROTTLE</span>
+      <span class="redtag" id="redtag">⚠ REDLINE</span>
+    </div>
+    <input type="range" id="throttle" min="10" max="500" step="5" value="60">
+  </div>
+
+  <div class="ctrls">
+    <div class="seg">
+      <span class="lab">YOUR CALL</span>
+      <div class="opts">
+        <div class="opt long on" data-dir="1">▲ LONG</div>
+        <div class="opt short" data-dir="-1">▼ SHORT</div>
+      </div>
+    </div>
+    <div class="seg">
+      <span class="lab">STAKE</span>
+      <div class="stake"><div class="stk-btn" id="stkDown">−</div><div class="stk-val" id="stkVal">$1.00</div><div class="stk-btn" id="stkUp">+</div></div>
+    </div>
+  </div>
+
+  <button class="go" id="go">🚀 LAUNCH</button>
+  <div class="status" id="status">Your position rides the <b>real live SOL price</b>, amplified by your leverage. Rev the <b>throttle</b> like a tachometer — the deeper into the <b>redline</b>, the smaller the SOL wobble that blows your engine (liquidation). Bank the multiplier before it dies.</div>
+  <div class="foot">Live Pyth SOL/USD · 10–500× throttle · 5% house fee · liquidation ×0.20 · synthetic demo, no real funds.</div>
+</div>
+
+<script>
+(function(){
+  var $=function(id){return document.getElementById(id);};
+  var balance=100, stake=1, dir=1, lev=60, equity=1, inRun=false, over=false;
+  var EDGE=0.05, LIQ=0.20, MAXSEC=60, startT=0, eqHist=[];
+  var entryPx=0;
+
+  /* ---------- real SOL price (Pyth Hermes) ---------- */
+  var SOL_ID='ef0d8b6fda2ceba41da15d4095d1da392a0d2f8ed0c6c7bc0f4cfac8c280b56d';
+  var solTarget=0, solPx=0, solPrev=0, feedLive=false, lastTick=0;
+  function connectFeed(){
+    try{
+      var es=new EventSource('https://hermes.pyth.network/v2/updates/price/stream?ids[]='+SOL_ID+'&parsed=true');
+      es.onmessage=function(e){try{var d=JSON.parse(e.data);var p=d.parsed&&d.parsed[0]&&d.parsed[0].price;if(p){var v=parseFloat(p.price)*Math.pow(10,p.expo);if(v>0){solTarget=v;if(!solPx){solPx=v;solPrev=v;}feedLive=true;lastTick=Date.now();}}}catch(_){}};
+      es.onerror=function(){feedLive=false;};
+    }catch(_){ }
+  }
+  connectFeed();
+  setInterval(function(){ // sim fallback when the live feed is stale/offline
+    if(Date.now()-lastTick>2500){ feedLive=false; if(!solTarget)solTarget=172; solTarget=Math.max(1,solTarget*(1+(Math.random()-0.5)*0.0016)); }
+  },220);
+  setInterval(function(){
+    $('src').innerHTML='◉ SOL <b>$'+(solPx?solPx.toFixed(2):'—')+'</b> · '+(feedLive?'<span class="ok">live Pyth</span>':'<span class="sim">sim (feed offline)</span>');
+  },400);
+
+  /* ---------- tachometer ---------- */
+  var CX=160,CY=170,R=140,RMIN=10,RMAX=500,REDLINE=300;
+  function lf(l){return (l-RMIN)/(RMAX-RMIN);}
+  function pt(f,rad){var a=Math.PI*(1-f);return [CX+rad*Math.cos(a),CY-rad*Math.sin(a)];}
+  function arc(f0,f1,rad,n){var d='',i,f,p;for(i=0;i<=n;i++){f=f0+(f1-f0)*i/n;p=pt(f,rad);d+=(i?'L':'M')+p[0].toFixed(1)+' '+p[1].toFixed(1);}return d;}
+  (function buildTach(){
+    var s='';
+    s+='<path class="tline" d="'+arc(0,1,R-6,64)+'" stroke="#16203c" stroke-width="13"/>';
+    s+='<path class="tline" d="'+arc(0,0.40,R-6,28)+'" stroke="#2ee6a6" stroke-width="11"/>';
+    s+='<path class="tline" d="'+arc(0.40,lf(REDLINE),R-6,24)+'" stroke="#ffd166" stroke-width="11"/>';
+    s+='<path class="tline" d="'+arc(lf(REDLINE),1,R-6,24)+'" stroke="#ff4d6d" stroke-width="11" filter="url(#rg)"/>';
+    var i,f,p1,p2;
+    for(i=0;i<=10;i++){ f=i/10; p1=pt(f,R-13); p2=pt(f,R-25); s+='<line x1="'+p1[0].toFixed(1)+'" y1="'+p1[1].toFixed(1)+'" x2="'+p2[0].toFixed(1)+'" y2="'+p2[1].toFixed(1)+'" stroke="#3a4a72" stroke-width="'+(i%5===0?2.4:1.2)+'"/>'; }
+    // labels at ends
+    var pl=pt(0,R-40),pr=pt(1,R-40);
+    s+='<text x="'+pl[0].toFixed(0)+'" y="'+(pl[1]+4).toFixed(0)+'" text-anchor="middle" font-family="ui-monospace" font-size="9" fill="#5a678c">10×</text>';
+    s+='<text x="'+pr[0].toFixed(0)+'" y="'+(pr[1]+4).toFixed(0)+'" text-anchor="middle" font-family="ui-monospace" font-size="9" fill="#ff4d6d">500×</text>';
+    $('tachStatic').innerHTML='<defs><filter id="rg" x="-30%" y="-30%" width="160%" height="160%"><feGaussianBlur stdDeviation="3" result="b"/><feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge></filter></defs>'+s;
+  })();
+  function updateGauge(jit){
+    var f=lf(lev), rot=180*f-90;
+    if(jit&&lev>=REDLINE) rot+=(Math.random()-0.5)*3.2;
+    $('needle').setAttribute('transform','rotate('+rot.toFixed(2)+' '+CX+' '+CY+')');
+    var col=lev>=REDLINE?'#ff4d6d':lev>=170?'#ffd166':'#2ee6a6';
+    $('needle').querySelector('polygon').setAttribute('fill',col);
+    var lb=$('levBig'); lb.textContent=lev+'×'; lb.setAttribute('fill',col);
+    $('redtag').className='redtag'+(lev>=REDLINE?' on':'');
+  }
+
+  /* ---------- canvases / juice ---------- */
+  var spark=$('spark'),sc=spark.getContext('2d'),fx=$('fx'),fxc=fx.getContext('2d');
+  function fit(){var d=devicePixelRatio||1;spark.width=spark.clientWidth*d;spark.height=spark.clientHeight*d;sc.setTransform(d,0,0,d,0,0);fx.width=innerWidth;fx.height=innerHeight;}
+  addEventListener('resize',fit);setTimeout(fit,30);
+  var parts=[],rings=[],flashA=0,flashColor='46,230,166',shake=0;
+  function center(el){var r=el.getBoundingClientRect();return {x:r.left+r.width/2,y:r.top+r.height/2};}
+  function flash(c,a){flashColor=c;flashA=a;}
+  function burst(x,y,col,n){rings.push({x:x,y:y,r:6,life:1,color:col});for(var i=0;i<(n||26);i++){var a=Math.random()*6.283,sp=2+Math.random()*6;parts.push({x:x,y:y,vx:Math.cos(a)*sp,vy:Math.sin(a)*sp,life:1,g:.12,size:2+Math.random()*4,color:col,shape:'dot'});}}
+  function coinShower(){flash('46,230,166',.4);for(var i=0;i<55;i++)parts.push({x:Math.random()*innerWidth,y:-20-Math.random()*220,vx:(Math.random()-.5)*2,vy:2+Math.random()*4,life:1.7,g:.12,size:4+Math.random()*4,color:['255,210,90','46,230,166','255,200,120'][(Math.random()*3)|0],shape:Math.random()<.4?'txt':'dot',txt:'🪙'});}
+  function floater(x,y,txt,col){parts.push({x:x,y:y,vx:0,vy:-1.1,life:1.7,g:.02,size:0,color:col,shape:'big',txt:txt});}
+  function buzz(p){if(navigator.vibrate)try{navigator.vibrate(p);}catch(e){}}
+  function drawFx(){
+    fxc.clearRect(0,0,innerWidth,innerHeight);
+    if(flashA>.001){fxc.fillStyle='rgba('+flashColor+','+(flashA*.5)+')';fxc.fillRect(0,0,innerWidth,innerHeight);flashA*=.88;}
+    for(var r=rings.length-1;r>=0;r--){var R2=rings[r];R2.r+=7;R2.life-=.04;fxc.beginPath();fxc.arc(R2.x,R2.y,R2.r,0,7);fxc.strokeStyle='rgba('+R2.color+','+Math.max(0,R2.life)+')';fxc.lineWidth=3;fxc.stroke();if(R2.life<=0)rings.splice(r,1);}
+    for(var i=parts.length-1;i>=0;i--){var p=parts[i];p.vy+=p.g;p.x+=p.vx;p.y+=p.vy;p.life-=.016;if(p.life<=0||p.y>innerHeight+40){parts.splice(i,1);continue;}fxc.globalAlpha=Math.max(0,Math.min(1,p.life));if(p.shape==='txt'){fxc.font='15px serif';fxc.fillText(p.txt,p.x,p.y);}else if(p.shape==='big'){fxc.font='900 26px ui-monospace,monospace';fxc.fillStyle='rgb('+p.color+')';fxc.textAlign='center';fxc.fillText(p.txt,p.x,p.y);fxc.textAlign='left';}else{fxc.beginPath();fxc.arc(p.x,p.y,p.size,0,7);fxc.fillStyle='rgb('+p.color+')';fxc.fill();}fxc.globalAlpha=1;}
+    if(shake>.4){shake*=.86;$('tach').style.transform='translate('+((Math.random()-.5)*shake)+'px,'+((Math.random()-.5)*shake)+'px)';}else $('tach').style.transform='';
+  }
+  function drawSpark(){
+    var w=spark.clientWidth,h=spark.clientHeight;sc.clearRect(0,0,w,h);
+    var mx=1.6,i; for(i=0;i<eqHist.length;i++){if(eqHist[i]>mx)mx=eqHist[i];} mx*=1.08; var rng=mx||1,pad=7;
+    function Y(v){return h-pad-(v/rng)*(h-pad*2);}
+    sc.strokeStyle='rgba(255,255,255,.08)';sc.setLineDash([3,4]);sc.beginPath();sc.moveTo(0,Y(1));sc.lineTo(w,Y(1));sc.stroke();
+    sc.strokeStyle='rgba(255,77,109,.8)';sc.beginPath();sc.moveTo(0,Y(LIQ));sc.lineTo(w,Y(LIQ));sc.stroke();sc.setLineDash([]);
+    if(!eqHist.length)return;
+    var last=eqHist[eqHist.length-1],col=last<0.55?'255,77,109':last>=1?'46,230,166':'255,210,90';
+    function X(i){return eqHist.length<2?w:i/(eqHist.length-1)*w;}
+    sc.beginPath();for(i=0;i<eqHist.length;i++)i?sc.lineTo(X(i),Y(eqHist[i])):sc.moveTo(X(i),Y(eqHist[i]));
+    sc.strokeStyle='rgb('+col+')';sc.lineWidth=2.2;sc.lineJoin='round';sc.shadowColor='rgba('+col+',.8)';sc.shadowBlur=5+lev*0.02;sc.stroke();sc.shadowBlur=0;
+  }
+
+  function lerpCol(t){t=Math.max(0,Math.min(1,t));var a=[46,230,166],b=[255,210,90],c=[255,77,109],o;if(t<.5){var u=t/.5;o=[a[0]+(b[0]-a[0])*u,a[1]+(b[1]-a[1])*u,a[2]+(b[2]-a[2])*u];}else{var v=(t-.5)/.5;o=[b[0]+(c[0]-b[0])*v,b[1]+(c[1]-b[1])*v,b[2]+(c[2]-b[2])*v];}return 'rgb('+(o[0]|0)+','+(o[1]|0)+','+(o[2]|0)+')';}
+  function fmt(n){return '$'+n.toFixed(2);}
+  function status(m,c){var s=$('status');s.innerHTML=m;s.className='status'+(c?' '+c:'');}
+
+  /* ---------- main loop ---------- */
+  function loop(){
+    if(solTarget>0){ solPx += (solTarget-solPx)*0.10; }
+    var r=(solPx>0&&solPrev>0)?(solPx-solPrev)/solPrev:0; solPrev=solPx;
+    if(inRun&&!over){
+      equity*=(1+dir*lev*r); if(equity<0)equity=0;
+      eqHist.push(equity); if(eqHist.length>200)eqHist.shift();
+      var elapsed=(Date.now()-startT)/1000, payout=stake*equity*(1-EDGE);
+      var mEl=$('multi'),col=equity>=1?lerpCol((equity-1)/8):'rgb(255,77,109)';
+      mEl.textContent='×'+equity.toFixed(2);mEl.style.color=col;
+      mEl.style.textShadow='0 0 '+(18+Math.min(40,equity*4))+'px '+col.replace('rgb(','rgba(').replace(')',',.6)');
+      $('multiSub').innerHTML='cash value '+fmt(payout)+' · '+lev+'× · entry $'+entryPx.toFixed(2);
+      var go=$('go');go.className='go cash'+(equity<1?' warn':'');go.textContent=(equity>=1?'CASH OUT ':'BAIL ')+fmt(payout);
+      updateGauge(true);
+      if(equity<=LIQ){liquidate();}
+      else if(elapsed>=MAXSEC){settle(true);}
+    }
+    drawSpark();drawFx();
+    requestAnimationFrame(loop);
+  }
+  requestAnimationFrame(loop);
+
+  /* ---------- round control ---------- */
+  function launch(){
+    if(inRun){settle(false);return;}
+    if(balance<stake){status('Not enough balance — lower your stake.','lose');return;}
+    if(!solPx){status('Waiting for the SOL price feed… try again in a second.','');return;}
+    balance-=stake;$('bal').textContent=fmt(balance);
+    equity=1;eqHist=[1];inRun=true;over=false;startT=Date.now();entryPx=solPx;
+    var c=center($('multi'));burst(c.x,c.y,dir>0?'46,230,166':'255,77,109',22);buzz(12);flash(dir>0?'46,230,166':'255,77,109',.2);
+    $('bgfx').style.background='radial-gradient(120% 60% at 50% -10%,'+(dir>0?'#0e3a2b':'#3a1422')+' 0%,#0a0f1f 46%,var(--bg) 78%)';
+    setTimeout(function(){if(!over)$('bgfx').style.background='';},500);
+    status('Riding '+(dir>0?'LONG':'SHORT')+' SOL at '+lev+'× from $'+entryPx.toFixed(2)+'. Work the throttle — cash out before liquidation.','');
+  }
+  function settle(auto){
+    if(!inRun||over)return;over=true;inRun=false;
+    var winAmt=stake*Math.max(0,equity)*(1-EDGE),profit=winAmt-stake;
+    balance+=winAmt;$('bal').textContent=fmt(balance);
+    $('multi').style.color=profit>=0?'var(--grn)':'var(--gold)';
+    if(profit>=0){coinShower();$('bgfx').style.background='radial-gradient(120% 60% at 50% -10%,#0e3a2b 0%,#0a0f1f 46%,var(--bg) 78%)';}
+    setTimeout(function(){$('bgfx').style.background='';},800);buzz(26);
+    var c=center($('multi'));floater(c.x,c.y-26,(profit>=0?'+':'')+fmt(winAmt),profit>=0?'#ffd166':'#ff9aa6');
+    $('multiSub').innerHTML=(auto?'⏱ time cap — ':'')+'cashed at ×'+equity.toFixed(2)+' · SOL $'+solPx.toFixed(2);
+    status((profit>=0?'✅ Banked ':'Bailed for ')+fmt(winAmt)+' ('+(profit>=0?'+':'')+fmt(profit)+'). Rev up and launch again!',profit>=0?'win':'lose');
+    endBtn();
+  }
+  function liquidate(){
+    if(over)return;over=true;inRun=false;
+    $('multi').textContent='×0.00';$('multi').style.color='var(--red)';
+    $('multiSub').innerHTML='💥 ENGINE BLOWN — liquidated · SOL $'+solPx.toFixed(2);
+    var c=center($('multi'));burst(c.x,c.y,'255,77,109',42);flash('255,77,109',.55);shake=18;buzz([30,50,30]);
+    $('bgfx').style.background='radial-gradient(120% 60% at 50% -10%,#451320 0%,#0a0f1f 46%,var(--bg) 78%)';setTimeout(function(){$('bgfx').style.background='';},700);
+    floater(c.x,c.y-26,'−'+fmt(stake),'#ff5067');
+    status('💥 Liquidated at '+lev+'×. Lost '+fmt(stake)+'. At that leverage even a small SOL wobble blows the engine — ease off the redline next time.','lose');
+    endBtn();
+  }
+  function endBtn(){var go=$('go');go.className='go';go.textContent='🚀 LAUNCH';}
+
+  /* ---------- controls ---------- */
+  $('go').addEventListener('click',launch);
+  $('throttle').addEventListener('input',function(){
+    lev=parseInt(this.value,10); updateGauge(false);
+    if(!inRun)$('multiSub').textContent='throttle '+lev+'× — '+(lev>=REDLINE?'REDLINE: max thrust, razor margin':lev>=170?'aggressive':'cruising');
+  });
+  document.querySelectorAll('.opt[data-dir]').forEach(function(o){o.addEventListener('click',function(){
+    if(inRun)return; dir=parseInt(o.getAttribute('data-dir'),10);
+    document.querySelectorAll('.opt[data-dir]').forEach(function(x){x.classList.remove('on');});o.classList.add('on');
+  });});
+  $('stkUp').addEventListener('click',function(){if(inRun)return;stake=Math.min(50,stake+1);$('stkVal').textContent=fmt(stake);});
+  $('stkDown').addEventListener('click',function(){if(inRun)return;stake=Math.max(1,stake-1);$('stkVal').textContent=fmt(stake);});
+  $('reset').addEventListener('click',function(){if(inRun)return;balance=100;$('bal').textContent=fmt(balance);equity=1;eqHist=[];$('multi').textContent='×1.00';$('multi').style.color='var(--grn)';$('multiSub').textContent='balance reset — pick a side and LAUNCH';status('Balance reset to $100. Rev the throttle and ride the real SOL price.','');});
+
+  updateGauge(false);
+})();
+</script>
+</body></html>

@@ -1,0 +1,184 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover" />
+    <title>REDLINE 3D</title>
+    <!-- installable PWA (Add to Home Screen / Install app on the Seeker) -->
+    <link rel="manifest" href="./manifest.webmanifest" />
+    <meta name="theme-color" content="#05030d" />
+    <meta name="mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+    <meta name="apple-mobile-web-app-title" content="Redline" />
+    <link rel="apple-touch-icon" href="./icon-192.png" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <!-- Chakra Petch: techno display face for the arcade HUD. (Self-host for the offline APK later.) -->
+    <link href="https://fonts.googleapis.com/css2?family=Chakra+Petch:wght@500;600;700&display=swap" rel="stylesheet" />
+    <style>
+      :root{
+        --panel:rgba(12,10,26,.78); --line:rgba(132,150,224,.15); --line2:rgba(132,150,224,.3);
+        --ink:#eef2ff; --mut:#828fb8;
+        --cyan:#27e7ff; --mag:#ff39c0; --grn:#2ee6a6; --red:#ff4d6d; --amb:#ffd166;
+        --r:9px; --shadow:0 10px 26px rgba(0,0,0,.45);
+      }
+      *{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+      html,body{margin:0;height:100%;overflow:hidden;background:#05030d}
+      body{font-family:"Chakra Petch",ui-monospace,monospace;color:var(--ink);position:fixed;inset:0}
+      #gl{position:fixed;inset:0;display:block;width:100%;height:100%;z-index:1;touch-action:none}
+      #hud{position:fixed;inset:0;z-index:2;pointer-events:none;max-width:460px;margin:0 auto}
+      #hud .pe{pointer-events:auto}
+
+      /* ---- design system ---- */
+      .panel{background:var(--panel);border:1px solid var(--line);border-radius:var(--r);
+        box-shadow:inset 0 1px 0 rgba(255,255,255,.05),var(--shadow)}
+      .lbl{font-size:9px;font-weight:600;letter-spacing:.18em;text-transform:uppercase;color:var(--mut)}
+      .num{font-weight:700;font-variant-numeric:tabular-nums lining-nums}
+
+      .chip{padding:6px 11px}
+      .chip .lbl{display:block;margin-bottom:2px}
+      .chip .num{font-size:16px;color:var(--ink);line-height:1.02;display:block}
+
+      /* asset tabs */
+      .atab{font-size:10px;font-weight:700;letter-spacing:.08em;padding:3px 9px;border-radius:7px;
+        border:1px solid var(--line2);color:var(--mut);background:rgba(10,8,22,.55);cursor:pointer;
+        transition:color .15s,border-color .15s,background .15s}
+
+      /* segmented LONG/SHORT */
+      .seg{flex:1;text-align:center;padding:10px 0;font-size:13px;font-weight:700;letter-spacing:.05em;
+        text-transform:uppercase;border-radius:8px;border:1px solid var(--line2);color:var(--mut);
+        background:rgba(12,10,26,.55);cursor:pointer;transition:.14s ease}
+      .seg:active{transform:translateY(1px)}
+      .seg.long.on{color:#04130d;background:linear-gradient(180deg,#3aedad,#15c78c);border-color:transparent;
+        box-shadow:0 0 0 1px rgba(46,230,166,.45),0 6px 16px rgba(46,230,166,.25)}
+      .seg.short.on{color:#1c0309;background:linear-gradient(180deg,#ff7387,#ff3355);border-color:transparent;
+        box-shadow:0 0 0 1px rgba(255,77,109,.45),0 6px 16px rgba(255,77,109,.25)}
+
+      /* stake stepper */
+      .step{width:36px;height:34px;display:grid;place-items:center;font-size:20px;font-weight:700;color:var(--ink);
+        border:1px solid var(--line2);border-radius:8px;background:rgba(14,11,28,.65);cursor:pointer;transition:.1s}
+      .step:active{transform:translateY(1px);background:rgba(40,30,64,.7)}
+
+      /* pedals */
+      .pedal{flex:1;text-align:center;padding:11px 0;font-size:17px;font-weight:700;letter-spacing:.04em;
+        border-radius:9px;border:1px solid var(--line2);color:var(--ink);background:rgba(14,11,28,.65);
+        cursor:pointer;user-select:none;transition:.1s}
+      .pedal.gas{flex:1.7;color:var(--grn);border-color:rgba(46,230,166,.42)}
+      .pedal.held,.pedal:active{transform:translateY(1px)}
+      .pedal.gas.held,.pedal.gas:active{box-shadow:inset 0 0 20px rgba(46,230,166,.3);background:rgba(20,40,33,.7)}
+      .pedal.brk.held,.pedal.brk:active{box-shadow:inset 0 0 20px rgba(255,77,109,.25);background:rgba(40,18,26,.7)}
+
+      /* LAUNCH / cash-out CTA — chamfered arcade button */
+      .cta{width:100%;border:none;padding:16px;font-family:"Chakra Petch";font-size:18px;font-weight:700;
+        letter-spacing:.14em;text-transform:uppercase;color:#04130d;cursor:pointer;position:relative;
+        background:linear-gradient(180deg,#48f0b6,#14c78c);
+        clip-path:polygon(14px 0,100% 0,100% calc(100% - 14px),calc(100% - 14px) 100%,0 100%,0 14px);
+        filter:drop-shadow(0 10px 22px rgba(46,230,166,.4));transition:transform .06s ease,filter .15s}
+      .cta::after{content:"";position:absolute;inset:0;clip-path:inherit;pointer-events:none;z-index:2;
+        background:linear-gradient(180deg,rgba(255,255,255,.34),transparent 44%)}
+      .cta:active{transform:translateY(1px)}
+      .cta.live{background:linear-gradient(180deg,#ffe28e,#ffc23d);color:#1c1303;filter:drop-shadow(0 10px 22px rgba(255,209,102,.38))}
+      .cta.warn{background:linear-gradient(180deg,#ff9aa6,#ff4d6d);color:#fff;filter:drop-shadow(0 10px 22px rgba(255,77,109,.42))}
+
+      /* LIVE = liquidation gauge: the button itself becomes the bar. A two-hue
+         fill (safe green → danger red) whose boundary --b slides left as the
+         buffer drains. The multiplier carries win/lose; this carries time-to-liq. */
+      @property --b{syntax:"<percentage>";inherits:false;initial-value:100%}
+      .cta #gofill{position:absolute;inset:0;display:none;pointer-events:none;z-index:1;--b:100%;
+        background:linear-gradient(90deg,#2ee6a6 var(--b),#ff2d55 var(--b));
+        transition:--b .12s linear}
+      .cta #golabel{position:relative;z-index:3;text-shadow:0 1px 3px rgba(0,0,0,.55)}
+      .cta.gauge{color:#fff;background:#160a10;filter:drop-shadow(0 10px 22px rgba(46,230,166,.26))}
+      .cta.gauge #gofill{display:block}
+      .cta.gauge.warn{background:#160a10;filter:drop-shadow(0 10px 22px rgba(255,77,109,.42))}
+
+      /* ---- PHONE LANDSCAPE ONLY (wide + short). Desktop & portrait are untouched
+             because they never match max-height:500px. Splits the bottom dock into
+             the thumb corners so the scene isn't crammed into the centre. ---- */
+      @media (orientation:landscape) and (max-height:500px){
+        #hud{max-width:none}
+        #balchip{top:max(8px,env(safe-area-inset-top))!important;left:max(10px,env(safe-area-inset-left))!important}
+        #pxchip{top:max(8px,env(safe-area-inset-top))!important;right:max(10px,env(safe-area-inset-right))!important}
+        #tmrchip{top:max(8px,env(safe-area-inset-top))!important}
+        #minipanel{top:44px!important;width:min(300px,34%)!important;height:46px!important}
+        #ctr{top:29%!important}
+        /* neutralise the centred dock; its pieces are pinned to the corners below */
+        #dock{position:static!important;transform:none!important}
+        #status{position:fixed!important;left:50%!important;transform:translateX(-50%)!important;bottom:max(6px,env(safe-area-inset-bottom))!important;width:auto!important;max-width:34%!important;text-align:center!important}
+        #driveCol{position:fixed!important;left:max(12px,env(safe-area-inset-left))!important;bottom:max(12px,env(safe-area-inset-bottom))!important;width:148px!important}
+        #ctrlMount{position:fixed!important;right:max(12px,env(safe-area-inset-right))!important;bottom:74px!important;width:244px!important}
+        #goMount{position:fixed!important;right:max(12px,env(safe-area-inset-right))!important;bottom:max(14px,env(safe-area-inset-bottom))!important;width:244px!important}
+      }
+
+      /* end-of-round FX: a brief screen shake on liquidation */
+      @keyframes fxshake{0%,100%{transform:none}15%{transform:translate(-5px,3px)}30%{transform:translate(6px,-4px)}45%{transform:translate(-6px,-2px)}60%{transform:translate(5px,4px)}75%{transform:translate(-4px,2px)}90%{transform:translate(3px,-2px)}}
+      #gl.fxshake{animation:fxshake .45s ease-out}
+
+      /* ---- loading splash: the Ferto welcome video + a neon loading bar ---- */
+      #splash{position:fixed;inset:0;z-index:50;background:#05030d;overflow:hidden;opacity:1;transition:opacity .55s ease}
+      #splash.hide{opacity:0;pointer-events:none}
+      #splashvid{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;object-position:center}
+      @media (orientation:landscape){#splashvid{object-fit:contain}}
+      /* the image is a finished composition — only a faint veil behind the bar */
+      #splashveil{position:absolute;inset:0;pointer-events:none;
+        background:linear-gradient(to bottom,transparent 76%,rgba(5,3,13,.4) 90%,rgba(5,3,13,.82) 100%)}
+      #splashui{position:absolute;left:0;right:0;bottom:max(40px,calc(env(safe-area-inset-bottom) + 28px));
+        padding:0 26px;text-align:center}
+      #splashbar{width:min(360px,78%);height:10px;margin:0 auto;border-radius:6px;background:rgba(255,255,255,.13);
+        border:1px solid rgba(255,255,255,.24);overflow:hidden}
+      #splashfill{height:100%;width:0;border-radius:6px;transition:width .25s ease;
+        background:linear-gradient(90deg,#27e7ff,#ff39c0);box-shadow:0 0 16px rgba(39,231,255,.65)}
+      #splashpct{margin-top:11px;font-family:"Chakra Petch";font-size:11px;letter-spacing:.24em;
+        text-transform:uppercase;color:#9fb0d8}
+    </style>
+    <script type="module" crossorigin src="./assets/index-BXk3XWtm.js"></script>
+  </head>
+  <body>
+    <canvas id="gl"></canvas>
+    <div id="hud"></div>
+
+    <div id="splash">
+      <img id="splashvid" src="./loadingscreen.png" alt="" />
+      <div id="splashveil"></div>
+      <div id="splashui">
+        <div id="splashbar"><div id="splashfill"></div></div>
+        <div id="splashpct">loading…</div>
+      </div>
+    </div>
+    <script>
+      // Loading bar runs immediately (before the module bundle). It eases toward
+      // 90% while assets load; main.ts calls window.hideSplash() when the scene +
+      // car model are ready, which fills to 100% and fades out (min on-screen time
+      // so it never just flashes; 9s safety so the player is never trapped).
+      (function () {
+        var fill = document.getElementById("splashfill"),
+          pct = document.getElementById("splashpct"),
+          splash = document.getElementById("splash");
+        var p = 0, done = false, t0 = Date.now();
+        (function tick() {
+          if (done) return;
+          p += (90 - p) * 0.04 + 0.35;
+          if (p > 90) p = 90;
+          fill.style.width = p.toFixed(1) + "%";
+          requestAnimationFrame(tick);
+        })();
+        window.hideSplash = function () {
+          if (done) return;
+          done = true;
+          var go = function () {
+            fill.style.width = "100%";
+            pct.textContent = "ready";
+            setTimeout(function () {
+              splash.classList.add("hide");
+              setTimeout(function () { splash.remove(); }, 650);
+            }, 240);
+          };
+          setTimeout(go, Math.max(0, 1300 - (Date.now() - t0)));
+        };
+        setTimeout(function () { window.hideSplash(); }, 9000);
+      })();
+    </script>
+
+  </body>
+</html>

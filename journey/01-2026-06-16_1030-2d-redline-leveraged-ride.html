@@ -1,0 +1,271 @@
+<!doctype html><html lang="en"><head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover">
+<title>REDLINE — leveraged ride</title>
+<style>
+:root{
+  --bg:#06080f; --bg2:#0b1020; --line:#1b2540; --line2:#2a3a60;
+  --txt:#eaf0ff; --dim:#8a96b8; --faint:#5a678c;
+  --grn:#2ee6a6; --gold:#ffd166; --red:#ff4d6d; --blu:#4da6ff; --org:#ff7a3c;
+}
+*{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+html,body{margin:0;height:100%}
+body{background:var(--bg);color:var(--txt);font-family:ui-rounded,-apple-system,"SF Pro Rounded",system-ui,sans-serif;overflow:hidden;position:fixed;inset:0}
+#bgfx{position:fixed;inset:0;z-index:0;background:radial-gradient(120% 60% at 50% -10%,#16224a 0%,#0a0f1f 46%,var(--bg) 78%);transition:background .35s}
+#fx{position:fixed;inset:0;z-index:60;pointer-events:none}
+.wrap{position:relative;z-index:2;max-width:440px;margin:0 auto;height:100%;display:flex;flex-direction:column;padding:max(10px,env(safe-area-inset-top)) 14px 14px}
+
+.top{display:flex;align-items:center;justify-content:space-between;margin-bottom:4px}
+.brand{font-weight:900;letter-spacing:.14em;font-size:17px}
+.brand b{color:var(--red)}
+.brand span{color:var(--faint);font-weight:700;font-size:9px;letter-spacing:.18em;display:block;margin-top:-2px}
+.bal{text-align:right;font-size:11px;color:var(--dim);font-weight:700}
+.bal b{display:block;color:var(--txt);font-size:18px;font-weight:900;letter-spacing:.02em}
+.reset{display:inline-block;margin-top:2px;font-size:9px;color:var(--blu);cursor:pointer;border:1px solid var(--line2);border-radius:6px;padding:1px 6px}
+
+.pf{display:flex;align-items:center;gap:6px;font-size:9.5px;color:var(--faint);font-family:ui-monospace,monospace;margin:2px 0 6px;justify-content:center}
+.pf b{color:var(--dim);font-weight:700}
+.pf .ok{color:var(--grn)}
+
+.mcard{text-align:center;padding:8px 0 2px}
+.m{font-family:ui-monospace,"SF Mono",monospace;font-weight:800;font-size:62px;line-height:1;color:var(--grn);text-shadow:0 0 26px rgba(46,230,166,.55);transition:color .1s}
+.sub{font-size:11.5px;color:var(--dim);margin-top:5px;font-weight:600;min-height:15px}
+
+.chartwrap{position:relative;flex:1;min-height:120px;margin:6px 0 4px;border:1px solid var(--line);border-radius:14px;background:linear-gradient(180deg,rgba(20,30,60,.35),rgba(8,12,24,.2));overflow:hidden}
+#chart{width:100%;height:100%;display:block}
+.clab{position:absolute;top:7px;left:10px;font-size:9px;letter-spacing:.12em;color:var(--faint);font-weight:800}
+.gforce{position:absolute;top:7px;right:10px;font-size:9px;letter-spacing:.1em;font-weight:800;color:var(--faint)}
+
+.heat{height:6px;border-radius:6px;background:#16203c;overflow:hidden;margin:5px 0 9px}
+.heat i{display:block;height:100%;width:0%;background:linear-gradient(90deg,var(--gold),var(--red));transition:width .08s}
+
+.thr{border:1px solid var(--line);border-radius:14px;padding:10px 12px 12px;background:rgba(12,18,36,.5);margin-bottom:9px}
+.thr .row{display:flex;align-items:baseline;justify-content:space-between;margin-bottom:7px}
+.thr .lab{font-size:9.5px;letter-spacing:.16em;color:var(--faint);font-weight:800}
+.lev{font-family:ui-monospace,monospace;font-weight:900;font-size:24px;color:var(--grn);transition:color .12s}
+.lev small{font-size:11px;opacity:.7}
+.redtag{font-size:9px;font-weight:900;letter-spacing:.12em;color:var(--red);opacity:0;transition:opacity .15s}
+.redtag.on{opacity:1;animation:bl .6s infinite}
+@keyframes bl{50%{opacity:.35}}
+input[type=range]#throttle{-webkit-appearance:none;width:100%;height:16px;border-radius:10px;outline:none;
+  background:linear-gradient(90deg,#1f7d5e 0%,#2ee6a6 22%,var(--gold) 58%,var(--org) 76%,var(--red) 100%);
+  box-shadow:inset 0 0 0 1px var(--line2)}
+input[type=range]#throttle::-webkit-slider-thumb{-webkit-appearance:none;width:26px;height:26px;border-radius:50%;background:#fff;border:3px solid #0a0f1f;box-shadow:0 0 14px rgba(255,255,255,.6),0 2px 6px rgba(0,0,0,.5);cursor:pointer}
+input[type=range]#throttle::-moz-range-thumb{width:24px;height:24px;border-radius:50%;background:#fff;border:3px solid #0a0f1f;cursor:pointer}
+
+.ctrls{display:flex;gap:9px;margin-bottom:9px}
+.seg{flex:1;border:1px solid var(--line);border-radius:12px;padding:8px 9px;background:rgba(12,18,36,.5)}
+.seg .lab{font-size:9px;letter-spacing:.13em;color:var(--faint);font-weight:800;display:block;margin-bottom:6px}
+.opts{display:flex;gap:6px}
+.opt{flex:1;text-align:center;padding:8px 0;border:1px solid var(--line2);border-radius:9px;font-weight:800;font-size:13px;color:var(--dim);cursor:pointer;transition:.12s;user-select:none}
+.opt.long.on{background:rgba(46,230,166,.16);border-color:var(--grn);color:var(--grn)}
+.opt.short.on{background:rgba(255,77,109,.16);border-color:var(--red);color:var(--red)}
+.stake{display:flex;align-items:center;gap:6px}
+.stk-btn{width:32px;height:32px;border:1px solid var(--line2);border-radius:9px;display:flex;align-items:center;justify-content:center;font-size:18px;font-weight:800;color:var(--txt);cursor:pointer;user-select:none}
+.stk-val{flex:1;text-align:center;font-weight:900;font-size:16px}
+
+.go{width:100%;border:none;border-radius:15px;padding:17px;font-size:18px;font-weight:900;letter-spacing:.04em;color:#06121a;cursor:pointer;
+  background:linear-gradient(180deg,#43f0b0,#13c98a);box-shadow:0 8px 26px rgba(46,230,166,.34);transition:.12s;text-transform:uppercase}
+.go:active{transform:translateY(2px)}
+.go.cash{background:linear-gradient(180deg,#ffe08a,#ffc23d);box-shadow:0 8px 26px rgba(255,200,80,.36)}
+.go.cash.warn{background:linear-gradient(180deg,#ff9aa6,#ff5067);box-shadow:0 8px 26px rgba(255,80,99,.38);color:#fff}
+.go:disabled{filter:grayscale(.6) brightness(.7);box-shadow:none;cursor:default}
+
+.status{text-align:center;font-size:11.5px;color:var(--dim);margin-top:9px;line-height:1.45;min-height:30px}
+.status.win{color:var(--grn)} .status.lose{color:var(--red)}
+.status b{color:var(--txt)}
+.foot{text-align:center;font-size:9px;color:var(--faint);margin-top:7px;line-height:1.5}
+</style></head>
+<body>
+<div id="bgfx"></div>
+<canvas id="fx"></canvas>
+<div class="wrap">
+  <div class="top">
+    <div class="brand">RED<b>LINE</b><span>LEVERAGED RIDE</span></div>
+    <div class="bal">balance<b id="bal">$100.00</b><span class="reset" id="reset">↺ clear</span></div>
+  </div>
+
+  <div class="pf" id="pf"><b>provably fair</b> · commit <span id="pfhash">—</span></div>
+
+  <div class="mcard">
+    <div class="m" id="multi">×1.00</div>
+    <div class="sub" id="multiSub">pick a side, set your throttle, then LAUNCH</div>
+  </div>
+
+  <div class="chartwrap">
+    <span class="clab">EQUITY ×</span>
+    <span class="gforce" id="gforce">IDLE</span>
+    <canvas id="chart"></canvas>
+  </div>
+  <div class="heat"><i id="heat"></i></div>
+
+  <div class="thr">
+    <div class="row">
+      <span class="lab">THROTTLE · LEVERAGE</span>
+      <span class="redtag" id="redtag">⚠ REDLINE</span>
+      <span class="lev" id="levVal">20<small>×</small></span>
+    </div>
+    <input type="range" id="throttle" min="5" max="100" step="1" value="20">
+  </div>
+
+  <div class="ctrls">
+    <div class="seg">
+      <span class="lab">YOUR CALL</span>
+      <div class="opts">
+        <div class="opt long on" data-dir="1">▲ LONG</div>
+        <div class="opt short" data-dir="-1">▼ SHORT</div>
+      </div>
+    </div>
+    <div class="seg">
+      <span class="lab">STAKE</span>
+      <div class="stake"><div class="stk-btn" id="stkDown">−</div><div class="stk-val" id="stkVal">$1.00</div><div class="stk-btn" id="stkUp">+</div></div>
+    </div>
+  </div>
+
+  <button class="go" id="go">🚀 LAUNCH</button>
+  <div class="status" id="status">Your equity rides a fair, independent price each round. Crank the <b>throttle</b> for speed — but the higher the leverage, the smaller the move that <b>liquidates</b> you. Bank the multiplier before it dies.</div>
+  <div class="foot">Independent provably-fair round each launch · 5% house fee · auto-liquidate at ×0.20 · synthetic demo, no real funds.</div>
+</div>
+
+<script>
+(function(){
+  var $=function(id){return document.getElementById(id);};
+  // ---- state ----
+  var balance=100, stake=1, dir=1, lev=20, equity=1, inRun=false, over=false;
+  var EDGE=0.05, LIQ=0.20, SIG=0.0015, MAXSEC=30;
+  var startT=0, eqHist=[], roundRng=null, seed=0;
+
+  // ---- seeded PRNG (provably-fair path) ----
+  function mulberry32(a){return function(){a|=0;a=a+0x6D2B79F5|0;var t=Math.imul(a^a>>>15,1|a);t=t+Math.imul(t^t>>>7,61|t)^t;return((t^t>>>14)>>>0)/4294967296;};}
+  function cyrb53(str,s){s=s||0;var h1=0xdeadbeef^s,h2=0x41c6ce57^s;for(var i=0,ch;i<str.length;i++){ch=str.charCodeAt(i);h1=Math.imul(h1^ch,2654435761);h2=Math.imul(h2^ch,1597334677);}h1=Math.imul(h1^(h1>>>16),2246822507);h1^=Math.imul(h2^(h2>>>13),3266489909);h2=Math.imul(h2^(h2>>>16),2246822507);h2^=Math.imul(h1^(h1>>>13),3266489909);return(4294967296*(2097151&h2)+(h1>>>0)).toString(16);}
+
+  // ---- canvases ----
+  var chart=$('chart'),cc=chart.getContext('2d');
+  var fx=$('fx'),fxc=fx.getContext('2d');
+  function fit(){var d=devicePixelRatio||1;[[chart,cc]].forEach(function(p){p[0].width=p[0].clientWidth*d;p[0].height=p[0].clientHeight*d;p[1].setTransform(d,0,0,d,0,0);});fx.width=innerWidth;fx.height=innerHeight;}
+  addEventListener('resize',fit);setTimeout(fit,30);
+
+  // ---- particles / juice ----
+  var parts=[],rings=[],flashA=0,flashColor='46,230,166',shake=0;
+  function center(el){var r=el.getBoundingClientRect();return {x:r.left+r.width/2,y:r.top+r.height/2};}
+  function flash(c,a){flashColor=c;flashA=a;}
+  function burst(x,y,col,n){rings.push({x:x,y:y,r:6,life:1,color:col});for(var i=0;i<(n||26);i++){var a=Math.random()*6.283,sp=2+Math.random()*6;parts.push({x:x,y:y,vx:Math.cos(a)*sp,vy:Math.sin(a)*sp,life:1,g:.12,size:2+Math.random()*4,color:col,shape:'dot'});}}
+  function coinShower(){flash('46,230,166',.4);for(var i=0;i<55;i++)parts.push({x:Math.random()*innerWidth,y:-20-Math.random()*220,vx:(Math.random()-.5)*2,vy:2+Math.random()*4,life:1.7,g:.12,size:4+Math.random()*4,color:['255,210,90','46,230,166','255,200,120'][(Math.random()*3)|0],shape:Math.random()<.4?'txt':'dot',txt:'🪙'});}
+  function floater(x,y,txt,col){parts.push({x:x,y:y,vx:0,vy:-1.1,life:1.7,g:.02,size:0,color:col,shape:'big',txt:txt});}
+  function buzz(p){if(navigator.vibrate)try{navigator.vibrate(p);}catch(e){}}
+  function drawFx(){
+    fxc.clearRect(0,0,innerWidth,innerHeight);
+    if(flashA>.001){fxc.fillStyle='rgba('+flashColor+','+(flashA*.5)+')';fxc.fillRect(0,0,innerWidth,innerHeight);flashA*=.88;}
+    for(var r=rings.length-1;r>=0;r--){var R=rings[r];R.r+=7;R.life-=.04;fxc.beginPath();fxc.arc(R.x,R.y,R.r,0,7);fxc.strokeStyle='rgba('+R.color+','+Math.max(0,R.life)+')';fxc.lineWidth=3;fxc.stroke();if(R.life<=0)rings.splice(r,1);}
+    for(var i=parts.length-1;i>=0;i--){var p=parts[i];p.vy+=p.g;p.x+=p.vx;p.y+=p.vy;p.life-=.016;if(p.life<=0||p.y>innerHeight+40){parts.splice(i,1);continue;}fxc.globalAlpha=Math.max(0,Math.min(1,p.life));if(p.shape==='txt'){fxc.font='15px serif';fxc.fillText(p.txt,p.x,p.y);}else if(p.shape==='big'){fxc.font='900 26px ui-monospace,monospace';fxc.fillStyle='rgb('+p.color+')';fxc.textAlign='center';fxc.fillText(p.txt,p.x,p.y);fxc.textAlign='left';}else{fxc.beginPath();fxc.arc(p.x,p.y,p.size,0,7);fxc.fillStyle='rgb('+p.color+')';fxc.fill();}fxc.globalAlpha=1;}
+    if(shake>.4){shake*=.86;$('multi').style.transform='translate('+((Math.random()-.5)*shake)+'px,'+((Math.random()-.5)*shake)+'px)';}else $('multi').style.transform='';
+  }
+
+  // ---- chart ----
+  function drawChart(){
+    var w=chart.clientWidth,h=chart.clientHeight;cc.clearRect(0,0,w,h);
+    var mx=2,mn=0; for(var i=0;i<eqHist.length;i++){if(eqHist[i]>mx)mx=eqHist[i];}
+    mx*=1.1; var rng=(mx-mn)||1,pad=12;
+    function X(i){return eqHist.length<2?w:i/(eqHist.length-1)*w;} function Y(v){return h-pad-((v-mn)/rng)*(h-pad*2);}
+    cc.strokeStyle='rgba(255,255,255,.09)';cc.setLineDash([3,4]);cc.lineWidth=1;cc.beginPath();cc.moveTo(0,Y(1));cc.lineTo(w,Y(1));cc.stroke();
+    cc.strokeStyle='rgba(255,77,109,.85)';cc.beginPath();cc.moveTo(0,Y(LIQ));cc.lineTo(w,Y(LIQ));cc.stroke();cc.setLineDash([]);
+    cc.fillStyle='rgba(255,77,109,.9)';cc.font='9px ui-monospace';cc.fillText('LIQUIDATION ×0.20',5,Y(LIQ)-3);
+    if(!eqHist.length)return;
+    var last=eqHist[eqHist.length-1],col=last<0.55?'255,77,109':last>=1?'46,230,166':'255,210,90';
+    cc.beginPath();cc.moveTo(0,h);for(i=0;i<eqHist.length;i++)cc.lineTo(X(i),Y(eqHist[i]));cc.lineTo(X(eqHist.length-1),h);cc.closePath();
+    var ag=cc.createLinearGradient(0,0,0,h);ag.addColorStop(0,'rgba('+col+',.28)');ag.addColorStop(1,'rgba('+col+',0)');cc.fillStyle=ag;cc.fill();
+    cc.beginPath();for(i=0;i<eqHist.length;i++)i?cc.lineTo(X(i),Y(eqHist[i])):cc.moveTo(X(i),Y(eqHist[i]));
+    cc.strokeStyle='rgb('+col+')';cc.lineWidth=2.6;cc.lineJoin='round';cc.shadowColor='rgba('+col+',.8)';cc.shadowBlur=6+lev*0.16;cc.stroke();cc.shadowBlur=0;
+    var lx=X(eqHist.length-1),ly=Y(last),pr=4+Math.sin(Date.now()/160)*1.6;
+    cc.beginPath();cc.arc(lx,ly,pr+5,0,7);cc.fillStyle='rgba('+col+',.2)';cc.fill();
+    cc.beginPath();cc.arc(lx,ly,pr,0,7);cc.fillStyle='rgb('+col+')';cc.fill();
+  }
+
+  // ---- color helpers ----
+  function lerpCol(t){t=Math.max(0,Math.min(1,t));var a=[46,230,166],b=[255,210,90],c=[255,77,109],o;if(t<.5){var u=t/.5;o=[a[0]+(b[0]-a[0])*u,a[1]+(b[1]-a[1])*u,a[2]+(b[2]-a[2])*u];}else{var v=(t-.5)/.5;o=[b[0]+(c[0]-b[0])*v,b[1]+(c[1]-b[1])*v,b[2]+(c[2]-b[2])*v];}return 'rgb('+(o[0]|0)+','+(o[1]|0)+','+(o[2]|0)+')';}
+  function fmt(n){return '$'+n.toFixed(2);}
+  function status(m,c){var s=$('status');s.innerHTML=m;s.className='status'+(c?' '+c:'');}
+
+  // ---- main loop ----
+  function loop(){
+    if(inRun&&!over){
+      var r=SIG*(roundRng()*2-1);
+      equity*=(1+dir*lev*r);
+      if(equity<0)equity=0;
+      eqHist.push(equity); if(eqHist.length>200)eqHist.shift();
+      var elapsed=(Date.now()-startT)/1000;
+      var payout=stake*equity*(1-EDGE);
+      // multiplier display
+      var mEl=$('multi'),col=equity>=1?lerpCol((equity-1)/8):'rgb(255,77,109)';
+      mEl.textContent='×'+equity.toFixed(2);mEl.style.color=col;
+      mEl.style.textShadow='0 0 '+(20+Math.min(40,equity*4))+'px '+col.replace('rgb(','rgba(').replace(')',',.6)');
+      $('multiSub').innerHTML='cash value '+fmt(payout)+' · '+lev+'× · '+(MAXSEC-elapsed|0)+'s';
+      $('heat').style.width=Math.max(0,Math.min(100,(1-equity)/(1-LIQ)*100))+'%';
+      var go=$('go');go.className='go cash'+(equity<1?' warn':'');go.textContent=(equity>=1?'CASH OUT ':'BAIL ')+fmt(payout);
+      $('gforce').textContent=(lev>=60?'🔥 REDLINE':lev>=30?'⚡ FAST':'CRUISE')+' · '+(equity>1.6?'+G':equity<0.7?'-G':'·');
+      $('gforce').style.color=lev>=60?'var(--red)':lev>=30?'var(--gold)':'var(--faint)';
+      if(equity<=LIQ){liquidate();}
+      else if(elapsed>=MAXSEC){settle(true);}
+    }
+    drawChart();drawFx();
+    requestAnimationFrame(loop);
+  }
+  requestAnimationFrame(loop);
+
+  // ---- round control ----
+  function launch(){
+    if(inRun){settle(false);return;}
+    if(balance<stake){status('Not enough balance — lower your stake.','lose');return;}
+    balance-=stake;$('bal').textContent=fmt(balance);
+    seed=(Math.random()*1e9)|0; roundRng=mulberry32(seed);
+    $('pfhash').textContent=cyrb53(''+seed).slice(0,12); $('pf').innerHTML='<b>provably fair</b> · commit <span id="pfhash">'+cyrb53(''+seed).slice(0,12)+'</span>';
+    equity=1;eqHist=[1];inRun=true;over=false;startT=Date.now();
+    var c=center($('multi'));burst(c.x,c.y,dir>0?'46,230,166':'255,77,109',22);buzz(12);flash(dir>0?'46,230,166':'255,77,109',.22);
+    $('bgfx').style.background='radial-gradient(120% 60% at 50% -10%,'+(dir>0?'#0e3a2b':'#3a1422')+' 0%,#0a0f1f 46%,var(--bg) 78%)';
+    setTimeout(function(){if(!over)$('bgfx').style.background='';},500);
+    status('Riding '+(dir>0?'LONG':'SHORT')+' at '+lev+'×. Drag the throttle to manage speed vs liquidation. Cash out anytime.','');
+  }
+  function settle(auto){
+    if(!inRun||over)return; over=true;inRun=false;
+    var winAmt=stake*Math.max(0,equity)*(1-EDGE),profit=winAmt-stake;
+    balance+=winAmt;$('bal').textContent=fmt(balance);
+    $('multi').style.color=profit>=0?'var(--grn)':'var(--gold)';
+    if(profit>=0){coinShower();$('bgfx').style.background='radial-gradient(120% 60% at 50% -10%,#0e3a2b 0%,#0a0f1f 46%,var(--bg) 78%)';}
+    setTimeout(function(){$('bgfx').style.background='';},800);buzz(26);
+    var c=center($('multi'));floater(c.x,c.y-30,(profit>=0?'+':'')+fmt(winAmt),profit>=0?'#ffd166':'#ff9aa6');
+    $('multiSub').innerHTML=(auto?'⏱ time cap — ':'')+'cashed at ×'+equity.toFixed(2)+' · seed '+seed;
+    status((profit>=0?'✅ Banked ':'Bailed for ')+fmt(winAmt)+' ('+(profit>=0?'+':'')+fmt(profit)+'). Seed <b>'+seed+'</b> — verifiable. Launch again!',profit>=0?'win':'lose');
+    endBtn();
+  }
+  function liquidate(){
+    if(over)return; over=true;inRun=false;
+    $('multi').textContent='×0.00';$('multi').style.color='var(--red)';
+    $('multiSub').innerHTML='💥 liquidated — position wiped · seed '+seed;
+    $('heat').style.width='100%';
+    var c=center($('multi'));burst(c.x,c.y,'255,77,109',40);flash('255,77,109',.55);shake=16;buzz([30,50,30]);
+    $('bgfx').style.background='radial-gradient(120% 60% at 50% -10%,#451320 0%,#0a0f1f 46%,var(--bg) 78%)';setTimeout(function(){$('bgfx').style.background='';},700);
+    floater(c.x,c.y-30,'−'+fmt(stake),'#ff5067');
+    status('💥 Liquidated at '+lev+'×. Lost '+fmt(stake)+'. A wobble that big only wipes you because the leverage was cranked. Seed <b>'+seed+'</b>.','lose');
+    endBtn();
+  }
+  function endBtn(){var go=$('go');go.className='go';go.textContent='🚀 LAUNCH';$('gforce').textContent='IDLE';$('gforce').style.color='var(--faint)';}
+
+  // ---- controls ----
+  $('go').addEventListener('click',launch);
+  $('throttle').addEventListener('input',function(){
+    lev=parseInt(this.value,10);
+    var z=lev>=60?'var(--red)':lev>=30?'var(--gold)':'var(--grn)';
+    $('levVal').innerHTML=lev+'<small>×</small>';$('levVal').style.color=z;
+    $('redtag').className='redtag'+(lev>=60?' on':'');
+    if(!inRun)$('multiSub').textContent='throttle '+lev+'× — '+(lev>=60?'redline: huge gains, tiny margin':lev>=30?'aggressive':'cruising');
+  });
+  document.querySelectorAll('.opt[data-dir]').forEach(function(o){o.addEventListener('click',function(){
+    if(inRun)return; dir=parseInt(o.getAttribute('data-dir'),10);
+    document.querySelectorAll('.opt[data-dir]').forEach(function(x){x.classList.remove('on');});o.classList.add('on');
+  });});
+  $('stkUp').addEventListener('click',function(){if(inRun)return;stake=Math.min(50,stake+1);$('stkVal').textContent=fmt(stake);});
+  $('stkDown').addEventListener('click',function(){if(inRun)return;stake=Math.max(1,stake-1);$('stkVal').textContent=fmt(stake);});
+  $('reset').addEventListener('click',function(){if(inRun)return;balance=100;$('bal').textContent=fmt(balance);equity=1;eqHist=[];$('multi').textContent='×1.00';$('multi').style.color='var(--grn)';$('heat').style.width='0%';$('multiSub').textContent='balance reset to $100 — pick a side and LAUNCH';status('Balance reset. Your equity rides a fair, independent price each round — manage the throttle, bank before liquidation.','');});
+})();
+</script>
+</body></html>
