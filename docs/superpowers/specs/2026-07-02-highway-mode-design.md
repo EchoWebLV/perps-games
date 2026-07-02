@@ -159,6 +159,16 @@ delegate-busy friendly message, unfunded-wallet fail-fast).
 - **Phase 2 — Ghosts:** `server/presence.mjs` relay (Railway) + `net/presence.ts` client +
   `oval.setRemoteCars` broadcast loop. Browser-verified with two clients.
 
+## Revision v2 — 2026-07-02 (user drive feedback, mid-build)
+
+After driving Phase 1 on devnet the user directed five changes (supersedes the numbers above where they conflict):
+1. **3× track scale**: R 60→180, STRAIGHT 200→600 (LEN ≈ 2331).
+2. **3 lanes per carriageway, 3× road width**: LANE_W 6→12, LANES 3, MEDIAN_HALF 4, EDGE = 4 + 3×12 = 40.
+3. **Speed**: top gear (100×) must *feel* like the racer's 1000× — a `HIGHWAY_DRIVE` tuning preset (MAX_FWD ≈ 100 u/s vs the lot's 28) fed to a parametrized `freedrive.step(…, tune)`; lobby keeps `DRIVE` unchanged.
+4. **Elevation**: smooth periodic `elevationAt(s)` (two gentle hills/lap, ≤~11u); purely visual — physics stays 2D; car y + pitch follow the road; renderer ribbons/props follow.
+5. **Soft walls**: contact must not zero speed — position still clamps (slide along the wall), speed decays by an exponential scrape (`WALL_SCRAPE`) while touching.
+6. **Backdrop**: synthwave dressing around the oval (sky gradient dome, striped sun, mountain ring, stars) so the horizon isn't black.
+
 ## Open Questions
 
 None blocking. Track dimensions (straight length, arc radius, lane width) and gear
