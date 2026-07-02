@@ -11,17 +11,18 @@ export const LOT_BOUNDS = { x: 120, z: 120 };
 // out to the south and sides for free driving.
 export const LOBBY_SPAWN = { x: 0, z: 52 };
 
-// The four storefronts sit along a shallow ARC across one (north) end of the lot, cupping the open
+// The five storefronts sit along a shallow ARC across one (north) end of the lot, cupping the open
 // plaza. `ARC` is the focus the crescent wraps around; each building faces that focus, so the whole
 // row faces the approaching player. Positions + facing are derived from the arc so it stays tunable.
-// Garage = your cars · Upgrades = tune · Crates = (soon) · Track = race.
+// The arc is deliberately asymmetric now: Highway's 81° extends the row east past the old ±49° spread.
+// Garage = your cars · Upgrades = tune · Crates = (soon) · Track = race · Highway = free-drive oval.
 const ARC = { cx: 0, cz: 15, r: 72 };
 const ARC_SPEC: Array<{ kind: BuildingKind; deg: number; w: number; d: number; color: number; name: string }> = [
   { kind: "garage", deg: -49, w: 26, d: 16, color: 0x27e7ff, name: "GARAGE" },
   { kind: "upgrades", deg: -16.5, w: 20, d: 20, color: 0xffd166, name: "UPGRADES" },
   { kind: "crates", deg: 16.5, w: 26, d: 18, color: 0xff39c0, name: "CRATES" },
   { kind: "track", deg: 49, w: 30, d: 12, color: 0x14f195, name: "TRACK" },
-  { kind: "highway", deg: 81, w: 30, d: 12, color: 0x27ff9d, name: "HIGHWAY" },
+  { kind: "highway", deg: 81, w: 30, d: 12, color: 0xff6a3d, name: "HIGHWAY" },
 ];
 
 export const BUILDINGS: Building[] = ARC_SPEC.map((s) => {
