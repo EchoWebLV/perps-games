@@ -49,7 +49,7 @@ export function createOval(): Oval {
   const ground = new THREE.Mesh(groundGeo, groundMat);
   ground.rotation.x = -Math.PI / 2; ground.position.y = -0.05;
   group.add(ground);
-  const grid = new THREE.GridHelper(760, 76, 0xff4dd2, 0x6a2bd9);
+  const grid = track(new THREE.GridHelper(760, 76, 0xff4dd2, 0x6a2bd9));
   const gm = grid.material as THREE.Material & { opacity: number };
   gm.transparent = true; gm.opacity = 0.28;
   grid.position.y = -0.02;
@@ -77,7 +77,7 @@ export function createOval(): Oval {
   const dashGeo = track(new THREE.PlaneGeometry(0.35, 3));
   const laneLat = MEDIAN_HALF + TRACK.LANE_W;
   const dashCount = Math.floor(LEN / 9);
-  const dashes = new THREE.InstancedMesh(dashGeo, dashMat, dashCount * 2);
+  const dashes = track(new THREE.InstancedMesh(dashGeo, dashMat, dashCount * 2));
   const m4 = new THREE.Matrix4(), q = new THREE.Quaternion(), up = new THREE.Vector3(0, 1, 0);
   let di = 0;
   for (let i = 0; i < dashCount; i++) {
@@ -96,7 +96,7 @@ export function createOval(): Oval {
   const wallMat = track(new THREE.MeshStandardMaterial({ color: 0x180a30, emissive: 0xff4dd2, emissiveIntensity: 0.55 }));
   const wallGeo = track(new THREE.BoxGeometry(0.6, 1.6, 6.4));
   const wallCount = Math.floor(LEN / 6);
-  const walls = new THREE.InstancedMesh(wallGeo, wallMat, wallCount * 2);
+  const walls = track(new THREE.InstancedMesh(wallGeo, wallMat, wallCount * 2));
   let wi = 0;
   for (let i = 0; i < wallCount; i++) {
     const c = sample((i / wallCount) * LEN);
@@ -134,8 +134,8 @@ export function createOval(): Oval {
     g.fillStyle = "#0c0a18"; g.fillRect(0, 0, 512, 256);
     g.strokeStyle = "#2de2e6"; g.lineWidth = 8; g.strokeRect(6, 6, 500, 244);
     g.textAlign = "center"; g.font = "700 72px 'Chakra Petch', ui-monospace, monospace";
-    g.fillStyle = "#2de2e6"; g.fillText(l1, 256, 104);
-    g.fillStyle = "#35ff9d"; g.fillText(l2, 256, 200);
+    g.fillStyle = "#2de2e6"; g.fillText(l1, 256, 104, 492);
+    g.fillStyle = "#35ff9d"; g.fillText(l2, 256, 200, 492);
     bbTex.needsUpdate = true;
   };
   drawBillboard("PERPS", "RAIDER");
