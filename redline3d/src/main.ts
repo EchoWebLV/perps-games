@@ -41,6 +41,7 @@ import { createMapButton } from "./ui/mapbutton";
 import { createLobbyHud } from "./ui/lobbyhud";
 import { step as driveStep, DRIVE, type DriveState } from "./core/freedrive";
 import { entranceHit, LOT_BOUNDS, LOBBY_SPAWN, type BuildingKind } from "./core/lobby-layout";
+import { modeSwitchBlocked } from "./core/mode-guard";
 import { createOval } from "./render/oval";
 import { spawnPose, contain, HW_BOUNDS } from "./core/track";
 import { shiftGear, levOf, HW_MAX_LEV } from "./core/highway-gears";
@@ -303,7 +304,7 @@ function setRaceHudVisible(visible: boolean) {
 }
 
 function enterLobby() {
-  if (opening || engine.getPhase() === "live") return; // no mode switch while a GO is in flight
+  if (modeSwitchBlocked({ opening, phase: engine.getPhase() })) return; // no mode switch while a GO is in flight
   mode = "lobby";
   drive = { x: LOBBY_SPAWN.x, z: LOBBY_SPAWN.z, heading: 0, speed: 0, steer: 0 };
   doorDwell = 0;
@@ -336,7 +337,7 @@ function exitLobby() {
 // ── highway: the free-drive divided oval (spec 2026-07-02) ─────────────────
 // Direction is picked at GO and locked; speed drives the 10..100× gear ladder.
 function enterHighway() {
-  if (opening || engine.getPhase() === "live" || roundActive) return;
+  if (modeSwitchBlocked({ opening, phase: engine.getPhase(), roundActive })) return;
   mode = "highway";
   drive = spawnPose(controls.dir());
   hwGear = 0;
@@ -353,7 +354,7 @@ function enterHighway() {
 }
 
 function exitHighwayToLobby() {
-  if (opening || engine.getPhase() === "live" || roundActive) return;
+  if (modeSwitchBlocked({ opening, phase: engine.getPhase(), roundActive })) return;
   oval.hide();
   tach.rebuild(effRmax());
   setAbility(ability); // restore the car's own buttons/toggles
