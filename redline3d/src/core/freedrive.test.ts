@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { step, DRIVE, type DriveState } from "./freedrive";
+import { step, DRIVE, HIGHWAY_DRIVE, type DriveState } from "./freedrive";
 
 const BOUNDS = { x: 60, z: 60 };
 const spawn = (): DriveState => ({ x: 0, z: 0, heading: 0, speed: 0, steer: 0 });
@@ -77,5 +77,26 @@ describe("freedrive.step (kinematic bicycle + arcade input layer)", () => {
     expect(s.z).toBeGreaterThanOrEqual(-60 - 1e-6);
     expect(s.z).toBeCloseTo(-60, 5);
     expect(s.speed).toBe(0);
+  });
+});
+
+describe("tuning presets", () => {
+  it("default tuning is unchanged: flat-out tops out at the lot cap", () => {
+    let s: DriveState = { x: 0, z: 0, heading: 0, speed: 0, steer: 0 };
+    for (let i = 0; i < 600; i++) s = step(s, { throttle: 1, steer: 0 }, 1 / 60, { x: 1e9, z: 1e9 });
+    expect(s.speed).toBeCloseTo(DRIVE.MAX_FWD, 1);
+  });
+
+  it("HIGHWAY_DRIVE reaches highway speed with the same model", () => {
+    let s: DriveState = { x: 0, z: 0, heading: 0, speed: 0, steer: 0 };
+    for (let i = 0; i < 600; i++) s = step(s, { throttle: 1, steer: 0 }, 1 / 60, { x: 1e9, z: 1e9 }, HIGHWAY_DRIVE);
+    expect(s.speed).toBeCloseTo(HIGHWAY_DRIVE.MAX_FWD, 1);
+    expect(HIGHWAY_DRIVE.MAX_FWD).toBeGreaterThan(3 * DRIVE.MAX_FWD);
+  });
+
+  it("highway steering authority at top speed is tight but sufficient for the arcs", () => {
+    // full lock at max speed must beat the steer angle the R=180 arc needs at wheelbase 6.5
+    const needed = Math.atan(HIGHWAY_DRIVE.WHEELBASE / 180);
+    expect(HIGHWAY_DRIVE.MAX_STEER_HIGH).toBeGreaterThan(needed * 1.2);
   });
 });

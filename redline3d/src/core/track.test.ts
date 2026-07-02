@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { TRACK, LEN, sample, progress, contain, spawnPose, HW_BOUNDS } from "./track";
+import { TRACK, LEN, sample, progress, contain, spawnPose, HW_BOUNDS, WALL_SCRAPE, elevationAt } from "./track";
 
 const { R, STRAIGHT, MEDIAN_HALF, EDGE } = TRACK;
 
@@ -102,8 +102,39 @@ describe("track contain()", () => {
 });
 
 describe("TRACK constants", () => {
-  it("EDGE derives from the median + two lanes (retuning one must retune all)", () => {
-    expect(EDGE).toBe(MEDIAN_HALF + 2 * TRACK.LANE_W);
+  it("EDGE derives from the median + LANES lanes (retuning one must retune all)", () => {
+    expect(EDGE).toBe(MEDIAN_HALF + TRACK.LANES * TRACK.LANE_W);
+  });
+
+  it("wall scrape halves speed in about half a second, never zeroes it", () => {
+    let v = 100;
+    for (let i = 0; i < 30; i++) v *= Math.exp(-WALL_SCRAPE * (1 / 60));
+    expect(v).toBeGreaterThan(45); expect(v).toBeLessThan(60);
+  });
+});
+
+describe("elevationAt", () => {
+  it("is periodic across the s=0 seam", () => {
+    expect(elevationAt(0)).toBeCloseTo(elevationAt(LEN), 9);
+    expect(elevationAt(-5)).toBeCloseTo(elevationAt(LEN - 5), 9);
+  });
+
+  it("is non-negative and bounded over the lap", () => {
+    let min = Infinity, max = -Infinity;
+    for (let i = 0; i <= 2000; i++) {
+      const y = elevationAt((i / 2000) * LEN);
+      min = Math.min(min, y); max = Math.max(max, y);
+    }
+    expect(min).toBeGreaterThanOrEqual(0);
+    expect(max).toBeLessThanOrEqual(12);
+    expect(max - min).toBeGreaterThan(5); // it actually has hills
+  });
+
+  it("is smooth (no step bigger than a gentle grade between 1-unit samples)", () => {
+    for (let i = 0; i < 2000; i++) {
+      const a = elevationAt((i / 2000) * LEN), b = elevationAt(((i + 1) / 2000) * LEN);
+      expect(Math.abs(b - a)).toBeLessThan(0.12); // ≤ ~10% grade at ~1.17u spacing
+    }
   });
 });
 

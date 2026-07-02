@@ -3,19 +3,31 @@ import type { DriveState } from "./freedrive";
 /** Stadium oval: two straights along Z at x=±R joined by semicircular arcs.
  *  All units are world units (the lobby lot is 240×240 for scale). */
 export const TRACK = {
-  R: 60,           // centerline arc radius
-  STRAIGHT: 200,   // straight length
-  MEDIAN_HALF: 2,  // half-width of the raised median (a hard barrier — no crossing)
-  LANE_W: 6,       // one lane; a carriageway is two lanes
-  EDGE: 14,        // median centerline → outer barrier (MEDIAN_HALF + 2 lanes)
-  WALL_PAD: 0.8,   // car half-width buffer against median/barrier
+  R: 180,          // centerline arc radius
+  STRAIGHT: 600,   // straight length
+  MEDIAN_HALF: 4,  // half-width of the raised median (a hard barrier — no crossing)
+  LANE_W: 12,      // one lane; a carriageway is LANES lanes
+  LANES: 3,        // lanes per carriageway — a real highway
+  EDGE: 40,        // median centerline → outer barrier (MEDIAN_HALF + LANES·LANE_W)
+  WALL_PAD: 1.0,   // car half-width buffer against median/barrier
 };
 
 /** total centerline length */
 export const LEN = 2 * TRACK.STRAIGHT + 2 * Math.PI * TRACK.R;
 
-/** generous rectangular bounds handed to freedrive.step — contain() is the real wall */
-export const HW_BOUNDS = { x: 400, z: 400 };
+/** generous rectangular bounds handed to freedrive.step — contain() is the real wall
+ *  (x extent = R+EDGE = 220; z extent = STRAIGHT/2 + R + EDGE = 520) */
+export const HW_BOUNDS = { x: 400, z: 700 };
+
+/** exponential speed-decay rate (s⁻¹) while scraping a wall — sliding, not a dead stop */
+export const WALL_SCRAPE = 1.4;
+
+/** road elevation at arc length s: two gentle overlapping hills per lap (≈0..11 units).
+ *  Purely visual — the driving model stays flat; the renderer and the car's y/pitch read this. */
+export function elevationAt(s: number): number {
+  const t = ((s % LEN) + LEN) % LEN;
+  return 4 * (1 - Math.cos((4 * Math.PI * t) / LEN)) + 1.5 * (1 - Math.cos((2 * Math.PI * t) / LEN + 1.3));
+}
 
 export interface TrackPoint { x: number; z: number; heading: number }
 export interface TrackProgress { s: number; lateralOffset: number; tangentHeading: number }
@@ -94,7 +106,7 @@ export function contain(x: number, z: number): { x: number; z: number; hitWall: 
 /** on-ramp pose: LONG (dir=1) in the outer carriageway going increasing-s,
  *  SHORT (dir=−1) in the inner carriageway going the other way. Stationary. */
 export function spawnPose(dir: 1 | -1): DriveState {
-  const s0 = 60; // partway down the east straight
+  const s0 = 180; // partway down the east straight
   const c = sample(s0);
   const lat = dir * (MEDIAN_HALF + LANE_W / 2); // inner lane of your carriageway
   const rx = Math.cos(c.heading), rz = Math.sin(c.heading);

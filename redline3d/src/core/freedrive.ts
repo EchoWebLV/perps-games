@@ -21,6 +21,22 @@ export const DRIVE = {
   STEER_RATE: 9,        // frame-rate-independent ease rate toward the target steer angle
 };
 
+/** Highway tuning: ~3.5× the lot's top speed so top gear (100×) FEELS like the racer's
+ *  1000× throttle on the 3× track (lap ≈ 23s flat out). Steering authority at speed is
+ *  much tighter — at 100 u/s the arcs (R=180) need ~0.036 rad; 0.05 leaves 1.4× headroom
+ *  without letting a twitch put you in the wall. */
+export const HIGHWAY_DRIVE: typeof DRIVE = {
+  ACCEL: 60,
+  MAX_FWD: 100,
+  MAX_REV: 14,
+  DRAG: 1.6,
+  WHEELBASE: 6.5,
+  MAX_STEER_LOW: 0.5,
+  MAX_STEER_HIGH: 0.05,
+  STEER_EXPO: 1.8,
+  STEER_RATE: 8,
+};
+
 const clamp = (v: number, a: number, b: number) => Math.max(a, Math.min(b, v));
 // frame-rate-independent approach factor: ease `cur` toward a target by `rate` per second
 const approach = (rate: number, dt: number) => 1 - Math.exp(-rate * dt);
@@ -34,28 +50,29 @@ const approach = (rate: number, dt: number) => 1 - Math.exp(-rate * dt);
  *   • speed-sensitive max steer angle (full lock slow, gentle fast)
  *   • frame-rate-independent easing of the wheel angle (auto-centres on release)
  *   • frame-rate-independent coast-down so it settles instead of gliding ("slippery")
+ * `tune` selects the tuning preset (defaults to the lot's DRIVE; pass HIGHWAY_DRIVE on the track).
  */
-export function step(s: DriveState, input: DriveInput, dt: number, bounds: Bounds): DriveState {
+export function step(s: DriveState, input: DriveInput, dt: number, bounds: Bounds, tune: typeof DRIVE = DRIVE): DriveState {
   const th = clamp(input.throttle, -1, 1);
 
   // expo steer input: flat near centre for precision, steep at the edge for full lock
   const raw = clamp(input.steer, -1, 1);
-  const sIn = Math.sign(raw) * Math.pow(Math.abs(raw), DRIVE.STEER_EXPO);
+  const sIn = Math.sign(raw) * Math.pow(Math.abs(raw), tune.STEER_EXPO);
 
   // longitudinal: gas/reverse, else coast toward 0 (fps-independent so it isn't slippery)
   let v = s.speed;
-  if (Math.abs(th) > 0.05) v += th * DRIVE.ACCEL * dt;
-  else v -= v * approach(DRIVE.DRAG, dt);
-  v = clamp(v, -DRIVE.MAX_REV, DRIVE.MAX_FWD);
+  if (Math.abs(th) > 0.05) v += th * tune.ACCEL * dt;
+  else v -= v * approach(tune.DRAG, dt);
+  v = clamp(v, -tune.MAX_REV, tune.MAX_FWD);
 
   // speed-sensitive steer authority: full lock when slow, gentle when fast
-  const speedFrac = Math.min(1, Math.abs(v) / DRIVE.MAX_FWD);
-  const maxSteer = DRIVE.MAX_STEER_LOW + (DRIVE.MAX_STEER_HIGH - DRIVE.MAX_STEER_LOW) * speedFrac;
+  const speedFrac = Math.min(1, Math.abs(v) / tune.MAX_FWD);
+  const maxSteer = tune.MAX_STEER_LOW + (tune.MAX_STEER_HIGH - tune.MAX_STEER_LOW) * speedFrac;
   const target = sIn * maxSteer;
   // ease the front wheels toward the target (auto-centres as target→0 on release)
-  const steer = s.steer + (target - s.steer) * approach(DRIVE.STEER_RATE, dt);
+  const steer = s.steer + (target - s.steer) * approach(tune.STEER_RATE, dt);
 
-  const L = DRIVE.WHEELBASE;
+  const L = tune.WHEELBASE;
   // rear axle from the current centre, along the current heading
   const fwdX = Math.sin(s.heading), fwdZ = -Math.cos(s.heading);
   let rx = s.x - fwdX * (L / 2), rz = s.z - fwdZ * (L / 2);
