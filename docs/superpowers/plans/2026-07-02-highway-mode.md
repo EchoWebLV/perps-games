@@ -482,6 +482,12 @@ git commit -m "feat(client): HIGHWAY gate on the lobby arc (reuses the start-gan
 
 ### Task 4: `render/oval.ts` — the track world
 
+> **ERRATA (found in review, fixed in the landed code — do not re-transcribe the block below verbatim):**
+> 1. Wrap both `InstancedMesh` constructors and the `GridHelper` in `track(...)` — all three have their own `dispose()` releasing GPU buffers the tracked geometries/materials don't cover.
+> 2. `drawBillboard` must pass the `maxWidth` arg to both `fillText` calls (`, 492`) so long price strings condense instead of overflowing.
+> 3. Drop `STRAIGHT` from the `TRACK` destructure (unused; `noUnusedLocals`).
+> Known cosmetic risk for the Task 8 browser pass: barrier-wall pitch is measured on the centerline, so segments show gaps on the outside of the arcs (effective pitch ×74.6/60). Judge visually; if it reads as a bug, shorten the pitch or lengthen segments on the arcs.
+
 Mirrors `render/lobby.ts` structure exactly: `group/show/hide/setRemoteCars/update/dispose`, a `track()` disposal helper, hidden by default. Geometry is built by sampling `sample(s)` from `core/track.ts`. No unit test (renderer precedent); gate is `npm run build` + browser in Task 7.
 
 **Files:**
