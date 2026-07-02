@@ -1,5 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { step, DRIVE, HIGHWAY_DRIVE, type DriveState } from "./freedrive";
+import { TRACK } from "./track";
 
 const BOUNDS = { x: 60, z: 60 };
 const spawn = (): DriveState => ({ x: 0, z: 0, heading: 0, speed: 0, steer: 0 });
@@ -94,9 +95,13 @@ describe("tuning presets", () => {
     expect(HIGHWAY_DRIVE.MAX_FWD).toBeGreaterThan(3 * DRIVE.MAX_FWD);
   });
 
-  it("highway steering authority at top speed is tight but sufficient for the arcs", () => {
-    // full lock at max speed must beat the steer angle the R=180 arc needs at wheelbase 6.5
-    const needed = Math.atan(HIGHWAY_DRIVE.WHEELBASE / 180);
-    expect(HIGHWAY_DRIVE.MAX_STEER_HIGH).toBeGreaterThan(needed * 1.2);
+  it("highway steering authority at top speed holds the tightest drivable line", () => {
+    // binding constraint = the innermost lane edge (r = R − (EDGE − WALL_PAD)), not the centerline:
+    // a retune that passes at R=180 could still make the inner carriageway unholdable flat out.
+    // No extra margin factor — the real safety valve is the speed-sensitive authority curve
+    // (shedding speed restores steer authority fast).
+    const rMin = TRACK.R - (TRACK.EDGE - TRACK.WALL_PAD);
+    const needed = Math.atan(HIGHWAY_DRIVE.WHEELBASE / rMin);
+    expect(HIGHWAY_DRIVE.MAX_STEER_HIGH).toBeGreaterThan(needed);
   });
 });

@@ -21,20 +21,24 @@ export const DRIVE = {
   STEER_RATE: 9,        // frame-rate-independent ease rate toward the target steer angle
 };
 
+/** a full tuning preset for step() — same shape as DRIVE (future per-car tunes anchor here) */
+export type DriveTune = typeof DRIVE;
+
 /** Highway tuning: ~3.5× the lot's top speed so top gear (100×) FEELS like the racer's
  *  1000× throttle on the 3× track (lap ≈ 23s flat out). Steering authority at speed is
- *  much tighter — at 100 u/s the arcs (R=180) need ~0.036 rad; 0.05 leaves 1.4× headroom
- *  without letting a twitch put you in the wall. */
-export const HIGHWAY_DRIVE: typeof DRIVE = {
+ *  much tighter — at 100 u/s the centerline arc (R=180) needs ~0.036 rad and the tightest
+ *  inner-lane line (r=141) ~0.046 — 0.05 covers both at full speed, and easing off the gas
+ *  rapidly restores authority (maxSteer is speed-interpolated). */
+export const HIGHWAY_DRIVE: DriveTune = {
   ACCEL: 60,
   MAX_FWD: 100,
-  MAX_REV: 14,
-  DRAG: 1.6,
-  WHEELBASE: 6.5,
+  MAX_REV: 14,          // scaled with the world
+  DRAG: 1.6,            // longer coast — highways don't stop on a dime
+  WHEELBASE: 6.5,       // slightly longer car stance = steadier at speed
   MAX_STEER_LOW: 0.5,
   MAX_STEER_HIGH: 0.05,
   STEER_EXPO: 1.8,
-  STEER_RATE: 8,
+  STEER_RATE: 8,        // a touch slower ease = less twitch at 100 u/s
 };
 
 const clamp = (v: number, a: number, b: number) => Math.max(a, Math.min(b, v));
@@ -52,7 +56,7 @@ const approach = (rate: number, dt: number) => 1 - Math.exp(-rate * dt);
  *   • frame-rate-independent coast-down so it settles instead of gliding ("slippery")
  * `tune` selects the tuning preset (defaults to the lot's DRIVE; pass HIGHWAY_DRIVE on the track).
  */
-export function step(s: DriveState, input: DriveInput, dt: number, bounds: Bounds, tune: typeof DRIVE = DRIVE): DriveState {
+export function step(s: DriveState, input: DriveInput, dt: number, bounds: Bounds, tune: DriveTune = DRIVE): DriveState {
   const th = clamp(input.throttle, -1, 1);
 
   // expo steer input: flat near centre for precision, steep at the edge for full lock
