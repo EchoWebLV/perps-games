@@ -9,7 +9,8 @@ export interface LobbyCam {
   reset(): void;
 }
 
-const BACK = 17, HEIGHT = 8.5, LOOK_AHEAD = 12, LOOK_Y = 1.6, FOV = 64;
+// pulled back per user feel: 17/8.5 framed the car too tight, especially at highway speed
+const BACK = 26, HEIGHT = 12, LOOK_AHEAD = 18, LOOK_Y = 1.6, FOV = 64;
 
 export function createLobbyCam(): LobbyCam {
   return {
