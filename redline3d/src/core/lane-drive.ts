@@ -55,6 +55,8 @@ export const LANE_DRIVE: LaneTune = {
 };
 
 const clamp = (v: number, a: number, b: number) => Math.max(a, Math.min(b, v));
+// frame-rate-independent approach factor: ease `cur` toward a target by `rate` per second
+const approach = (rate: number, dt: number) => 1 - Math.exp(-rate * dt);
 // NaN/Infinity-proof a value (a dead touch axis or a tab-suspend dt spike must not poison the car)
 const finite = (v: number) => (Number.isFinite(v) ? v : 0);
 // a tab coming back from the background can hand us a giant dt — integrate at most this much
@@ -116,7 +118,7 @@ export function laneStep(
   // yaw follows the ACTUAL lateral velocity — the car leans into where it's GOING,
   // and straightens as the motion dies (the old code leaned on remaining error)
   const yawTarget = clamp(vx * tune.YAW_GAIN, -tune.YAW_MAX, tune.YAW_MAX);
-  const yaw = yaw0 + (yawTarget - yaw0) * (1 - Math.exp(-tune.YAW_EASE * h));
+  const yaw = yaw0 + (yawTarget - yaw0) * approach(tune.YAW_EASE, h);
 
   // front wheels show the un-clamped PD demand, normalized to the current authority:
   // pinned into a swerve, then flipped against it to brake the slide (counter-steer).

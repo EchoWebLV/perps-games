@@ -34,7 +34,7 @@ describe("laneStep (1-D lateral car dynamics for the scrolling road)", () => {
   it("full-width swerve at speed settles in ~a second", () => {
     const traj = simulate(spawn({ x: -10 }), 10, 1, 1 / 60, 6);
     const t = settleTime(traj, 10, 1 / 60);
-    expect(t).toBeGreaterThan(0.5);  // not a teleport — the car has to travel
+    expect(t).toBeGreaterThan(0.75); // spec band starts ~0.8s — a sub-0.7s dodge is teleport-adjacent
     expect(t).toBeLessThan(1.4);     // but it's a swerve, not a commute
   });
 
@@ -119,12 +119,14 @@ describe("laneStep (1-D lateral car dynamics for the scrolling road)", () => {
       let a = spawn({ x: 3, vx: 2 });
       let b = spawn({ x: 3, vx: 2 });
       let c = spawn({ x: 3, vx: 2 });
+      let d = { x: bad, vx: bad, yaw: bad, steer: 0 };   // poisoned incoming STATE
       for (let i = 0; i < 10; i++) {
         a = laneStep(a, bad, 1, 1 / 60);   // poisoned target
         b = laneStep(b, 5, bad, 1 / 60);   // poisoned speedFrac
         c = laneStep(c, 5, 1, bad);        // poisoned dt
+        d = laneStep(d, 5, 1, 1 / 60);     // one bad frame must not wedge the car forever
       }
-      for (const s of [a, b, c]) {
+      for (const s of [a, b, c, d]) {
         for (const v of [s.x, s.vx, s.yaw, s.steer]) expect(Number.isFinite(v)).toBe(true);
       }
     }
