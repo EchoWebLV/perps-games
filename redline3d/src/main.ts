@@ -969,6 +969,7 @@ if (import.meta.env.DEV) {
     // sets the persistent override the frame loop reads (a direct setRemoteCars call
     // would be wiped by the very next frame)
     ghosts: (states: import("./render/oval").OvalRemoteCar[] | undefined) => { (window as any).__hwGhostStates = states; },
+    gfx: { renderer: ctx.renderer, scene: ctx.scene, camera: ctx.camera }, // 7F draw-call/mesh-count probe (DEV-only)
     state: () => ({ mode, hwGear, lev: levOf(hwGear), x: drive.x, z: drive.z, speed: drive.speed, roll: body.roll, pitch: body.pitch, rot: { x: car.group.rotation.x, y: car.group.rotation.y, z: car.group.rotation.z } }),
   };
   // racer lane-drive telemetry (7H browser verification) — reads the live physics state;

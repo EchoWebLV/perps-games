@@ -66,7 +66,21 @@ export function createOval(): Oval {
   group.add(grid);
 
   // ── synthwave backdrop (fog: false — it lives far past the scene fog) ─────
-  // sky dome: deep purple up top → magenta glow near the horizon
+  // deterministic placement: a tiny seeded PRNG (mulberry32) instead of Math.random
+  // so the mountain/star arrangement is identical every load (stable visual diffs)
+  let prngState = 0x7f4a7c15;
+  const rand = () => {
+    prngState = (prngState + 0x6d2b79f5) | 0;
+    let t = Math.imul(prngState ^ (prngState >>> 15), 1 | prngState);
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+  // sky dome: deep purple up top → magenta glow near the horizon.
+  // INVARIANT: the dome radius (1400) must stay LARGER than the distance of every
+  // backdrop prop it encloses — striped sun (z≈−1150), mountain ring (≤1250),
+  // stars (≤1300) — or they'd poke outside / be swallowed by the dome. All of
+  // these live far beyond the scene fog (which fully fades at 420), so every
+  // backdrop material sets fog:false; without it they'd render as flat fog color.
   const skyGeo = track(new THREE.SphereGeometry(1400, 24, 12));
   const skyMat = track(new THREE.ShaderMaterial({
     side: THREE.BackSide, fog: false,
@@ -106,14 +120,14 @@ export function createOval(): Oval {
   const mtnMatB = track(new THREE.MeshBasicMaterial({ color: 0x2c1257, fog: false }));
   const MTN_N = 18;
   for (let i = 0; i < MTN_N; i++) {
-    const a = (i / MTN_N) * Math.PI * 2 + (Math.random() - 0.5) * 0.25;
-    const rr = 1000 + Math.random() * 250;
-    const h = 60 + Math.random() * 100;
-    const rad = 70 + Math.random() * 90;
+    const a = (i / MTN_N) * Math.PI * 2 + (rand() - 0.5) * 0.25;
+    const rr = 1000 + rand() * 250;
+    const h = 60 + rand() * 100;
+    const rad = 70 + rand() * 90;
     const m = new THREE.Mesh(mtnGeo, i % 2 ? mtnMatA : mtnMatB);
     m.scale.set(rad, h, rad);
     m.position.set(Math.cos(a) * rr, h / 2 - 2, Math.sin(a) * rr);
-    m.rotation.y = Math.random() * Math.PI;
+    m.rotation.y = rand() * Math.PI;
     group.add(m);
   }
 
@@ -122,16 +136,18 @@ export function createOval(): Oval {
   const STAR_N = 420;
   const sp = new Float32Array(STAR_N * 3);
   for (let i = 0; i < STAR_N; i++) {
-    const th = Math.random() * Math.PI * 2;
-    const u = 0.18 + Math.random() * 0.75; // sin(elevation) → y stays above ~200
-    const rr = 1100 + Math.random() * 200;
+    const th = rand() * Math.PI * 2;
+    const u = 0.18 + rand() * 0.75; // sin(elevation) → y stays above ~200
+    const rr = 1100 + rand() * 200;
     const horiz = Math.sqrt(1 - u * u) * rr;
     sp[i * 3] = Math.cos(th) * horiz;
     sp[i * 3 + 1] = u * rr;
     sp[i * 3 + 2] = Math.sin(th) * horiz;
   }
   starGeo.setAttribute("position", new THREE.BufferAttribute(sp, 3));
-  const starMat = track(new THREE.PointsMaterial({ color: 0xd6ecff, size: 3.2, sizeAttenuation: true, fog: false, transparent: true, opacity: 0.85 }));
+  // sizeAttenuation OFF: constant pixel size, so stars don't balloon when the
+  // camera nears the dome. size retuned 3.2→1.6 to match the old attenuated look.
+  const starMat = track(new THREE.PointsMaterial({ color: 0xd6ecff, size: 1.6, sizeAttenuation: false, fog: false, transparent: true, opacity: 0.85 }));
   group.add(new THREE.Points(starGeo, starMat));
 
   // ── the road ────────────────────────────────────────────────────────────
@@ -199,12 +215,17 @@ export function createOval(): Oval {
   }
   group.add(walls);
 
-  // lamp posts every ~96m outside the barrier: violet pole + magenta bar (emissive only)
+  // lamp posts every ~96m outside the barrier: violet pole + magenta bar (emissive
+  // only) — instanced like the dashes/walls: one draw for all poles + one for all bars
   const poleMat = track(new THREE.MeshStandardMaterial({ color: 0x160f2e, emissive: 0x5a3fd6, emissiveIntensity: 0.8 }));
   const barMat = track(new THREE.MeshStandardMaterial({ color: 0x2a0f24, emissive: 0xff2d95, emissiveIntensity: 1.6 }));
   const poleGeo = track(new THREE.CylinderGeometry(0.18, 0.18, 7, 6));
   const barGeo = track(new THREE.BoxGeometry(2.6, 0.28, 0.28));
   const lampCount = Math.floor(LEN / 96);
+  const poles = track(new THREE.InstancedMesh(poleGeo, poleMat, lampCount * 2));
+  const bars = track(new THREE.InstancedMesh(barGeo, barMat, lampCount * 2));
+  const noRot = new THREE.Quaternion();
+  let li = 0;
   for (let i = 0; i < lampCount; i++) {
     const s = (i / lampCount) * LEN;
     const c = sample(s);
@@ -212,10 +233,14 @@ export function createOval(): Oval {
     const rx = Math.cos(c.heading), rz = Math.sin(c.heading);
     for (const side of [1, -1]) {
       const px = c.x + rx * (EDGE + 3.4) * side, pz = c.z + rz * (EDGE + 3.4) * side;
-      const pole = new THREE.Mesh(poleGeo, poleMat); pole.position.set(px, ey + 3.5, pz); group.add(pole);
-      const bar = new THREE.Mesh(barGeo, barMat); bar.position.set(px, ey + 7.1, pz); bar.rotation.y = -c.heading; group.add(bar);
+      m4.compose(new THREE.Vector3(px, ey + 3.5, pz), noRot, one);
+      poles.setMatrixAt(li, m4);
+      q.setFromAxisAngle(up, -c.heading); // bar faces across the road, like bar.rotation.y = -heading
+      m4.compose(new THREE.Vector3(px, ey + 7.1, pz), q, one);
+      bars.setMatrixAt(li++, m4);
     }
   }
+  group.add(poles, bars);
 
   // trackside price billboard (east straight, outside the barrier)
   const bbCanvas = document.createElement("canvas");
