@@ -106,9 +106,10 @@ describe("arcade grip model (vector momentum + lateral grip)", () => {
   it("grip reels it back: drift decays toward zero within ~1s of releasing the steer", () => {
     let s: DriveState = { x: 0, z: 0, heading: 0, speed: HIGHWAY_DRIVE.MAX_FWD, steer: 0 };
     for (let i = 0; i < 18; i++) s = step(s, { throttle: 1, steer: 1 }, 1 / 60, BIG, HIGHWAY_DRIVE);
-    expect(driftDeg(s)).toBeGreaterThan(2); // drift built up
+    const built = driftDeg(s);
+    expect(built).toBeGreaterThan(2); // drift built up
     for (let i = 0; i < 60; i++) s = step(s, { throttle: 1, steer: 0 }, 1 / 60, BIG, HIGHWAY_DRIVE);
-    expect(driftDeg(s)).toBeLessThan(0.5); // tires reeled the velocity back onto the heading
+    expect(driftDeg(s)).toBeLessThan(built * 0.1); // ≥90% of the slip reeled back — relative, survives a GRIP retune
   });
 
   it("stays railed at parking speeds even at full lock (no silly low-speed drifting)", () => {
@@ -161,7 +162,7 @@ describe("arcade grip model (vector momentum + lateral grip)", () => {
 
   it("NaN inputs cannot poison the state", () => {
     const s = step({ ...spawn(), speed: 15 }, { throttle: NaN, steer: NaN }, 1 / 60, BOUNDS);
-    for (const v of [s.x, s.z, s.heading, s.speed, s.steer]) {
+    for (const v of [s.x, s.z, s.heading, s.speed, s.steer, s.vx!, s.vz!]) {
       expect(Number.isFinite(v)).toBe(true);
     }
   });

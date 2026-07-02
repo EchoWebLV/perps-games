@@ -54,8 +54,8 @@ export const HIGHWAY_DRIVE: DriveTune = {
 const clamp = (v: number, a: number, b: number) => Math.max(a, Math.min(b, v));
 // frame-rate-independent approach factor: ease `cur` toward a target by `rate` per second
 const approach = (rate: number, dt: number) => 1 - Math.exp(-rate * dt);
-// NaN-proof an input axis (a dead gamepad/touch axis must not poison position/heading)
-const finite = (v: number) => (Number.isNaN(v) ? 0 : v);
+// NaN/Infinity-proof an input axis (a dead gamepad/touch axis must not poison position/heading)
+const finite = (v: number) => (Number.isFinite(v) ? v : 0);
 
 // LOW-SPEED RAIL: real tires don't slide at parking pace. A constant GRIP loose enough
 // to carve at 100 u/s would also let the car drift at 3 u/s, which looks silly — so
