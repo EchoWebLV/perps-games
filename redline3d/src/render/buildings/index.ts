@@ -15,5 +15,6 @@ export function buildBuilding(kind: BuildingKind, color: number, track: Track): 
     case "track": return buildTrack(color, track);
     case "upgrades": return buildUpgrades(color, track);
     case "crates": return buildCrates(color, track);
+    case "highway": return buildTrack(color, track); // same start-gantry look, its own color/sign
   }
 }

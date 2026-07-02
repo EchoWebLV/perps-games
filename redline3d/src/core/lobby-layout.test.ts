@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest";
 import { BUILDINGS, DOORS, LOT_BOUNDS, entranceHit, type BuildingKind } from "./lobby-layout";
 
-const KINDS: BuildingKind[] = ["garage", "upgrades", "crates", "track"];
+const KINDS: BuildingKind[] = ["garage", "upgrades", "crates", "track", "highway"];
 
 describe("lobby-layout", () => {
   it("has one building + one door per functional kind", () => {

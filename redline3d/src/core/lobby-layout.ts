@@ -1,5 +1,5 @@
 /** which functional building you drive into — the lobby is the economy town, not a market picker */
-export type BuildingKind = "garage" | "upgrades" | "crates" | "track";
+export type BuildingKind = "garage" | "upgrades" | "crates" | "track" | "highway";
 
 export interface Building { kind: BuildingKind; x: number; z: number; w: number; d: number; rot: number; color: number; name: string }
 export interface DoorZone { kind: BuildingKind; x: number; z: number; r: number }
@@ -21,6 +21,7 @@ const ARC_SPEC: Array<{ kind: BuildingKind; deg: number; w: number; d: number; c
   { kind: "upgrades", deg: -16.5, w: 20, d: 20, color: 0xffd166, name: "UPGRADES" },
   { kind: "crates", deg: 16.5, w: 26, d: 18, color: 0xff39c0, name: "CRATES" },
   { kind: "track", deg: 49, w: 30, d: 12, color: 0x14f195, name: "TRACK" },
+  { kind: "highway", deg: 81, w: 30, d: 12, color: 0x27ff9d, name: "HIGHWAY" },
 ];
 
 export const BUILDINGS: Building[] = ARC_SPEC.map((s) => {
