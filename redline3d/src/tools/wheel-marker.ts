@@ -119,6 +119,7 @@ let loadGen = 0;
 
 async function loadModel(name: string): Promise<void> {
   const gen = ++loadGen;
+  cancelSpin(""); // restore swapped indices BEFORE the old model is disposed
   statusEl.textContent = "loading…";
   try {
     const gltf = await loader.loadAsync(`/models/${name}.glb`);
@@ -213,6 +214,7 @@ function centerDot(c: Circle, color: number): THREE.Points {
 }
 
 function rebuildRings(): void {
+  cancelSpin("circles changed — re-tick spin to preview");
   for (const child of [...overlay.children]) {
     overlay.remove(child);
     const obj = child as THREE.Line;
@@ -439,21 +441,127 @@ window.addEventListener("resize", () => {
   camera.updateProjectionMatrix();
 });
 
-// spin test: continuously rotate all wheel_N with the runtime composition
+// ---- circle spin preview: simulate the cut for the USER's circles ----
+// Captures every triangle whose centroid falls inside a drawn circle (in the
+// rolling plane), removes it from the body via an index swap (attributes stay
+// shared — cheap and lossless) and re-parents it to a group pivoted at the
+// circle's center. Spinning that group previews exactly what a re-rig from
+// these circles would look like. Skinned meshes (delorean) are skipped.
+let preview: { groups: THREE.Group[]; restores: Array<() => void> } | null = null;
+
+function teardownPreview(): void {
+  if (!preview) return;
+  for (const r of preview.restores) r();
+  for (const g of preview.groups) scene.remove(g);
+  preview = null;
+}
+
+function buildPreview(): number {
+  teardownPreview();
+  if (!model || !circles.length) return 0;
+  const groups = circles.map((c) => {
+    const g = new THREE.Group();
+    g.position.set(c.x, c.y, c.z);
+    scene.add(g);
+    g.updateWorldMatrix(true, false);
+    return g;
+  });
+  const restores: Array<() => void> = [];
+  const v = new THREE.Vector3();
+  model.updateWorldMatrix(true, true);
+  const meshes: THREE.Mesh[] = [];
+  model.traverse((o) => {
+    const mesh = o as THREE.Mesh;
+    if (mesh.isMesh && !(mesh as unknown as { isSkinnedMesh?: boolean }).isSkinnedMesh) meshes.push(mesh);
+  });
+  for (const mesh of meshes) {
+    const geo = mesh.geometry as THREE.BufferGeometry;
+    const posA = geo.attributes.position as THREE.BufferAttribute | undefined;
+    if (!posA) continue;
+    const srcIdx = geo.index;
+    const triCount = (srcIdx ? srcIdx.count : posA.count) / 3;
+    const at = (k: number) => (srcIdx ? srcIdx.getX(k) : k);
+    const buckets: number[][] = circles.map(() => []);
+    const rest: number[] = [];
+    for (let t = 0; t < triCount; t++) {
+      const ia = at(t * 3), ib = at(t * 3 + 1), ic = at(t * 3 + 2);
+      let hx = 0, hy = 0;
+      for (const ii of [ia, ib, ic]) {
+        v.fromBufferAttribute(posA, ii).applyMatrix4(mesh.matrixWorld);
+        hx += (viewAxis === "x" ? v.z : v.x) / 3;
+        hy += v.y / 3;
+      }
+      let hit = -1;
+      for (let ci = 0; ci < circles.length; ci++) {
+        const c = circles[ci];
+        const dh = hx - horiz(c), dy = hy - c.y;
+        if (dh * dh + dy * dy <= c.r * c.r * 1.1025) { hit = ci; break; } // (r*1.05)²
+      }
+      if (hit < 0) rest.push(ia, ib, ic);
+      else buckets[hit].push(ia, ib, ic);
+    }
+    if (rest.length === triCount * 3) continue; // nothing captured here
+    const needs32 = posA.count > 65535;
+    const mk = (arr: number[]) => new THREE.BufferAttribute(needs32 ? new Uint32Array(arr) : new Uint16Array(arr), 1);
+    const oldIndex = geo.index;
+    geo.setIndex(mk(rest));
+    restores.push(() => geo.setIndex(oldIndex));
+    buckets.forEach((idxs, ci) => {
+      if (!idxs.length) return;
+      const ng = new THREE.BufferGeometry();
+      for (const [name, attr] of Object.entries(geo.attributes)) ng.setAttribute(name, attr as THREE.BufferAttribute);
+      ng.setIndex(mk(idxs));
+      const cm = new THREE.Mesh(ng, mesh.material);
+      cm.matrixAutoUpdate = false;
+      cm.matrix.copy(groups[ci].matrixWorld).invert().multiply(mesh.matrixWorld);
+      groups[ci].add(cm);
+    });
+  }
+  preview = { groups, restores };
+  return groups.length;
+}
+
+function applySpin(deg: number): void {
+  const rad = (deg * Math.PI) / 180;
+  if (preview) {
+    const axis = viewAxis === "x" ? new THREE.Vector3(1, 0, 0) : new THREE.Vector3(0, 0, 1);
+    for (const g of preview.groups) g.quaternion.setFromAxisAngle(axis, rad);
+  } else {
+    poseTest(deg, 0); // no circles drawn: fall back to the rigged wheels
+  }
+}
+
+// spin test: user circles when drawn, rigged wheel_N otherwise
 let spinOn = false;
 let spinAngle = 0;
 let lastT = 0;
 const spinBox = document.getElementById("spin") as HTMLInputElement;
 spinBox.onchange = () => {
   spinOn = spinBox.checked;
-  if (!spinOn) poseTest(0, 0);
+  if (spinOn) {
+    const n = circles.length ? buildPreview() : 0;
+    statusEl.textContent = n ? `spinning ${n} drawn circle${n > 1 ? "s" : ""}` : "spinning the rigged wheels (no circles drawn)";
+  } else {
+    teardownPreview();
+    poseTest(0, 0);
+    statusEl.textContent = "";
+  }
 };
+/** any circle/model/view change invalidates the preview — flip the test off */
+function cancelSpin(reason: string): void {
+  if (!spinOn) return;
+  spinOn = false;
+  spinBox.checked = false;
+  teardownPreview();
+  poseTest(0, 0);
+  statusEl.textContent = reason;
+}
 renderer.setAnimationLoop((t) => {
   const dt = lastT ? Math.min((t - lastT) / 1000, 0.1) : 0;
   lastT = t;
   if (spinOn && model) {
     spinAngle += dt * 120; // 120°/s — slow enough to see wobble/clip
-    poseTest(spinAngle, 0);
+    applySpin(spinAngle);
   }
   renderer.render(scene, camera);
 });
@@ -494,6 +602,15 @@ if (import.meta.env.DEV) {
     get viewAxis() { return viewAxis; },
     get json() { return outEl.value; },
     poseTest,
+    /** build the circle-cut preview (if needed) and pose it at a fixed angle */
+    spinPreview(deg: number): { groups: number; capturedMeshes: number } {
+      if (!preview && circles.length) buildPreview();
+      applySpin(deg);
+      return {
+        groups: preview?.groups.length ?? 0,
+        capturedMeshes: preview?.groups.reduce((s, g) => s + g.children.length, 0) ?? 0,
+      };
+    },
     /** hide/show wheel nodes — leftover tread shells on the body become visible */
     setWheelsVisible(v: boolean): number {
       if (!poseWheels.length) collectPoseWheels();

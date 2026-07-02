@@ -1,0 +1,36 @@
+{
+  "_comment": "Manual wheel circles from wheel-marker.html — (x|z, y, r) drawn by hand in the side view. Optional ac/aw = axle-center magnitude / half-width (capture window along the axle); when absent they are derived from vertex density in the circle's bottom sector. ac/aw here were measured from the v3 auto-rig's verified cut geometry.",
+  "clown-car": {
+    "axle": "z",
+    "units": "glb-scene",
+    "circles": [
+      { "x": -0.1828, "y": -0.353, "r": 0.134 },
+      { "x": 0.688, "y": -0.3513, "r": 0.1289 }
+    ]
+  },
+  "helmet": {
+    "axle": "z",
+    "units": "glb-scene",
+    "circles": [
+      { "x": 0.6724, "y": -0.3435, "r": 0.2136, "ac": 0.392, "aw": 0.136 },
+      { "x": -0.7518, "y": -0.3748, "r": 0.19, "ac": 0.405, "aw": 0.113 }
+    ]
+  },
+  "pink-rod": {
+    "axle": "z",
+    "units": "glb-scene",
+    "circles": [
+      { "x": 0.6872, "y": -0.2471, "r": 0.2506, "ac": 0.461, "aw": 0.139 },
+      { "x": -0.6911, "y": -0.2658, "r": 0.1823, "ac": 0.447, "aw": 0.129 }
+    ]
+  },
+  "six-wheeler": {
+    "axle": "z",
+    "units": "glb-scene",
+    "circles": [
+      { "x": 0.6069, "y": -0.1299, "r": 0.1686, "ac": 0.325, "aw": 0.129 },
+      { "x": -0.3029, "y": -0.1512, "r": 0.129, "ac": 0.324, "aw": 0.133 },
+      { "x": -0.6308, "y": -0.1522, "r": 0.1376, "ac": 0.331, "aw": 0.126 }
+    ]
+  }
+}
