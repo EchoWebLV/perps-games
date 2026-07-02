@@ -2,7 +2,7 @@ import { PublicKey } from "@solana/web3.js";
 import type { SolanaWalletPort } from "../core/solana-wallet";
 import { createDevKeypairPort } from "./dev-keypair-port";
 import { portToAnchorWallet } from "./anchor-wallet";
-import { createChainRound, maxPayoutBase, WalletUnfundedError, type ChainRound, type OpenedRound, type SettledRound, type ActionResult, type RoundSnap, type AssetSym } from "./chain-round";
+import { createChainRound, maxPayoutBase, WalletUnfundedError, BankrollFullError, type ChainRound, type OpenedRound, type SettledRound, type ActionResult, type RoundSnap, type AssetSym } from "./chain-round";
 import { createLeverSync } from "./lever-sync";
 
 /** The settled shape main.ts needs to finalize a round in the HUD. */
@@ -195,13 +195,27 @@ export function createGameSession(opts: {
       // starve the master pot until every new session sees "Tables are full".
       try { await c.sweepTill(); } catch { /* no till to sweep */ }
       // Carve a SESSION-sized till off the master pot BEFORE delegating it. A session plays
-      // many rounds off this one till, and each round locks `max_payout`; sizing the till to
-      // exactly one max_payout leaves zero buffer, so a single player-favorable round strands
-      // it below the next round's lock (HouseUndercapitalized) and the session can't continue.
-      // Carve a healthy multiple so normal P&L swings never block round-to-round play. If it
-      // does eventually drain, the player ends the session + presses GO to re-slice a fresh
-      // till (main.ts surfaces that). Throws BankrollFullError if the pot can't cover it.
-      await c.sliceFromPot(maxPayoutBase(stakeBase) * SESSION_TILL_ROUNDS);
+      // many rounds off this one till, and each round locks `max_payout`; a multiple gives
+      // buffer so ordinary P&L swings don't strand it below the next round's lock. But the
+      // multiple is a NICE-TO-HAVE — the true solvency line is ONE round's max payout. So
+      // take what the pot can host (3, 2, or 1 rounds) instead of refusing a playable table,
+      // and only refuse below 1 round — then NAME the table limit instead of "try again".
+      const oneRound = maxPayoutBase(stakeBase);
+      let rounds = SESSION_TILL_ROUNDS;
+      const avail = await c.houseAvailable().catch(() => null);
+      if (avail !== null) {
+        const fit = avail / BigInt(oneRound); // floor
+        if (fit < 1n) {
+          // Largest stake whose 23.75x max payout the pot still covers, floored to the
+          // 0.01-SOL bet step the UI uses. Below one step, the table is genuinely spent.
+          const maxStakeSol = Math.floor((Number(avail) / 23.75 / 1e9) * 100) / 100;
+          throw new BankrollFullError(maxStakeSol >= 0.01
+            ? `Table limit right now is ${maxStakeSol.toFixed(2)} SOL — lower your bet to play.`
+            : "The table's bankroll is spent — try again soon.");
+        }
+        rounds = Math.min(rounds, Number(fit));
+      }
+      await c.sliceFromPot(oneRound * rounds); // races still surface the program's own check below
       await c.delegate(); // hardened: reuses a stale-but-live same-wallet session, else throws DelegateBusyError
       isDelegated = true;
       // The ER can serve a STALE copy of the player ledger right after delegation (same

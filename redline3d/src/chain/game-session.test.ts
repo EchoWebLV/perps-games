@@ -19,6 +19,7 @@ function fakeChain(over: Partial<ChainRound> = {}): ChainRound {
     sliceFromPot: vi.fn(async () => {}),
     sweepTill: vi.fn(async () => {}),
     walletFunds: vi.fn(async () => ({ sol: 1_000_000_000n, stake: 1_000_000_000n })),
+    houseAvailable: vi.fn(async () => 1_000_000_000_000n), // roomy pot by default
     open: vi.fn(async () => ({ entryRaw: 0n, entryExpo: 8, entryHuman: 60000, deadlineTs: 0, feed: "71wtTRDY8Gxgw56bXFt2oc6qeAbTxzStdNiC425Z51sr" })),
     close: vi.fn(async () => ({ outcome: 0, outcomeName: "cashout", payout: 1_500_000n, exitRaw: 0n, exitHuman: 0, balance: 4_500_000n })),
     flip: vi.fn(async () => ({ settled: false as const, banked: 0n, dir: -1, lev: 100, entryHuman: 60000 })),
@@ -346,6 +347,38 @@ describe("createGameSession", () => {
     await s.init();
     await s.ensureSession(100_000_000, 10_000_000);
     expect(chain.buyIn).toHaveBeenCalledWith(100_000_000); // topped up so the round can open
+  });
+
+  it("shrinks the bankroll slice to what the pot can host (1 round beats refusing)", async () => {
+    // Pot can back ~1.5 rounds of this bet: take ONE round's worth and play — never refuse
+    // while even a single round is coverable ("Tables are full" was hiding a playable table).
+    const oneRound = maxPayoutBase(1_000_000);
+    const chain = fakeChain({ houseAvailable: vi.fn(async () => BigInt(Math.floor(oneRound * 1.5))) });
+    const s = createGameSession({ mint: MINT, onSettled: vi.fn(), injectChain: chain, injectAddress: "Fake111" });
+    await s.init();
+    await s.ensureSession(2_000_000, 1_000_000);
+    expect(chain.sliceFromPot).toHaveBeenCalledWith(oneRound); // degraded from 3× to 1×
+    expect(chain.delegate).toHaveBeenCalled();
+  });
+
+  it("refuses ONLY below one round's backing, and then names the actual table limit", async () => {
+    // Pot can back at most a 0.02-SOL bet (23.75x lock) — a 0.05 bet must be told the limit.
+    const chain = fakeChain({ houseAvailable: vi.fn(async () => BigInt(maxPayoutBase(20_000_000))) });
+    const s = createGameSession({ mint: MINT, onSettled: vi.fn(), injectChain: chain, injectAddress: "Fake111" });
+    await s.init();
+    await expect(s.ensureSession(100_000_000, 50_000_000)).rejects.toMatchObject({
+      code: "bankroll_full",
+      message: expect.stringContaining("0.02"),
+    });
+    expect(chain.sliceFromPot).not.toHaveBeenCalled();
+  });
+
+  it("keeps the full 3-round slice when the pot is roomy", async () => {
+    const chain = fakeChain();
+    const s = createGameSession({ mint: MINT, onSettled: vi.fn(), injectChain: chain, injectAddress: "Fake111" });
+    await s.init();
+    await s.ensureSession(2_000_000, 1_000_000);
+    expect(chain.sliceFromPot).toHaveBeenCalledWith(maxPayoutBase(1_000_000) * SESSION_TILL_ROUNDS);
   });
 
   it("stages a buffer of several bets so the heavy rebuild stays rare (capped by the wallet)", async () => {

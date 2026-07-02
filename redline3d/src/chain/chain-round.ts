@@ -121,6 +121,8 @@ export interface ChainRound {
   address: string;
   /** The owner WALLET's spendable funds: native SOL (fees/wrap) + the stake-token ATA balance. */
   walletFunds(): Promise<{ sol: bigint; stake: bigint }>;
+  /** The master pot's UNLOCKED balance — how much bankroll a new session can still carve. */
+  houseAvailable(): Promise<bigint>;
   readPlayerBalance(onEr?: boolean): Promise<bigint>;
   readRoundStatus(onEr?: boolean): Promise<number>;
   readRound(onEr?: boolean): Promise<RoundSnap | null>;
@@ -220,6 +222,12 @@ export function createChainRound(deps: { wallet: AnchorWalletLike; mint: PublicK
         baseConn.getTokenAccountBalance(ownerAta).then((r) => BigInt(r.value.amount)).catch(() => 0n), // no ATA yet = 0
       ]);
       return { sol, stake };
+    },
+
+    async houseAvailable() {
+      const m = await program.account.houseBalance.fetchNullable(pdas.master);
+      if (!m) return 0n;
+      return BigInt(m.balance.toString()) - BigInt(m.locked.toString());
     },
 
     async readPlayerBalance(onEr = false) {
