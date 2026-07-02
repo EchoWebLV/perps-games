@@ -10,7 +10,12 @@ export interface Pickups {
   update(dt: number, speed: number, carX: number, surfaceY: (z: number) => number, collect?: boolean): CoinHit;
   /** Vaporwave ability: coins turn rainbow and roll a hidden value multiplier on pickup */
   setRainbow(on: boolean): void;
+  /** Cart Rod ability: coins recycle over a shorter span → `rate`× more coins on the road (1 = stock) */
+  setCoinRate(rate: number): void;
 }
+
+/** Cart Rod "Coin Scoop": a third more coins on the road (+33%) */
+export const CART_COIN_RATE = 4 / 3;
 
 /** roll a coin's value multiplier from a uniform r∈[0,1): 3% ×5, 6% ×3, 12% ×2, else ×1 */
 export function coinMult(r: number): 1 | 2 | 3 | 5 {
@@ -24,6 +29,9 @@ const LANES = [-8, -4, 0, 4, 8];
 const N = 9;
 const SP = 110;          // spacing along z
 const TOTAL = N * SP;
+/** wrap-around span for a recycled coin: the same N coins spread over TOTAL/rate road,
+ * so coin density (coins passed per unit driven) scales by exactly `rate` */
+export const recycleSpan = (rate: number) => TOTAL / rate;
 const RECYCLE = 22;      // z past the camera → wrap to the far end
 const CATCH_Z0 = -14, CATCH_Z1 = -9;  // z window around the car where a coin can be caught
 const CATCH_X = 3.2;     // lateral catch radius
@@ -49,6 +57,7 @@ export function createPickups(): Pickups {
   }
 
   let rainbow = false;
+  let rate = 1;
   let time = 0;
 
   return {
@@ -56,6 +65,9 @@ export function createPickups(): Pickups {
     setRainbow(on) {
       rainbow = on;
       if (!on) for (const m of coins) { matOf(m).color.set(GOLD_C); matOf(m).emissive.set(GOLD_E); }
+    },
+    setCoinRate(r) {
+      rate = r; // takes hold as coins recycle — the road re-spaces itself within a wrap
     },
     update(dt, speed, carX, surfaceY, collect = true) {
       time += dt;
@@ -77,7 +89,7 @@ export function createPickups(): Pickups {
           value += mult;
           if (mult > 1) pops.push(mult);
         }
-        if (m.position.z > RECYCLE) place(m, m.position.z - TOTAL);
+        if (m.position.z > RECYCLE) place(m, m.position.z - recycleSpan(rate));
       });
       return { count, value, pops };
     },

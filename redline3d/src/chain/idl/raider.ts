@@ -258,7 +258,8 @@ export type Raider = {
                   111,
                   117,
                   115,
-                  101
+                  101,
+                  50
                 ]
               },
               {
@@ -373,7 +374,8 @@ export type Raider = {
                   111,
                   117,
                   115,
-                  101
+                  101,
+                  50
                 ]
               },
               {
@@ -752,7 +754,8 @@ export type Raider = {
                   111,
                   117,
                   115,
-                  101
+                  101,
+                  50
                 ]
               },
               {
@@ -1003,7 +1006,8 @@ export type Raider = {
                   111,
                   117,
                   115,
-                  101
+                  101,
+                  50
                 ]
               },
               {
@@ -1121,7 +1125,8 @@ export type Raider = {
                   111,
                   117,
                   115,
-                  101
+                  101,
+                  50
                 ]
               },
               {
@@ -1215,7 +1220,8 @@ export type Raider = {
                   111,
                   117,
                   115,
-                  101
+                  101,
+                  50
                 ]
               },
               {
@@ -1435,7 +1441,8 @@ export type Raider = {
                   111,
                   117,
                   115,
-                  101
+                  101,
+                  50
                 ]
               },
               {
@@ -1688,7 +1695,8 @@ export type Raider = {
                   111,
                   117,
                   115,
-                  101
+                  101,
+                  50
                 ]
               },
               {
@@ -1802,7 +1810,8 @@ export type Raider = {
                   111,
                   117,
                   115,
-                  101
+                  101,
+                  50
                 ]
               },
               {
@@ -1906,6 +1915,10 @@ export type Raider = {
         },
         {
           "name": "tp",
+          "type": "u32"
+        },
+        {
+          "name": "refund",
           "type": "u32"
         }
       ]
@@ -2151,7 +2164,8 @@ export type Raider = {
                   111,
                   117,
                   115,
-                  101
+                  101,
+                  50
                 ]
               },
               {
@@ -2173,7 +2187,8 @@ export type Raider = {
                   111,
                   117,
                   115,
-                  101
+                  101,
+                  50
                 ]
               },
               {
@@ -2245,7 +2260,8 @@ export type Raider = {
                   111,
                   117,
                   115,
-                  101
+                  101,
+                  50
                 ]
               },
               {
@@ -2267,7 +2283,8 @@ export type Raider = {
                   111,
                   117,
                   115,
-                  101
+                  101,
+                  50
                 ]
               },
               {
@@ -2343,7 +2360,8 @@ export type Raider = {
                   111,
                   117,
                   115,
-                  101
+                  101,
+                  50
                 ]
               },
               {
@@ -2455,7 +2473,8 @@ export type Raider = {
                   111,
                   117,
                   115,
-                  101
+                  101,
+                  50
                 ]
               },
               {
@@ -2871,8 +2890,8 @@ export type Raider = {
       "name": "houseBalance",
       "docs": [
         "HouseBalance backs BOTH roles in the sharding model: the singleton master pot",
-        "`[b\"house\", mint]` (the bankroll; never delegated) AND each per-session till",
-        "`[b\"house\", mint, owner]` (carved off the master, co-delegated with Player+Round",
+        "`[HOUSE_SEED, mint]` (the bankroll; never delegated) AND each per-session till",
+        "`[HOUSE_SEED, mint, owner]` (carved off the master, co-delegated with Player+Round",
         "for one ER session, swept back at end). Identical layout/SIZE for both."
       ],
       "type": {
@@ -3017,6 +3036,10 @@ export type Raider = {
           {
             "name": "liqBreachTs",
             "type": "i64"
+          },
+          {
+            "name": "refundFp",
+            "type": "u32"
           }
         ]
       }

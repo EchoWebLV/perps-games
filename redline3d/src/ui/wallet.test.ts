@@ -292,6 +292,36 @@ describe("createWallet", () => {
     expect(overlay.querySelector<FakeElement>("#wltOcCash")?.attrs.disabled).toBe(""); // no balance → disabled
   });
 
+  it("shows the wallet's own SOL under the hero so a deposit visibly arrives", async () => {
+    const parent = new FakeElement("div");
+    const wallet = createWallet(parent as unknown as HTMLElement, {
+      address: () => ADDR,
+      balance: () => 0,
+      fetchWalletSol: vi.fn(async () => 0.25),
+      onchain: makeOnchain(),
+    });
+
+    wallet.open();
+    await Promise.resolve(); await Promise.resolve(); // let the async fetch land
+
+    const overlay = parent.children[0];
+    expect(overlay.querySelector<FakeElement>(".wlt-hero-sub")?.textContent).toContain("wallet 0.250 SOL");
+  });
+
+  it("keeps the plain network line when no wallet-SOL fetch is wired (dev/legacy callers)", () => {
+    const parent = new FakeElement("div");
+    const wallet = createWallet(parent as unknown as HTMLElement, {
+      address: () => ADDR,
+      balance: () => 0,
+      onchain: makeOnchain(),
+    });
+
+    wallet.open();
+
+    const overlay = parent.children[0];
+    expect(overlay.querySelector<FakeElement>(".wlt-hero-sub")?.textContent ?? "").not.toContain("wallet");
+  });
+
   it("drops the legacy connect-wallet / USDC / add-to-play UI", () => {
     const parent = new FakeElement("div");
     const wallet = createWallet(parent as unknown as HTMLElement, {

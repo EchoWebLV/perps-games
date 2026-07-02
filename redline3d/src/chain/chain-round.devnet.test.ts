@@ -23,7 +23,7 @@ describe.skipIf(!RUN)("chain-round devnet loop", () => {
 
     // --- operator setup: fresh mint + house, funded ---
     const mint = await createMint(conn, funder, funder.publicKey, null, 6);
-    const [house] = PublicKey.findProgramAddressSync([Buffer.from("house"), mint.toBuffer()], program.programId);
+    const [house] = PublicKey.findProgramAddressSync([Buffer.from("house2"), mint.toBuffer()], program.programId);
     const [vaultAuthority] = PublicKey.findProgramAddressSync([Buffer.from("vault"), mint.toBuffer()], program.programId);
     const vaultToken = getAssociatedTokenAddressSync(mint, vaultAuthority, true);
     await program.methods.initHouse().accounts({ authority: funder.publicKey, mint, house, vaultAuthority, vaultToken, tokenProgram: TOKEN_PROGRAM_ID, associatedTokenProgram: ASSOCIATED_TOKEN_PROGRAM_ID, systemProgram: SystemProgram.programId }).rpc({ skipPreflight: true });
@@ -76,7 +76,7 @@ describe.skipIf(!RUN)("chain-round devnet loop", () => {
 
     // operator: fresh mint + house funded over the 2000x pre-lock (23.75 per round)
     const mint = await createMint(conn, funder, funder.publicKey, null, 6);
-    const [house] = PublicKey.findProgramAddressSync([Buffer.from("house"), mint.toBuffer()], program.programId);
+    const [house] = PublicKey.findProgramAddressSync([Buffer.from("house2"), mint.toBuffer()], program.programId);
     const [vaultAuthority] = PublicKey.findProgramAddressSync([Buffer.from("vault"), mint.toBuffer()], program.programId);
     const vaultToken = getAssociatedTokenAddressSync(mint, vaultAuthority, true);
     await program.methods.initHouse().accounts({ authority: funder.publicKey, mint, house, vaultAuthority, vaultToken, tokenProgram: TOKEN_PROGRAM_ID, associatedTokenProgram: ASSOCIATED_TOKEN_PROGRAM_ID, systemProgram: SystemProgram.programId }).rpc({ skipPreflight: true });
@@ -137,7 +137,7 @@ describe.skipIf(!RUN)("chain-round devnet loop", () => {
     const STAKE = 1_000_000;
     const SLICE = maxPayoutBase(STAKE); // 23_750_000
     const mint = await createMint(conn, funder, funder.publicKey, null, 6);
-    const [master] = PublicKey.findProgramAddressSync([Buffer.from("house"), mint.toBuffer()], program.programId);
+    const [master] = PublicKey.findProgramAddressSync([Buffer.from("house2"), mint.toBuffer()], program.programId);
     const [vaultAuthority] = PublicKey.findProgramAddressSync([Buffer.from("vault"), mint.toBuffer()], program.programId);
     const vaultToken = getAssociatedTokenAddressSync(mint, vaultAuthority, true);
     await program.methods.initHouse().accounts({ authority: funder.publicKey, mint, house: master, vaultAuthority, vaultToken, tokenProgram: TOKEN_PROGRAM_ID, associatedTokenProgram: ASSOCIATED_TOKEN_PROGRAM_ID, systemProgram: SystemProgram.programId }).rpc({ skipPreflight: true });
@@ -207,7 +207,7 @@ describe.skipIf(!RUN)("chain-round devnet loop", () => {
     const provider = new anchor.AnchorProvider(conn, new anchor.Wallet(funder), { commitment: "confirmed" });
     const program = new anchor.Program(idl as anchor.Idl, provider);
     const mint = await createMint(conn, funder, funder.publicKey, null, 6);
-    const [house] = PublicKey.findProgramAddressSync([Buffer.from("house"), mint.toBuffer()], program.programId);
+    const [house] = PublicKey.findProgramAddressSync([Buffer.from("house2"), mint.toBuffer()], program.programId);
     const [vaultAuthority] = PublicKey.findProgramAddressSync([Buffer.from("vault"), mint.toBuffer()], program.programId);
     const vaultToken = getAssociatedTokenAddressSync(mint, vaultAuthority, true);
     await program.methods.initHouse().accounts({ authority: funder.publicKey, mint, house, vaultAuthority, vaultToken, tokenProgram: TOKEN_PROGRAM_ID, associatedTokenProgram: ASSOCIATED_TOKEN_PROGRAM_ID, systemProgram: SystemProgram.programId }).rpc({ skipPreflight: true });
@@ -289,7 +289,7 @@ describe.skipIf(!RUN)("chain-round devnet loop", () => {
     const erProgram = new anchor.Program(idl as anchor.Idl, erProvider);
     const pdas = deriveRaiderPdas(CHAIN.PROGRAM_ID, player.publicKey, mint);
     const registry = deriveFeedRegistry(CHAIN.PROGRAM_ID);
-    const tx = await erProgram.methods.open(1, 1, 100, new anchor.BN(1_000_000), new anchor.BN(60), 200_000, 0, 0, 0).accountsPartial({
+    const tx = await erProgram.methods.open(1, 1, 100, new anchor.BN(1_000_000), new anchor.BN(60), 200_000, 0, 0, 0, 0).accountsPartial({
       player: pdas.player, house: pdas.till, round: pdas.round, mint,
       priceUpdate: CHAIN.FEEDS.BTC, registry, playerAuthority: player.publicKey, // BTC feed on an ETH (asset 1) round
     }).transaction();

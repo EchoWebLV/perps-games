@@ -252,7 +252,8 @@
                   111,
                   117,
                   115,
-                  101
+                  101,
+                  50
                 ]
               },
               {
@@ -367,7 +368,8 @@
                   111,
                   117,
                   115,
-                  101
+                  101,
+                  50
                 ]
               },
               {
@@ -746,7 +748,8 @@
                   111,
                   117,
                   115,
-                  101
+                  101,
+                  50
                 ]
               },
               {
@@ -997,7 +1000,8 @@
                   111,
                   117,
                   115,
-                  101
+                  101,
+                  50
                 ]
               },
               {
@@ -1115,7 +1119,8 @@
                   111,
                   117,
                   115,
-                  101
+                  101,
+                  50
                 ]
               },
               {
@@ -1209,7 +1214,8 @@
                   111,
                   117,
                   115,
-                  101
+                  101,
+                  50
                 ]
               },
               {
@@ -1429,7 +1435,8 @@
                   111,
                   117,
                   115,
-                  101
+                  101,
+                  50
                 ]
               },
               {
@@ -1682,7 +1689,8 @@
                   111,
                   117,
                   115,
-                  101
+                  101,
+                  50
                 ]
               },
               {
@@ -1796,7 +1804,8 @@
                   111,
                   117,
                   115,
-                  101
+                  101,
+                  50
                 ]
               },
               {
@@ -1900,6 +1909,10 @@
         },
         {
           "name": "tp",
+          "type": "u32"
+        },
+        {
+          "name": "refund",
           "type": "u32"
         }
       ]
@@ -2145,7 +2158,8 @@
                   111,
                   117,
                   115,
-                  101
+                  101,
+                  50
                 ]
               },
               {
@@ -2167,7 +2181,8 @@
                   111,
                   117,
                   115,
-                  101
+                  101,
+                  50
                 ]
               },
               {
@@ -2239,7 +2254,8 @@
                   111,
                   117,
                   115,
-                  101
+                  101,
+                  50
                 ]
               },
               {
@@ -2261,7 +2277,8 @@
                   111,
                   117,
                   115,
-                  101
+                  101,
+                  50
                 ]
               },
               {
@@ -2337,7 +2354,8 @@
                   111,
                   117,
                   115,
-                  101
+                  101,
+                  50
                 ]
               },
               {
@@ -2449,7 +2467,8 @@
                   111,
                   117,
                   115,
-                  101
+                  101,
+                  50
                 ]
               },
               {
@@ -2865,8 +2884,8 @@
       "name": "HouseBalance",
       "docs": [
         "HouseBalance backs BOTH roles in the sharding model: the singleton master pot",
-        "`[b\"house\", mint]` (the bankroll; never delegated) AND each per-session till",
-        "`[b\"house\", mint, owner]` (carved off the master, co-delegated with Player+Round",
+        "`[HOUSE_SEED, mint]` (the bankroll; never delegated) AND each per-session till",
+        "`[HOUSE_SEED, mint, owner]` (carved off the master, co-delegated with Player+Round",
         "for one ER session, swept back at end). Identical layout/SIZE for both."
       ],
       "type": {
@@ -3011,6 +3030,10 @@
           {
             "name": "liq_breach_ts",
             "type": "i64"
+          },
+          {
+            "name": "refund_fp",
+            "type": "u32"
           }
         ]
       }

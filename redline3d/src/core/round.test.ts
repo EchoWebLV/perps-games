@@ -42,6 +42,15 @@ describe("RoundEngine", () => {
     expect(s.reason).toBe("time");
   });
 
+  it("honors a per-round maxSec over CONFIG.MAXSEC (Six Wheeler Heavy Load)", () => {
+    const r = new RoundEngine();
+    r.launch({ dir: 1, lev: 10, stake: 1, entryRaw: 100, startMs: 0, maxSec: 90 });
+    expect(r.tick(101, 60_000).phase).toBe("live"); // past the default 60s cap — still running
+    const s = r.tick(101, 90_000);
+    expect(s.phase).toBe("settled");
+    expect(s.reason).toBe("time");
+  });
+
   it("cashout settles with reason cashout", () => {
     const r = launched();
     r.tick(102, 1000);

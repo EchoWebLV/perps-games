@@ -1,5 +1,10 @@
 import { sol } from "../core/money";
 
+/** play-amount ceiling in 0.01-SOL units (0.10 SOL); Six Wheeler's Heavy Load raises it */
+export const DEFAULT_PLAY_CAP = 10;
+/** step the play amount by ±1 within [1, cap] — also pulls an over-cap value back down */
+export const stepPlay = (v: number, delta: 1 | -1, cap: number) => Math.max(1, Math.min(cap, v + delta));
+
 export interface Controls {
   dir(): 1 | -1;
   /** set the LONG/SHORT call externally (e.g. the Clown Car's lane-bet ability) — works live too */
@@ -7,6 +12,8 @@ export interface Controls {
   /** Clown Car: keep the call box visible during a live round so it reads out the live direction */
   setLaneMode(on: boolean): void;
   playAmount(): number;
+  /** per-car max bet (0.01-SOL units) — clamps the current amount down if the cap shrinks */
+  setPlayCap(cap: number): void;
   gas(): boolean;
   brake(): boolean;
   steer(): number; // -1 left, 0, 1 right
@@ -38,7 +45,7 @@ export function createControls(ctrlMount: HTMLElement, goMount: HTMLElement, ped
   goMount.innerHTML = `<button id="go" class="cta"><span id="gofill"></span><span id="golabel">GO!</span></button>`;
 
   const q = (s: string) => (ctrlMount.querySelector(s) || goMount.querySelector(s) || pedalMount.querySelector(s)) as HTMLElement;
-  let d: 1 | -1 = 1, playAmount = 5, live = false; // 0.01-SOL units → 0.05 SOL default
+  let d: 1 | -1 = 1, playAmount = 5, playCap = DEFAULT_PLAY_CAP, live = false; // 0.01-SOL units → 0.05 SOL default
   let gasOn = false, brakeOn = false, steerL = false, steerR = false;
   let launchCb = () => {}, cashCb = () => {};
   // anti-double-tap: when a round goes live the GO button becomes BAIL in place, so a quick second
@@ -64,8 +71,8 @@ export function createControls(ctrlMount: HTMLElement, goMount: HTMLElement, ped
     callbox.style.opacity = !live || laneMode ? "1" : "0";
     callbox.style.pointerEvents = live ? "none" : "auto";
   };
-  q("#sup").onclick = () => { if (!live) { playAmount = Math.min(10, playAmount + 1); sval.textContent = sol(playAmount); } }; // +0.01 → 0.10 SOL cap
-  q("#sdn").onclick = () => { if (!live) { playAmount = Math.max(1, playAmount - 1); sval.textContent = sol(playAmount); } };   // -0.01 → 0.01 SOL floor
+  q("#sup").onclick = () => { if (!live) { playAmount = stepPlay(playAmount, 1, playCap); sval.textContent = sol(playAmount); } };  // +0.01 up to the car's cap
+  q("#sdn").onclick = () => { if (!live) { playAmount = stepPlay(playAmount, -1, playCap); sval.textContent = sol(playAmount); } }; // -0.01 → 0.01 SOL floor
   go.onclick = () => {
     if (live) { if (performance.now() < cashLockUntil) return; cashCb(); } // bail is locked for BAIL_LOCK_MS after launch
     else launchCb();
@@ -103,6 +110,10 @@ export function createControls(ctrlMount: HTMLElement, goMount: HTMLElement, ped
     setDir: applyDir,
     setLaneMode(on: boolean) { laneMode = on; refreshCall(); },
     playAmount: () => playAmount,
+    setPlayCap(cap: number) {
+      playCap = cap;
+      if (playAmount > playCap) { playAmount = playCap; sval.textContent = sol(playAmount); } // cap shrank → pull the bet down
+    },
     gas: () => gasOn,
     brake: () => brakeOn,
     steer: () => (steerR ? 1 : 0) - (steerL ? 1 : 0),

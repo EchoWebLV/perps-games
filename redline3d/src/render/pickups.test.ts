@@ -1,5 +1,5 @@
 import { describe, expect, test } from "vitest";
-import { coinMult } from "./pickups";
+import { CART_COIN_RATE, coinMult, createPickups, recycleSpan } from "./pickups";
 
 describe("coinMult tiers (Vaporwave rainbow coins)", () => {
   test("maps r-ranges to the right multipliers", () => {
@@ -21,5 +21,24 @@ describe("coinMult tiers (Vaporwave rainbow coins)", () => {
     expect(counts[3] / M).toBeCloseTo(0.06, 3);
     expect(counts[2] / M).toBeCloseTo(0.12, 3);
     expect(counts[1] / M).toBeCloseTo(0.79, 3);
+  });
+});
+
+describe("coin rate (Cart Rod +33% coins on the road)", () => {
+  test("recycleSpan shrinks by the rate → coin density rises by exactly the rate", () => {
+    expect(recycleSpan(1)).toBeCloseTo(990, 6); // 9 coins × 110 spacing (stock road)
+    expect(recycleSpan(CART_COIN_RATE)).toBeCloseTo(990 / CART_COIN_RATE, 6);
+    expect(CART_COIN_RATE).toBeCloseTo(4 / 3, 9); // a third more coins
+  });
+
+  test("update() recycles a passed coin a shorter span back at cart rate (denser road)", () => {
+    const p = createPickups();
+    p.setCoinRate(CART_COIN_RATE);
+    const flat = () => 0;
+    const before = p.group.children.map((c) => c.position.z);
+    // +300z: only the nearest coin (z≈-218) crosses RECYCLE=22 and wraps
+    p.update(300, 1, 0, flat, false);
+    expect(p.group.children[0].position.z).toBeCloseTo(before[0] + 300 - recycleSpan(CART_COIN_RATE), 6);
+    expect(p.group.children[1].position.z).toBeCloseTo(before[1] + 300, 6); // no wrap — just drifted
   });
 });

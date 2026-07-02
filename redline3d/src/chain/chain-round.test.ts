@@ -11,8 +11,8 @@ describe("chain-round pure helpers", () => {
     const program = new PublicKey("FwUNcUaRbYGiWasHa6DA3xQaQJfZWCgH7UhDeBvoJcBv");
     const pdas = deriveRaiderPdas(program, owner, mint);
     const [player] = PublicKey.findProgramAddressSync([Buffer.from("player"), owner.toBuffer(), mint.toBuffer()], program);
-    const [master] = PublicKey.findProgramAddressSync([Buffer.from("house"), mint.toBuffer()], program);
-    const [till] = PublicKey.findProgramAddressSync([Buffer.from("house"), mint.toBuffer(), owner.toBuffer()], program);
+    const [master] = PublicKey.findProgramAddressSync([Buffer.from("house2"), mint.toBuffer()], program);
+    const [till] = PublicKey.findProgramAddressSync([Buffer.from("house2"), mint.toBuffer(), owner.toBuffer()], program);
     const [round] = PublicKey.findProgramAddressSync([Buffer.from("round"), owner.toBuffer()], program);
     expect(pdas.player.equals(player)).toBe(true);
     expect(pdas.master.equals(master)).toBe(true);

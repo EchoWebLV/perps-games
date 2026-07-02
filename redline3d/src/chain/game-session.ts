@@ -2,7 +2,7 @@ import { PublicKey } from "@solana/web3.js";
 import type { SolanaWalletPort } from "../core/solana-wallet";
 import { createDevKeypairPort } from "./dev-keypair-port";
 import { portToAnchorWallet } from "./anchor-wallet";
-import { createChainRound, maxPayoutBase, type ChainRound, type OpenedRound, type SettledRound, type ActionResult, type RoundSnap, type AssetSym } from "./chain-round";
+import { createChainRound, maxPayoutBase, WalletUnfundedError, type ChainRound, type OpenedRound, type SettledRound, type ActionResult, type RoundSnap, type AssetSym } from "./chain-round";
 import { createLeverSync } from "./lever-sync";
 
 /** The settled shape main.ts needs to finalize a round in the HUD. */
@@ -21,8 +21,11 @@ export interface GameSession {
   init(): Promise<bigint>;
   refreshBalance(onEr?: boolean): Promise<bigint>;
   ensureSession(buyInBase: number, stakeBase: number): Promise<void>;
-  // graceSecs / slFp / tpFp: per-round risk knobs (Skull grace, Pink Rod SL/TP); 0 = off.
-  open(asset: AssetSym, dir: 1 | -1, lev: number, stakeBase: number, durationSecs: number, liqFp: number, graceSecs?: number, slFp?: number, tpFp?: number): Promise<OpenedRound>;
+  // graceSecs / slFp / tpFp / refundFp: per-round risk knobs (Skull grace, Pink Rod SL/TP,
+  // Flintstone liq-refund); 0 = off.
+  open(asset: AssetSym, dir: 1 | -1, lev: number, stakeBase: number, durationSecs: number, liqFp: number, graceSecs?: number, slFp?: number, tpFp?: number, refundFp?: number): Promise<OpenedRound>;
+  /** The owner wallet's native SOL (lamports) — the fundable balance the wallet panel shows. */
+  walletSol(): Promise<bigint>;
   noteLeverage(lev: number): void;
   flip(dir: 1 | -1): Promise<ActionResult>;
   close(): Promise<SettledRound>;
@@ -77,7 +80,12 @@ export function createGameSession(opts: {
         await port!.connect();
         chain = createChainRound({ wallet: portToAnchorWallet(port!), mint: opts.mint });
       }
-      bal = await chain.readPlayerBalance(false);
+      // Re-adopt a still-live session (page reload / log-out→log-in mid-session): the L1 copy
+      // of a delegated balance PDA is stale, and cash-out must know to undelegate first —
+      // otherwise the chip shows old money and "Cash out" withdraws against a locked PDA.
+      const state = await chain.delegationState().catch(() => "fresh" as const);
+      isDelegated = state === "reuse";
+      bal = await chain.readPlayerBalance(isDelegated);
       return bal;
     },
 
@@ -104,6 +112,19 @@ export function createGameSession(opts: {
       if (state === "busy") await c.delegate();
       // Fresh session: buy in if the play balance is empty, carve a bet-sized till, delegate.
       const onL1 = await c.readPlayerBalance(false);
+      // Fail fast on an unfunded wallet BEFORE spending: sends go out with skipPreflight, so a
+      // 0-SOL fee payer (a brand-new Privy embedded wallet) otherwise dies as a silent drop +
+      // a 60s confirm hang. Player-actionable message; best-effort (a read failure skips it).
+      const funds = await c.walletFunds().catch(() => null);
+      if (funds) {
+        const FEE_FLOOR = 5_000_000n; // fees + ATA rent headroom (~0.005 SOL)
+        const needsBuyIn = onL1 === 0n;
+        const solNeeded = needsBuyIn && isWsol ? BigInt(buyInBase) + FEE_FLOOR : FEE_FLOOR;
+        if (funds.sol < solNeeded)
+          throw new WalletUnfundedError("Your wallet needs SOL first — open the wallet panel and send SOL to your address.");
+        if (needsBuyIn && !isWsol && funds.stake < BigInt(buyInBase))
+          throw new WalletUnfundedError("Not enough funds in your wallet for this bet — top up your wallet first.");
+      }
       if (onL1 === 0n) { if (isWsol) await c.wrapForBuyIn(buyInBase); await c.buyIn(buyInBase); }
       await c.ensureRoundInited();
       // Carve a SESSION-sized till off the master pot BEFORE delegating it. A session plays
@@ -119,7 +140,11 @@ export function createGameSession(opts: {
       bal = await c.readPlayerBalance(true);
     },
 
-    async open(asset, dir, lev, stakeBase, durationSecs, liqFp, graceSecs = 0, slFp = 0, tpFp = 0) {
+    async walletSol() {
+      return (await need().walletFunds()).sol;
+    },
+
+    async open(asset, dir, lev, stakeBase, durationSecs, liqFp, graceSecs = 0, slFp = 0, tpFp = 0, refundFp = 0) {
       const c = need();
       // Reconcile a leftover OPEN round before starting a new one. After a page reload,
       // a log-out→log-in, or a missed auto-settle (crank), a prior round can still be open
@@ -134,9 +159,12 @@ export function createGameSession(opts: {
           bal = await c.readPlayerBalance(true);
         }
       } catch (e) { console.warn("open: stale-round reconcile skipped:", e); }
-      const opened = await c.open(asset, dir, lev, stakeBase, durationSecs, liqFp, graceSecs, slFp, tpFp);
+      const opened = await c.open(asset, dir, lev, stakeBase, durationSecs, liqFp, graceSecs, slFp, tpFp, refundFp);
       armed = false;
-      try { await c.scheduleCrank(); armed = true; } catch { armed = false; }
+      // Size the crank to THIS round: 1s ticks for the round's full duration + settle margin.
+      // A fixed 70-tick schedule let a 90s Heavy-Load round outlive its own crank (the 90s
+      // deadline was never observed on-chain and the round hung open) — live-found on devnet.
+      try { await c.scheduleCrank({ iterations: durationSecs + 10 }); armed = true; } catch { armed = false; }
       return opened;
     },
 
@@ -184,8 +212,11 @@ export function createGameSession(opts: {
     },
 
     async logout() {
-      // Sign out: drop the session so the next init() reconnects fresh. Any live ER session
-      // persists on-chain (settle/reclaim via the wallet panel) — this is a UI sign-out only.
+      // Sign out: disconnect the wallet (for Privy this clears the auth session, so the next
+      // init() shows the login modal — enabling account switch) and drop the local session so
+      // init() reconnects fresh. Any live ER session persists on-chain (settle/reclaim via the
+      // wallet panel); no on-chain state is touched here.
+      try { await port?.disconnect(); } catch (e) { console.warn("wallet disconnect failed:", e); }
       chain = opts.injectChain ?? null;
       isDelegated = false;
       armed = false;

@@ -2,17 +2,37 @@ import { createDevKeypairPort } from "./dev-keypair-port";
 import type { SolanaWalletPort } from "../core/solana-wallet";
 
 /**
- * Pick the on-chain signer by build config. Dev-keypair is the DEFAULT (Preview/tests/automation);
- * `VITE_WALLET=privy` selects the Privy embedded wallet.
+ * Pick the on-chain signer. Resolution order:
+ *   1. `?wallet=dev|privy` URL param — runtime escape hatch so Claude Preview / automation
+ *      can force the dev keypair without touching .env (and a Privy run can be forced anywhere).
+ *   2. `VITE_WALLET` env (build-time pin).
+ *   3. Default: **privy whenever a Privy app id is configured** — the player path — else dev-keypair.
  *
  * Returns synchronously so main.ts needs no async restructuring. For Privy, the React island
  * (react + @privy-io/react-auth) is dynamic-imported and mounted LAZILY on the first connect() —
- * keeping it out of the default bundle, and out of the path entirely unless VITE_WALLET=privy.
+ * keeping it out of the default bundle, and out of the path entirely when the dev keypair is picked.
  * game-session.init() awaits port.connect() before using the address, so the lazy mount lands
  * in time for portToAnchorWallet.
  */
+export type WalletKind = "privy" | "dev";
+
+export function resolveWalletKind(
+  env: { VITE_WALLET?: string; VITE_PRIVY_APP_ID?: string },
+  search: string,
+): WalletKind {
+  const param = new URLSearchParams(search).get("wallet");
+  if (param === "dev" || param === "privy") return param;
+  if (env.VITE_WALLET === "privy") return "privy";
+  if (env.VITE_WALLET === "dev") return "dev";
+  return env.VITE_PRIVY_APP_ID ? "privy" : "dev";
+}
+
 export function selectChainWalletPort(): SolanaWalletPort {
-  if (import.meta.env?.VITE_WALLET === "privy") return createLazyPrivyPort();
+  const kind = resolveWalletKind(
+    (import.meta.env ?? {}) as { VITE_WALLET?: string; VITE_PRIVY_APP_ID?: string },
+    globalThis.location?.search ?? "",
+  );
+  if (kind === "privy") return createLazyPrivyPort();
   return createDevKeypairPort();
 }
 

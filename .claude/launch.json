@@ -15,17 +15,11 @@
     },
     {
       "name": "redline3d",
-      "runtimeExecutable": "npm",
-      "runtimeArgs": ["run", "dev", "--", "--port", "4000", "--strictPort", "--host"],
+      "runtimeExecutable": "bash",
+      "runtimeArgs": ["-c", "VITE_WALLET=dev npm run dev -- --host"],
       "cwd": "redline3d",
-      "port": 4000
-    },
-    {
-      "name": "redline3d-wheels",
-      "runtimeExecutable": "npm",
-      "runtimeArgs": ["run", "dev", "--", "--port", "4010", "--strictPort", "--host"],
-      "cwd": "redline3d",
-      "port": 4010
+      "port": 4000,
+      "autoPort": true
     },
     {
       "name": "redline3d-privy",

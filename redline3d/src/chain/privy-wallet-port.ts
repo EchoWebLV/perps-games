@@ -1,10 +1,11 @@
 import type { SolanaWalletPort } from "../core/solana-wallet";
 
-/** The minimal island surface the port needs (privy-island.tsx publishes this). */
+/** The minimal island surface the port needs (privy-island.ts publishes this). */
 export interface PrivyIsland {
   connect(): Promise<string>; // triggers Privy login, ensures an embedded wallet, returns its address
   signTransaction(txBase64: string): Promise<string>;
   currentAddress(): string | null;
+  logout(): Promise<void>; // Privy sign-out — clears the auth session so the next connect() shows the login modal
 }
 
 /**
@@ -21,7 +22,8 @@ export function createPrivyPort(deps: { island: PrivyIsland }): SolanaWalletPort
       return { address, label: "privy" };
     },
     async disconnect() {
-      /* island owns logout (wallet panel); nothing to tear down here */
+      address = "";
+      await island.logout();
     },
     currentAddress() {
       return island.currentAddress() ?? (address || null);

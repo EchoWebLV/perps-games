@@ -8,6 +8,8 @@ export interface LaunchParams {
   stake: number;
   entryRaw: number;
   startMs: number;
+  /** per-round time cap in seconds (Six Wheeler Heavy Load runs longer); defaults to CONFIG.MAXSEC */
+  maxSec?: number;
 }
 
 export class RoundEngine {
@@ -15,6 +17,7 @@ export class RoundEngine {
   private pos: Position = { dir: 1, lev: 10, entryRaw: 0, banked: 0 };
   private stake = 0;
   private startMs = 0;
+  private maxSec = CONFIG.MAXSEC;
   private reason?: SettleReason;
   private finalEquity = 1;
 
@@ -27,6 +30,7 @@ export class RoundEngine {
     this.pos = { dir: p.dir, lev: p.lev, entryRaw: p.entryRaw, banked: 0 };
     this.stake = p.stake;
     this.startMs = p.startMs;
+    this.maxSec = p.maxSec ?? CONFIG.MAXSEC;
     this.reason = undefined;
     this.finalEquity = 1;
   }
@@ -51,7 +55,7 @@ export class RoundEngine {
     const equity = equityOf(this.pos, price);
     if (equity <= CONFIG.LIQ) return this.finish("liquidated", "liq", 0);
     if (equity >= CONFIG.CAP) return this.finish("settled", "cap", CONFIG.CAP);
-    if ((nowMs - this.startMs) / 1000 >= CONFIG.MAXSEC)
+    if ((nowMs - this.startMs) / 1000 >= this.maxSec)
       return this.finish("settled", "time", equity);
     return this.snapshot(price, nowMs);
   }

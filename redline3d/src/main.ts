@@ -23,7 +23,6 @@ import { CONFIG } from "./core/config";
 import { createMinimap } from "./ui/minimap";
 import { CART_COIN_RATE, createPickups } from "./render/pickups";
 import { createCarPicker, type CarAbility } from "./ui/carpicker";
-import { createAuthGate } from "./ui/auth-gate";
 import { createFx } from "./ui/fx";
 import { createDeathsDoor } from "./ui/deaths-door";
 import { createAutoExit } from "./ui/pinkrod";
@@ -32,6 +31,9 @@ import { createAudio } from "./core/audio";
 import { createRadio } from "./ui/radio";
 import { createCoinCounter } from "./ui/coins";
 import { createNitro } from "./ui/nitro";
+import { createFlux, FLUX_LEV } from "./ui/flux";
+import { createSwerveCore } from "./core/swerve";
+import { jackpotRoll } from "./core/slots";
 import { createWallet } from "./ui/wallet";
 import { createLobby } from "./render/lobby";
 import { createLobbyCam } from "./render/lobbycam";
@@ -89,7 +91,7 @@ let opening = false;     // the GO handler (ensureSession+open) is mid-flight
 const session = createGameSession({
   mint: new PublicKey(CHAIN.STAKE_MINT),
   onSettled: (info) => finalizeSettled(info), // terminal-first background lever
-  port: selectChainWalletPort(), // dev-keypair by default; Privy under VITE_WALLET=privy
+  port: selectChainWalletPort(), // Privy by default (app id set); ?wallet=dev forces the dev keypair
 });
 // The cash chip + wallet hero read the on-chain play balance (centi-SOL units). Single writer.
 function syncOnchainBalance() {
@@ -100,11 +102,35 @@ function syncOnchainBalance() {
   hud.setBalance(balance);
   walletUI.setBalance(balance);
 }
-// NOTE: the login gate is created near the END of setup (createHud does
-// `hudRoot.innerHTML = …`, which would wipe a gate added here). See `authGate` below.
 // The game is fully on-chain: the SOL play balance + round loop live in `session` (the ER round).
 // `balance` is the displayed cash chip, sourced only from the on-chain play balance (centi-SOL units).
 let balance = 0;
+
+// Lazy sign-in — there is NO login gate. The game boots straight into the scene; the wallet
+// connects on the FIRST money action (GO or the wallet panel). Under Privy that's the moment
+// the login modal opens, so "press GO → log in → you're racing" is the whole onboarding.
+let signedIn = false, signingIn = false;
+async function ensureSignedIn(): Promise<boolean> {
+  if (signedIn) return true;
+  if (signingIn) return false; // a login attempt (modal) is already up — don't stack another
+  signingIn = true;
+  try {
+    await session.init();
+    syncOnchainBalance();
+    signedIn = true;
+    return true;
+  } catch (e) {
+    console.error("sign-in failed", e);
+    const msg = String((e as Error)?.message ?? e);
+    hud.setStatus(
+      msg.includes("privy_login_cancelled") ? "Sign-in cancelled — press GO to try again." :
+      msg.includes("privy_unreachable") ? "Couldn't reach sign-in — check your connection and try again." :
+      "Sign-in failed — check your connection and try again.");
+    return false;
+  } finally {
+    signingIn = false;
+  }
+}
 
 // price feeds — BTC / ETH / SOL (subscribe to all; the active one drives the game)
 const ASSETS = [
@@ -129,6 +155,7 @@ const controls = createControls(hud.ctrlMount, hud.goMount, hud.pedalMount);
 const minimap = createMinimap(hud.miniCanvas);
 const fx = createFx();
 const deathsDoor = createDeathsDoor(); // Skull car: near-death sequence at the liq floor
+const swerve = createSwerveCore();     // Helmet car: one auto-flip at the edge of liquidation
 // Pink Rod's Auto-Exit (stop-loss / take-profit) panel — appended into the pre-round control
 // stack AFTER createControls set its innerHTML; values are stamped on-chain at GO.
 const autoExit = createAutoExit(hud.ctrlMount);
@@ -137,6 +164,15 @@ const audio = createAudio();
 const coins = createCoinCounter(hudRoot);
 // Orion's Nitro Overdrive — 2× leverage burst; the button fires it, main applies the boost
 const nitro = createNitro(hudRoot, () => { fx.nitro(); chase.shake(0.7); navigator.vibrate?.([0, 30, 20, 40]); });
+// DeLorean's Flux Brake — bank the P&L + pin leverage to 10× for ~4s; the lever rebank IS
+// the freeze (provable on-chain). Engage on the tap itself — don't wait a frame — then the
+// loop holds the pin while active and hands back to the throttle when the window ends.
+const flux = createFlux(hudRoot, () => {
+  game.lev = FLUX_LEV;
+  engine.setLeverage(FLUX_LEV, priceSource.price()); // local rebank: gains lock into banked now
+  session.noteLeverage(FLUX_LEV);                    // on-chain lever follows (coalesced)
+  chase.shake(0.35); navigator.vibrate?.(25);
+});
 hud.setBalance(balance);
 // Effective leverage ceiling = the upgrade-driven CONFIG.RMAX, raised to a car's base if higher
 // (the Cybertruck starts at 1500). Nitro (Orion) then doubles the live leverage on top of this.
@@ -163,6 +199,8 @@ const walletUI = createWallet(hudRoot, {
   // the wallet shown for funding is the on-chain session wallet (Privy embedded / dev keypair)
   address: () => session.address(),
   balance: () => balance,
+  // the wallet's own SOL (lamports → SOL), so a deposit visibly arrives before the first GO
+  fetchWalletSol: async () => { try { return Number(await session.walletSol()) / 1e9; } catch { return null; } },
   onchain: {
     status: () => ({ delegated: session.delegated(), playCents: baseToUnits(session.balance()) }),
     // One player action. "Cash out" quietly undelegates the ER session (if one is live) and THEN
@@ -178,7 +216,11 @@ const walletUI = createWallet(hudRoot, {
   },
   // Log out moved to the menu (settings); the wallet page is deposit-only now.
 });
-hud.onWallet(() => { if (engine.getPhase() !== "live") walletUI.open(); });
+hud.onWallet(() => {
+  if (engine.getPhase() === "live") return;
+  // funding needs an address, so the wallet chip signs you in first (Privy modal if needed)
+  void ensureSignedIn().then((ok) => { if (ok) walletUI.open(); });
+});
 
 // car picker — swap the GLB model live + apply the card's special ability
 const setAbility = (a?: CarAbility) => {
@@ -186,38 +228,42 @@ const setAbility = (a?: CarAbility) => {
   world.setLaneBet(a === "laneBet");      // Clown Car colors the road green/red
   controls.setLaneMode(a === "laneBet");  // keep LONG/SHORT visible as a live readout
   nitro.setEnabled(a === "nitro");        // Orion shows the Nitro Overdrive button
+  flux.setEnabled(a === "flux");          // DeLorean shows the Flux Brake button
   pickups.setRainbow(a === "rainbow");    // Vaporwave: rainbow coins + value multipliers
   pickups.setCoinRate(a === "cartRod" ? CART_COIN_RATE : 1); // Cart Rod: +33% coins on the road
   deathsDoor.setEnabled(a === "skull");   // Skull: near-death sequence when equity hits the floor
+  swerve.setEnabled(a === "swerve");      // Helmet: auto-flip at the edge of liquidation
   autoExit.setEnabled(a === "pinkRod");   // Pink Rod: pre-round stop-loss / take-profit sliders
   controls.setPlayCap(a === "sixWheeler" ? HEAVY_PLAY_CAP : DEFAULT_PLAY_CAP); // Six Wheeler hauls a bigger max bet
 };
 // synthwave radio — streams on the first gesture; its on/off toggle lives in the menu (below)
 const radio = createRadio(hudRoot);
 const garage = createCarPicker(hudRoot, [
-  { name: "DeLorean", url: "/models/delorean.glb", power: { name: "Flux Brake", desc: "freeze your P&L ~4s", icon: "clock" } },
+  { name: "DeLorean", url: "/models/delorean.glb", ability: "flux", power: { name: "Flux Brake", desc: "freeze your P&L ~4s", icon: "clock" } },
   { name: "Cybertruck", url: "/models/cybertruck.glb", scale: 1.3, baseLev: 1500, power: { name: "Overclocked", desc: "starts at 1500× leverage", icon: "gauge" } },
   { name: "Orion", url: "/models/orion.glb", yaw: -Math.PI / 2, ability: "nitro", power: { name: "Nitro Overdrive", desc: "2× leverage · 3s", icon: "flame" } },
   { name: "Vaporwave", url: "/models/vaporwave.glb", ability: "rainbow", power: { name: "Rainbow Coins", desc: "×2 ×3 ×5 coin drops", icon: "magnet" } },
-  { name: "Flintstone", url: "/models/flintstone.glb", scale: 0.7, power: { name: "Stone-Age Airbag", desc: "keep play amount on liq", icon: "chute" } },
+  { name: "Flintstone", url: "/models/flintstone.glb", scale: 0.7, ability: "airbag", power: { name: "Stone-Age Airbag", desc: "up to 20% back on a wreck", icon: "chute" } },
   { name: "Clown Car", url: "/models/clown-car.glb", yaw: Math.PI / 2, ability: "laneBet", power: { name: "Lane Bet", desc: "steer = LONG / SHORT", icon: "swap" } },
   // headline new cars — abilities still to be designed (brainstorming car-by-car).
   // skull/slot-machine are different model sources; yaw is a guess (+π/2) — fix if a card faces backwards.
   { name: "Skull", url: "/models/skull.glb", yaw: Math.PI / 2, ability: "skull", power: { name: "Death's Door", desc: "survive a liq for 2s", icon: "skull" } },
-  { name: "Slot Machine", url: "/models/slot-machine.glb", yaw: Math.PI / 2, power: { name: "New Ride", desc: "ability TBD", icon: "car" } },
+  { name: "Slot Machine", url: "/models/slot-machine.glb", yaw: Math.PI / 2, ability: "slots", power: { name: "Triple 7s", desc: "1-in-50 rounds: +777 coins", icon: "bell" } },
   // descriptive-renamed placeholders (were Car 5–8 / Default) — same pack, length-on-X → yaw +π/2.
-  { name: "Cart Rod", url: "/models/shopping-cart.glb", yaw: Math.PI / 2, ability: "cartRod", power: { name: "Coin Scoop", desc: "+33% coins on the road", icon: "coin" } },
-  { name: "Helmet", url: "/models/helmet.glb", yaw: Math.PI / 2, power: { name: "New Ride", desc: "ability TBD", icon: "car" } },
+  { name: "Cart Rod", url: "/models/shopping-cart.glb", scale: 0.65, yaw: Math.PI / 2, ability: "cartRod", power: { name: "Coin Scoop", desc: "+33% coins on the road", icon: "coin" } },
+  { name: "Helmet", url: "/models/helmet.glb", yaw: Math.PI / 2, ability: "swerve", power: { name: "Auto-Swerve", desc: "flips the bet instead of dying", icon: "swerve" } },
   { name: "Pink Rod", url: "/models/pink-rod.glb", yaw: Math.PI / 2, ability: "pinkRod", power: { name: "Auto-Exit", desc: "set a stop-loss / take-profit", icon: "target" } },
   { name: "Six Wheeler", url: "/models/six-wheeler.glb", yaw: Math.PI / 2, ability: "sixWheeler", power: { name: "Heavy Load", desc: "bigger bets · more time · slower ×", icon: "weight" } },
-  { name: "Starter", url: "/models/starter.glb", yaw: Math.PI / 2, power: { name: "New Ride", desc: "ability TBD", icon: "car" } },
+  // Starter is deliberately stock — the plain baseline that makes the ability cards feel special.
+  { name: "Starter", url: "/models/starter.glb", yaw: Math.PI / 2 },
 ], (c) => { car.setModel(c.url, c.scale, c.yaw); setAbility(c.ability); carBaseLev = c.baseLev ?? 0; tach.rebuild(effRmax()); }, () => upgrades.open(), [
   { label: "Music", sub: "synthwave radio", glyph: "♫", get: () => radio.isOn(), set: (on) => radio.setOn(on) },
   { label: "SFX", sub: "engine & coins", glyph: "🔊", get: () => audio.isEnabled(), set: (on) => audio.setEnabled(on) },
 ], () => {
-  // Log out (garage menu → account): sign out the session and return to the sign-in gate.
-  void session.logout().then(() => syncOnchainBalance());
-  authGate.show();
+  // Log out (garage menu → account). Refused mid-round — the on-chain round would keep running
+  // invisibly and wedge the game on re-login. No gate: the next GO simply signs in again.
+  if (roundActive || engine.getPhase() === "live") { hud.setStatus("Finish this run before signing out."); return; }
+  void session.logout().then(() => { signedIn = false; syncOnchainBalance(); hud.setStatus("Signed out — press GO to play."); });
 }, () => {
   // closed from the lobby Garage building → re-hide the hamburger chrome and restore the lobby back button
   if (mode === "lobby") { garage.el.style.display = "none"; lobbyHud.show(); }
@@ -372,11 +418,21 @@ function finalizeSettled(info: { outcome: number; outcomeName: string; payout: b
   controls.setLive(false, "GO!");
   hud.setMultiplier(Math.max(0, liq ? 0 : finalEq), liq ? "liquidated" : "settled");
   if (liq) {
-    hud.setStatus("💥 Liquidated. Lost the play amount.");
+    // Flintstone airbag: a liq can now carry a refund — show what the airbag saved.
+    hud.setStatus(payoutUnits > 0
+      ? `💥 Wrecked — airbag saved ${sol3(payoutUnits)}.`
+      : "💥 Liquidated. Lost the play amount.");
     fx.liquidate(); audio.liquidate(); navigator.vibrate?.([30, 40, 30, 40, 90]);
   } else {
-    hud.setStatus(`Settled at ×${finalEq.toFixed(2)}. Banked ${sol3(payoutUnits)}.`);
-    fx.confetti(); audio.cashout(); navigator.vibrate?.(35);
+    // Slot Machine "Triple 7s": finishing a round (not liquidated) pulls the arm — 1-in-50
+    // pays +777 coins. Soft-economy only; the real-SOL jackpot waits for VRF (crates first).
+    const jackpot = ability === "slots" ? jackpotRoll(Math.random()) : 0;
+    if (jackpot > 0) upgrades.addCoins(jackpot);
+    hud.setStatus(
+      (jackpot > 0 ? `🎰 TRIPLE 7s! +${jackpot} coins · ` : "") +
+      `Settled at ×${finalEq.toFixed(2)}. Banked ${sol3(payoutUnits)}.`,
+    );
+    fx.confetti(); audio.cashout(); navigator.vibrate?.(jackpot > 0 ? [35, 60, 35, 60, 120] : 35);
   }
   void session.refreshBalance(session.delegated()).then(() => syncOnchainBalance()).catch(() => {});
 }
@@ -409,6 +465,8 @@ controls.onLaunch(async () => {
   // round to that asset's feed and `hud.onAsset` blocks switching once live, so the local engine's ×
   // (driven off priceSource for `asset`) reads the same feed the chain settles against.
   try {
+    // Not signed in yet? This is where the wallet connects (Privy opens its login modal here).
+    if (!(await ensureSignedIn())) return;
     // First GO auto-starts the ER session (buy-in if empty + slice the bankroll + delegate).
     const playAmount = controls.playAmount(); // 0.01-SOL units — sizes the house slice for the round
     hud.setStatus("Getting on track…");
@@ -417,8 +475,9 @@ controls.onLaunch(async () => {
       await session.ensureSession(Math.max(BUY_IN_BASE, unitsToBase(playAmount)), unitsToBase(playAmount));
     } catch (e: any) {
       console.error("session start failed", e); // the open() catch logs too — keep this path debuggable
-      const friendly = e?.code === "delegate_busy" || e?.code === "bankroll_full";
+      const friendly = e?.code === "delegate_busy" || e?.code === "bankroll_full" || e?.code === "wallet_unfunded";
       hud.setStatus(friendly ? e.message : "Couldn't start the round. Try again.");
+      if (e?.code === "wallet_unfunded") walletUI.open(); // show the deposit address right away
       return;
     }
     await session.refreshBalance(true); syncOnchainBalance();
@@ -444,7 +503,10 @@ controls.onLaunch(async () => {
       // 0 = OFF) — the crank auto-cashes-out when equity crosses one. Other cars send 0/0.
       const graceSecs = ability === "skull" ? 2 : 0;
       const { slFp, tpFp } = ability === "pinkRod" ? autoExit.values() : { slFp: 0, tpFp: 0 };
-      opened = await session.open(asset, dir, lev, unitsToBase(playAmount), roundMaxSec, Math.round(CONFIG.LIQ * 1_000_000), graceSecs, slFp, tpFp);
+      // Flintstone "Stone-Age Airbag": a liquidation refunds min(20%, wreck equity) of the
+      // stake — settled on-chain like a forced cash-out at that equity (standard edge applies).
+      const refundFp = ability === "airbag" ? 200_000 : 0;
+      opened = await session.open(asset, dir, lev, unitsToBase(playAmount), roundMaxSec, Math.round(CONFIG.LIQ * 1_000_000), graceSecs, slFp, tpFp, refundFp);
     } catch (e: any) {
       console.error("on-chain open failed", e);
       // HouseUndercapitalized is RaiderError #6005 — the on-chain error arrives as the raw
@@ -476,7 +538,7 @@ controls.onLaunch(async () => {
     chase.setDriving(true);
     controls.setLive(true, "CASH OUT");
     garage.setBusy(true); mapBtn.setVisible(false); upgrades.setBusy(true); walletUI.setBusy(true);
-    hud.setStatus(session.crankArmed() ? "" : "⚠ auto-settle crank not armed — cash out manually.");
+    hud.setStatus(session.crankArmed() ? "" : "⚠ Auto cash-out is off this round — tap CASH OUT before the timer ends.");
   } finally {
     opening = false;
   }
@@ -568,8 +630,9 @@ function frame() {
     throttle = Math.max(0, Math.min(100, throttle));
   }
   const boost = nitro.update(dt, drivable); // Orion Nitro Overdrive: 2× for 3s, else 1
-  game.lev = clampInt(niceLev(tToLev(throttle, effRmax())) * boost, 10, 3000); // car base (≤1500) × nitro (2×), on-chain RMAX=3000
-  tach.setThrottle(Math.min(1, (throttle / 100) * boost), game.lev); // needle pegs during nitro
+  const frozen = flux.update(dt, drivable); // DeLorean Flux Brake: P&L pinned at 10× for ~4s
+  game.lev = frozen ? FLUX_LEV : clampInt(niceLev(tToLev(throttle, effRmax())) * boost, 10, 3000); // car base (≤1500) × nitro (2×), on-chain RMAX=3000
+  tach.setThrottle(frozen ? 0 : Math.min(1, (throttle / 100) * boost), game.lev); // needle pegs during nitro, drops to idle while flux-frozen
   audio.engine(throttle / 100, gasOn || drivable); // rev drone tracks leverage (live only)
   if (drivable) { engine.setLeverage(game.lev, roundPrice); session.noteLeverage(game.lev); } // instant local + coalesced on-chain
 
@@ -587,6 +650,19 @@ function frame() {
       else if (nearDeath && snap.buffer >= 0.22) nearDeath = false;
       deathsDoor.danger(nearDeath);
     }
+    // Helmet "Auto-Swerve": once per round, at the edge of liquidation, flip the bet instead
+    // of dying — stop-and-reverse (the flip's rebank keeps the loss banked; a too-late swerve
+    // still liquidates on-chain, terminal-first, so there's nothing to exploit).
+    if (swerve.update(true, snap.buffer) && !flipping && !settling) {
+      const nd = (round.dir === 1 ? -1 : 1) as 1 | -1;
+      engine.setDir(nd, roundPrice);   // instant local flip (feel)
+      round.dir = nd;
+      round.entryPx = roundPrice;      // re-anchor the local liq line
+      controls.setDir(nd);
+      void doFlip(nd);                 // mirror to the on-chain round in the background
+      hud.setStatus(`🪖 Auto-swerve! Now ${nd === 1 ? "LONG" : "SHORT"}.`);
+      chase.shake(0.5); navigator.vibrate?.([0, 25, 30, 25]);
+    }
     hud.setTimer(roundMaxSec - (nowMs - roundStartMs) / 1000, true);
     car.setEquity("live", Math.max(0, snap.equity));
     controls.setLive(true, `${snap.equity >= 1 ? "CASH OUT" : "BAIL"} ${sol3(snap.payout)}`, snap.equity < 1);
@@ -595,6 +671,7 @@ function frame() {
   } else {
     car.setEquity("idle", 1);
     hud.setTimer(effMaxSec(), false);
+    swerve.update(false, 1); // between rounds → re-arm the Helmet's one swerve
   }
 
   // lateral steering — only while playing; the parked car re-centres in the showroom
@@ -681,19 +758,4 @@ setInterval(async () => {
 }, 650);
 
 requestAnimationFrame(frame);
-// Login gate — created LAST so createHud's `hudRoot.innerHTML = …` can't wipe it. The
-// wallet connects + the session starts ONLY on "Sign in"; Log out (garage menu) re-shows it.
-const authGate = createAuthGate(document.body);
-authGate.onSignIn(async () => {
-  authGate.setBusy(true);
-  try {
-    await session.init();
-    syncOnchainBalance();
-    authGate.hide();
-  } catch (e) {
-    console.error("sign-in failed", e);
-    authGate.setError("Sign-in failed — check your connection and try again.");
-  }
-});
-
 console.log("redline3d render up");

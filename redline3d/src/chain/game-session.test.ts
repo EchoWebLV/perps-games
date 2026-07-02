@@ -18,6 +18,7 @@ function fakeChain(over: Partial<ChainRound> = {}): ChainRound {
     delegate: vi.fn(async () => {}),
     sliceFromPot: vi.fn(async () => {}),
     sweepTill: vi.fn(async () => {}),
+    walletFunds: vi.fn(async () => ({ sol: 1_000_000_000n, stake: 1_000_000_000n })),
     open: vi.fn(async () => ({ entryRaw: 0n, entryExpo: 8, entryHuman: 60000, deadlineTs: 0, feed: "71wtTRDY8Gxgw56bXFt2oc6qeAbTxzStdNiC425Z51sr" })),
     close: vi.fn(async () => ({ outcome: 0, outcomeName: "cashout", payout: 1_500_000n, exitRaw: 0n, exitHuman: 0, balance: 4_500_000n })),
     flip: vi.fn(async () => ({ settled: false as const, banked: 0n, dir: -1, lev: 100, entryHuman: 60000 })),
@@ -100,6 +101,24 @@ describe("createGameSession", () => {
     expect(chain.delegate).toHaveBeenCalled();
   });
 
+  it("open threads refundFp (Flintstone airbag) through to the chain, defaulting 0", async () => {
+    const chain = fakeChain();
+    const s = createGameSession({ mint: MINT, onSettled: vi.fn(), injectChain: chain, injectAddress: "Fake111" });
+    await s.init();
+    await s.ensureSession(2_000_000, 1_000_000);
+    await s.open("BTC", 1, 100, 1_000_000, 60, 200_000, 0, 0, 0, 200_000);
+    expect(vi.mocked(chain.open).mock.calls[0][9]).toBe(200_000); // refundFp stamped on-chain at open
+    await s.open("BTC", 1, 100, 1_000_000, 60, 200_000);
+    expect(vi.mocked(chain.open).mock.calls[1][9] ?? 0).toBe(0); // every other car: no airbag
+  });
+
+  it("walletSol() reads the owner wallet's native SOL (wallet panel display)", async () => {
+    const chain = fakeChain({ walletFunds: vi.fn(async () => ({ sol: 250_000_000n, stake: 0n })) });
+    const s = createGameSession({ mint: MINT, onSettled: vi.fn(), injectChain: chain, injectAddress: "Fake111" });
+    await s.init();
+    expect(await s.walletSol()).toBe(250_000_000n);
+  });
+
   it("open arms the crank; crankArmed() reflects success", async () => {
     const chain = fakeChain();
     const s = createGameSession({ mint: MINT, onSettled: vi.fn(), injectChain: chain, injectAddress: "Fake111" });
@@ -108,6 +127,17 @@ describe("createGameSession", () => {
     expect(opened.entryHuman).toBe(60000);
     expect(chain.scheduleCrank).toHaveBeenCalled();
     expect(s.crankArmed()).toBe(true);
+  });
+
+  it("sizes the crank schedule to the round's duration (a 90s Heavy-Load round must not outlive its crank)", async () => {
+    const chain = fakeChain();
+    const s = createGameSession({ mint: MINT, onSettled: vi.fn(), injectChain: chain, injectAddress: "Fake111" });
+    await s.init();
+    await s.open("BTC", 1, 500, 1_000_000, 90, 200_000);
+    const opts = vi.mocked(chain.scheduleCrank).mock.calls[0][0];
+    // 1s ticks → iterations must cover the whole round + settle margin. The old fixed 70
+    // exhausted at ~70s, so a 90s round's deadline was never observed (live-found on devnet).
+    expect(opts?.iterations ?? 70).toBeGreaterThanOrEqual(100);
   });
 
   it("open still resolves when the crank fails to arm (degrades)", async () => {
@@ -180,5 +210,84 @@ describe("createGameSession", () => {
     await s.endSession();
     expect((chain.commitAndUndelegate as any).mock.invocationCallOrder[0])
       .toBeLessThan((chain.sweepTill as any).mock.invocationCallOrder[0]);
+  });
+
+  it("init() adopts a still-delegated session (log-out→log-in mid-session) so cash-out sees live ER state", async () => {
+    const chain = fakeChain({
+      delegationState: vi.fn(async () => "reuse" as const),
+      readPlayerBalance: vi.fn(async (onEr?: boolean) => (onEr ? 7_000_000n : 1n)),
+    });
+    const s = createGameSession({ mint: MINT, onSettled: vi.fn(), injectChain: chain, injectAddress: "Fake111" });
+    expect(await s.init()).toBe(7_000_000n); // the ER copy, not the stale L1 one
+    expect(s.delegated()).toBe(true);
+  });
+
+  it("ensureSession fails fast with a player-friendly error when the wallet has no SOL (fresh Privy wallet)", async () => {
+    const chain = fakeChain({ walletFunds: vi.fn(async () => ({ sol: 0n, stake: 0n })) });
+    const s = createGameSession({ mint: MINT, onSettled: vi.fn(), injectChain: chain, injectAddress: "Fake111" });
+    await s.init();
+    await expect(s.ensureSession(100_000_000, 10_000_000)).rejects.toMatchObject({ code: "wallet_unfunded" });
+    expect(chain.buyIn).not.toHaveBeenCalled();
+    expect(chain.sliceFromPot).not.toHaveBeenCalled();
+  });
+
+  it("ensureSession fails fast when the stake-token wallet can't cover the buy-in", async () => {
+    const chain = fakeChain({ walletFunds: vi.fn(async () => ({ sol: 1_000_000_000n, stake: 0n })) });
+    const s = createGameSession({ mint: MINT, onSettled: vi.fn(), injectChain: chain, injectAddress: "Fake111" });
+    await s.init();
+    await expect(s.ensureSession(100_000_000, 10_000_000)).rejects.toMatchObject({ code: "wallet_unfunded" });
+    expect(chain.buyIn).not.toHaveBeenCalled();
+  });
+
+  it("under the wSOL mint, SOL must cover the buy-in itself (wrap pulls native SOL)", async () => {
+    const chain = fakeChain({ walletFunds: vi.fn(async () => ({ sol: 50_000_000n, stake: 0n })) });
+    const wsol = new PublicKey("So11111111111111111111111111111111111111112");
+    const s = createGameSession({ mint: wsol, onSettled: vi.fn(), injectChain: chain, injectAddress: "Fake111" });
+    await s.init();
+    await expect(s.ensureSession(100_000_000, 10_000_000)).rejects.toMatchObject({ code: "wallet_unfunded" });
+    expect(chain.wrapForBuyIn).not.toHaveBeenCalled();
+  });
+
+  it("skips the stake check when the play balance is already funded (no buy-in needed)", async () => {
+    const chain = fakeChain({
+      readPlayerBalance: vi.fn(async () => 500_000_000n),
+      walletFunds: vi.fn(async () => ({ sol: 100_000_000n, stake: 0n })),
+    });
+    const s = createGameSession({ mint: MINT, onSettled: vi.fn(), injectChain: chain, injectAddress: "Fake111" });
+    await s.init();
+    await s.ensureSession(100_000_000, 10_000_000); // no throw: fees covered, buy-in not needed
+    expect(chain.buyIn).not.toHaveBeenCalled();
+    expect(chain.delegate).toHaveBeenCalled();
+  });
+
+  it("logout() disconnects the wallet port so the next sign-in starts fresh (Privy account switch)", async () => {
+    const port = {
+      kind: "web-standard" as const,
+      connect: vi.fn(async () => ({ address: "PrivyAddr1111" })),
+      disconnect: vi.fn(async () => {}),
+      currentAddress: () => "PrivyAddr1111",
+      signMessage: vi.fn(async () => new Uint8Array()),
+      signTransaction: vi.fn(async (b64: string) => b64),
+    };
+    const s = createGameSession({ mint: MINT, onSettled: vi.fn(), port });
+    await s.logout();
+    expect(port.disconnect).toHaveBeenCalled();
+    expect(s.delegated()).toBe(false);
+    expect(s.balance()).toBe(0n);
+  });
+
+  it("logout() still resets state when the port disconnect fails", async () => {
+    const port = {
+      kind: "web-standard" as const,
+      connect: vi.fn(async () => ({ address: "PrivyAddr1111" })),
+      disconnect: vi.fn(async () => { throw new Error("privy_down"); }),
+      currentAddress: () => "PrivyAddr1111",
+      signMessage: vi.fn(async () => new Uint8Array()),
+      signTransaction: vi.fn(async (b64: string) => b64),
+    };
+    const s = createGameSession({ mint: MINT, onSettled: vi.fn(), port });
+    await expect(s.logout()).resolves.toBeUndefined();
+    expect(port.disconnect).toHaveBeenCalled();
+    expect(s.balance()).toBe(0n);
   });
 });

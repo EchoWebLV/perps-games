@@ -24,8 +24,9 @@ export interface WalletOpts {
   address: () => string;
   /** Displayed balance in centi-SOL units (1 unit = 0.01 SOL) — the on-chain play balance. */
   balance: () => number;
-  /** sign the player out — when omitted (dev/guest) the account row stays hidden */
-  onLogout?: () => void;
+  /** The wallet's OWN native SOL (in SOL), read fresh on every open — so a deposit visibly
+   *  arrives before the first GO moves it into the play balance. null/absent = don't show. */
+  fetchWalletSol?: () => Promise<number | null>;
   /**
    * On-chain controls. `status()` is read on every open/refresh: `playCents` = the on-chain play
    * balance in centi-SOL units; `delegated` is kept for internal bookkeeping only (NOT surfaced to
@@ -148,6 +149,15 @@ export function createWallet(parent: HTMLElement, opts: WalletOpts): Wallet {
 
   const q = <T extends HTMLElement>(s: string) => panel.querySelector(s) as T;
   const balEl = q("#wltBal");
+  const heroSub = q(".wlt-hero-sub");
+
+  // Wallet's own SOL, refreshed on every open — deposits show up here before the first GO.
+  const renderWalletSol = () => {
+    if (!opts.fetchWalletSol) return;
+    void opts.fetchWalletSol().then((sol) => {
+      heroSub.textContent = sol == null ? "Solana · devnet" : `Solana · devnet · wallet ${fmt(sol)} SOL`;
+    }).catch(() => { /* keep the plain network line */ });
+  };
 
   let busy = false;
 
@@ -214,6 +224,7 @@ export function createWallet(parent: HTMLElement, opts: WalletOpts): Wallet {
       renderBalance();
       renderAddressUI();
       renderOnchain();
+      renderWalletSol();
     }
   };
   overlay.onclick = (e) => {

@@ -3,8 +3,8 @@
   "configurations": [
     {
       "name": "redline3d",
-      "runtimeExecutable": "npm",
-      "runtimeArgs": ["run", "dev"],
+      "runtimeExecutable": "bash",
+      "runtimeArgs": ["-c", "VITE_WALLET=dev npm run dev"],
       "port": 3000
     }
   ]

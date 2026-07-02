@@ -16,8 +16,10 @@ export interface RaiderPdas { player: PublicKey; master: PublicKey; till: Public
  *  `master` = singleton bankroll `[house, mint]`; `till` = per-session `[house, mint, owner]`. */
 export function deriveRaiderPdas(programId: PublicKey, owner: PublicKey, mint: PublicKey): RaiderPdas {
   const [player] = PublicKey.findProgramAddressSync([Buffer.from("player"), owner.toBuffer(), mint.toBuffer()], programId);
-  const [master] = PublicKey.findProgramAddressSync([Buffer.from("house"), mint.toBuffer()], programId);
-  const [till] = PublicKey.findProgramAddressSync([Buffer.from("house"), mint.toBuffer(), owner.toBuffer()], programId);
+  // "house2": seed v2 — the legacy [b"house", wSOL] master pot is stuck delegated on devnet
+  // (pre-upgrade session, no ix can undelegate a house account), so v2 re-homes the bankroll.
+  const [master] = PublicKey.findProgramAddressSync([Buffer.from("house2"), mint.toBuffer()], programId);
+  const [till] = PublicKey.findProgramAddressSync([Buffer.from("house2"), mint.toBuffer(), owner.toBuffer()], programId);
   const [round] = PublicKey.findProgramAddressSync([Buffer.from("round"), owner.toBuffer()], programId);
   const [vaultAuthority] = PublicKey.findProgramAddressSync([Buffer.from("vault"), mint.toBuffer()], programId);
   const vaultToken = getAssociatedTokenAddressSync(mint, vaultAuthority, true);
@@ -51,6 +53,12 @@ export class DelegateBusyError extends Error {
 export class BankrollFullError extends Error {
   readonly code = "bankroll_full" as const;
   constructor(message: string) { super(message); this.name = "BankrollFullError"; }
+}
+
+/** Session start rejected: the player's wallet can't fund the buy-in / fees (fresh Privy wallet). */
+export class WalletUnfundedError extends Error {
+  readonly code = "wallet_unfunded" as const;
+  constructor(message: string) { super(message); this.name = "WalletUnfundedError"; }
 }
 
 export type DelegateState = "reuse" | "fresh" | "busy";
@@ -111,6 +119,8 @@ export function actionResultFromSnap(snap: RoundSnap, balance: bigint): ActionRe
 
 export interface ChainRound {
   address: string;
+  /** The owner WALLET's spendable funds: native SOL (fees/wrap) + the stake-token ATA balance. */
+  walletFunds(): Promise<{ sol: bigint; stake: bigint }>;
   readPlayerBalance(onEr?: boolean): Promise<bigint>;
   readRoundStatus(onEr?: boolean): Promise<number>;
   readRound(onEr?: boolean): Promise<RoundSnap | null>;
@@ -124,9 +134,10 @@ export interface ChainRound {
   sliceFromPot(slice: number): Promise<void>;
   sweepTill(): Promise<void>;
   // graceSecs (Skull "Death's Door" auto-liq grace, seconds), slFp/tpFp (Pink Rod
-  // stop-loss / take-profit equity thresholds in SCALE units) are per-round risk knobs;
-  // 0 = off (the default for every car without that ability). The program clamps them.
-  open(asset: AssetSym, dir: 1 | -1, lev: number, stake: number, durationSecs: number, liqFp: number, graceSecs?: number, slFp?: number, tpFp?: number): Promise<OpenedRound>;
+  // stop-loss / take-profit equity thresholds in SCALE units), refundFp (Flintstone
+  // airbag — the liq refund fraction of stake, SCALE units, program-clamped ≤200_000)
+  // are per-round risk knobs; 0 = off (the default for every car without that ability).
+  open(asset: AssetSym, dir: 1 | -1, lev: number, stake: number, durationSecs: number, liqFp: number, graceSecs?: number, slFp?: number, tpFp?: number, refundFp?: number): Promise<OpenedRound>;
   close(): Promise<SettledRound>;
   flip(newDir: 1 | -1): Promise<ActionResult>;
   lever(newLev: number): Promise<ActionResult>;
@@ -203,6 +214,14 @@ export function createChainRound(deps: { wallet: AnchorWalletLike; mint: PublicK
   return {
     address: owner.toBase58(),
 
+    async walletFunds() {
+      const [sol, stake] = await Promise.all([
+        baseConn.getBalance(owner).then(BigInt),
+        baseConn.getTokenAccountBalance(ownerAta).then((r) => BigInt(r.value.amount)).catch(() => 0n), // no ATA yet = 0
+      ]);
+      return { sol, stake };
+    },
+
     async readPlayerBalance(onEr = false) {
       const prog = onEr ? programER : program;
       const acct = await prog.account.playerBalance.fetchNullable(pdas.player);
@@ -274,8 +293,8 @@ export function createChainRound(deps: { wallet: AnchorWalletLike; mint: PublicK
       }));
     },
 
-    async open(asset, dir, lev, stake, durationSecs, liqFp, graceSecs = 0, slFp = 0, tpFp = 0) {
-      await send(erConn, programER.methods.open(CHAIN.ASSET_ID[asset], dir, lev, new BN(stake), new BN(durationSecs), liqFp, graceSecs, slFp, tpFp).accountsPartial({
+    async open(asset, dir, lev, stake, durationSecs, liqFp, graceSecs = 0, slFp = 0, tpFp = 0, refundFp = 0) {
+      await send(erConn, programER.methods.open(CHAIN.ASSET_ID[asset], dir, lev, new BN(stake), new BN(durationSecs), liqFp, graceSecs, slFp, tpFp, refundFp).accountsPartial({
         player: pdas.player, house: pdas.till, round: pdas.round, mint, priceUpdate: feedFor(asset), registry, playerAuthority: owner,
       }));
       const r = await programER.account.round.fetch(pdas.round);
