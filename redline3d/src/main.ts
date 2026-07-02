@@ -41,6 +41,7 @@ import { createMapButton } from "./ui/mapbutton";
 import { createLobbyHud } from "./ui/lobbyhud";
 import { step as driveStep, DRIVE, HIGHWAY_DRIVE, type DriveState, type DriveTune } from "./core/freedrive";
 import { stepBody, type BodyState } from "./core/body-language";
+import { laneStep, type LaneState } from "./core/lane-drive";
 import { entranceHit, LOT_BOUNDS, LOBBY_SPAWN, type BuildingKind } from "./core/lobby-layout";
 import { modeSwitchBlocked } from "./core/mode-guard";
 import { createOval } from "./render/oval";
@@ -71,6 +72,10 @@ ctx.scene.add(world.group);
 // dismiss the loading splash (index.html) once the real car model is in
 const car = createCar(() => (window as any).hideSplash?.());
 car.group.position.set(0, 0, -12);
+// YXZ everywhere: yaw first, then pitch/roll about the car's OWN axes — under the default
+// XYZ a pitched car leans sideways at yaw≠0 (the lobby bug de1760d fixed). Every mode
+// entry re-asserts it; the racer pose is multi-axis too since the lane-drive rebuild (7H).
+car.group.rotation.order = "YXZ";
 ctx.scene.add(car.group);
 const chase = createChaseCam();
 const pickups = createPickups();
@@ -344,9 +349,13 @@ function exitLobby() {
   mapBtn.setVisible(true);
   // restore the road car pose; the chase cam takes back over next frame.
   // market (BTC/ETH/SOL) stays whatever it was — it's chosen from the in-race HUD tabs, not the lobby.
-  car.group.position.set(0, 0, -12);
+  lane = { x: 0, vx: 0, yaw: 0, steer: 0 };
+  carXTarget = 0;
+  body = { roll: 0, pitch: 0 };
+  prevRoadSpeed = 0;
+  car.group.position.set(0, 0, CAR_Z);
   car.group.rotation.set(0, 0, 0);
-  car.group.rotation.order = "XYZ"; // the racer's proven convention
+  car.group.rotation.order = "YXZ"; // same convention as every mode (see the boot-time note)
 }
 
 // ── highway: the free-drive divided oval (spec 2026-07-02) ─────────────────
@@ -409,7 +418,17 @@ let solEMA = 0;    // slow average; price vs this drives the terrain elevation
 
 // price history (minimap), lateral steering, and the active round's entry
 const priceHist: number[] = [];
-let carX = 0, carXTarget = 0;
+// racer lateral drive (7H): carXTarget is the steering INTENT — pointer/keys write it,
+// the Clown-Car lane-bet reads it (flip latency unchanged). `lane` is the BODY: the
+// lane-drive PD+momentum state that replaced the old `carX += (target−carX)*0.18` spring.
+let carXTarget = 0;
+let lane: LaneState = { x: 0, vx: 0, yaw: 0, steer: 0 };
+let prevRoadSpeed = 0;        // road speed last frame → the racer's squat/dive accel
+const CAR_Z = -12;            // the racer car's fixed z — the road scrolls past it
+const ROAD_SPEED_MAX = 277;   // roadSpeed()'s base top end (render/camera) → speedFrac for lane physics
+const PARK_RECENTRE = 7.6;    // s⁻¹ target-recentre while parked (≈ the old 0.12-per-frame @60fps)
+const ROAD_ACCEL_SCALE = 120; // road-speed delta (u/s²) that reads as FULL squat/dive — a full-throttle
+                              // spool-up (~52 throttle/s) peaks around here, so launches pin the nose up
 let roundStartMs = 0;
 let roundMaxSec = 0; // this round's time cap, frozen at GO (Heavy Load runs longer than CONFIG.MAXSEC)
 const round = { entryPx: 0, dir: 1 as 1 | -1 };
@@ -863,43 +882,52 @@ function frame() {
       }
     }
   } else {
-    carXTarget += (0 - carXTarget) * 0.12;     // ease back to centre while parked
+    carXTarget += (0 - carXTarget) * (1 - Math.exp(-PARK_RECENTRE * dt)); // ease back to centre while parked (fps-independent)
   }
-  carX += (carXTarget - carX) * 0.18;
 
   const live2 = drivable;
   // price-driven terrain bias: road climbs when SOL is above its average, dips when below
   const hill = Math.max(-7, Math.min(7, (solEMA ? solSmooth / solEMA - 1 : 0) * 2600));
   const speed = roadSpeed(throttle / 100, game.equity, live2) * boost; // Nitro: road rips by 2× faster
+  // lane-drive physics (7H): PD-with-momentum chases the target; the accel budget scales
+  // with road speed (flat-out darts, idle is lazy). Parked pins speedFrac to 0 — the road
+  // still scrolls in the showroom, so raw speed never reads 0 — and AUTH_MIN recentres.
+  const speedFrac = drivable ? Math.min(1, speed / ROAD_SPEED_MAX) : 0;
+  lane = laneStep(lane, carXTarget, speedFrac, dt);
   world.update(dt, speed, hill);
 
   // car hugs the road: ride the surface height + pitch to the local slope, lean into turns
-  const carY = world.surfaceY(-12);
-  const aheadY = world.surfaceY(-15.4), behindY = world.surfaceY(-8.6);
+  const carY = world.surfaceY(CAR_Z);
+  const aheadY = world.surfaceY(CAR_Z - SLOPE_SAMPLE), behindY = world.surfaceY(CAR_Z + SLOPE_SAMPLE);
   car.update(dt, speed);
-  car.group.position.x = carX;
+  car.group.position.x = lane.x;
   car.group.position.y = carY;
-  car.group.rotation.x = Math.max(-0.4, Math.min(0.4, Math.atan2(aheadY - behindY, 6.8)));
-  // steer like a real car: point the nose INTO the lane change (not crab sideways),
-  // turn the front wheels, and bank the body. Bigger yaw so it reads as steering;
-  // it eases back to straight as the car settles into the new lane.
-  const turn = Math.max(-1, Math.min(1, (carXTarget - carX) / 2.4));
-  car.setSteer(turn);
-  car.group.rotation.y = turn * 0.36;
-  car.group.rotation.z = Math.max(-0.18, Math.min(0.18, -turn * 0.14));
+  // squat/dive from the road-speed delta (a nitro kick reads as a nose-up lunge)
+  const accel = dt > 0 ? (speed - prevRoadSpeed) / dt : 0;
+  prevRoadSpeed = speed;
+  body = stepBody(body, lane.steer, speedFrac, accel, ROAD_ACCEL_SCALE, dt);
+  const slopePitch = Math.max(-SLOPE_CLAMP, Math.min(SLOPE_CLAMP, Math.atan2(aheadY - behindY, 2 * SLOPE_SAMPLE)));
+  // steer like a real car: the nose yaws with the ACTUAL lateral velocity (momentum you
+  // can see), the front wheels show the PD demand — pinned into a swerve, then flipped
+  // against it to arrest the slide — and the body banks/squats over the road slope.
+  // YXZ order keeps pitch/roll body-local under the yaw (see the boot-time note).
+  car.group.rotation.x = slopePitch + body.pitch;
+  car.group.rotation.y = lane.yaw;
+  car.group.rotation.z = body.roll;
+  car.setSteer(lane.steer);
 
   // camera: idle showroom orbit when parked, smooth blend to the chase cam while driving
-  chase.update(ctx.camera, dt, speed, carY, carX);
+  chase.update(ctx.camera, dt, speed, carY, lane.x);
 
   // collectible coins: cosmetic only — they must NOT affect P&L, or every
   // round becomes a guaranteed win and the long/short bet stops mattering
-  const hit = pickups.update(dt, speed, carX, world.surfaceY, drivable);
+  const hit = pickups.update(dt, speed, lane.x, world.surfaceY, drivable);
   if (hit.count > 0) {
     upgrades.addCoins(hit.value); // value carries Vaporwave's ×2/×3/×5; refreshes the counter
     audio.coin(hit.count);
     if (hit.pops.length) {
       // project a point just above the car to screen space so the ×N rises over IT
-      const ndc = new THREE.Vector3(carX, carY + 3.5, -12).project(ctx.camera);
+      const ndc = new THREE.Vector3(lane.x, carY + 3.5, CAR_Z).project(ctx.camera);
       const sx = (ndc.x * 0.5 + 0.5) * window.innerWidth;
       const sy = (-ndc.y * 0.5 + 0.5) * window.innerHeight;
       hit.pops.forEach((m, k) => fx.coinPop(m, sx + (k - (hit.pops.length - 1) / 2) * 34, sy)); // stagger multiples
@@ -943,5 +971,15 @@ if (import.meta.env.DEV) {
     // would be wiped by the very next frame)
     ghosts: (states: import("./render/oval").OvalRemoteCar[] | undefined) => { (window as any).__hwGhostStates = states; },
     state: () => ({ mode, hwGear, lev: levOf(hwGear), x: drive.x, z: drive.z, speed: drive.speed, roll: body.roll, pitch: body.pitch, rot: { x: car.group.rotation.x, y: car.group.rotation.y, z: car.group.rotation.z } }),
+  };
+  // racer lane-drive telemetry (7H browser verification) — reads the live physics state;
+  // setTarget writes the same INPUT variable the pointer drag does (nothing below it)
+  (window as any).__race = {
+    state: () => ({
+      mode, target: carXTarget, x: lane.x, vx: lane.vx, yaw: lane.yaw, steer: lane.steer,
+      roll: body.roll, pitch: body.pitch,
+      rot: { x: car.group.rotation.x, y: car.group.rotation.y, z: car.group.rotation.z, order: car.group.rotation.order },
+    }),
+    setTarget: (x: number) => { carXTarget = Math.max(-10, Math.min(10, x)); },
   };
 }
