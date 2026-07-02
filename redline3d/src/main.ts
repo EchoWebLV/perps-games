@@ -315,6 +315,9 @@ function enterLobby() {
   doorDwell = 0;
   doorArmed = true;
   bodyRoll = 0; bodyPitch = 0; prevDriveSpeed = 0;
+  // pitch must be body-local under yaw (YXZ), or squat/dive reads as a sideways
+  // lean when heading east/west; every mode entry asserts its own order
+  car.group.rotation.order = "YXZ";
   lobbyCam.reset();
   world.group.visible = false;
   pickups.group.visible = false;
@@ -338,6 +341,7 @@ function exitLobby() {
   // market (BTC/ETH/SOL) stays whatever it was — it's chosen from the in-race HUD tabs, not the lobby.
   car.group.position.set(0, 0, -12);
   car.group.rotation.set(0, 0, 0);
+  car.group.rotation.order = "XYZ"; // the racer's proven convention
 }
 
 // ── highway: the free-drive divided oval (spec 2026-07-02) ─────────────────
@@ -358,8 +362,8 @@ function enterHighway() {
   // racer-only ability buttons are meaningless here — the gear ladder owns leverage
   nitro.setEnabled(false); flux.setEnabled(false); autoExit.setEnabled(false);
   hwBillboardCd = 0; // fresh entry → redraw the billboard immediately (no stale asset/price beat)
-  // pitch composes over yaw on the hills (YXZ = yaw outer, pitch local); the racer's flat
-  // branches set rotations with the default order, so exit restores it
+  // pitch composes over yaw on the hills (YXZ = yaw outer, pitch local); every mode
+  // entry asserts its own order (the racer restores XYZ in exitLobby)
   car.group.rotation.order = "YXZ";
   audio.resume(); radio.resume();
 }
@@ -369,7 +373,6 @@ function exitHighwayToLobby() {
   oval.hide();
   tach.rebuild(effRmax());
   setAbility(ability); // restore the car's own buttons/toggles
-  car.group.rotation.order = "XYZ"; // back to the racer/lobby convention
   audio.engine(0, false); // the highway drives the drone every frame; silence it for the lobby
   enterLobby();
 }
@@ -649,8 +652,8 @@ function samplePrice(): number {
 }
 
 // ease body-language angles toward their targets, fps-independent (same approach() idea
-// as freedrive). Roll leans OUT of the turn (racer convention: rotation.z = −turn·k);
-// squat lifts the nose under throttle, dive drops it under braking.
+// as freedrive). Roll leans INTO the turn (racer convention: rotation.z = −turn·k — see
+// the racer branch); squat lifts the nose under throttle, dive drops it under braking.
 function bodyLanguage(steerFrac: number, speedFrac: number, accel: number, accelScale: number, dt: number) {
   const ease = 1 - Math.exp(-10 * dt);
   const rollT = -steerFrac * speedFrac * 0.09;                                  // ≤ ~5°
