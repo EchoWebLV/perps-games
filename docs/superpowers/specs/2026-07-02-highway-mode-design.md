@@ -169,6 +169,29 @@ After driving Phase 1 on devnet the user directed five changes (supersedes the n
 5. **Soft walls**: contact must not zero speed — position still clamps (slide along the wall), speed decays by an exponential scrape (`WALL_SCRAPE`) while touching.
 6. **Backdrop**: synthwave dressing around the oval (sky gradient dome, striped sun, mountain ring, stars) so the horizon isn't black.
 
+## Revision v3 — 2026-07-02 (racer real-car feel)
+
+User: "the main track feels really weird to drive.. i want this to feel like real car game."
+The racer's lateral movement is a per-frame position spring (`carX += (carXTarget − carX) * 0.18`,
+not dt-scaled) with yaw faked from the remaining error — no momentum, no grip, frame-rate-dependent.
+
+Fix, without changing the input UX or the trading mechanics:
+1. **New pure module `src/core/lane-drive.ts`**: 1-D lateral car dynamics for the scrolling
+   road. State `{ x, vx, yaw }`. Each frame a PD controller turns the existing `carXTarget`
+   into a bounded steering acceleration (`ax = clamp(K_P·(target−x) − K_D·vx, ±A_MAX·auth)`),
+   `vx` integrates with grip decay, `x` integrates and clamps to the road (±10, `vx` zeroed
+   into the edge only), `yaw` follows **actual lateral velocity** (not error) with easing.
+   Authority `auth` scales with road speed (a slow car steers lazily, a fast one darts) —
+   tuned near-critically damped with a whisper of underdamp for juice. dt-invariant
+   (60 vs 120 Hz converge to the same trajectory — the core bug fix).
+2. **Inputs untouched**: thumb drag still maps to an absolute lane target (line ~440),
+   keyboard still rate-adjusts the target (line ~847). Only the plant changes: the car now
+   *drives* to the target instead of sliding there. Clown-Car lane-bet keeps reading the car's
+   x sign; front wheels `setSteer` from the PD steering command; body lean/pitch via the 7E
+   `bodyLanguage()` helper, composed with the road-slope pitch.
+3. **Racer pose lines replaced** (`main.ts` ~864–887): parked path eases target to 0 through
+   the same physics; the `0.12`/`0.18`/`turn*0.36` per-frame constants die.
+
 ## Open Questions
 
 None blocking. Track dimensions (straight length, arc radius, lane width) and gear

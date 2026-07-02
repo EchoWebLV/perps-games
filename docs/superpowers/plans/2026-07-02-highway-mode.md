@@ -1547,3 +1547,36 @@ git commit -m "feat(client): highway ghosts live — presence wired to the oval 
 - Commit after every task; never batch tasks into one commit.
 - If any step's expected output doesn't match, STOP and debug (superpowers:systematic-debugging) before moving on.
 - Task 8 (browser devnet verify) is a hard gate for Phase 1; Task 12 for Phase 2. "Tests pass" alone is not done (project memory).
+
+---
+
+### Task 7G: Racer lateral car physics — pure module (spec v3)
+
+**Files:**
+- Create: `redline3d/src/core/lane-drive.ts`
+- Test: `redline3d/src/core/lane-drive.test.ts`
+
+1-D lateral dynamics for the scrolling-road racer: `{ x, vx, yaw }` state, PD controller
+from `carXTarget` → bounded steering accel scaled by road speed, grip decay on `vx`,
+edge clamp at ±10 (zero `vx` into the edge only), `yaw` eased from actual lateral
+velocity. Also returns the normalized steer command for `car.setSteer`. dt-invariant
+(60 vs 120 Hz same trajectory within tolerance). TDD; pathspec-scoped commit
+(`git commit -- redline3d/src/core/lane-drive.ts redline3d/src/core/lane-drive.test.ts`).
+
+- [ ] Written test-first, all tests green, tsc clean
+- [ ] Committed pathspec-scoped
+
+### Task 7H: Racer wiring — replace the position spring (after 7E lands)
+
+**Files:**
+- Modify: `redline3d/src/main.ts` (racer frame branch, ~lines 845–890)
+
+Replace `carX += (carXTarget − carX) * 0.18` + error-derived yaw/bank with
+`laneStep(...)` from Task 7G: pose from `{x, yaw}`, `car.setSteer(steerCmd)`,
+lean/pitch via the 7E `bodyLanguage()` helper composed with road-slope pitch;
+parked path drives target to 0 through the same physics. Inputs untouched
+(thumb = absolute lane target, keys rate-adjust target); Clown-Car lane-bet
+unchanged (reads car x sign). Browser feel-check mandatory.
+
+- [ ] Wired, tsc + suite green
+- [ ] Browser feel-check on the real game (racer drives like a car; lane-bet still flips)
