@@ -53,4 +53,13 @@ describe("shiftGear", () => {
     expect(shiftGear(-3, 0)).toBe(0);
     expect(shiftGear(99, 1)).toBe(N - 1);
   });
+
+  it("holds the current gear on NaN speed (never resets → never a spurious rebank)", () => {
+    expect(shiftGear(3, NaN)).toBe(3);
+    expect(levOf(NaN)).toBe(10); // clamped, not undefined
+  });
+
+  it("floors a fractional current gear", () => {
+    expect(shiftGear(2.7, 2.5 / GEARS.length)).toBe(2);
+  });
 });

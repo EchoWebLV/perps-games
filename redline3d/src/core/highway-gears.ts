@@ -5,9 +5,9 @@
 export const GEARS = [10, 20, 35, 50, 75, 100] as const;
 export const HW_MAX_LEV = GEARS[GEARS.length - 1];
 const N = GEARS.length;
-const HYST = 0.035;
+const HYST = 0.035; // ±3.5% of top speed; must stay < 1/(2N) so adjacent dead bands don't overlap
 
-const clampGear = (g: number) => Math.max(0, Math.min(N - 1, Math.floor(g)));
+const clampGear = (g: number) => Math.max(0, Math.min(N - 1, Math.floor(g) || 0));
 
 /** next gear given the current gear and |speed|/MAX_FWD ∈ [0,1] — hysteresis both ways */
 export function shiftGear(cur: number, speedFrac: number): number {
