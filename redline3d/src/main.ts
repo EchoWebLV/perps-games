@@ -704,8 +704,9 @@ function frame() {
     car.update(dt, drive.speed);
     car.group.position.set(drive.x, yHere, drive.z);
     // order is YXZ in this mode: yaw first, then pitch about the car's own axle line.
-    // nose-up when the road ahead is higher → negative local-X rotation, hence behind−ahead.
-    car.group.rotation.set(Math.max(-0.35, Math.min(0.35, Math.atan2(yBehind - yAhead, 6.8))), -drive.heading, 0);
+    // Rx(+θ) tips the −Z nose UP, so nose-up on a climb needs POSITIVE x — hence ahead−behind
+    // (same sign as the racer's slope trick; the inverted form ships the car nose-down uphill).
+    car.group.rotation.set(Math.max(-0.35, Math.min(0.35, Math.atan2(yAhead - yBehind, 6.8))), -drive.heading, 0);
     car.setSteer(drive.steer / HIGHWAY_DRIVE.MAX_STEER_LOW);
 
     const roundPrice = samplePrice();
