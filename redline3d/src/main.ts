@@ -39,11 +39,11 @@ import { createLobby } from "./render/lobby";
 import { createLobbyCam } from "./render/lobbycam";
 import { createMapButton } from "./ui/mapbutton";
 import { createLobbyHud } from "./ui/lobbyhud";
-import { step as driveStep, DRIVE, type DriveState } from "./core/freedrive";
+import { step as driveStep, DRIVE, HIGHWAY_DRIVE, type DriveState } from "./core/freedrive";
 import { entranceHit, LOT_BOUNDS, LOBBY_SPAWN, type BuildingKind } from "./core/lobby-layout";
 import { modeSwitchBlocked } from "./core/mode-guard";
 import { createOval } from "./render/oval";
-import { spawnPose, contain, HW_BOUNDS } from "./core/track";
+import { spawnPose, contain, HW_BOUNDS, elevationAt, progress, WALL_SCRAPE } from "./core/track";
 import { shiftGear, levOf, HW_MAX_LEV } from "./core/highway-gears";
 import { PublicKey } from "@solana/web3.js";
 import { CHAIN } from "./chain/config";
@@ -350,6 +350,10 @@ function enterHighway() {
   tach.rebuild(HW_MAX_LEV); // the tach reads the gear ladder, not the racer's RMAX
   // racer-only ability buttons are meaningless here — the gear ladder owns leverage
   nitro.setEnabled(false); flux.setEnabled(false); autoExit.setEnabled(false);
+  hwBillboardCd = 0; // fresh entry → redraw the billboard immediately (no stale asset/price beat)
+  // pitch composes over yaw on the hills (YXZ = yaw outer, pitch local); the racer's flat
+  // branches set rotations with the default order, so exit restores it
+  car.group.rotation.order = "YXZ";
   audio.resume(); radio.resume();
 }
 
@@ -358,6 +362,7 @@ function exitHighwayToLobby() {
   oval.hide();
   tach.rebuild(effRmax());
   setAbility(ability); // restore the car's own buttons/toggles
+  car.group.rotation.order = "XYZ"; // back to the racer/lobby convention
   audio.engine(0, false); // the highway drives the drone every frame; silence it for the lobby
   enterLobby();
 }
@@ -396,7 +401,7 @@ const round = { entryPx: 0, dir: 1 as 1 | -1 };
 
 // asset switching (BTC/ETH/SOL) — blocked mid-bet; resets the chart for the new asset
 hud.onAsset((a) => {
-  if (engine.getPhase() === "live") return;
+  if (opening || engine.getPhase() === "live") return; // locked while live AND while a GO is in flight (open reads `asset` after awaits)
   asset = a as "BTC" | "ETH" | "SOL";
   solSmooth = 0;
   solEMA = 0;
@@ -683,15 +688,25 @@ function frame() {
     const brake = touchBrake || controls.brake();
     const th = brake ? -1 : gas ? 1 : 0;
     const steer = Math.max(-1, Math.min(1, (holding ? steerNorm : 0) + kSteer));
-    drive = driveStep(drive, { throttle: th, steer }, dt, HW_BOUNDS);
-    // the median and outer barrier are the real walls (track-shaped contain)
+    drive = driveStep(drive, { throttle: th, steer }, dt, HW_BOUNDS, HIGHWAY_DRIVE);
+    // the median and outer barrier are the real walls (track-shaped contain) — sliding
+    // contact: position clamps along the wall while speed bleeds off exponentially,
+    // never a dead stop (user drive-feedback v2)
     const c = contain(drive.x, drive.z);
-    drive = c.hitWall ? { ...drive, x: c.x, z: c.z, speed: 0 } : { ...drive, x: c.x, z: c.z };
+    drive = { ...drive, x: c.x, z: c.z, speed: c.hitWall ? drive.speed * Math.exp(-WALL_SCRAPE * dt) : drive.speed };
 
+    // ride the hills: road height under the car, plus ahead/behind samples along the
+    // heading — their difference pitches the nose over crests (racer's slope trick)
+    const fwdX = Math.sin(drive.heading), fwdZ = -Math.cos(drive.heading);
+    const yHere = elevationAt(progress(drive.x, drive.z).s);
+    const yAhead = elevationAt(progress(drive.x + fwdX * 3.4, drive.z + fwdZ * 3.4).s);
+    const yBehind = elevationAt(progress(drive.x - fwdX * 3.4, drive.z - fwdZ * 3.4).s);
     car.update(dt, drive.speed);
-    car.group.position.set(drive.x, 0, drive.z);
-    car.group.rotation.set(0, -drive.heading, 0); // same mirror convention as the lobby
-    car.setSteer(drive.steer / DRIVE.MAX_STEER_LOW);
+    car.group.position.set(drive.x, yHere, drive.z);
+    // order is YXZ in this mode: yaw first, then pitch about the car's own axle line.
+    // nose-up when the road ahead is higher → negative local-X rotation, hence behind−ahead.
+    car.group.rotation.set(Math.max(-0.35, Math.min(0.35, Math.atan2(yBehind - yAhead, 6.8))), -drive.heading, 0);
+    car.setSteer(drive.steer / HIGHWAY_DRIVE.MAX_STEER_LOW);
 
     const roundPrice = samplePrice();
     const nowMs = Date.now();
@@ -705,7 +720,7 @@ function frame() {
     }
 
     // speed → gear → leverage (the ladder is the only leverage source in this mode)
-    const speedFrac = Math.abs(drive.speed) / DRIVE.MAX_FWD;
+    const speedFrac = Math.abs(drive.speed) / HIGHWAY_DRIVE.MAX_FWD;
     hwGear = shiftGear(hwGear, speedFrac);
     const lev = levOf(hwGear);
     tach.setThrottle(speedFrac, lev);
@@ -736,7 +751,7 @@ function frame() {
     // ghost seam — Phase 2 replaces this with live presence; the window var is the
     // Preview verification hook (persists across frames, unlike a one-shot call)
     oval.setRemoteCars(((window as any).__hwGhostStates as import("./render/oval").OvalRemoteCar[] | undefined) ?? []);
-    lobbyCam.update(ctx.camera, dt, drive.x, drive.z, drive.heading);
+    lobbyCam.update(ctx.camera, dt, drive.x, drive.z, drive.heading, yHere);
 
     if (post) post.render();
     else ctx.renderer.render(ctx.scene, ctx.camera);
