@@ -87,7 +87,7 @@ export function contain(x: number, z: number): { x: number; z: number; hitWall: 
   return {
     x: c.x + rx * side * clamped,
     z: c.z + rz * side * clamped,
-    hitWall: clamped !== mag,
+    hitWall: Math.abs(clamped - mag) > 1e-9,
   };
 }
 

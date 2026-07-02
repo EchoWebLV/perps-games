@@ -41,6 +41,9 @@ import { createMapButton } from "./ui/mapbutton";
 import { createLobbyHud } from "./ui/lobbyhud";
 import { step as driveStep, DRIVE, type DriveState } from "./core/freedrive";
 import { entranceHit, LOT_BOUNDS, LOBBY_SPAWN, type BuildingKind } from "./core/lobby-layout";
+import { createOval } from "./render/oval";
+import { spawnPose, contain, HW_BOUNDS } from "./core/track";
+import { shiftGear, levOf, HW_MAX_LEV } from "./core/highway-gears";
 import { PublicKey } from "@solana/web3.js";
 import { CHAIN } from "./chain/config";
 import { createGameSession } from "./chain/game-session";
@@ -279,7 +282,10 @@ const garage = createCarPicker(hudRoot, [
 const lobby = createLobby();
 ctx.scene.add(lobby.group);
 const lobbyCam = createLobbyCam();
-let mode: "race" | "lobby" = "race";
+const oval = createOval();
+ctx.scene.add(oval.group);
+let hwGear = 0; // current highway gear (index into GEARS)
+let mode: "race" | "lobby" | "highway" = "race";
 let drive: DriveState = { x: LOBBY_SPAWN.x, z: LOBBY_SPAWN.z, heading: 0, speed: 0, steer: 0 };
 let doorDwell = 0;
 let doorArmed = true; // disarmed after entering a building until the car leaves every doorway (no instant re-open)
@@ -326,6 +332,33 @@ function exitLobby() {
   car.group.rotation.set(0, 0, 0);
 }
 
+// ── highway: the free-drive divided oval (spec 2026-07-02) ─────────────────
+// Direction is picked at GO and locked; speed drives the 10..100× gear ladder.
+function enterHighway() {
+  if (engine.getPhase() === "live" || roundActive) return;
+  mode = "highway";
+  drive = spawnPose(controls.dir());
+  hwGear = 0;
+  lobby.hide(); lobbyHud.hide(); lobbyHud.setPrompt(null);
+  world.group.visible = false;
+  pickups.group.visible = false;
+  oval.show();
+  setRaceHudVisible(true);
+  mapBtn.setVisible(true); // "map" = back to the lobby town
+  tach.rebuild(HW_MAX_LEV); // the tach reads the gear ladder, not the racer's RMAX
+  // racer-only ability buttons are meaningless here — the gear ladder owns leverage
+  nitro.setEnabled(false); flux.setEnabled(false); autoExit.setEnabled(false);
+  audio.resume(); radio.resume();
+}
+
+function exitHighwayToLobby() {
+  if (engine.getPhase() === "live" || roundActive) return;
+  oval.hide();
+  tach.rebuild(effRmax());
+  setAbility(ability); // restore the car's own buttons/toggles
+  enterLobby();
+}
+
 /** drive-into-a-building action. Economy screens open over the lobby; the Track gate leaves to the race. */
 function triggerBuilding(kind: BuildingKind) {
   switch (kind) {
@@ -333,12 +366,13 @@ function triggerBuilding(kind: BuildingKind) {
     case "upgrades": lobbyHud.hide(); upgrades.open(); break;        // tune your car
     case "crates": lobbyHud.toast("Crate Shop — coming soon"); break; // Pillar 2, not built yet
     case "track": exitLobby(); break;                                // back to the race
+    case "highway": lobbyHud.hide(); enterHighway(); break;       // the free-drive oval
   }
 }
 
 const mapBtn = createMapButton(hudRoot, () => {
-  if (mode !== "race") return;
-  enterLobby();
+  if (mode === "race") enterLobby();
+  else if (mode === "highway") exitHighwayToLobby();
 });
 const lobbyHud = createLobbyHud(hudRoot, () => exitLobby());
 
@@ -375,7 +409,7 @@ let holding = false, touchGas = false, touchBrake = false;
 let anchorX = 0, anchorY = 0, anchorCarX = 0;
 canvas.addEventListener("pointerdown", (e) => {
   audio.resume(); radio.resume(); // unlock audio + start the radio on the first touch
-  if (mode !== "lobby" && engine.getPhase() !== "live") return; // showroom: no driving until live (lobby is always drivable)
+  if (mode === "race" && engine.getPhase() !== "live") return; // showroom: no driving until live (lobby + highway are always drivable)
   holding = true; touchGas = true; touchBrake = false;
   anchorX = e.clientX; anchorY = e.clientY; anchorCarX = carXTarget;
   joystick.show(e.clientX, e.clientY); // white ring at the thumb
@@ -575,6 +609,21 @@ async function doFlip(dir: 1 | -1) {
   }
 }
 
+// One price update per frame, shared by the race and highway branches: eases the display
+// price, feeds the HUD + minimap history, and returns the settle-safe round price
+// (spec §9: never settle P&L on a stale feed).
+function samplePrice(): number {
+  const price = priceSource.price();
+  const live = priceSource.live();
+  if (live && price > 0) lastLivePrice = price;
+  if (price > 0) solSmooth = solSmooth ? solSmooth + (price - solSmooth) * 0.1 : price;
+  if (solSmooth > 0) solEMA = solEMA ? solEMA + (solSmooth - solEMA) * 0.012 : solSmooth;
+  hud.setPrice(solSmooth || price, live);
+  if (solUsd > 0) hud.setSolUsd(solUsd);
+  if (solSmooth > 0) { priceHist.push(solSmooth); if (priceHist.length > 300) priceHist.shift(); }
+  return live ? price : lastLivePrice || price;
+}
+
 function frame() {
   const dt = Math.min(0.05, ctx.clock.getDelta()); // clamp so a frame hitch can't teleport the world
 
@@ -615,19 +664,67 @@ function frame() {
     return;
   }
 
-  const price = priceSource.price();
-  const live = priceSource.live();
-  if (live && price > 0) lastLivePrice = price;
-  // ease the display price toward the latest tick → smooth, wave-like minimap line
-  if (price > 0) solSmooth = solSmooth ? solSmooth + (price - solSmooth) * 0.1 : price;
-  if (solSmooth > 0) solEMA = solEMA ? solEMA + (solSmooth - solEMA) * 0.012 : solSmooth;
-  hud.setPrice(solSmooth || price, live);
-  if (solUsd > 0) hud.setSolUsd(solUsd);
-  if (solSmooth > 0) { priceHist.push(solSmooth); if (priceHist.length > 300) priceHist.shift(); }
+  if (mode === "highway") {
+    // same input model as the lobby: hold+drag or WASD
+    const kSteer = controls.steer();
+    const gas = holding || controls.gas();
+    const brake = touchBrake || controls.brake();
+    const th = brake ? -1 : gas ? 1 : 0;
+    const steer = Math.max(-1, Math.min(1, (holding ? steerNorm : 0) + kSteer));
+    drive = driveStep(drive, { throttle: th, steer }, dt, HW_BOUNDS);
+    // the median and outer barrier are the real walls (track-shaped contain)
+    const c = contain(drive.x, drive.z);
+    drive = c.hitWall ? { ...drive, x: c.x, z: c.z, speed: 0 } : { ...drive, x: c.x, z: c.z };
 
-  // spec §9: never settle P&L on a stale feed. Freeze equity at the last real
-  // price when the feed is down so sim drift can't liquidate a live round.
-  const roundPrice = live ? price : lastLivePrice || price;
+    car.update(dt, drive.speed);
+    car.group.position.set(drive.x, 0, drive.z);
+    car.group.rotation.set(0, -drive.heading, 0); // same mirror convention as the lobby
+    car.setSteer(drive.steer / DRIVE.MAX_STEER_LOW);
+
+    const roundPrice = samplePrice();
+    const nowMs = Date.now();
+
+    // speed → gear → leverage (the ladder is the only leverage source in this mode)
+    const speedFrac = Math.abs(drive.speed) / DRIVE.MAX_FWD;
+    hwGear = shiftGear(hwGear, speedFrac);
+    const lev = levOf(hwGear);
+    tach.setThrottle(speedFrac, lev);
+    audio.engine(speedFrac, true);
+
+    if (engine.getPhase() === "live") {
+      game.lev = lev;
+      engine.setLeverage(lev, roundPrice);   // instant local rebank (no-op if unchanged)
+      session.noteLeverage(lev);             // coalesced on-chain lever (no-op if unchanged)
+      const snap = engine.snapshot(roundPrice, nowMs);
+      game.equity = snap.equity;
+      hud.setMultiplier(Math.max(0, snap.equity), "live");
+      controls.setBuffer(Math.max(0, Math.min(1, snap.buffer)));
+      controls.setLive(true, `${snap.equity >= 1 ? "CASH OUT" : "BAIL"} ${sol3(snap.payout)}`, snap.equity < 1);
+      hud.setTimer(roundMaxSec - (nowMs - roundStartMs) / 1000, true);
+      car.setEquity("live", Math.max(0, snap.equity));
+      // local time-cap backstop, same as the race branch
+      if (roundActive && !settling && (nowMs - roundStartMs) / 1000 >= roundMaxSec) void closeRound("expire");
+    } else {
+      car.setEquity("idle", 1);
+      hud.setTimer(effMaxSec(), false);
+    }
+
+    const liqPx = engine.getPhase() === "live" ? liqPriceOf(round.entryPx, round.dir, game.lev, CONFIG.LIQ) : 0;
+    minimap.draw({ hist: priceHist, inRun: engine.getPhase() === "live", equity: game.equity, entryPx: round.entryPx, liqPx, dir: round.dir });
+
+    oval.update(dt);
+    // ghost seam — Phase 2 replaces this with live presence; the window var is the
+    // Preview verification hook (persists across frames, unlike a one-shot call)
+    oval.setRemoteCars(((window as any).__hwGhostStates as import("./render/oval").OvalRemoteCar[] | undefined) ?? []);
+    lobbyCam.update(ctx.camera, dt, drive.x, drive.z, drive.heading);
+
+    if (post) post.render();
+    else ctx.renderer.render(ctx.scene, ctx.camera);
+    requestAnimationFrame(frame);
+    return;
+  }
+
+  const roundPrice = samplePrice();
   const drivable = engine.getPhase() === "live"; // you can only drive while a round is live
 
   // accelerator with momentum — only while playing; the showroom car stays parked
@@ -773,3 +870,15 @@ requestAnimationFrame(frame);
 // A fresh visitor gets NO modal here — their first GO opens the login.
 void session.reconnect().then((ok) => { if (ok) { signedIn = true; syncOnchainBalance(); } }).catch(() => {});
 console.log("redline3d render up");
+
+// DEV-only hooks so browser verification can jump between modes without driving
+// across the lobby at Preview's throttled frame rate. Stripped from prod builds.
+if (import.meta.env.DEV) {
+  (window as any).__hw = {
+    enterHighway, exitHighwayToLobby, enterLobby,
+    // sets the persistent override the frame loop reads (a direct setRemoteCars call
+    // would be wiped by the very next frame)
+    ghosts: (states: import("./render/oval").OvalRemoteCar[] | undefined) => { (window as any).__hwGhostStates = states; },
+    state: () => ({ mode, hwGear, lev: levOf(hwGear), x: drive.x, z: drive.z, speed: drive.speed }),
+  };
+}

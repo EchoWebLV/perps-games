@@ -93,6 +93,18 @@ describe("track contain()", () => {
     const d = Math.hypot(c.x - 0, c.z + STRAIGHT / 2);
     expect(d).toBeLessThan(R + EDGE);
   });
+
+  it("is hitWall-stable on its own output (no float-noise re-fire)", () => {
+    const c1 = contain(R + EDGE + 4, 40);
+    const c2 = contain(c1.x, c1.z);
+    expect(c2.hitWall).toBe(false);
+  });
+});
+
+describe("TRACK constants", () => {
+  it("EDGE derives from the median + two lanes (retuning one must retune all)", () => {
+    expect(EDGE).toBe(MEDIAN_HALF + 2 * TRACK.LANE_W);
+  });
 });
 
 describe("track spawnPose()", () => {
