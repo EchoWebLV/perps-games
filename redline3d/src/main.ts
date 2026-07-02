@@ -39,7 +39,8 @@ import { createLobby } from "./render/lobby";
 import { createLobbyCam } from "./render/lobbycam";
 import { createMapButton } from "./ui/mapbutton";
 import { createLobbyHud } from "./ui/lobbyhud";
-import { step as driveStep, DRIVE, HIGHWAY_DRIVE, type DriveState } from "./core/freedrive";
+import { step as driveStep, DRIVE, HIGHWAY_DRIVE, type DriveState, type DriveTune } from "./core/freedrive";
+import { stepBody, type BodyState } from "./core/body-language";
 import { entranceHit, LOT_BOUNDS, LOBBY_SPAWN, type BuildingKind } from "./core/lobby-layout";
 import { modeSwitchBlocked } from "./core/mode-guard";
 import { createOval } from "./render/oval";
@@ -286,11 +287,15 @@ const lobbyCam = createLobbyCam();
 const oval = createOval();
 ctx.scene.add(oval.group);
 let hwGear = 0; // current highway gear (index into GEARS)
-// free-drive body language (lobby + highway): eased roll into corners + squat/dive
-// on throttle/brake. Visual only — never feeds physics or money.
-let bodyRoll = 0;   // rotation.z target-chased each frame
-let bodyPitch = 0;  // squat(+)/dive(−) component, ADDS to the highway's slope pitch
-let prevDriveSpeed = 0;
+// drive-mode body language (all modes): eased roll into corners + squat/dive on
+// throttle/brake — core/body-language owns the math. Visual only — never physics or money.
+let body: BodyState = { roll: 0, pitch: 0 };
+let prevDriveSpeed = 0; // freedrive speed last frame (lobby + highway accel derive)
+// road-slope sampler (highway + racer share the pattern): surface height ±SLOPE_SAMPLE
+// around the car, nose pitched by atan2(rise, 2·SLOPE_SAMPLE), clamped so a terrain
+// step can't flip the car
+const SLOPE_SAMPLE = 3.4;
+const SLOPE_CLAMP = 0.35;
 let hwBillboardCd = 0; // billboard redraw cooldown (CanvasTexture upload ≈ not free)
 let mode: "race" | "lobby" | "highway" = "race";
 let drive: DriveState = { x: LOBBY_SPAWN.x, z: LOBBY_SPAWN.z, heading: 0, speed: 0, steer: 0 };
@@ -314,7 +319,7 @@ function enterLobby() {
   drive = { x: LOBBY_SPAWN.x, z: LOBBY_SPAWN.z, heading: 0, speed: 0, steer: 0 };
   doorDwell = 0;
   doorArmed = true;
-  bodyRoll = 0; bodyPitch = 0; prevDriveSpeed = 0;
+  body = { roll: 0, pitch: 0 }; prevDriveSpeed = 0;
   // pitch must be body-local under yaw (YXZ), or squat/dive reads as a sideways
   // lean when heading east/west; every mode entry asserts its own order
   car.group.rotation.order = "YXZ";
@@ -351,7 +356,7 @@ function enterHighway() {
   mode = "highway";
   drive = spawnPose(controls.dir());
   hwGear = 0;
-  bodyRoll = 0; bodyPitch = 0; prevDriveSpeed = 0;
+  body = { roll: 0, pitch: 0 }; prevDriveSpeed = 0;
   lobby.hide(); lobbyHud.hide(); lobbyHud.setPrompt(null);
   world.group.visible = false;
   pickups.group.visible = false;
@@ -651,15 +656,13 @@ function samplePrice(): number {
   return live ? price : lastLivePrice || price;
 }
 
-// ease body-language angles toward their targets, fps-independent (same approach() idea
-// as freedrive). Roll leans INTO the turn (racer convention: rotation.z = −turn·k — see
-// the racer branch); squat lifts the nose under throttle, dive drops it under braking.
-function bodyLanguage(steerFrac: number, speedFrac: number, accel: number, accelScale: number, dt: number) {
-  const ease = 1 - Math.exp(-10 * dt);
-  const rollT = -steerFrac * speedFrac * 0.09;                                  // ≤ ~5°
-  const pitchT = Math.max(-1, Math.min(1, accel / accelScale)) * 0.04;          // ≤ ~2.3°
-  bodyRoll += (rollT - bodyRoll) * ease;
-  bodyPitch += (pitchT - bodyPitch) * ease;
+// step the shared body pose from freedrive's DriveState: derive longitudinal accel from
+// the speed delta, then feed core/body-language with the mode's tune (lobby + highway;
+// the racer derives its accel from the scrolling road speed instead — see the race branch)
+function stepFreedriveBody(tune: DriveTune, dt: number) {
+  const accel = dt > 0 ? (drive.speed - prevDriveSpeed) / dt : 0;
+  prevDriveSpeed = drive.speed;
+  body = stepBody(body, drive.steer / tune.MAX_STEER_LOW, Math.min(1, Math.abs(drive.speed) / tune.MAX_FWD), accel, tune.ACCEL, dt);
 }
 
 function frame() {
@@ -673,16 +676,14 @@ function frame() {
     const throttle = brake ? -1 : gas ? 1 : 0;
     const steer = Math.max(-1, Math.min(1, (holding ? steerNorm : 0) + kSteer));
     drive = driveStep(drive, { throttle, steer }, dt, LOT_BOUNDS);
-    const accel = dt > 0 ? (drive.speed - prevDriveSpeed) / dt : 0;
-    prevDriveSpeed = drive.speed;
-    bodyLanguage(drive.steer / DRIVE.MAX_STEER_LOW, Math.min(1, Math.abs(drive.speed) / DRIVE.MAX_FWD), accel, DRIVE.ACCEL, dt);
+    stepFreedriveBody(DRIVE, dt);
 
     car.update(dt, drive.speed);
     car.setEquity("idle", 1);
     car.group.position.set(drive.x, 0, drive.z);
     // -heading: Three's +Y rotation mirrors X vs the physics/camera (sin,-cos) convention,
     // so the body must use -heading to actually face the way it drives (camera stays behind it)
-    car.group.rotation.set(bodyPitch, -drive.heading, bodyRoll);
+    car.group.rotation.set(body.pitch, -drive.heading, body.roll);
     car.setSteer(drive.steer / DRIVE.MAX_STEER_LOW); // front wheels point to the real steer angle
 
     const hit = entranceHit(drive.x, drive.z);
@@ -718,23 +719,21 @@ function frame() {
     // never a dead stop (user drive-feedback v2)
     const c = contain(drive.x, drive.z);
     drive = { ...drive, x: c.x, z: c.z, speed: c.hitWall ? drive.speed * Math.exp(-WALL_SCRAPE * dt) : drive.speed };
-    const accel = dt > 0 ? (drive.speed - prevDriveSpeed) / dt : 0;
-    prevDriveSpeed = drive.speed;
-    bodyLanguage(drive.steer / HIGHWAY_DRIVE.MAX_STEER_LOW, Math.min(1, Math.abs(drive.speed) / HIGHWAY_DRIVE.MAX_FWD), accel, HIGHWAY_DRIVE.ACCEL, dt);
+    stepFreedriveBody(HIGHWAY_DRIVE, dt);
 
     // ride the hills: road height under the car, plus ahead/behind samples along the
     // heading — their difference pitches the nose over crests (racer's slope trick)
     const fwdX = Math.sin(drive.heading), fwdZ = -Math.cos(drive.heading);
     const yHere = elevationAt(progress(drive.x, drive.z).s);
-    const yAhead = elevationAt(progress(drive.x + fwdX * 3.4, drive.z + fwdZ * 3.4).s);
-    const yBehind = elevationAt(progress(drive.x - fwdX * 3.4, drive.z - fwdZ * 3.4).s);
+    const yAhead = elevationAt(progress(drive.x + fwdX * SLOPE_SAMPLE, drive.z + fwdZ * SLOPE_SAMPLE).s);
+    const yBehind = elevationAt(progress(drive.x - fwdX * SLOPE_SAMPLE, drive.z - fwdZ * SLOPE_SAMPLE).s);
     car.update(dt, drive.speed);
     car.group.position.set(drive.x, yHere, drive.z);
     // order is YXZ in this mode: yaw first, then pitch about the car's own axle line.
     // Rx(+θ) tips the −Z nose UP, so nose-up on a climb needs POSITIVE x — hence ahead−behind
     // (same sign as the racer's slope trick; the inverted form ships the car nose-down uphill).
-    const slopePitch = Math.max(-0.35, Math.min(0.35, Math.atan2(yAhead - yBehind, 6.8)));
-    car.group.rotation.set(slopePitch + bodyPitch, -drive.heading, bodyRoll);
+    const slopePitch = Math.max(-SLOPE_CLAMP, Math.min(SLOPE_CLAMP, Math.atan2(yAhead - yBehind, 2 * SLOPE_SAMPLE)));
+    car.group.rotation.set(slopePitch + body.pitch, -drive.heading, body.roll);
     car.setSteer(drive.steer / HIGHWAY_DRIVE.MAX_STEER_LOW);
 
     const roundPrice = samplePrice();
@@ -943,6 +942,6 @@ if (import.meta.env.DEV) {
     // sets the persistent override the frame loop reads (a direct setRemoteCars call
     // would be wiped by the very next frame)
     ghosts: (states: import("./render/oval").OvalRemoteCar[] | undefined) => { (window as any).__hwGhostStates = states; },
-    state: () => ({ mode, hwGear, lev: levOf(hwGear), x: drive.x, z: drive.z, speed: drive.speed, roll: bodyRoll, pitch: bodyPitch, rot: { x: car.group.rotation.x, y: car.group.rotation.y, z: car.group.rotation.z } }),
+    state: () => ({ mode, hwGear, lev: levOf(hwGear), x: drive.x, z: drive.z, speed: drive.speed, roll: body.roll, pitch: body.pitch, rot: { x: car.group.rotation.x, y: car.group.rotation.y, z: car.group.rotation.z } }),
   };
 }
