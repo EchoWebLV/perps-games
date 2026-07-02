@@ -285,6 +285,7 @@ const lobbyCam = createLobbyCam();
 const oval = createOval();
 ctx.scene.add(oval.group);
 let hwGear = 0; // current highway gear (index into GEARS)
+let hwBillboardCd = 0; // billboard redraw cooldown (CanvasTexture upload ≈ not free)
 let mode: "race" | "lobby" | "highway" = "race";
 let drive: DriveState = { x: LOBBY_SPAWN.x, z: LOBBY_SPAWN.z, heading: 0, speed: 0, steer: 0 };
 let doorDwell = 0;
@@ -302,7 +303,7 @@ function setRaceHudVisible(visible: boolean) {
 }
 
 function enterLobby() {
-  if (engine.getPhase() === "live") return;
+  if (opening || engine.getPhase() === "live") return; // no mode switch while a GO is in flight
   mode = "lobby";
   drive = { x: LOBBY_SPAWN.x, z: LOBBY_SPAWN.z, heading: 0, speed: 0, steer: 0 };
   doorDwell = 0;
@@ -335,7 +336,7 @@ function exitLobby() {
 // ── highway: the free-drive divided oval (spec 2026-07-02) ─────────────────
 // Direction is picked at GO and locked; speed drives the 10..100× gear ladder.
 function enterHighway() {
-  if (engine.getPhase() === "live" || roundActive) return;
+  if (opening || engine.getPhase() === "live" || roundActive) return;
   mode = "highway";
   drive = spawnPose(controls.dir());
   hwGear = 0;
@@ -352,7 +353,7 @@ function enterHighway() {
 }
 
 function exitHighwayToLobby() {
-  if (engine.getPhase() === "live" || roundActive) return;
+  if (opening || engine.getPhase() === "live" || roundActive) return;
   oval.hide();
   tach.rebuild(effRmax());
   setAbility(ability); // restore the car's own buttons/toggles
@@ -693,6 +694,14 @@ function frame() {
 
     const roundPrice = samplePrice();
     const nowMs = Date.now();
+
+    // trackside billboard: the same feed the round settles against, made physical
+    hwBillboardCd -= dt;
+    if (hwBillboardCd <= 0) {
+      hwBillboardCd = 0.5;
+      const px = solSmooth || roundPrice;
+      oval.setBillboard(asset, px > 0 ? px.toLocaleString("en-US", { maximumFractionDigits: 2 }) : "—");
+    }
 
     // speed → gear → leverage (the ladder is the only leverage source in this mode)
     const speedFrac = Math.abs(drive.speed) / DRIVE.MAX_FWD;
