@@ -49,6 +49,7 @@ export function createDevKeypairPort(opts?: { secretKey?: Uint8Array; store?: St
     kind: "web-standard",
     keypair: kp,
     async connect() { return { address, label: "dev-keypair" }; },
+    async reconnect() { return { address }; }, // keypair is local — restoring is always silent
     async disconnect() { /* no-op */ },
     currentAddress() { return address; },
     async signMessage(message: Uint8Array) { return nacl.sign.detached(message, kp.secretKey); },

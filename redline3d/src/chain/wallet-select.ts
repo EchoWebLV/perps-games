@@ -54,6 +54,14 @@ function createLazyPrivyPort(): SolanaWalletPort {
   return {
     kind: "web-standard",
     async connect() { return (await ensure()).connect(); },
+    async reconnect() {
+      // Boot-time silent restore. Skip mounting the island entirely unless Privy left a
+      // session in localStorage — fresh visitors keep the react chunk out of their boot.
+      const hasSession = Object.keys(globalThis.localStorage ?? {}).some((k) => k.startsWith("privy:"));
+      if (!inner && !hasSession) return null;
+      const p = await ensure();
+      return p.reconnect ? p.reconnect() : null;
+    },
     async disconnect() { if (inner) await inner.disconnect(); },
     currentAddress() { return inner?.currentAddress() ?? null; },
     async signMessage(message) { return (await ensure()).signMessage(message); },

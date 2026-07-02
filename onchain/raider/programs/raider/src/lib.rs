@@ -219,6 +219,7 @@ pub mod raider {
         r.grace_secs = 0; // Skull grace window; set at open (0 = none)
         r.sl_fp = 0; // Pink Rod stop-loss; set at open (0 = unset)
         r.tp_fp = 0; // Pink Rod take-profit; set at open (0 = unset)
+        r.refund_fp = 0; // Flintstone airbag; set at open (0 = none)
         r.status = 0; // idle
         r.bump = ctx.bumps.round;
         r.liq_breach_ts = 0; // Skull grace runtime record; written by the tick
@@ -364,6 +365,7 @@ pub mod raider {
         grace: u16,
         sl: u32,
         tp: u32,
+        refund: u32,
     ) -> Result<()> {
         require!(
             lev >= settle::RMIN && lev <= settle::RMAX,
@@ -464,6 +466,13 @@ pub mod raider {
         } else {
             (tp as i128).clamp(settle::SCALE + 1, settle::CAP_FP - 1) as u32
         };
+        // Flintstone "Stone-Age Airbag": SCALE-units fraction of stake a liquidation
+        // refunds (0 = none, the default for every non-Flintstone car). Clamped to
+        // MAX_REFUND_FP (0.20) so a client can never buy back more than floor-level
+        // equity — settle::terminal pays min(refund, observed equity) with the standard
+        // edge, so it never beats cashing out above the floor. Stamped on the round →
+        // every liquidation path honors THIS value (provable fairness).
+        round.refund_fp = state::clamp_refund_fp(refund);
         round.status = 1;
         // Clear any stale settlement record from a previous round on this PDA (this Round
         // PDA is reused across rounds without re-init). liq_breach_ts MUST reset too, or a
@@ -912,6 +921,7 @@ fn settle_round(
         round.entry_raw,
         snap.price,
         round.liq_fp as i128,
+        round.refund_fp as i128,
     );
     // Defense in depth: a settle can never exceed the pre-locked worst case.
     let payout = payout.min(round.max_payout);
@@ -984,8 +994,12 @@ pub struct InitHouse<'info> {
     /// CHECK: PDA that owns the vault token account; only used as a signing authority.
     #[account(seeds = [VAULT_SEED, mint.key().as_ref()], bump)]
     pub vault_authority: UncheckedAccount<'info>,
+    // init_if_needed: the vault ATA `[vault, mint]` is NOT seed-versioned, so re-running
+    // init_house after a house-seed bump on a mint whose vault already exists (wSOL) must
+    // reuse it — plain `init` fails "account already in use" and the v2 pot could never be
+    // created. The associated_token constraints re-validate mint+authority when it exists.
     #[account(
-        init,
+        init_if_needed,
         payer = authority,
         associated_token::mint = mint,
         associated_token::authority = vault_authority,

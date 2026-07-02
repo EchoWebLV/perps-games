@@ -107,10 +107,11 @@ function settleSeq(stake, dir0, lev0, entry0, actions, exitRaw) {
   return { outcome: t.code, payout: payoutFp(BigInt(stake), t.settled) };
 }
 
-// Per-session till PDA `[b"house", mint, owner]` (the master pot is `[b"house", mint]`).
+// Per-session till PDA `[b"house2", mint, owner]` (the master pot is `[b"house2", mint]`).
+// Seed v2: the legacy [b"house", wSOL] master on devnet is stuck delegated (see state.rs).
 function deriveTill(programId, mint, owner) {
   return PublicKey.findProgramAddressSync(
-    [Buffer.from("house"), mint.toBuffer(), owner.toBuffer()],
+    [Buffer.from("house2"), mint.toBuffer(), owner.toBuffer()],
     programId
   )[0];
 }

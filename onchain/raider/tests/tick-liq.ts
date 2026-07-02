@@ -102,7 +102,7 @@ describe("raider — continuous 2000x liquidation via tick (keeper-driven)", fun
         6
       );
       const [housePda] = PublicKey.findProgramAddressSync(
-        [Buffer.from("house"), mint.toBuffer()],
+        [Buffer.from("house2"), mint.toBuffer()],
         program.programId
       );
       const [feedRegistry] = PublicKey.findProgramAddressSync(
@@ -266,7 +266,7 @@ describe("raider — continuous 2000x liquidation via tick (keeper-driven)", fun
       // The `open` is deferred so both sides open together with fresh deadlines.
       const open = () =>
         programER.methods
-          .open(ASSET_BTC, dir, 2000, new BN(STAKE), new BN(0), 0, 0, 0, 0)
+          .open(ASSET_BTC, dir, 2000, new BN(STAKE), new BN(0), 0, 0, 0, 0, 0)
           .accounts({
             player,
             house: till,

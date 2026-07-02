@@ -110,7 +110,7 @@ describe("raider — flip-after-settle race guard (NoOpenRound)", function () {
       6
     );
     const [housePda] = PublicKey.findProgramAddressSync(
-      [Buffer.from("house"), mint.toBuffer()],
+      [Buffer.from("house2"), mint.toBuffer()],
       program.programId
     );
     const [vaultAuthority] = PublicKey.findProgramAddressSync(
@@ -191,7 +191,7 @@ describe("raider — flip-after-settle race guard (NoOpenRound)", function () {
     // House sharding: the funded master pot is `[house, mint]` (housePda above); this
     // session's till `[house, mint, session]` is what co-delegates with player+round.
     const till = PublicKey.findProgramAddressSync(
-      [Buffer.from("house"), mint.toBuffer(), session.publicKey.toBuffer()],
+      [Buffer.from("house2"), mint.toBuffer(), session.publicKey.toBuffer()],
       program.programId
     )[0];
     // Multi-asset registry `[b"feeds"]` (open binds asset->feed; asset 0 = BTC).
@@ -280,7 +280,7 @@ describe("raider — flip-after-settle race guard (NoOpenRound)", function () {
 
     // ---- open long 10x (low lev: will not terminate on price within the window) ----
     await programER.methods
-      .open(ASSET_BTC, 1, 10, new BN(STAKE), new BN(0), 0, 0, 0, 0)
+      .open(ASSET_BTC, 1, 10, new BN(STAKE), new BN(0), 0, 0, 0, 0, 0)
       .accounts({
         player: playerPda,
         house: till,

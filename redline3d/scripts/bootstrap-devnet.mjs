@@ -21,7 +21,7 @@ const mint = process.argv[2]
   : await createMint(conn, funder, funder.publicKey, null, 6);
 console.log("MINT", mint.toBase58());
 
-const [house] = PublicKey.findProgramAddressSync([Buffer.from("house"), mint.toBuffer()], program.programId);
+const [house] = PublicKey.findProgramAddressSync([Buffer.from("house2"), mint.toBuffer()], program.programId);
 const [vaultAuthority] = PublicKey.findProgramAddressSync([Buffer.from("vault"), mint.toBuffer()], program.programId);
 const vaultToken = getAssociatedTokenAddressSync(mint, vaultAuthority, true);
 

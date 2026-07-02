@@ -19,6 +19,9 @@ export interface PrivyIsland {
   /** Sign a wire tx (base64) with the embedded wallet; resolves the signed wire tx (base64). */
   signTransaction(txBase64: string): Promise<string>;
   currentAddress(): string | null;
+  /** Silent restore: resolve the address if Privy is ALREADY authenticated (persisted session),
+   *  null otherwise. Never opens the login modal. */
+  reconnect(): Promise<string | null>;
   /** Privy sign-out: clears the auth session so the next connect() shows the login modal. */
   logout(): Promise<void>;
 }
@@ -137,6 +140,11 @@ const facade: PrivyIsland = {
     return live.sign(txBase64);
   },
   currentAddress() {
+    return live.address;
+  },
+  async reconnect() {
+    if (!live.authenticated) return null; // no persisted session — stay silent, no modal
+    await waitFor(() => !!live.address, 20_000, "privy_wallet_timeout").catch(() => {});
     return live.address;
   },
   async logout() {

@@ -113,7 +113,7 @@ describe("raider — 60s time-cap (deterministic clock terminal, outcome=Time)",
       6
     );
     const [housePda] = PublicKey.findProgramAddressSync(
-      [Buffer.from("house"), mint.toBuffer()],
+      [Buffer.from("house2"), mint.toBuffer()],
       program.programId
     );
     const [feedRegistry] = PublicKey.findProgramAddressSync(
@@ -275,7 +275,7 @@ describe("raider — 60s time-cap (deterministic clock terminal, outcome=Time)",
     // ---- open long 10x: cannot liq (needs ~-8% in 8s) nor cap (needs ~+240%);
     //      the ONLY terminal that can fire in the cap window is TIME ----
     await programER.methods
-      .open(ASSET_BTC, 1, 10, new BN(STAKE), new BN(0), 0, 0, 0, 0)
+      .open(ASSET_BTC, 1, 10, new BN(STAKE), new BN(0), 0, 0, 0, 0, 0)
       .accounts({
         player: playerPda,
         house: till,

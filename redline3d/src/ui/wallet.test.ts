@@ -305,7 +305,7 @@ describe("createWallet", () => {
     await Promise.resolve(); await Promise.resolve(); // let the async fetch land
 
     const overlay = parent.children[0];
-    expect(overlay.querySelector<FakeElement>(".wlt-hero-sub")?.textContent).toContain("wallet 0.250 SOL");
+    expect(overlay.querySelector<FakeElement>(".wlt-hero-sub")?.textContent).toContain("wallet 0.250");
   });
 
   it("keeps the plain network line when no wallet-SOL fetch is wired (dev/legacy callers)", () => {

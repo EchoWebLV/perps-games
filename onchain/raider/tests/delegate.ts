@@ -63,7 +63,7 @@ describe("raider delegate_session (co-delegate player+house+round)", function ()
     // Mint authority = funder (it has the SOL); session owner just plays.
     mint = await createMint(provider.connection, funder.payer, funder.publicKey, null, 6);
     [housePda] = PublicKey.findProgramAddressSync(
-      [Buffer.from("house"), mint.toBuffer()], program.programId);
+      [Buffer.from("house2"), mint.toBuffer()], program.programId);
     till = deriveTill(program.programId, mint, session.publicKey); // per-session till (was the shared house)
     [vaultAuthority] = PublicKey.findProgramAddressSync(
       [Buffer.from("vault"), mint.toBuffer()], program.programId);

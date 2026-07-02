@@ -10,8 +10,15 @@ export type SettledInfo = { outcome: number; outcomeName: string; payout: bigint
 
 /** Per-session till size, as a multiple of ONE round's worst-case payout. The till is a
  *  session bankroll (many rounds run off it); a multiple gives buffer so ordinary P&L
- *  swings don't strand it below the next round's max_payout lock. */
-export const SESSION_TILL_ROUNDS = 10;
+ *  swings don't strand it below the next round's max_payout lock. 3 (not 10) so a modest
+ *  devnet pot accepts the DEFAULT bet (till = 3 × 23.75 × stake must fit the master pot);
+ *  if a hot streak drains a till, the existing recover path re-slices on the next GO. */
+export const SESSION_TILL_ROUNDS = 3;
+
+/** Buy-in buffer, in bets: stage several bets' worth of the PLAYER's money per top-up so the
+ *  heavy session rebuild (teardown + re-slice, ~8 txs) stays rare. Their money throughout —
+ *  own PDA, withdrawable via cash-out — and the chip shows wallet+play as one number. */
+export const SESSION_BUFFER_BETS = 5;
 
 export interface GameSession {
   address(): string;
@@ -19,6 +26,8 @@ export interface GameSession {
   crankArmed(): boolean;
   balance(): bigint;
   init(): Promise<bigint>;
+  /** Silent boot restore: true if the port had a persisted login (no login UI shown). */
+  reconnect(): Promise<boolean>;
   refreshBalance(onEr?: boolean): Promise<bigint>;
   ensureSession(buyInBase: number, stakeBase: number): Promise<void>;
   // graceSecs / slFp / tpFp / refundFp: per-round risk knobs (Skull grace, Pink Rod SL/TP,
@@ -46,7 +55,7 @@ export function createGameSession(opts: {
   injectChain?: ChainRound;
   injectAddress?: string;
 }): GameSession {
-  const port = opts.injectChain ? null : (opts.port ?? createDevKeypairPort());
+  const port = opts.port ?? (opts.injectChain ? null : createDevKeypairPort());
   let chain: ChainRound | null = opts.injectChain ?? null;
   let isDelegated = false;
   let armed = false;
@@ -58,6 +67,33 @@ export function createGameSession(opts: {
   function need(): ChainRound {
     if (!chain) throw new Error("game_session_not_initialized");
     return chain;
+  }
+
+  // End a live session: settle any open round, commit+undelegate, return the till to the
+  // master pot. Shared by endSession (cash-out) and ensureSession's rebuild-on-short-ledger.
+  async function teardownSession(c: ChainRound): Promise<void> {
+    // Settle any still-open round FIRST — otherwise commit_and_undelegate lands an open
+    // round (locked till) and sweep_till fails (till.locked != 0), stranding the slice in
+    // the till and starving the master pot for the next session.
+    try {
+      const snap = await c.readRound(true);
+      if (snap && snap.status === 1) await c.close();
+    } catch (e) { console.warn("teardown: pre-settle skipped:", e); }
+    await c.commitAndUndelegate();
+    // Return the till (slice ± session P&L) to the master pot so it funds the next
+    // session/player (self-smoothing). Now safe because the round is settled (lock released).
+    try { await c.sweepTill(); } catch (e) { console.warn("sweep_till skipped:", e); }
+    isDelegated = false;
+  }
+
+  // Re-adopt a still-live session (page reload / log-out→log-in mid-session): the L1 copy
+  // of a delegated balance PDA is stale, and cash-out must know to undelegate first —
+  // otherwise the chip shows old money and "Cash out" withdraws against a locked PDA.
+  async function adoptAndRead(): Promise<void> {
+    const c = need();
+    const state = await c.delegationState().catch(() => "fresh" as const);
+    isDelegated = state === "reuse";
+    bal = await c.readPlayerBalance(isDelegated);
   }
 
   // Background coalesced on-chain leverage: instant local feel lives in main.ts; this trails to latest.
@@ -80,13 +116,20 @@ export function createGameSession(opts: {
         await port!.connect();
         chain = createChainRound({ wallet: portToAnchorWallet(port!), mint: opts.mint });
       }
-      // Re-adopt a still-live session (page reload / log-out→log-in mid-session): the L1 copy
-      // of a delegated balance PDA is stale, and cash-out must know to undelegate first —
-      // otherwise the chip shows old money and "Cash out" withdraws against a locked PDA.
-      const state = await chain.delegationState().catch(() => "fresh" as const);
-      isDelegated = state === "reuse";
-      bal = await chain.readPlayerBalance(isDelegated);
+      await adoptAndRead();
       return bal;
+    },
+
+    async reconnect() {
+      if (port?.reconnect) {
+        const restored = await port.reconnect().catch(() => null);
+        if (!restored) return false; // nothing persisted — caller decides when to show a login
+      } else if (!chain) {
+        return false;
+      }
+      chain ??= createChainRound({ wallet: portToAnchorWallet(port!), mint: opts.mint });
+      await adoptAndRead();
+      return true;
     },
 
     async refreshBalance(onEr = false) {
@@ -96,17 +139,25 @@ export function createGameSession(opts: {
 
     async ensureSession(buyInBase, stakeBase) {
       const c = need();
-      if (isDelegated) return;
-      // Adopt an already-delegated session (page reload / log-out→log-in mid-session) — but
-      // ONLY when the L1 owners say the PDAs are actually delegated ("reuse"). The ER keeps
-      // serving a stale copy of the Round after an undelegate, so a bare ER read is NOT a
-      // liveness signal: adopting on it skips buy-in/slice/delegate and every subsequent
-      // open fails HouseUndercapitalized against the empty till (the End→GO wedge).
-      // When genuinely live, reuse it — the till is already sliced, so do NOT buy in or
-      // re-slice (the delegated till is program-locked; re-slicing fails and can drain the
-      // pot). open() settles any leftover open round before starting the new one.
-      const state = await c.delegationState().catch(() => "fresh" as const);
-      if (state === "reuse") { isDelegated = true; bal = await c.readPlayerBalance(true); return; }
+      // A live session (already ours, or an adopted one — page reload / log-out→log-in):
+      // ride it IF its ledger covers this bet. A delegated ledger can't be topped up from
+      // the wallet (buy_in writes the L1 copy), so a short one is quietly ended + rebuilt
+      // by the fresh path below (wallet top-up + re-slice). The player just sees GO.
+      // Adoption gates on the L1 owners ("reuse") — the ER keeps serving a stale copy of
+      // the Round after an undelegate, so a bare ER read is NOT a liveness signal (the
+      // old End→GO HouseUndercapitalized wedge).
+      let state: "reuse" | "fresh" | "busy" = "fresh";
+      if (isDelegated) {
+        state = "reuse";
+      } else {
+        state = await c.delegationState().catch(() => "fresh" as const);
+      }
+      if (state === "reuse") {
+        isDelegated = true;
+        bal = await c.readPlayerBalance(true);
+        if (bal >= BigInt(stakeBase)) return; // the live session covers this bet — ride it
+        await teardownSession(c);
+      }
       // Torn mid-delegation: delegate() renders the friendly DelegateBusyError (don't let
       // the fresh path's sliceFromPot hit the half-delegated till with a raw tx error).
       if (state === "busy") await c.delegate();
@@ -115,18 +166,34 @@ export function createGameSession(opts: {
       // Fail fast on an unfunded wallet BEFORE spending: sends go out with skipPreflight, so a
       // 0-SOL fee payer (a brand-new Privy embedded wallet) otherwise dies as a silent drop +
       // a 60s confirm hang. Player-actionable message; best-effort (a read failure skips it).
+      // Top up whenever the play balance can't cover THIS bet (not only when it's empty) —
+      // the player thinks in "my SOL", so GO quietly moves what the round needs from the
+      // wallet instead of bouncing them to a funding screen mid-flow.
+      const needsBuyIn = onL1 < BigInt(stakeBase);
       const funds = await c.walletFunds().catch(() => null);
       if (funds) {
         const FEE_FLOOR = 5_000_000n; // fees + ATA rent headroom (~0.005 SOL)
-        const needsBuyIn = onL1 === 0n;
         const solNeeded = needsBuyIn && isWsol ? BigInt(buyInBase) + FEE_FLOOR : FEE_FLOOR;
         if (funds.sol < solNeeded)
           throw new WalletUnfundedError("Your wallet needs SOL first — open the wallet panel and send SOL to your address.");
         if (needsBuyIn && !isWsol && funds.stake < BigInt(buyInBase))
           throw new WalletUnfundedError("Not enough funds in your wallet for this bet — top up your wallet first.");
       }
-      if (onL1 === 0n) { if (isWsol) await c.wrapForBuyIn(buyInBase); await c.buyIn(buyInBase); }
+      // Stage a BUFFER of bets, not just this one (see SESSION_BUFFER_BETS) — capped by what
+      // the wallet can spare. The pre-flight above guarantees at least `buyInBase` is there.
+      let topUp = Math.max(buyInBase, stakeBase * SESSION_BUFFER_BETS);
+      if (funds) {
+        const FEE_FLOOR = 5_000_000n;
+        const spendable = isWsol ? (funds.sol > FEE_FLOOR ? funds.sol - FEE_FLOOR : 0n) : funds.stake;
+        topUp = Math.max(buyInBase, Math.min(topUp, Number(spendable)));
+      }
+      if (needsBuyIn) { if (isWsol) await c.wrapForBuyIn(topUp); await c.buyIn(topUp); }
+      const fundedL1 = onL1 + (needsBuyIn ? BigInt(topUp) : 0n); // what the ER clone must show
       await c.ensureRoundInited();
+      // Self-heal: reclaim any leftover (undelegated) till from a previous session whose
+      // sweep was missed — e.g. an RPC failure at cash-out. Strands otherwise quietly
+      // starve the master pot until every new session sees "Tables are full".
+      try { await c.sweepTill(); } catch { /* no till to sweep */ }
       // Carve a SESSION-sized till off the master pot BEFORE delegating it. A session plays
       // many rounds off this one till, and each round locks `max_payout`; sizing the till to
       // exactly one max_payout leaves zero buffer, so a single player-favorable round strands
@@ -137,7 +204,16 @@ export function createGameSession(opts: {
       await c.sliceFromPot(maxPayoutBase(stakeBase) * SESSION_TILL_ROUNDS);
       await c.delegate(); // hardened: reuses a stale-but-live same-wallet session, else throws DelegateBusyError
       isDelegated = true;
+      // The ER can serve a STALE copy of the player ledger right after delegation (same
+      // stale-clone behavior as the Round after undelegate) — a bare read here returned 0
+      // for a funded player and GO bounced with "Not enough SOL" (live-hit). Poll briefly
+      // for the clone to land, then fall back to the L1 accounting we just performed.
       bal = await c.readPlayerBalance(true);
+      for (let i = 0; i < 5 && bal < fundedL1; i++) {
+        await new Promise((r) => setTimeout(r, 300));
+        bal = await c.readPlayerBalance(true).catch(() => bal);
+      }
+      if (bal < fundedL1) bal = fundedL1;
     },
 
     async walletSol() {
@@ -188,18 +264,7 @@ export function createGameSession(opts: {
 
     async endSession() {
       const c = need();
-      // Settle any still-open round FIRST — otherwise commit_and_undelegate lands an open
-      // round (locked till) and sweep_till fails (till.locked != 0), stranding the slice in
-      // the till and starving the master pot for the next session.
-      try {
-        const snap = await c.readRound(true);
-        if (snap && snap.status === 1) await c.close();
-      } catch (e) { console.warn("endSession: pre-settle skipped:", e); }
-      await c.commitAndUndelegate();
-      // Return the till (slice ± session P&L) to the master pot so it funds the next
-      // session/player (self-smoothing). Now safe because the round is settled (lock released).
-      try { await c.sweepTill(); } catch (e) { console.warn("sweep_till skipped:", e); }
-      isDelegated = false;
+      await teardownSession(c);
       bal = await c.readPlayerBalance(false);
     },
 

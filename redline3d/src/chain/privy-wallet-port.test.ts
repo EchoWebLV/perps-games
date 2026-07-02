@@ -7,6 +7,7 @@ function fakeIsland() {
     connect: vi.fn(async () => "PrivyAddr1111"),
     signTransaction: vi.fn(async (b64: string) => b64 + ".signed"),
     currentAddress: () => addr,
+    reconnect: vi.fn(async () => addr),
     logout: vi.fn(async () => { addr = null; }),
   };
 }

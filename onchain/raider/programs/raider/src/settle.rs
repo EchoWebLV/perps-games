@@ -72,9 +72,24 @@ pub fn equity_fp(banked_fp: i128, dir: i8, lev: u32, entry_raw: i64, exit_raw: i
 /// Apply terminal precedence at the exit mark; return (outcome, settled_equity_fp).
 /// `liq_fp` is the round's per-round liquidation floor (SCALE units): equity at or
 /// below it liquidates. Callers pass `round.liq_fp`; the default is LIQ_FP (0.20).
-pub fn terminal(eq: i128, liq_fp: i128) -> (Outcome, i128) {
+/// `refund_fp` is the round's Flintstone airbag (SCALE units; 0 = none): what a
+/// liquidation settles at instead of the classic 0.
+pub fn terminal(eq: i128, liq_fp: i128, refund_fp: i128) -> (Outcome, i128) {
     if eq <= liq_fp {
-        (Outcome::Liq, 0)
+        // Flintstone "Stone-Age Airbag": a liquidation settles like a forced
+        // cash-out at min(refund_fp, observed equity), clamped >= 0, through the
+        // SAME audited house-favorable payout(stake, eq) path as every other
+        // settle. min(refund, equity) because:
+        //   - the refund never exceeds what the house actually captured at the
+        //     wreck (a gap-through pays the remaining equity, not the full 20%);
+        //   - with the standard edge applied, cashing out just above the floor
+        //     always pays >= riding into the liq (no liquidation-seeking exploit;
+        //     at the stock 0.20 floor both pay ~19%);
+        //   - so the house edge is preserved in every regime, by construction.
+        // Solvency: refund <= 0.19*stake << max_payout(stake) = 23.75*stake — the
+        // existing pre-lock covers it. refund_fp = 0 reproduces the classic
+        // pay-nothing liq byte-for-byte. Outcome stays Liq (clients key UI off it).
+        (Outcome::Liq, refund_fp.min(eq.max(0)))
     } else if eq >= CAP_FP {
         (Outcome::Cap, CAP_FP)
     } else {
@@ -98,6 +113,7 @@ pub fn max_payout(stake: u64) -> u64 {
 
 /// Full settle for one mark (liq/cap/cashout precedence; time is layered by the
 /// caller, which has `now`/`deadline_ts`).
+#[allow(clippy::too_many_arguments)]
 pub fn settle(
     banked_fp: i128,
     dir: i8,
@@ -106,8 +122,13 @@ pub fn settle(
     entry_raw: i64,
     exit_raw: i64,
     liq_fp: i128,
+    refund_fp: i128,
 ) -> (Outcome, u64) {
-    let (o, eq) = terminal(equity_fp(banked_fp, dir, lev, entry_raw, exit_raw), liq_fp);
+    let (o, eq) = terminal(
+        equity_fp(banked_fp, dir, lev, entry_raw, exit_raw),
+        liq_fp,
+        refund_fp,
+    );
     (o, payout(stake, eq))
 }
 
@@ -123,7 +144,9 @@ pub fn fires(
     deadline_ts: i64,
     liq_fp: i128,
 ) -> bool {
-    let (term, _) = terminal(equity_fp(banked_fp, dir, lev, entry_raw, exit_raw), liq_fp);
+    // refund_fp = 0 here: the airbag changes WHAT a liq pays, never WHETHER it
+    // fires, and the settled equity is discarded — only the outcome class matters.
+    let (term, _) = terminal(equity_fp(banked_fp, dir, lev, entry_raw, exit_raw), liq_fp, 0);
     term != Outcome::Cashout || now >= deadline_ts
 }
 
@@ -218,7 +241,7 @@ mod tests {
     // banked = 0 path (Phase-1 parity): long, 100x, +1% => equity 2.0x, cashout.
     #[test]
     fn long_winner_no_bank() {
-        let (o, p) = settle(0, 1, 100, 1_000_000, 60_000, 60_600, LIQ_FP);
+        let (o, p) = settle(0, 1, 100, 1_000_000, 60_000, 60_600, LIQ_FP, 0);
         assert_eq!(o, Outcome::Cashout);
         assert_eq!(p, 1_900_000); // floor(1e6 * 2e6 * 950_000 / 1e12)
     }
@@ -226,7 +249,7 @@ mod tests {
     // banked = 0: long, 1000x, -0.1% => equity 0 <= LIQ => Liq, payout 0.
     #[test]
     fn long_liquidated_no_bank() {
-        let (o, p) = settle(0, 1, 1000, 1_000_000, 60_000, 59_940, LIQ_FP);
+        let (o, p) = settle(0, 1, 1000, 1_000_000, 60_000, 59_940, LIQ_FP, 0);
         assert_eq!(o, Outcome::Liq);
         assert_eq!(p, 0);
     }
@@ -234,7 +257,7 @@ mod tests {
     // cap clamp: long, 2000x, +1.5% => raw equity 31x >= CAP => Cap, payout = max_payout.
     #[test]
     fn cap_clamp_no_bank() {
-        let (o, p) = settle(0, 1, 2000, 1_000_000, 60_000, 60_900, LIQ_FP);
+        let (o, p) = settle(0, 1, 2000, 1_000_000, 60_000, 60_900, LIQ_FP, 0);
         assert_eq!(o, Outcome::Cap);
         assert_eq!(p, max_payout(1_000_000)); // 23_750_000
     }
@@ -270,7 +293,7 @@ mod tests {
     fn flip_sequence_matches_engine() {
         let banked = rebank_fp(0, 1, 10, 100, 110);
         let eq = equity_fp(banked, -1, 10, 110, 105);
-        let (o, _) = terminal(eq, LIQ_FP);
+        let (o, _) = terminal(eq, LIQ_FP, 0);
         assert_eq!(o, Outcome::Cashout);
         assert_eq!(eq, 2_454_550);
     }
@@ -294,8 +317,8 @@ mod tests {
     #[test]
     fn lower_floor_survives_deeper_drawdown() {
         let eq = 150_000; // 0.15x equity
-        assert_eq!(terminal(eq, LIQ_FP).0, Outcome::Liq); // 0.20 floor: wiped
-        assert_eq!(terminal(eq, MIN_LIQ_FP), (Outcome::Cashout, 150_000)); // 0.10 floor: survives
+        assert_eq!(terminal(eq, LIQ_FP, 0).0, Outcome::Liq); // 0.20 floor: wiped
+        assert_eq!(terminal(eq, MIN_LIQ_FP, 0), (Outcome::Cashout, 150_000)); // 0.10 floor: survives
     }
 
     // settle() end-to-end honoring the per-round floor. long 1000x, entry 60_000, exit
@@ -303,10 +326,10 @@ mod tests {
     // Liq (payout 0) at the 0.20 floor; Cashout (payout 142_500) at the 0.10 floor.
     #[test]
     fn settle_honors_per_round_floor() {
-        let (o_hi, p_hi) = settle(0, 1, 1000, 1_000_000, 60_000, 59_949, LIQ_FP);
+        let (o_hi, p_hi) = settle(0, 1, 1000, 1_000_000, 60_000, 59_949, LIQ_FP, 0);
         assert_eq!(o_hi, Outcome::Liq);
         assert_eq!(p_hi, 0);
-        let (o_lo, p_lo) = settle(0, 1, 1000, 1_000_000, 60_000, 59_949, MIN_LIQ_FP);
+        let (o_lo, p_lo) = settle(0, 1, 1000, 1_000_000, 60_000, 59_949, MIN_LIQ_FP, 0);
         assert_eq!(o_lo, Outcome::Cashout);
         assert_eq!(p_lo, 142_500); // floor(1e6 * 150_000 * 950_000 / 1e12)
     }
@@ -397,5 +420,65 @@ mod tests {
     fn benign_tick_holds() {
         let a = tick_action(0, 1, 100, 60_000, 60_060, 100, 1_000_000, LIQ_FP, 0, 0, 0, 0);
         assert_eq!(a, TickAction::Hold);
+    }
+
+    // --- Flintstone "Stone-Age Airbag" (refund_fp): a liquidation settles like a
+    // forced cash-out at min(refund_fp, observed equity), through the SAME
+    // house-favorable payout() as every other outcome. Stake 1e6 throughout.
+
+    // Max airbag (0.20) at the stock 0.20 floor: observed eq == the floor →
+    // settled = min(200_000, 200_000) → payout 190_000 (19% of stake at EDGE 5%),
+    // exactly what a Cashout at eq 0.20 would pay — the indifference property
+    // (riding into the liq never beats cashing out just above the floor).
+    #[test]
+    fn airbag_pays_refund_at_the_floor() {
+        // 1000x long, entry 1_000_000, exit 999_200 → eq = 1e6 + 1000*(-800) = 200_000.
+        let (o, p) = settle(0, 1, 1000, 1_000_000, 1_000_000, 999_200, LIQ_FP, 200_000);
+        assert_eq!(o, Outcome::Liq); // outcome stays Liq — clients key UI off it
+        assert_eq!(p, payout(1_000_000, 200_000)); // == a Cashout at eq 0.20
+        assert_eq!(p, 190_000); // floor(1e6 * 200_000 * 950_000 / 1e12)
+    }
+
+    // Gap-through: the wreck happened BELOW the airbag — the refund never exceeds
+    // what the house actually captured. Observed eq 0.08 → pays the wreck value.
+    #[test]
+    fn airbag_gap_through_pays_wreck_value() {
+        // 1000x long, exit 999_080 → eq = 1e6 + 1000*(-920) = 80_000 (0.08x).
+        let (o, p) = settle(0, 1, 1000, 1_000_000, 1_000_000, 999_080, LIQ_FP, 200_000);
+        assert_eq!(o, Outcome::Liq);
+        assert_eq!(p, payout(1_000_000, 80_000)); // not the full 20%
+        assert_eq!(p, 76_000);
+    }
+
+    // Negative-equity gap: the max(eq, 0) clamp floors the settled equity at 0 →
+    // payout 0. (settle()'s equity_fp already clamps at 0; terminal's own clamp is
+    // belt-and-braces for direct callers.)
+    #[test]
+    fn airbag_negative_equity_pays_zero() {
+        let (o, eq) = terminal(-50_000, LIQ_FP, 200_000);
+        assert_eq!(o, Outcome::Liq);
+        assert_eq!(eq, 0);
+        assert_eq!(payout(1_000_000, eq), 0);
+    }
+
+    // refund_fp = 0 (every non-Flintstone car): byte-for-byte the classic
+    // pay-nothing liquidation.
+    #[test]
+    fn no_airbag_liq_pays_zero() {
+        let (o, p) = settle(0, 1, 1000, 1_000_000, 60_000, 59_940, LIQ_FP, 0);
+        assert_eq!(o, Outcome::Liq);
+        assert_eq!(p, 0);
+    }
+
+    // Suspension interplay: the airbag settles against the round's OWN floor.
+    // Floor 0.10, refund 0.20, observed eq exactly 0.10 → settled =
+    // min(200_000, 100_000) = 100_000 → ~9.5% of stake.
+    #[test]
+    fn airbag_honors_suspension_floor() {
+        // 1000x long, exit 999_100 → eq = 1e6 + 1000*(-900) = 100_000 (== 0.10 floor).
+        let (o, p) = settle(0, 1, 1000, 1_000_000, 1_000_000, 999_100, MIN_LIQ_FP, 200_000);
+        assert_eq!(o, Outcome::Liq);
+        assert_eq!(p, payout(1_000_000, 100_000));
+        assert_eq!(p, 95_000);
     }
 }

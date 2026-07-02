@@ -42,7 +42,7 @@ describe("raider init_house", function () {
     console.log("mint  :", mint.toBase58());
 
     [housePda] = PublicKey.findProgramAddressSync(
-      [Buffer.from("house"), mint.toBuffer()],
+      [Buffer.from("house2"), mint.toBuffer()],
       program.programId
     );
     [vaultAuthority] = PublicKey.findProgramAddressSync(

@@ -44,7 +44,7 @@ describe("raider buy_in + withdraw (non-custodial invariant)", function () {
 
     mint = await createMint(provider.connection, wallet.payer, wallet.publicKey, null, 6);
     [housePda] = PublicKey.findProgramAddressSync(
-      [Buffer.from("house"), mint.toBuffer()], program.programId);
+      [Buffer.from("house2"), mint.toBuffer()], program.programId);
     [vaultAuthority] = PublicKey.findProgramAddressSync(
       [Buffer.from("vault"), mint.toBuffer()], program.programId);
     vaultToken = getAssociatedTokenAddressSync(mint, vaultAuthority, true);

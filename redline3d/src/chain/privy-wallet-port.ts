@@ -5,6 +5,7 @@ export interface PrivyIsland {
   connect(): Promise<string>; // triggers Privy login, ensures an embedded wallet, returns its address
   signTransaction(txBase64: string): Promise<string>;
   currentAddress(): string | null;
+  reconnect(): Promise<string | null>; // silent restore of a persisted login; never opens the modal
   logout(): Promise<void>; // Privy sign-out — clears the auth session so the next connect() shows the login modal
 }
 
@@ -20,6 +21,12 @@ export function createPrivyPort(deps: { island: PrivyIsland }): SolanaWalletPort
     async connect() {
       address = await island.connect();
       return { address, label: "privy" };
+    },
+    async reconnect() {
+      const a = await island.reconnect();
+      if (!a) return null;
+      address = a;
+      return { address: a };
     },
     async disconnect() {
       address = "";

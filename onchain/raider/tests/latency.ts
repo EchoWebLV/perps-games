@@ -93,7 +93,7 @@ describe("raider — ER latency re-measurement (processed + confirmed p50/p95)",
      // triggers "Unknown action 'undefined'".)
      try {
       const mint = await createMint(conn, funder.payer, funder.publicKey, null, 6);
-      const [housePda] = PublicKey.findProgramAddressSync([Buffer.from("house"), mint.toBuffer()], program.programId);
+      const [housePda] = PublicKey.findProgramAddressSync([Buffer.from("house2"), mint.toBuffer()], program.programId);
       const [feedRegistry] = PublicKey.findProgramAddressSync([Buffer.from("feeds")], program.programId);
       const [vaultAuthority] = PublicKey.findProgramAddressSync([Buffer.from("vault"), mint.toBuffer()], program.programId);
       const vaultToken = getAssociatedTokenAddressSync(mint, vaultAuthority, true);
@@ -179,7 +179,7 @@ describe("raider — ER latency re-measurement (processed + confirmed p50/p95)",
 
       // open
       await timeOne(
-        () => programER.methods.open(ASSET_BTC, 1, 100, new BN(STAKE), new BN(0), 0, 0, 0, 0).accounts({
+        () => programER.methods.open(ASSET_BTC, 1, 100, new BN(STAKE), new BN(0), 0, 0, 0, 0, 0).accounts({
           player: playerPda, house: till, round: roundPda, mint,
           priceUpdate: BTC_FEED, registry: feedRegistry, playerAuthority: session.publicKey,
         }).signers([session]).rpc({ skipPreflight: true, commitment: "confirmed" }),

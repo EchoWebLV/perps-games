@@ -47,14 +47,16 @@ describe("createGameSession", () => {
     const s = createGameSession({ mint: MINT, onSettled: vi.fn(), injectChain: chain, injectAddress: "Fake111" });
     await s.init();
     await s.ensureSession(2_000_000, 1_000_000);
-    expect(chain.buyIn).toHaveBeenCalledWith(2_000_000);
+    expect(chain.buyIn).toHaveBeenCalledWith(5_000_000); // 5-bet buffer (SESSION_BUFFER_BETS)
     expect(chain.ensureRoundInited).toHaveBeenCalled();
     expect(chain.delegate).toHaveBeenCalled();
     expect(s.delegated()).toBe(true);
   });
 
   it("ensureSession is idempotent once delegated (no second buy-in/delegate)", async () => {
-    const chain = fakeChain();
+    // L1 starts empty (drives the buy-in); the ER clone then shows the buffered ledger, so
+    // the second GO rides the live session instead of rebuilding it.
+    const chain = fakeChain({ readPlayerBalance: vi.fn(async (onEr?: boolean) => (onEr ? 5_000_000n : 0n)) });
     const s = createGameSession({ mint: MINT, onSettled: vi.fn(), injectChain: chain, injectAddress: "Fake111" });
     await s.init();
     await s.ensureSession(2_000_000, 1_000_000);
@@ -82,7 +84,10 @@ describe("createGameSession", () => {
   });
 
   it("adopts a genuinely live session (L1 owners delegated) without re-buying or re-slicing", async () => {
-    const chain = fakeChain({ delegationState: vi.fn(async () => "reuse" as const) });
+    const chain = fakeChain({
+      delegationState: vi.fn(async () => "reuse" as const),
+      readPlayerBalance: vi.fn(async () => 5_000_000n), // funded — covers the bet, so it rides
+    });
     const s = createGameSession({ mint: MINT, onSettled: vi.fn(), injectChain: chain, injectAddress: "Fake111" });
     await s.init();
     await s.ensureSession(2_000_000, 1_000_000);
@@ -208,8 +213,9 @@ describe("createGameSession", () => {
     expect((chain.sliceFromPot as any).mock.invocationCallOrder[0])
       .toBeLessThan((chain.delegate as any).mock.invocationCallOrder[0]);
     await s.endSession();
+    // the LAST sweep is endSession's (ensureSession also sweeps once, up front, to self-heal strands)
     expect((chain.commitAndUndelegate as any).mock.invocationCallOrder[0])
-      .toBeLessThan((chain.sweepTill as any).mock.invocationCallOrder[0]);
+      .toBeLessThan((chain.sweepTill as any).mock.invocationCallOrder.at(-1));
   });
 
   it("init() adopts a still-delegated session (log-out→log-in mid-session) so cash-out sees live ER state", async () => {
@@ -258,6 +264,97 @@ describe("createGameSession", () => {
     await s.ensureSession(100_000_000, 10_000_000); // no throw: fees covered, buy-in not needed
     expect(chain.buyIn).not.toHaveBeenCalled();
     expect(chain.delegate).toHaveBeenCalled();
+  });
+
+  it("reconnect() silently restores a returning session (port.reconnect resolves) and reads the balance", async () => {
+    const chain = fakeChain({ readPlayerBalance: vi.fn(async () => 4_000_000n) });
+    const port = {
+      kind: "web-standard" as const,
+      connect: vi.fn(async () => ({ address: "PrivyAddr1111" })),
+      reconnect: vi.fn(async () => ({ address: "PrivyAddr1111" })),
+      disconnect: vi.fn(async () => {}),
+      currentAddress: () => "PrivyAddr1111",
+      signMessage: vi.fn(async () => new Uint8Array()),
+      signTransaction: vi.fn(async (b64: string) => b64),
+    };
+    const s = createGameSession({ mint: MINT, onSettled: vi.fn(), port, injectChain: fakeChain({ readPlayerBalance: vi.fn(async () => 4_000_000n) }) });
+    void chain;
+    expect(await s.reconnect()).toBe(true);
+    expect(port.reconnect).toHaveBeenCalled();
+    expect(port.connect).not.toHaveBeenCalled(); // silent path — never triggers a login modal
+    expect(s.balance()).toBe(4_000_000n);
+  });
+
+  it("reconnect() returns false (and stays untouched) when there is no session to restore", async () => {
+    const port = {
+      kind: "web-standard" as const,
+      connect: vi.fn(async () => ({ address: "PrivyAddr1111" })),
+      reconnect: vi.fn(async () => null),
+      disconnect: vi.fn(async () => {}),
+      currentAddress: () => null,
+      signMessage: vi.fn(async () => new Uint8Array()),
+      signTransaction: vi.fn(async (b64: string) => b64),
+    };
+    const s = createGameSession({ mint: MINT, onSettled: vi.fn(), port });
+    expect(await s.reconnect()).toBe(false);
+    expect(port.connect).not.toHaveBeenCalled();
+    expect(s.balance()).toBe(0n);
+  });
+
+  it("re-adopted session that can't cover the bet is quietly ended + rebuilt with a wallet top-up", async () => {
+    // Live-hit: after a few rounds the delegated ledger dropped below the bet; adopt had no
+    // top-up path (a delegated ledger can't buy in) so GO bounced "Not enough SOL" while the
+    // wallet held plenty. The bet must flow from the wallet: end the session, rebuild, top up.
+    const chain = fakeChain({
+      delegationState: vi.fn(async () => "reuse" as const),
+      readPlayerBalance: vi.fn(async () => 40_000n), // covers neither the 1_000_000 stake nor a round
+    });
+    const s = createGameSession({ mint: MINT, onSettled: vi.fn(), injectChain: chain, injectAddress: "Fake111" });
+    await s.init();
+    await s.ensureSession(2_000_000, 1_000_000);
+    expect(chain.commitAndUndelegate).toHaveBeenCalled(); // old session ended under the hood
+    expect(chain.buyIn).toHaveBeenCalledWith(5_000_000);  // topped up from the wallet (5-bet buffer)
+    expect(chain.delegate).toHaveBeenCalled();            // fresh session carved + delegated
+    expect(s.delegated()).toBe(true);
+  }, 15_000);
+
+  it("falls back to L1 truth when the ER clone lags right after delegation (stale-0 read)", async () => {
+    // The ER serves stale copies around (un)delegation — a bare post-delegate ER read
+    // returned 0 for a funded player and GO bounced with "Not enough SOL" (live-hit).
+    const chain = fakeChain({
+      readPlayerBalance: vi.fn(async (onEr?: boolean) => (onEr ? 0n : 5_000_000n)),
+    });
+    const s = createGameSession({ mint: MINT, onSettled: vi.fn(), injectChain: chain, injectAddress: "Fake111" });
+    await s.init();
+    await s.ensureSession(2_000_000, 1_000_000);
+    expect(s.balance()).toBe(5_000_000n); // L1 accounting, not the stale ER 0
+  }, 15_000);
+
+  it("ensureSession reclaims a leftover till (missed sweep) BEFORE slicing a fresh one", async () => {
+    const chain = fakeChain();
+    const s = createGameSession({ mint: MINT, onSettled: vi.fn(), injectChain: chain, injectAddress: "Fake111" });
+    await s.init();
+    await s.ensureSession(2_000_000, 1_000_000);
+    expect(chain.sweepTill).toHaveBeenCalled();
+    expect((chain.sweepTill as any).mock.invocationCallOrder[0])
+      .toBeLessThan((chain.sliceFromPot as any).mock.invocationCallOrder[0]);
+  });
+
+  it("ensureSession tops up from the wallet when the play balance is below the stake (not only when 0)", async () => {
+    const chain = fakeChain({ readPlayerBalance: vi.fn(async () => 2_000_000n) }); // has 0.002, bets 0.01
+    const s = createGameSession({ mint: MINT, onSettled: vi.fn(), injectChain: chain, injectAddress: "Fake111" });
+    await s.init();
+    await s.ensureSession(100_000_000, 10_000_000);
+    expect(chain.buyIn).toHaveBeenCalledWith(100_000_000); // topped up so the round can open
+  });
+
+  it("stages a buffer of several bets so the heavy rebuild stays rare (capped by the wallet)", async () => {
+    // buy-in floor 2M, bet 1M → buffer target = 5 bets = 5M, wallet can spare only 3.5M → 3.5M
+    const chain = fakeChain({ walletFunds: vi.fn(async () => ({ sol: 1_000_000_000n, stake: 3_500_000n })) });
+    const s = createGameSession({ mint: MINT, onSettled: vi.fn(), injectChain: chain, injectAddress: "Fake111" });
+    await s.init();
+    await s.ensureSession(2_000_000, 1_000_000);
+    expect(chain.buyIn).toHaveBeenCalledWith(3_500_000);
   });
 
   it("logout() disconnects the wallet port so the next sign-in starts fresh (Privy account switch)", async () => {

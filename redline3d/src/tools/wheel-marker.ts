@@ -115,17 +115,23 @@ function readRig(root: THREE.Object3D): Circle[] {
   return out;
 }
 
+let loadGen = 0;
+
 async function loadModel(name: string): Promise<void> {
+  const gen = ++loadGen;
   statusEl.textContent = "loading…";
-  if (model) {
-    scene.remove(model);
-    disposeTree(model);
-    model = null;
-  }
-  circles = [];
-  selected = -1;
   try {
     const gltf = await loader.loadAsync(`/models/${name}.glb`);
+    if (gen !== loadGen) {
+      disposeTree(gltf.scene); // superseded by a newer pick
+      return;
+    }
+    if (model) {
+      scene.remove(model);
+      disposeTree(model);
+    }
+    circles = [];
+    selected = -1;
     model = gltf.scene;
     scene.add(model);
     model.updateWorldMatrix(true, true);
@@ -135,12 +141,14 @@ async function loadModel(name: string): Promise<void> {
     // the long horizontal axis is the car's length; the axle is perpendicular
     viewAxis = size.x >= size.z ? "z" : "x";
     refCircles = readRig(model);
+    poseWheels = [];
     if (grid) { scene.remove(grid); grid.dispose(); }
     grid = new THREE.GridHelper(Math.max(size.x, size.z) * 4, 20, 0x243048, 0x1a2230);
     grid.position.set(center.x, bbox.min.y, center.z);
     scene.add(grid);
     statusEl.textContent = refCircles.length ? `rig: ${refCircles.length} wheel nodes` : "rig: none found";
   } catch (err) {
+    if (gen !== loadGen) return;
     statusEl.textContent = `load failed: ${String(err)}`;
   }
   frame();
@@ -253,7 +261,7 @@ function syncList(): void {
       input.value = String(round4(get()));
       input.oninput = () => {
         const v = Number(input.value);
-        if (Number.isFinite(v)) {
+        if (input.value.trim() !== "" && Number.isFinite(v)) {
           set(v);
           rebuildRings();
           syncOut();
@@ -431,7 +439,52 @@ window.addEventListener("resize", () => {
   camera.updateProjectionMatrix();
 });
 
-renderer.setAnimationLoop(() => renderer.render(scene, camera));
+// spin test: continuously rotate all wheel_N with the runtime composition
+let spinOn = false;
+let spinAngle = 0;
+let lastT = 0;
+const spinBox = document.getElementById("spin") as HTMLInputElement;
+spinBox.onchange = () => {
+  spinOn = spinBox.checked;
+  if (!spinOn) poseTest(0, 0);
+};
+renderer.setAnimationLoop((t) => {
+  const dt = lastT ? Math.min((t - lastT) / 1000, 0.1) : 0;
+  lastT = t;
+  if (spinOn && model) {
+    spinAngle += dt * 120; // 120°/s — slow enough to see wobble/clip
+    poseTest(spinAngle, 0);
+  }
+  renderer.render(scene, camera);
+});
+
+// pose test: apply the runtime's exact composition (rest × steer(up) ×
+// spin(axle)) to every wheel_N at fixed angles — a wrong pivot or axis shows
+// as displaced/tilted geometry in the side view
+interface PoseWheel { o: THREE.Object3D; rest: THREE.Quaternion; axle: THREE.Vector3; up: THREE.Vector3 }
+let poseWheels: PoseWheel[] = [];
+function collectPoseWheels(): void {
+  poseWheels = [];
+  model?.traverse((o) => {
+    const pw = (o.userData as Record<string, any>).perpsWheel;
+    if (!pw || !/^wheel_\d+/.test(o.name)) return;
+    poseWheels.push({
+      o, rest: o.quaternion.clone(),
+      axle: new THREE.Vector3(...(pw.axle as number[])).normalize(),
+      up: new THREE.Vector3(...(pw.up as number[])).normalize(),
+    });
+  });
+}
+function poseTest(spinDeg: number, steerDeg: number): number {
+  if (!poseWheels.length) collectPoseWheels();
+  const qSpin = new THREE.Quaternion(), qSteer = new THREE.Quaternion();
+  for (const p of poseWheels) {
+    qSteer.setFromAxisAngle(p.up, (steerDeg * Math.PI) / 180);
+    qSpin.setFromAxisAngle(p.axle, (spinDeg * Math.PI) / 180);
+    p.o.quaternion.copy(p.rest).multiply(qSteer).multiply(qSpin);
+  }
+  return poseWheels.length;
+}
 
 // dev probe for automated verification
 if (import.meta.env.DEV) {
@@ -440,6 +493,24 @@ if (import.meta.env.DEV) {
     get refCircles() { return refCircles; },
     get viewAxis() { return viewAxis; },
     get json() { return outEl.value; },
+    poseTest,
+    /** hide/show wheel nodes — leftover tread shells on the body become visible */
+    setWheelsVisible(v: boolean): number {
+      if (!poseWheels.length) collectPoseWheels();
+      for (const p of poseWheels) p.o.visible = v;
+      return poseWheels.length;
+    },
+    /** per-wheel world bbox — drift under poseTest = pivot/axis error */
+    wheelBBoxes(): Record<string, number[]> {
+      const out: Record<string, number[]> = {};
+      if (!poseWheels.length) collectPoseWheels();
+      for (const p of poseWheels) {
+        p.o.updateWorldMatrix(true, false);
+        const b = new THREE.Box3().setFromObject(p.o);
+        out[p.o.name] = [b.min.x, b.min.y, b.min.z, b.max.x, b.max.y, b.max.z].map((v) => +v.toFixed(4));
+      }
+      return out;
+    },
     /** world point -> client pixel coords, for synthetic-pointer tests */
     screenOf(x: number, y: number, z: number) {
       camera.updateMatrixWorld();

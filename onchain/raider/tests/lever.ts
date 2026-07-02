@@ -154,7 +154,7 @@ describe("raider — lever mid-round parity (terminal-first rebank, BigInt seque
       6
     );
     const [housePda] = PublicKey.findProgramAddressSync(
-      [Buffer.from("house"), mint.toBuffer()],
+      [Buffer.from("house2"), mint.toBuffer()],
       program.programId
     );
     const [feedRegistry] = PublicKey.findProgramAddressSync(
@@ -315,7 +315,7 @@ describe("raider — lever mid-round parity (terminal-first rebank, BigInt seque
 
     // ---- open long 100x ----
     await programER.methods
-      .open(ASSET_BTC, 1, 100, new BN(STAKE), new BN(0), 0, 0, 0, 0)
+      .open(ASSET_BTC, 1, 100, new BN(STAKE), new BN(0), 0, 0, 0, 0, 0)
       .accounts({
         player: playerPda,
         house: till,

@@ -101,7 +101,7 @@ describe("raider — canonical end-to-end loop (L1 <-> ER, real USDC, provable f
 
     // ---- createMint(6 dec) ----
     const mint = await createMint(conn, funder.payer, funder.publicKey, null, 6);
-    const [masterPda] = PublicKey.findProgramAddressSync([Buffer.from("house"), mint.toBuffer()], program.programId);
+    const [masterPda] = PublicKey.findProgramAddressSync([Buffer.from("house2"), mint.toBuffer()], program.programId);
     const till = deriveTill(program.programId, mint, session.publicKey); // per-session till (was the shared house)
     // Multi-asset feed registry PDA `[b"feeds"]` (admin-owned, already set on devnet). open()
     // binds asset -> feed via it; asset 0 = BTC = BTC_FEED. (Deployed program upgraded past the
@@ -197,7 +197,7 @@ describe("raider — canonical end-to-end loop (L1 <-> ER, real USDC, provable f
     console.log("total (player+house.balance+house.locked) BEFORE open:", totalBefore.toString());
 
     // ---- open(BTC, long, 100x, 1 USDC) on the ER ----
-    await programER.methods.open(ASSET_BTC, 1, 100, new BN(STAKE), new BN(0), 0, 0, 0, 0).accounts({
+    await programER.methods.open(ASSET_BTC, 1, 100, new BN(STAKE), new BN(0), 0, 0, 0, 0, 0).accounts({
       player: playerPda, house: till, round: roundPda, mint,
       priceUpdate: BTC_FEED, registry: feedRegistry, playerAuthority: session.publicKey,
     }).signers([session]).rpc({ skipPreflight: true });

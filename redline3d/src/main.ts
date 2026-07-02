@@ -93,14 +93,18 @@ const session = createGameSession({
   onSettled: (info) => finalizeSettled(info), // terminal-first background lever
   port: selectChainWalletPort(), // Privy by default (app id set); ?wallet=dev forces the dev keypair
 });
-// The cash chip + wallet hero read the on-chain play balance (centi-SOL units). Single writer.
+// The cash chip + wallet hero show the player's TOTAL money — wallet SOL + play balance —
+// one number, the way the player thinks about it ("I sent 5 SOL, I have 5 SOL"). Moving
+// money between wallet and play (buy-in / cash-out) barely moves it; wins and losses do.
+// Display-only: money logic reads `session.balance()` (base units) directly.
+let walletSolUnits = 0; // last-read wallet SOL (centi-SOL units)
 function syncOnchainBalance() {
-  // Un-floored centi-SOL (base lamports / BASE_PER_UNIT) so the balance shows true 3-decimal
-  // SOL — the floored `baseToUnits` would drop sub-0.01 SOL that a cash-out leaves behind.
-  // Display-only: money logic reads `session.balance()` (base units) directly.
-  balance = Number(session.balance()) / BASE_PER_UNIT;
-  hud.setBalance(balance);
-  walletUI.setBalance(balance);
+  // Un-floored centi-SOL (base lamports / BASE_PER_UNIT) so true 3-decimal SOL survives.
+  const play = Number(session.balance()) / BASE_PER_UNIT;
+  const render = () => { balance = play + walletSolUnits; hud.setBalance(balance); walletUI.setBalance(balance); };
+  render();
+  // refresh the wallet side in the background (one getBalance; a pre-sign-in call just keeps 0)
+  void session.walletSol().then((sol) => { walletSolUnits = Number(sol) / BASE_PER_UNIT; render(); }).catch(() => {});
 }
 // The game is fully on-chain: the SOL play balance + round loop live in `session` (the ER round).
 // `balance` is the displayed cash chip, sourced only from the on-chain play balance (centi-SOL units).
@@ -478,12 +482,18 @@ controls.onLaunch(async () => {
       const friendly = e?.code === "delegate_busy" || e?.code === "bankroll_full" || e?.code === "wallet_unfunded";
       hud.setStatus(friendly ? e.message : "Couldn't start the round. Try again.");
       if (e?.code === "wallet_unfunded") walletUI.open(); // show the deposit address right away
+      // A buy-in may have landed before the failure (e.g. bought in, then the bankroll slice
+      // was refused) — refresh so the chip shows the money that DID move into the play balance.
+      void session.refreshBalance(false).then(() => syncOnchainBalance()).catch(() => {});
       return;
     }
-    await session.refreshBalance(true); syncOnchainBalance();
+    // NOTE: no refreshBalance(true) here — ensureSession just computed the authoritative
+    // balance (with a stale-ER-clone guard); a bare ER re-read can serve a stale 0 and
+    // bounce a funded player ("Not enough SOL" — live-hit).
+    syncOnchainBalance();
 
     if (session.balance() < BigInt(unitsToBase(playAmount))) {
-      hud.setStatus("Add SOL to your play balance to race.");
+      hud.setStatus("Not enough SOL for this bet — send SOL to your wallet first.");
       walletUI.open();
       return;
     }
@@ -758,4 +768,8 @@ setInterval(async () => {
 }, 650);
 
 requestAnimationFrame(frame);
+// Returning players see their money at the top immediately: silently restore a persisted
+// login at boot (dev keypair always; Privy only when its session survived in localStorage).
+// A fresh visitor gets NO modal here — their first GO opens the login.
+void session.reconnect().then((ok) => { if (ok) { signedIn = true; syncOnchainBalance(); } }).catch(() => {});
 console.log("redline3d render up");

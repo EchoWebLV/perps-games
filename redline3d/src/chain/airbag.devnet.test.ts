@@ -33,8 +33,8 @@ describe.skipIf(!RUN)("airbag liq refund (devnet)", () => {
     const vaultToken = getAssociatedTokenAddressSync(mint, vaultAuthority, true);
     await program.methods.initHouse().accounts({ authority: funder.publicKey, mint, house, vaultAuthority, vaultToken, tokenProgram: TOKEN_PROGRAM_ID, associatedTokenProgram: ASSOCIATED_TOKEN_PROGRAM_ID, systemProgram: SystemProgram.programId }).rpc({ skipPreflight: true });
     const funderAta = await getOrCreateAssociatedTokenAccount(conn, funder, mint, funder.publicKey);
-    await mintTo(conn, funder, mint, funderAta.address, funder.publicKey, 50_000_000);
-    await program.methods.fundHouse(new anchor.BN(50_000_000)).accounts({ funder: funder.publicKey, mint, house, funderToken: funderAta.address, vaultAuthority, vaultToken, tokenProgram: TOKEN_PROGRAM_ID }).rpc({ skipPreflight: true });
+    await mintTo(conn, funder, mint, funderAta.address, funder.publicKey, 250_000_000);
+    await program.methods.fundHouse(new anchor.BN(250_000_000)).accounts({ funder: funder.publicKey, mint, house, funderToken: funderAta.address, vaultAuthority, vaultToken, tokenProgram: TOKEN_PROGRAM_ID }).rpc({ skipPreflight: true });
 
     // player: throwaway keypair funded with SOL (fees) + tokens (stake)
     const player = Keypair.generate();
@@ -48,35 +48,46 @@ describe.skipIf(!RUN)("airbag liq refund (devnet)", () => {
 
     await chain.buyIn(5_000_000);
     await chain.ensureRoundInited();
-    await chain.sliceFromPot(maxPayoutBase(1_000_000));
+    // 3x one round's max payout: a profitable time-settle must not strand the till below
+    // the next attempt's lock (the same reason the game slices SESSION_TILL_ROUNDS x).
+    await chain.sliceFromPot(maxPayoutBase(1_000_000) * 3);
     await chain.delegate();
 
-    // 1500x long with the max 20% airbag: any ~0.053% dip breaches the 0.20 floor within
-    // the 180s window; the crank observes it and settles the liq with zero client tx.
+    // 1000x with the max 20% airbag: a ~0.08% adverse move breaches the 0.20 floor and the
+    // crank settles the liq with zero client tx. 1000x (not 3000x) keeps the floor band
+    // 0.02% wide, so the breaching tick usually lands INSIDE it (nonzero wreck equity) —
+    // at 3000x a single tick gapped 0.2->0 and the refund sample was the degenerate 0.
+    // A calm-but-drifting market can still time-settle one direction, so alternate
+    // long/short across up to 3 rounds.
     const STAKE = 1_000_000n;
-    await chain.open("BTC", 1, 1500, Number(STAKE), 180, 200_000, 0, 0, 0, 200_000);
-
-    // refund_fp really stamped on the ER round (provable fairness: the knob is on-chain state)
     const erProvider = new anchor.AnchorProvider(new Connection(CHAIN.ER_RPC, { commitment: "confirmed" }), new anchor.Wallet(funder), { commitment: "confirmed" });
     const erProgram = new anchor.Program(idl as anchor.Idl, erProvider);
     const pdas = deriveRaiderPdas(program.programId, player.publicKey, mint);
-    const stamped = await (erProgram.account as any).round.fetch(pdas.round);
-    expect(stamped.refundFp).toBe(200_000);
 
-    await chain.scheduleCrank({ iterations: 190 });
-
-    // wait for the crank to observe the breach and settle (or the 180s time cap)
     let snap = null as Awaited<ReturnType<typeof chain.readRound>>;
-    for (let i = 0; i < 200; i++) {
-      snap = await chain.readRound(true).catch(() => null);
-      if (snap && snap.status === 2) break;
-      await sleep(1000);
+    let balBefore = 0n;
+    let liqSeen = false;
+    for (let attempt = 0; attempt < 3 && !liqSeen; attempt++) {
+      const dir = (attempt % 2 === 0 ? 1 : -1) as 1 | -1;
+      balBefore = await chain.readPlayerBalance(true);
+      await chain.open("BTC", dir, 1000, Number(STAKE), 120, 200_000, 0, 0, 0, 200_000);
+      if (attempt === 0) {
+        // refund_fp really stamped on the ER round (provable fairness: the knob is on-chain state)
+        const stamped = await (erProgram.account as any).round.fetch(pdas.round);
+        expect(stamped.refundFp).toBe(200_000);
+      }
+      await chain.scheduleCrank({ iterations: 130, taskId: 7100 + attempt });
+      for (let i = 0; i < 140; i++) {
+        snap = await chain.readRound(true).catch(() => null);
+        if (snap && snap.status === 2) break;
+        await sleep(1000);
+      }
+      expect(snap?.status).toBe(2);
+      if (snap!.outcomeName === "liq") liqSeen = true;
+      // eslint-disable-next-line no-console
+      else console.log(`attempt ${attempt} (${dir === 1 ? "long" : "short"}): ${snap!.outcomeName} — retrying opposite direction`);
     }
-    expect(snap?.status).toBe(2);
-    if (snap!.outcomeName === "time") {
-      // BTC never dipped 0.053% in 3 minutes — no liq to prove; rerun the suite.
-      throw new Error("round TIME-settled before liquidating — market too calm, rerun");
-    }
+    if (!liqSeen) throw new Error("no liquidation in 3 alternating 1000x rounds — market absurdly flat, rerun");
     expect(snap!.outcomeName).toBe("liq");
 
     // Recompute the wreck equity from the round's own stamped integers, settle.rs-style,
@@ -90,13 +101,13 @@ describe.skipIf(!RUN)("airbag liq refund (devnet)", () => {
     expect(snap!.payout).toBe(expected);
     expect(snap!.payout).toBeLessThanOrEqual(190_000n); // never more than 19% of stake (20% × 0.95 edge)
 
-    // conservation on the ER ledger: balance = buy-in − stake + refund
-    expect(await chain.readPlayerBalance(true)).toBe(5_000_000n - STAKE + snap!.payout);
+    // conservation on the ER ledger across the liq round: balance = before − stake + refund
+    expect(await chain.readPlayerBalance(true)).toBe(balBefore - STAKE + snap!.payout);
 
     // eslint-disable-next-line no-console
     console.log(`AIRBAG PROOF: liq at eq=${Number(eq) / 1e6}x → payout ${snap!.payout} (${Number(snap!.payout) / 10_000}% of stake)`);
 
     await chain.commitAndUndelegate();
     expect(await chain.readRoundStatus(false)).toBe(2);
-  }, 300_000);
+  }, 600_000);
 });

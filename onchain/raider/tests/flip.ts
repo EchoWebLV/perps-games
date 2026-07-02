@@ -73,7 +73,7 @@ describe("raider — flip mid-round parity (terminal-first rebank, BigInt sequen
       6
     );
     const [housePda] = PublicKey.findProgramAddressSync(
-      [Buffer.from("house"), mint.toBuffer()],
+      [Buffer.from("house2"), mint.toBuffer()],
       program.programId
     );
     const [feedRegistry] = PublicKey.findProgramAddressSync(
@@ -234,7 +234,7 @@ describe("raider — flip mid-round parity (terminal-first rebank, BigInt sequen
 
     // ---- open long 50x ----
     await programER.methods
-      .open(ASSET_BTC, 1, 50, new BN(STAKE), new BN(0), 0, 0, 0, 0)
+      .open(ASSET_BTC, 1, 50, new BN(STAKE), new BN(0), 0, 0, 0, 0, 0)
       .accounts({
         player: playerPda,
         house: till,

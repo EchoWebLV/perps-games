@@ -4,6 +4,10 @@ export type ResolvedWalletTarget = "web" | "seeker";
 export interface SolanaWalletPort {
   kind: "web-standard" | "mobile-wallet-adapter";
   connect(): Promise<{ address: string; label?: string }>;
+  /** Silent session restore: resolve the address ONLY if a login already exists (never shows
+   *  a login UI); null when there is nothing to restore. Lets the game show a returning
+   *  player's balance at boot without ambushing a fresh visitor with a modal. */
+  reconnect?(): Promise<{ address: string } | null>;
   disconnect(): Promise<void>;
   currentAddress(): string | null;
   signMessage(message: Uint8Array): Promise<Uint8Array>;

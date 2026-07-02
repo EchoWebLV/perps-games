@@ -3,8 +3,8 @@
 // the conservation invariants are unit-testable in isolation. The `slice_from_pot`
 // and `sweep_till` instruction handlers in lib.rs are thin wrappers over these.
 //
-// Model: ONE master pot PDA `[b"house", mint]` (never delegated) holds the bankroll.
-// Each active session carves a till PDA `[b"house", mint, owner]` off the master for
+// Model: ONE master pot PDA `[HOUSE_SEED, mint]` (never delegated) holds the bankroll.
+// Each active session carves a till PDA `[HOUSE_SEED, mint, owner]` off the master for
 // the duration of its ER session, then sweeps it back. `master.balance + till.balance`
 // is invariant across slice and sweep — value only ever moves between the pot and a
 // till, never in or out.

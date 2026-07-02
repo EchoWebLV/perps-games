@@ -91,7 +91,7 @@ async function buildAndDelegate({ funder, baseProvider, program, houseFund, buyI
   const programAsSession = new anchor.Program(idl, sessionProvider);
 
   const mint = await createMint(conn, funder.payer, funder.publicKey, null, 6);
-  const [housePda] = PublicKey.findProgramAddressSync([Buffer.from("house"), mint.toBuffer()], program.programId);
+  const [housePda] = PublicKey.findProgramAddressSync([Buffer.from("house2"), mint.toBuffer()], program.programId);
   const till = deriveTill(program.programId, mint, session.publicKey); // per-session till (was the shared house)
   const [feedRegistry] = PublicKey.findProgramAddressSync([Buffer.from("feeds")], program.programId);
   const [vaultAuthority] = PublicKey.findProgramAddressSync([Buffer.from("vault"), mint.toBuffer()], program.programId);
@@ -191,7 +191,7 @@ describe("raider close (settle at exit, conserve, provably recomputable)", funct
     console.log("total (player+house.balance+house.locked) BEFORE open:", totalBefore.toString());
 
     // open(BTC, long, 100x, 1 USDC) — settles against the TILL
-    await programER.methods.open(ASSET_BTC, 1, 100, new BN(STAKE), new BN(0), 0, 0, 0, 0).accounts({
+    await programER.methods.open(ASSET_BTC, 1, 100, new BN(STAKE), new BN(0), 0, 0, 0, 0, 0).accounts({
       player: sc.playerPda, house: sc.till, round: sc.roundPda, mint: sc.mint,
       priceUpdate: BTC_FEED, registry: sc.feedRegistry, playerAuthority: sc.session.publicKey,
     }).signers([sc.session]).rpc({ skipPreflight: true });

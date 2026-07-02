@@ -138,7 +138,7 @@ export function createWallet(parent: HTMLElement, opts: WalletOpts): Wallet {
   panel.innerHTML =
     `<div class="wlt-head"><span class="lbl">wallet</span><button class="wlt-x" data-act="close" aria-label="Close">✕</button></div>` +
     `<div class="wlt-hero"><div class="wlt-hero-glow"></div>
-       <div class="wlt-hero-top">${solCoin(22)}<span class="wlt-hero-lbl">Play balance</span></div>
+       <div class="wlt-hero-top">${solCoin(22)}<span class="wlt-hero-lbl">Balance</span></div>
        <div class="wlt-bal"><span id="wltBal">0.000</span><span class="wlt-bal-cur">SOL</span></div>
        <div class="wlt-hero-sub">Solana · devnet</div>
      </div>` +
@@ -151,11 +151,14 @@ export function createWallet(parent: HTMLElement, opts: WalletOpts): Wallet {
   const balEl = q("#wltBal");
   const heroSub = q(".wlt-hero-sub");
 
-  // Wallet's own SOL, refreshed on every open — deposits show up here before the first GO.
+  // Breakdown line under the total: wallet SOL vs money currently in play. Refreshed on
+  // every open — deposits show up here (and in the total) before the first GO.
   const renderWalletSol = () => {
     if (!opts.fetchWalletSol) return;
     void opts.fetchWalletSol().then((sol) => {
-      heroSub.textContent = sol == null ? "Solana · devnet" : `Solana · devnet · wallet ${fmt(sol)} SOL`;
+      if (sol == null) { heroSub.textContent = "Solana · devnet"; return; }
+      const inPlay = opts.onchain.status().playCents / 100;
+      heroSub.textContent = `Solana · devnet · wallet ${fmt(sol)} · in play ${fmt(inPlay)}`;
     }).catch(() => { /* keep the plain network line */ });
   };
 

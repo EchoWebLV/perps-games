@@ -20,7 +20,7 @@ export default defineConfig({
   test: {
     globals: true,
     environment: "node",
-    include: ["src/chain/chain-round.devnet.test.ts"],
+    include: ["src/chain/*.devnet.test.ts"],
     testTimeout: 180_000,
     hookTimeout: 180_000,
   },

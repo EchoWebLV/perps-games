@@ -19,6 +19,7 @@
 import { NodeIO } from "@gltf-transform/core";
 import { resolve, basename, dirname } from "path";
 import { fileURLToPath } from "url";
+import { readFileSync, existsSync } from "fs";
 
 const MODELS_DIR = resolve(dirname(fileURLToPath(import.meta.url)), "../public/models");
 
@@ -610,6 +611,89 @@ function detectByIsland(prims, mn, mx) {
   return wheels;
 }
 
+// ---------- manual detection (wheel-marker overrides) ----------
+// Human-drawn circles from wheel-marker.html (scripts/wheel-overrides.json):
+// each circle is a wheel outline in the side view — (length-coord, y, r) in
+// scene units, covering BOTH mirrored wheels of an axle. Per side, the wheel's
+// axle placement/width comes from the geometry inside the circle: the tire is
+// the outermost dense band, so walk inward from the extreme until a sustained
+// gap. Downstream (cut, recenter, harmonize) is the shared pipeline — the
+// circle is a selector, the captured geometry remains the truth.
+function detectByManual(spec, wv, mn, mx) {
+  const axleAxis = spec.axle === "z" ? 2 : 0;
+  const lengthAxis = axleAxis === 2 ? 0 : 2;
+  const lenKey = axleAxis === 2 ? "x" : "z";
+  const L = Math.max(mx[0] - mn[0], mx[2] - mn[2]);
+  const nv = wv.length / 3;
+  const axleMid = (mn[axleAxis] + mx[axleAxis]) / 2;
+  const wheels = [];
+  spec.circles.forEach((c, ci) => {
+    const cl = c[lenKey];
+    if (!Number.isFinite(cl) || !Number.isFinite(c.y) || !(c.r > 0))
+      throw new Error(`manual circle ${ci}: bad values ${JSON.stringify(c)}`);
+    for (const side of [-1, 1]) {
+      // explicit capture window along the axle (ac = center magnitude,
+      // aw = half-width) — used when density derivation is unreliable
+      // (pink-rod: front tires stick out at |z|≈0.53 while near-centerline
+      // chassis verts chain through any gap rule). Hub z is the spin axis
+      // itself so it has no visual effect; it only bounds the cut.
+      if (Number.isFinite(c.ac) && Number.isFinite(c.aw)) {
+        const hub = [0, c.y, 0];
+        hub[lengthAxis] = cl;
+        hub[axleAxis] = c.ac * side;
+        wheels.push({ hub, radius: c.r, axleAxis, halfWidth: c.aw });
+        continue;
+      }
+      // bottom sector of the circle only: the tire is the ONLY geometry at
+      // the ground side; side pipes / running boards / chassis cross the
+      // circle at hub height and would otherwise register as dense bands
+      // (pink-rod's exhaust, six-wheeler's rocker) — measured, not assumed
+      const coords = [];
+      for (let i = 0; i < nv; i++) {
+        if ((wv[i * 3 + axleAxis] - axleMid) * side <= 0) continue;
+        if (wv[i * 3 + 1] >= c.y - 0.35 * c.r) continue;
+        if (Math.hypot(wv[i * 3 + lengthAxis] - cl, wv[i * 3 + 1] - c.y) > c.r * 1.02) continue;
+        coords.push(wv[i * 3 + axleAxis]);
+      }
+      if (coords.length < 30)
+        throw new Error(`manual circle ${ci} side ${side}: only ${coords.length} verts inside — circle misses the tire?`);
+      // The tire is the outermost DENSE band: its sidewall rings carry 10-50×
+      // the vert density of any body/axle geometry crossing the circle region
+      // (measured on clown-car: sidewalls ~5-7k verts/bin, body ≤500). Keep
+      // bins ≥20% of the peak and take the outermost run of dense bins,
+      // allowing gaps ≤ r between them (the sparse mid-tread dip between the
+      // two sidewall rings). A plain walk-until-gap fails here — the axle
+      // shaft connects the tire to the body with no gap at all.
+      const binW = Math.max(c.r * 0.15, 1e-4);
+      const hist = new Map();
+      for (const a of coords) {
+        const b = Math.round(a / binW);
+        hist.set(b, (hist.get(b) ?? 0) + 1);
+      }
+      const peak = Math.max(...hist.values());
+      const dense = [...hist.entries()].filter(([, n]) => n >= peak * 0.2).map(([b]) => b)
+        .sort((p, q) => (q - p) * side); // outermost first
+      let innerB = dense[0];
+      for (let k = 1; k < dense.length; k++) {
+        // sidewall rings can sit up to ~1.2r apart on wide duallies
+        // (six-wheeler); crossers are already excluded by the bottom filter
+        if (Math.abs(dense[k] - innerB) * binW > c.r * 1.6) break;
+        innerB = dense[k];
+      }
+      const bLo = Math.min(dense[0], innerB) * binW - binW / 2;
+      const bHi = Math.max(dense[0], innerB) * binW + binW / 2;
+      const within = coords.filter((a) => a >= bLo && a <= bHi).sort((p, q) => p - q);
+      const lo = within[Math.floor(within.length * 0.005)];
+      const hi = within[Math.ceil(within.length * 0.995) - 1];
+      const hub = [0, c.y, 0];
+      hub[lengthAxis] = cl;
+      hub[axleAxis] = (lo + hi) / 2;
+      wheels.push({ hub, radius: c.r, axleAxis, halfWidth: Math.max((hi - lo) / 2, c.r * 0.15) });
+    }
+  });
+  return wheels;
+}
+
 // cluster wheels by hub proximity: co-located nodes (tire+rim) = one wheel
 function groupWheels(wheels) {
   const groups = [];
@@ -622,17 +706,19 @@ function groupWheels(wheels) {
 }
 
 // ---------- per-model driver ----------
-async function processModel(io, file, { dry }) {
+async function processModel(io, file, { dry, manual }) {
   const name = basename(file, ".glb");
   const doc = await io.read(file);
   const { prims, mn, mx } = gatherPrims(doc);
-  const wheels = NAMED_PATH.has(name)
-    ? detectByName(doc, prims)
-    : NODE_SHAPE_PATH.has(name)
-      ? detectByNodeShape(prims, mn, mx)
-      : ISLAND_PATH.has(name)
-        ? detectByIsland(prims, mn, mx)
-        : detectByGround(worldVerts(prims), mn, mx);
+  const wheels = manual
+    ? detectByManual(manual, worldVerts(prims), mn, mx)
+    : NAMED_PATH.has(name)
+      ? detectByName(doc, prims)
+      : NODE_SHAPE_PATH.has(name)
+        ? detectByNodeShape(prims, mn, mx)
+        : ISLAND_PATH.has(name)
+          ? detectByIsland(prims, mn, mx)
+          : detectByGround(worldVerts(prims), mn, mx);
   if (!NAMED_PATH.has(name) && doc.getRoot().listSkins().length)
     throw new Error(`${name}: skinned mesh on the geometry path — unsupported`);
   const exp = EXPECTED[name];
@@ -640,7 +726,7 @@ async function processModel(io, file, { dry }) {
   // a physical wheel may be several co-located nodes (cybertruck: tire+rim) —
   // count hub-proximity GROUPS against EXPECTED, rig every member
   const groups = groupWheels(wheels);
-  console.log(`\n=== ${name}: ${groups.length} wheels / ${wheels.length} nodes (expected ${exp})`);
+  console.log(`\n=== ${name}${manual ? " (manual override)" : ""}: ${groups.length} wheels / ${wheels.length} nodes (expected ${exp})`);
   for (const w of wheels)
     console.log(`  wheel hub=[${w.hub.map((v) => v.toFixed(2)).join(", ")}] r=${w.radius.toFixed(3)} (${(100 * w.radius / L).toFixed(1)}%L) axle=${w.axleAxis === 0 ? "X" : "Z"} halfW=${w.halfWidth.toFixed(3)}${w.tagNode ? ` tag:${w.tagNode.getName()}` : ""}`);
   if (groups.length !== exp) throw new Error(`${name}: found ${groups.length} wheels, expected ${exp}`);
@@ -702,11 +788,17 @@ const args = process.argv.slice(2);
 const dry = args.includes("--dry");
 const verify = args.includes("--verify");
 const only = args.includes("--model") ? args[args.indexOf("--model") + 1] : null;
+// human-drawn wheel circles (from wheel-marker.html) override auto-detection;
+// loaded by default so a full re-rig reproduces the manual fixes
+const manualPath = args.includes("--manual")
+  ? args[args.indexOf("--manual") + 1]
+  : resolve(dirname(fileURLToPath(import.meta.url)), "wheel-overrides.json");
+const overrides = existsSync(manualPath) ? JSON.parse(readFileSync(manualPath, "utf8")) : {};
 const io = new NodeIO();
 const names = Object.keys(EXPECTED).filter((n) => !only || n === only);
 for (const n of names) {
   const file = resolve(MODELS_DIR, `${n}.glb`);
   if (verify) await verifyModel(io, file);
-  else await processModel(io, file, { dry });
+  else await processModel(io, file, { dry, manual: overrides[n] ?? null });
 }
 console.log(`\n${verify ? "verify" : dry ? "dry-run" : "rig"} complete: ${names.length} models`);
