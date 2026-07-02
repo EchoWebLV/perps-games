@@ -356,6 +356,7 @@ function exitHighwayToLobby() {
   oval.hide();
   tach.rebuild(effRmax());
   setAbility(ability); // restore the car's own buttons/toggles
+  audio.engine(0, false); // the highway drives the drone every frame; silence it for the lobby
   enterLobby();
 }
 
@@ -532,7 +533,9 @@ controls.onLaunch(async () => {
       return;
     }
     const dir = controls.dir();
-    const lev = clampInt(game.lev, 10, 3000); // on-chain RMAX=3000
+    // Highway: you pull onto the road from a stop — open in bottom gear (10×); the ladder
+    // takes it from there. Racer: the throttle's live leverage, on-chain RMAX=3000.
+    const lev = mode === "highway" ? levOf(0) : clampInt(game.lev, 10, 3000);
     roundMaxSec = effMaxSec(); // freeze this round's time cap (Heavy Load: +50%)
     hud.setStatus("Launching…");
     let opened;
@@ -579,7 +582,14 @@ controls.onLaunch(async () => {
     roundActive = true;
     nearDeath = false; deathsDoor.clear(); // fresh round → drop any lingering Skull near-death state
     autoExit.setLive(true); // Pink Rod panel: armed + locked (values stamped on-chain at open)
-    chase.setDriving(true);
+    if (mode === "highway") {
+      // locked direction = locked carriageway: respawn on the on-ramp of your side
+      drive = spawnPose(dir);
+      hwGear = 0;
+      game.lev = lev;
+    } else {
+      chase.setDriving(true);
+    }
     controls.setLive(true, "CASH OUT");
     garage.setBusy(true); mapBtn.setVisible(false); upgrades.setBusy(true); walletUI.setBusy(true);
     hud.setStatus(session.crankArmed() ? "" : "⚠ Auto cash-out is off this round — tap CASH OUT before the timer ends.");
