@@ -5,7 +5,7 @@ import * as THREE from "three";
 import { createScene } from "./render/scene";
 import { createWorld } from "./render/world";
 import { createCar } from "./render/car";
-import { createChaseCam, roadSpeed } from "./render/camera";
+import { createChaseCam, ROAD_SPEED_MAX, roadSpeed } from "./render/camera";
 import { detectQuality } from "./platform/perf";
 import { createPost } from "./render/post";
 import { createHud } from "./ui/hud";
@@ -376,8 +376,8 @@ function enterHighway() {
   // racer-only ability buttons are meaningless here — the gear ladder owns leverage
   nitro.setEnabled(false); flux.setEnabled(false); autoExit.setEnabled(false);
   hwBillboardCd = 0; // fresh entry → redraw the billboard immediately (no stale asset/price beat)
-  // pitch composes over yaw on the hills (YXZ = yaw outer, pitch local); every mode
-  // entry asserts its own order (the racer restores XYZ in exitLobby)
+  // pitch composes over yaw on the hills (YXZ = yaw outer, pitch local); all modes
+  // share YXZ since the 7H racer rebuild — see the boot-time note
   car.group.rotation.order = "YXZ";
   audio.resume(); radio.resume();
 }
@@ -425,7 +425,6 @@ let carXTarget = 0;
 let lane: LaneState = { x: 0, vx: 0, yaw: 0, steer: 0 };
 let prevRoadSpeed = 0;        // road speed last frame → the racer's squat/dive accel
 const CAR_Z = -12;            // the racer car's fixed z — the road scrolls past it
-const ROAD_SPEED_MAX = 277;   // roadSpeed()'s base top end (render/camera) → speedFrac for lane physics
 const PARK_RECENTRE = 7.6;    // s⁻¹ target-recentre while parked (≈ the old 0.12-per-frame @60fps)
 const ROAD_ACCEL_SCALE = 120; // road-speed delta (u/s²) that reads as FULL squat/dive — a full-throttle
                               // spool-up (~52 throttle/s) peaks around here, so launches pin the nose up

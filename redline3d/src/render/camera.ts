@@ -3,10 +3,15 @@ import * as THREE from "three";
 const clamp = (v: number, a: number, b: number) => Math.max(a, Math.min(b, v));
 const smooth = (t: number) => t * t * (3 - 2 * t); // smoothstep ease
 
+// base road-speed curve ends (before the equity/nitro boosts); main.ts normalizes the
+// lane-drive speedFrac by ROAD_SPEED_MAX, so deriving it here keeps them in sync
+const ROAD_SPEED_MIN = 42;
+export const ROAD_SPEED_MAX = ROAD_SPEED_MIN + 235; // gentler top end (was 404)
+
 /** road speed in world units/sec from the throttle fraction (winning revs harder) */
 export function roadSpeed(speedFrac: number, equity: number, live: boolean): number {
   const f = clamp(speedFrac, 0, 1);
-  const base = 42 + Math.pow(f, 1.6) * 235; // ~42 .. 277 — gentler top end (was 404)
+  const base = ROAD_SPEED_MIN + Math.pow(f, 1.6) * (ROAD_SPEED_MAX - ROAD_SPEED_MIN);
   const boost = live ? clamp(0.9 + Math.max(0, equity) * 0.06, 0.9, 1.3) : 1;
   return base * boost;
 }

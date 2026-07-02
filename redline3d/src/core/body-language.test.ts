@@ -19,10 +19,10 @@ describe("body-language (shared drive-mode roll/pitch)", () => {
     const b = run(144, 1, 0.8, 1, 13, 26);
     expect(a.roll).toBeCloseTo(b.roll, 10);
     expect(a.pitch).toBeCloseTo(b.pitch, 10);
-    // and both sit essentially on the target after 1s (rate 10 ⇒ e^-10 ≈ 0)
-    expect(a.roll).toBeCloseTo(-0.8 * ROLL_MAX, 4);
-    expect(a.pitch).toBeCloseTo(0.5 * PITCH_MAX, 4);
-    expect(BODY_EASE_RATE).toBe(10);
+    // and both sit exactly on the analytic 1s value — rate-agnostic, survives a retune
+    const settled = 1 - Math.exp(-BODY_EASE_RATE * 1);
+    expect(a.roll).toBeCloseTo(-0.8 * ROLL_MAX * settled, 10);
+    expect(a.pitch).toBeCloseTo(0.5 * PITCH_MAX * settled, 10);
   });
 
   test("accel clamps at ±accelScale: a monster launch can't fold the car in half", () => {
