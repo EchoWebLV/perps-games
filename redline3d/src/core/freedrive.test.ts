@@ -56,7 +56,7 @@ describe("freedrive.step (kinematic bicycle + arcade input layer)", () => {
   it("applies an expo curve: half input gives well under half the steer of full input", () => {
     const half = drive({ ...spawn(), speed: 4 }, { throttle: 0.01, steer: 0.5 }, 60);
     const full = drive({ ...spawn(), speed: 4 }, { throttle: 0.01, steer: 1 }, 60);
-    expect(half.steer / full.steer).toBeLessThan(0.45); // 0.5^1.8 ≈ 0.287
+    expect(half.steer / full.steer).toBeLessThan(0.45); // 0.5^1.5 ≈ 0.354 (expo retuned 1.8→1.5)
   });
 
   it("steering reverses sense when backing up", () => {
@@ -78,6 +78,92 @@ describe("freedrive.step (kinematic bicycle + arcade input layer)", () => {
     expect(s.z).toBeGreaterThanOrEqual(-60 - 1e-6);
     expect(s.z).toBeCloseTo(-60, 5);
     expect(s.speed).toBe(0);
+  });
+});
+
+// ——— arcade grip model: velocity is a world-space vector with lateral tire grip ———
+// drift angle = |velocity bearing − heading| in degrees (0 when velocity is railed to heading)
+const driftDeg = (s: DriveState) => {
+  const bearing = Math.atan2(s.vx!, -s.vz!); // same convention as heading: 0 faces −Z
+  let d = bearing - s.heading;
+  while (d > Math.PI) d -= 2 * Math.PI;
+  while (d < -Math.PI) d += 2 * Math.PI;
+  return (Math.abs(d) * 180) / Math.PI;
+};
+const BIG = { x: 1e9, z: 1e9 };
+
+describe("arcade grip model (vector momentum + lateral grip)", () => {
+  it("momentum exists: velocity direction lags the heading in a snap turn at highway speed", () => {
+    let s: DriveState = { x: 0, z: 0, heading: 0, speed: HIGHWAY_DRIVE.MAX_FWD, steer: 0 };
+    let maxDrift = 0;
+    for (let i = 0; i < 18; i++) { // 0.3s of full lock, flat out
+      s = step(s, { throttle: 1, steer: 1 }, 1 / 60, BIG, HIGHWAY_DRIVE);
+      maxDrift = Math.max(maxDrift, driftDeg(s));
+    }
+    expect(maxDrift).toBeGreaterThan(2); // the car carves with visible slip — not railed
+  });
+
+  it("grip reels it back: drift decays toward zero within ~1s of releasing the steer", () => {
+    let s: DriveState = { x: 0, z: 0, heading: 0, speed: HIGHWAY_DRIVE.MAX_FWD, steer: 0 };
+    for (let i = 0; i < 18; i++) s = step(s, { throttle: 1, steer: 1 }, 1 / 60, BIG, HIGHWAY_DRIVE);
+    expect(driftDeg(s)).toBeGreaterThan(2); // drift built up
+    for (let i = 0; i < 60; i++) s = step(s, { throttle: 1, steer: 0 }, 1 / 60, BIG, HIGHWAY_DRIVE);
+    expect(driftDeg(s)).toBeLessThan(0.5); // tires reeled the velocity back onto the heading
+  });
+
+  it("stays railed at parking speeds even at full lock (no silly low-speed drifting)", () => {
+    for (const tune of [DRIVE, HIGHWAY_DRIVE]) {
+      let s: DriveState = { x: 0, z: 0, heading: 0, speed: 4.8, steer: 0 };
+      let maxDrift = 0;
+      for (let i = 0; i < 60; i++) { // coasts down from 4.8 — whole window is parking pace
+        s = step(s, { throttle: 0, steer: 1 }, 1 / 60, BIG, tune);
+        maxDrift = Math.max(maxDrift, driftDeg(s));
+      }
+      expect(maxDrift).toBeLessThan(0.5);
+    }
+  });
+
+  it("speed reads only the forward component during a slide (tach can't rev sideways)", () => {
+    // heading 0 (forward = −Z): 30 u/s forward + 20 u/s sideways momentum
+    const s0: DriveState = { x: 0, z: 0, heading: 0, speed: 30, steer: 0, vx: 20, vz: -30 };
+    const s = step(s0, { throttle: 0, steer: 0 }, 1 / 60, BIG, HIGHWAY_DRIVE);
+    expect(s.speed).toBeGreaterThan(28); // ≈ the drag-decayed forward 30, not hypot(20,30)≈36
+    expect(s.speed).toBeLessThan(30);
+    expect(Math.abs(s.speed)).toBeLessThanOrEqual(Math.hypot(s.vx!, s.vz!) + 1e-9);
+    expect(Math.hypot(s.vx!, s.vz!)).toBeGreaterThan(Math.abs(s.speed) + 1); // lateral memory survives the step
+  });
+
+  it("legacy state without vx/vz steps identically to an explicitly seeded one", () => {
+    const h = 0.83, v = 17;
+    const legacy: DriveState = { x: 3, z: -2, heading: h, speed: v, steer: 0.1 };
+    const seeded: DriveState = { ...legacy, vx: Math.sin(h) * v, vz: -Math.cos(h) * v };
+    const input = { throttle: 0.7, steer: -0.4 };
+    const a = step(legacy, input, 1 / 60, BOUNDS);
+    const b = step(seeded, input, 1 / 60, BOUNDS);
+    expect(Math.abs(a.x - b.x)).toBeLessThan(1e-12);
+    expect(Math.abs(a.z - b.z)).toBeLessThan(1e-12);
+    expect(Math.abs(a.heading - b.heading)).toBeLessThan(1e-12);
+    expect(Math.abs(a.speed - b.speed)).toBeLessThan(1e-12);
+  });
+
+  it("wall contact kills only the axis into the wall — the car slides along it", () => {
+    // 45° heading: diagonal momentum into the +X wall while also moving −Z
+    const h = Math.PI / 4;
+    const s0: DriveState = { x: 59.9, z: 0, heading: h, speed: 20, steer: 0 };
+    const s = step(s0, { throttle: 0, steer: 0 }, 1 / 60, BOUNDS);
+    expect(s.x).toBe(BOUNDS.x); // clamped at the wall
+    expect(s.vx).toBe(0);       // the INTO-wall component died…
+    expect(s.vz).toBeLessThan(0); // …but the tangential one survived
+    expect(s.z).toBeLessThan(s0.z);
+    const s2 = step(s, { throttle: 0, steer: 0 }, 1 / 60, BOUNDS);
+    expect(s2.z).toBeLessThan(s.z); // still sliding along the wall the next frame
+  });
+
+  it("NaN inputs cannot poison the state", () => {
+    const s = step({ ...spawn(), speed: 15 }, { throttle: NaN, steer: NaN }, 1 / 60, BOUNDS);
+    for (const v of [s.x, s.z, s.heading, s.speed, s.steer]) {
+      expect(Number.isFinite(v)).toBe(true);
+    }
   });
 });
 

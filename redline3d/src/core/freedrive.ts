@@ -2,8 +2,14 @@ export interface DriveState {
   x: number;        // body-centre world X
   z: number;        // body-centre world Z
   heading: number;  // yaw, radians; 0 faces -Z (the game's forward)
-  speed: number;    // signed: + forward, - reverse
+  speed: number;    // signed FORWARD component of velocity: + forward, - reverse
+                    // (gears/audio/HUD consume this — a sideways slide must not rev the tach)
   steer: number;    // current front-wheel angle, radians (eased toward input)
+  // world-space velocity vector — the momentum. OPTIONAL for backward compat: legacy
+  // literals / spawn poses / mode entries omit them and step() derives heading×speed.
+  // step() always fills them on the way out.
+  vx?: number;
+  vz?: number;
 }
 export interface DriveInput { throttle: number; steer: number }
 export interface Bounds { x: number; z: number }
@@ -17,8 +23,10 @@ export const DRIVE = {
   WHEELBASE: 6,         // front-to-rear axle distance — sets the turn radius
   MAX_STEER_LOW: 0.52,  // ~30° full lock at low speed → tight parking-lot turns
   MAX_STEER_HIGH: 0.13, // ~7.5° at top speed → stable, not twitchy
-  STEER_EXPO: 1.8,      // input curve: flat near centre, full lock only at the edge
-  STEER_RATE: 9,        // frame-rate-independent ease rate toward the target steer angle
+  STEER_EXPO: 1.5,      // input curve: flat near centre, full lock at the edge (1.8 felt dead around centre)
+  STEER_RATE: 12,       // frame-rate-independent ease rate toward the target steer angle (9 felt laggy — "janky")
+  GRIP: 8,              // lateral-velocity bleed rate (s⁻¹) — tight, parking-lot grippy;
+                        // high enough to approximate the old heading-railed feel closely
 };
 
 /** a full tuning preset for step() — same shape as DRIVE (future per-car tunes anchor here) */
@@ -37,61 +45,107 @@ export const HIGHWAY_DRIVE: DriveTune = {
   WHEELBASE: 6.5,       // slightly longer car stance = steadier at speed
   MAX_STEER_LOW: 0.5,
   MAX_STEER_HIGH: 0.05,
-  STEER_EXPO: 1.8,
-  STEER_RATE: 8,        // a touch slower ease = less twitch at 100 u/s
+  STEER_EXPO: 1.5,      // matched to the lot — same hand feel across modes
+  STEER_RATE: 10,       // a touch slower ease than the lot = less twitch at 100 u/s
+  GRIP: 4.5,            // loose enough to carve with visible slip at 100 u/s —
+                        // lifting off mid-corner lets the nose rotate in
 };
 
 const clamp = (v: number, a: number, b: number) => Math.max(a, Math.min(b, v));
 // frame-rate-independent approach factor: ease `cur` toward a target by `rate` per second
 const approach = (rate: number, dt: number) => 1 - Math.exp(-rate * dt);
+// NaN-proof an input axis (a dead gamepad/touch axis must not poison position/heading)
+const finite = (v: number) => (Number.isNaN(v) ? 0 : v);
+
+// LOW-SPEED RAIL: real tires don't slide at parking pace. A constant GRIP loose enough
+// to carve at 100 u/s would also let the car drift at 3 u/s, which looks silly — so
+// effective grip ramps steeply below RAIL_SPEED (quadratic in the shortfall keeps the
+// hand-off into carve territory smooth). At/above RAIL_SPEED the preset's GRIP is pure.
+const RAIL_SPEED = 12;  // u/s
+const RAIL_GRIP = 180;  // extra bleed rate at standstill — rails parking maneuvers
 
 /**
- * One step of a kinematic bicycle model with an arcade input layer. The car pivots
- * around its REAR axle (front wheels steer), so it arcs like a real vehicle and can't
- * spin in place. The input layer — validated by the steering research — is what makes
- * it feel right:
+ * One step of an arcade grip-car model: a kinematic bicycle for the STEERING GEOMETRY,
+ * but velocity is a world-space VECTOR that does not rotate with the body — yawing at
+ * speed leaves the velocity lagging the heading (momentum you can feel), and the tires
+ * bleed the lateral component at tune.GRIP (high = railed, finite = carve-with-slip).
+ * The car still pivots around its REAR axle (front wheels steer), so it arcs like a
+ * real vehicle and can't spin in place; yaw is driven by the FORWARD component only,
+ * so sliding sideways can't steer the car. The input layer — validated by the steering
+ * research — is unchanged:
  *   • expo curve on the steer input (fine control near centre, full lock at the edge)
  *   • speed-sensitive max steer angle (full lock slow, gentle fast)
  *   • frame-rate-independent easing of the wheel angle (auto-centres on release)
- *   • frame-rate-independent coast-down so it settles instead of gliding ("slippery")
+ *   • frame-rate-independent coast-down of the forward component ("slippery"-proof)
+ * Compat contract: `speed` stays authoritative for the forward component on the way IN
+ * (external code scales it, e.g. the track wall scrape) — vx/vz only carry the lateral
+ * memory between steps, and are derived from heading×speed when absent (legacy states).
  * `tune` selects the tuning preset (defaults to the lot's DRIVE; pass HIGHWAY_DRIVE on the track).
  */
 export function step(s: DriveState, input: DriveInput, dt: number, bounds: Bounds, tune: DriveTune = DRIVE): DriveState {
-  const th = clamp(input.throttle, -1, 1);
+  const th = clamp(finite(input.throttle), -1, 1);
 
   // expo steer input: flat near centre for precision, steep at the edge for full lock
-  const raw = clamp(input.steer, -1, 1);
+  const raw = clamp(finite(input.steer), -1, 1);
   const sIn = Math.sign(raw) * Math.pow(Math.abs(raw), tune.STEER_EXPO);
 
-  // longitudinal: gas/reverse, else coast toward 0 (fps-independent so it isn't slippery)
-  let v = s.speed;
-  if (Math.abs(th) > 0.05) v += th * tune.ACCEL * dt;
-  else v -= v * approach(tune.DRAG, dt);
-  v = clamp(v, -tune.MAX_REV, tune.MAX_FWD);
+  // body frame BEFORE the yaw step (lat ⟂ fwd in the XZ plane)
+  const fwdX = Math.sin(s.heading), fwdZ = -Math.cos(s.heading);
+  const latX = -fwdZ, latZ = fwdX;
+
+  // decompose the momentum: forward comes from `speed` (authoritative — see docstring),
+  // lateral from the stored vector (zero for legacy states = starts perfectly railed)
+  let vFwd = s.speed;
+  let vLat = s.vx !== undefined && s.vz !== undefined ? s.vx * latX + s.vz * latZ : 0;
+
+  // longitudinal: gas/reverse push along the CURRENT heading (rear wheels drive the
+  // body), else coast the forward component toward 0 (fps-independent, same feel as
+  // the railed model); cap by clamping the forward component ONLY — a slide must not
+  // eat the throttle budget
+  if (Math.abs(th) > 0.05) vFwd += th * tune.ACCEL * dt;
+  else vFwd -= vFwd * approach(tune.DRAG, dt);
+  vFwd = clamp(vFwd, -tune.MAX_REV, tune.MAX_FWD);
 
   // speed-sensitive steer authority: full lock when slow, gentle when fast
-  const speedFrac = Math.min(1, Math.abs(v) / tune.MAX_FWD);
+  const speedFrac = Math.min(1, Math.abs(vFwd) / tune.MAX_FWD);
   const maxSteer = tune.MAX_STEER_LOW + (tune.MAX_STEER_HIGH - tune.MAX_STEER_LOW) * speedFrac;
   const target = sIn * maxSteer;
   // ease the front wheels toward the target (auto-centres as target→0 on release)
   const steer = s.steer + (target - s.steer) * approach(tune.STEER_RATE, dt);
 
+  // yaw: bicycle law off the FORWARD component (vFwd sign makes reverse steer correctly)
   const L = tune.WHEELBASE;
-  // rear axle from the current centre, along the current heading
-  const fwdX = Math.sin(s.heading), fwdZ = -Math.cos(s.heading);
-  let rx = s.x - fwdX * (L / 2), rz = s.z - fwdZ * (L / 2);
-  // advance the rear axle, then pivot about it (v sign makes reverse steer correctly)
-  rx += fwdX * v * dt; rz += fwdZ * v * dt;
-  const heading = s.heading + (v / L) * Math.tan(steer) * dt;
-  // recover the body centre from the new heading
+  const heading = s.heading + (vFwd / L) * Math.tan(steer) * dt;
   const nfwdX = Math.sin(heading), nfwdZ = -Math.cos(heading);
-  let x = rx + nfwdX * (L / 2), z = rz + nfwdZ * (L / 2);
+  const nlatX = -nfwdZ, nlatZ = nfwdX;
 
-  // soft walls: clamp the centre, kill speed on contact
-  if (x > bounds.x) { x = bounds.x; v = 0; }
-  else if (x < -bounds.x) { x = -bounds.x; v = 0; }
-  if (z > bounds.z) { z = bounds.z; v = 0; }
-  else if (z < -bounds.z) { z = -bounds.z; v = 0; }
+  // momentum: the velocity vector stays put in WORLD space while the body yaws —
+  // re-decompose it along the new heading, so forward bleeds into lateral (drift)
+  const wx = fwdX * vFwd + latX * vLat, wz = fwdZ * vFwd + latZ * vLat;
+  vFwd = clamp(wx * nfwdX + wz * nfwdZ, -tune.MAX_REV, tune.MAX_FWD);
+  vLat = wx * nlatX + wz * nlatZ;
 
-  return { x, z, heading, speed: v, steer };
+  // grip: the tires bleed the lateral component — preset GRIP sets the at-speed feel,
+  // the low-speed rail boost keeps parking maneuvers slip-free (see RAIL_* above)
+  const shortfall = Math.max(0, 1 - Math.abs(vFwd) / RAIL_SPEED);
+  vLat *= Math.exp(-(tune.GRIP + RAIL_GRIP * shortfall * shortfall) * dt);
+
+  let vx = nfwdX * vFwd + nlatX * vLat, vz = nfwdZ * vFwd + nlatZ * vLat;
+
+  // advance by the FULL vector (this is what makes momentum real) + the rear-axle
+  // pivot swing of the body centre (same arc the railed model had)
+  let x = s.x + vx * dt + (nfwdX - fwdX) * (L / 2);
+  let z = s.z + vz * dt + (nfwdZ - fwdZ) * (L / 2);
+
+  // soft walls: clamp the centre, kill ONLY the component into the clamped axis —
+  // the tangential one survives, so the car slides along the wall, not a dead stop
+  let hitWall = false;
+  if (x > bounds.x) { x = bounds.x; vx = 0; hitWall = true; }
+  else if (x < -bounds.x) { x = -bounds.x; vx = 0; hitWall = true; }
+  if (z > bounds.z) { z = bounds.z; vz = 0; hitWall = true; }
+  else if (z < -bounds.z) { z = -bounds.z; vz = 0; hitWall = true; }
+  // wall contact changed the vector, so re-project to keep the `speed` invariant honest
+  const speed = hitWall ? vx * nfwdX + vz * nfwdZ : vFwd;
+
+  return { x, z, heading, speed, steer, vx, vz };
 }
