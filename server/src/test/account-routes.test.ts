@@ -58,3 +58,36 @@ describe("coins earn/spend", () => {
     expect(rb.json().coins).toBe(20); // must NOT be swallowed by A's identical ref
   });
 });
+
+describe("scrap earn/spend", () => {
+  let ctx: TestCtx;
+  afterEach(async () => { await ctx?.close(); });
+
+  it("earns and spends scrap independently of coins", async () => {
+    ctx = await makeTestDb({ signupFaucet: false });
+    const earn = await ctx.server.inject({ method: "POST", url: "/v1/scrap/earn", headers: H, payload: { amount: 5, ref: "se1" } });
+    expect(earn.statusCode).toBe(200);
+    expect(earn.json().scrap).toBe(5);
+
+    const spend = await ctx.server.inject({ method: "POST", url: "/v1/scrap/spend", headers: H, payload: { amount: 2, ref: "ss1" } });
+    expect(spend.statusCode).toBe(200);
+    expect(spend.json().scrap).toBe(3);
+  });
+
+  it("402s when spending more scrap than the balance", async () => {
+    ctx = await makeTestDb({ signupFaucet: false });
+    const res = await ctx.server.inject({ method: "POST", url: "/v1/scrap/spend", headers: H, payload: { amount: 9, ref: "z" } });
+    expect(res.statusCode).toBe(402);
+    expect(res.json().error).toBe("insufficient_balance");
+  });
+
+  it("does not collide scrap refs across different users", async () => {
+    ctx = await makeTestDb({ signupFaucet: false });
+    const A = { "x-dev-user": "scrapA", "content-type": "application/json" };
+    const B = { "x-dev-user": "scrapB", "content-type": "application/json" };
+    const ra = await ctx.server.inject({ method: "POST", url: "/v1/scrap/earn", headers: A, payload: { amount: 8, ref: "shared" } });
+    const rb = await ctx.server.inject({ method: "POST", url: "/v1/scrap/earn", headers: B, payload: { amount: 8, ref: "shared" } });
+    expect(ra.json().scrap).toBe(8);
+    expect(rb.json().scrap).toBe(8); // must NOT be swallowed by A's identical ref
+  });
+});

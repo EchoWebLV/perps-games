@@ -91,6 +91,25 @@ export function registerRoutes(server: FastifyInstance, deps: RouteDeps): void {
     return { coins: await deps.ledger.balance(req.userId!, "coin") };
   });
 
+  server.post("/v1/scrap/earn", { preHandler: requireUser }, async (req, reply) => {
+    const p = CoinDelta.safeParse(req.body);
+    if (!p.success) return reply.code(400).send({ error: "bad_request" });
+    await deps.ledger.credit(req.userId!, "scrap", p.data.amount, "scrap_earn", `${req.userId!}:${p.data.ref}`);
+    return { scrap: await deps.ledger.balance(req.userId!, "scrap") };
+  });
+
+  server.post("/v1/scrap/spend", { preHandler: requireUser }, async (req, reply) => {
+    const p = CoinDelta.safeParse(req.body);
+    if (!p.success) return reply.code(400).send({ error: "bad_request" });
+    try {
+      await deps.ledger.debit(req.userId!, "scrap", p.data.amount, "scrap_spend", `${req.userId!}:${p.data.ref}`);
+    } catch (e: any) {
+      if (e?.message === "insufficient balance") return reply.code(402).send({ error: "insufficient_balance" });
+      throw e;
+    }
+    return { scrap: await deps.ledger.balance(req.userId!, "scrap") };
+  });
+
   server.get("/v1/inventory", { preHandler: requireUser }, async (req) => {
     const rows = await deps.inventory.list(req.userId!);
     return { cars: rows.map((r) => ({ carId: r.carId, acquiredAt: r.acquiredAt })) };
