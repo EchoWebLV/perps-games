@@ -47,4 +47,14 @@ describe("coins earn/spend", () => {
     expect(res.statusCode).toBe(402);
     expect(res.json().error).toBe("insufficient_balance");
   });
+
+  it("does not collide refs across different users", async () => {
+    ctx = await makeTestDb({ signupFaucet: false });
+    const A = { "x-dev-user": "userA", "content-type": "application/json" };
+    const B = { "x-dev-user": "userB", "content-type": "application/json" };
+    const ra = await ctx.server.inject({ method: "POST", url: "/v1/coins/earn", headers: A, payload: { amount: 20, ref: "shared" } });
+    const rb = await ctx.server.inject({ method: "POST", url: "/v1/coins/earn", headers: B, payload: { amount: 20, ref: "shared" } });
+    expect(ra.json().coins).toBe(20);
+    expect(rb.json().coins).toBe(20); // must NOT be swallowed by A's identical ref
+  });
 });
