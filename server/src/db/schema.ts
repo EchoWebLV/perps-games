@@ -37,7 +37,7 @@ export const users = pgTable(
 export type User = typeof users.$inferSelect;
 
 /** ledger asset: soft play-money (faucet, never withdrawable) vs USDC-backed real money */
-export const ledgerAsset = pgEnum("ledger_asset", ["coin", "cash"]);
+export const ledgerAsset = pgEnum("ledger_asset", ["coin", "cash", "scrap"]);
 
 /** append-only money ledger. balance = sum(delta). amounts are INTEGER coins. */
 export const ledgerEntries = pgTable(

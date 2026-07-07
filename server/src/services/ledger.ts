@@ -1,7 +1,7 @@
 import { eq, and, sql } from "drizzle-orm";
 import { ledgerEntries } from "../db/schema.js";
 
-export type Asset = "coin" | "cash";
+export type Asset = "coin" | "cash" | "scrap";
 
 /** reasons that move real USDC — each MUST carry a non-null ref (idempotency cannot be bypassed) */
 const CASH_REASONS = new Set(["deposit", "withdraw_reserve", "withdraw_reverse"]);

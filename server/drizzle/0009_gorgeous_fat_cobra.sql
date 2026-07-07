@@ -1,0 +1,1 @@
+ALTER TYPE "public"."ledger_asset" ADD VALUE 'scrap';
