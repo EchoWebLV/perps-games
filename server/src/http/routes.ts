@@ -46,6 +46,11 @@ const DepositSendBody = z.object({
   depositIntent: z.string().min(1),
   signedTxBase64: z.string().min(1),
 });
+const MigrateBody = z.object({
+  coins: z.number().int().min(0),
+  scrap: z.number().int().min(0),
+  cars: z.record(z.string().min(1), z.number().int().positive()),
+});
 
 const OpenRound = z.object({
   asset: z.enum(["BTC", "ETH", "SOL"]),
@@ -128,6 +133,30 @@ export function registerRoutes(server: FastifyInstance, deps: RouteDeps): void {
     if (!p.success) return reply.code(400).send({ error: "bad_request" });
     const r = await deps.inventory.melt(req.userId!, p.data.carId);
     return { carId: p.data.carId, melted: r.melted, count: r.count };
+  });
+
+  // FIRST-BIND migration: seed a brand-new (empty) server account from the player's local save.
+  // Refuses (and never sums) if the account already has any coins/scrap/cars — prevents a
+  // returning player's local save from double-crediting a server balance that already moved.
+  // Ledger refs are namespaced by userId (`migrate:${userId}`) so a duplicate call can't double-credit.
+  server.post("/v1/migrate", { preHandler: requireUser }, async (req, reply) => {
+    const p = MigrateBody.safeParse(req.body);
+    if (!p.success) return reply.code(400).send({ error: "bad_request" });
+    const userId = req.userId!;
+    const [coins, scrap, cars] = await Promise.all([
+      deps.ledger.balance(userId, "coin"),
+      deps.ledger.balance(userId, "scrap"),
+      deps.inventory.list(userId),
+    ]);
+    if (coins > 0 || scrap > 0 || cars.length > 0) {
+      return { seeded: false, reason: "account_not_empty" };
+    }
+    if (p.data.coins > 0) await deps.ledger.credit(userId, "coin", p.data.coins, "migrate_seed", `migrate:${userId}`);
+    if (p.data.scrap > 0) await deps.ledger.credit(userId, "scrap", p.data.scrap, "scrap_migrate_seed", `migrate:${userId}`);
+    for (const [carId, n] of Object.entries(p.data.cars)) {
+      for (let i = 0; i < n; i++) await deps.inventory.grant(userId, carId);
+    }
+    return { seeded: true };
   });
 
   server.get("/v1/me", { preHandler: requireUser }, async (req) => {
