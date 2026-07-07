@@ -23,3 +23,28 @@ describe("GET /v1/me account state", () => {
     expect(body.cars).toEqual([{ carId: "orion", count: 2, acquiredAt: expect.anything() }]);
   });
 });
+
+describe("coins earn/spend", () => {
+  let ctx: TestCtx;
+  afterEach(async () => { await ctx?.close(); });
+
+  it("earns coins (idempotent on ref) and spends them", async () => {
+    ctx = await makeTestDb({ signupFaucet: false });
+    const earn = await ctx.server.inject({ method: "POST", url: "/v1/coins/earn", headers: H, payload: { amount: 30, ref: "e1" } });
+    expect(earn.statusCode).toBe(200);
+    expect(earn.json().coins).toBe(30);
+    // replay same ref → swallowed
+    await ctx.server.inject({ method: "POST", url: "/v1/coins/earn", headers: H, payload: { amount: 30, ref: "e1" } });
+
+    const spend = await ctx.server.inject({ method: "POST", url: "/v1/coins/spend", headers: H, payload: { amount: 12, ref: "s1" } });
+    expect(spend.statusCode).toBe(200);
+    expect(spend.json().coins).toBe(18);
+  });
+
+  it("402s when spending more coins than the balance", async () => {
+    ctx = await makeTestDb({ signupFaucet: false });
+    const res = await ctx.server.inject({ method: "POST", url: "/v1/coins/spend", headers: H, payload: { amount: 5, ref: "x" } });
+    expect(res.statusCode).toBe(402);
+    expect(res.json().error).toBe("insufficient_balance");
+  });
+});

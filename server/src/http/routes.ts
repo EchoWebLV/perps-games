@@ -34,6 +34,7 @@ export interface RouteDeps {
 }
 
 const GrantCoins = z.object({ amount: z.number().int().positive() });
+const CoinDelta = z.object({ amount: z.number().int().positive(), ref: z.string().min(1) });
 const GrantCar = z.object({ carId: z.string().min(1) });
 const WalletBindChallengeBody = z.object({ wallet: z.string().min(32).max(44) });
 const WalletBindBody = z.object({
@@ -69,6 +70,25 @@ export function registerRoutes(server: FastifyInstance, deps: RouteDeps): void {
 
   server.get("/v1/balance", { preHandler: requireUser }, async (req) => {
     return { balance: await deps.ledger.balance(req.userId!, deps.stakeAsset) };
+  });
+
+  server.post("/v1/coins/earn", { preHandler: requireUser }, async (req, reply) => {
+    const p = CoinDelta.safeParse(req.body);
+    if (!p.success) return reply.code(400).send({ error: "bad_request" });
+    await deps.ledger.credit(req.userId!, "coin", p.data.amount, "earn", p.data.ref);
+    return { coins: await deps.ledger.balance(req.userId!, "coin") };
+  });
+
+  server.post("/v1/coins/spend", { preHandler: requireUser }, async (req, reply) => {
+    const p = CoinDelta.safeParse(req.body);
+    if (!p.success) return reply.code(400).send({ error: "bad_request" });
+    try {
+      await deps.ledger.debit(req.userId!, "coin", p.data.amount, "spend", p.data.ref);
+    } catch (e: any) {
+      if (e?.message === "insufficient balance") return reply.code(402).send({ error: "insufficient_balance" });
+      throw e;
+    }
+    return { coins: await deps.ledger.balance(req.userId!, "coin") };
   });
 
   server.get("/v1/inventory", { preHandler: requireUser }, async (req) => {
