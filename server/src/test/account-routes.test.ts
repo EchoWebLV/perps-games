@@ -91,3 +91,27 @@ describe("scrap earn/spend", () => {
     expect(rb.json().scrap).toBe(8); // must NOT be swallowed by A's identical ref
   });
 });
+
+describe("inventory grant/melt endpoints", () => {
+  let ctx: TestCtx;
+  afterEach(async () => { await ctx?.close(); });
+
+  it("grants (stacking) and melts (keep-last)", async () => {
+    ctx = await makeTestDb({ signupFaucet: false });
+    const g1 = await ctx.server.inject({ method: "POST", url: "/v1/inventory/grant", headers: H, payload: { carId: "orion" } });
+    expect(g1.json()).toEqual({ carId: "orion", isNew: true, count: 1 });
+    const g2 = await ctx.server.inject({ method: "POST", url: "/v1/inventory/grant", headers: H, payload: { carId: "orion" } });
+    expect(g2.json()).toEqual({ carId: "orion", isNew: false, count: 2 });
+
+    const m1 = await ctx.server.inject({ method: "POST", url: "/v1/inventory/melt", headers: H, payload: { carId: "orion" } });
+    expect(m1.json()).toEqual({ carId: "orion", melted: true, count: 1 });
+    const m2 = await ctx.server.inject({ method: "POST", url: "/v1/inventory/melt", headers: H, payload: { carId: "orion" } });
+    expect(m2.json()).toEqual({ carId: "orion", melted: false, count: 1 });
+  });
+
+  it("400s on a missing carId", async () => {
+    ctx = await makeTestDb({ signupFaucet: false });
+    const res = await ctx.server.inject({ method: "POST", url: "/v1/inventory/grant", headers: H, payload: {} });
+    expect(res.statusCode).toBe(400);
+  });
+});

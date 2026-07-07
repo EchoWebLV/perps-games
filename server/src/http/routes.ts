@@ -36,6 +36,7 @@ export interface RouteDeps {
 const GrantCoins = z.object({ amount: z.number().int().positive() });
 const CoinDelta = z.object({ amount: z.number().int().positive(), ref: z.string().min(1).max(200) });
 const GrantCar = z.object({ carId: z.string().min(1) });
+const CarRef = z.object({ carId: z.string().min(1) });
 const WalletBindChallengeBody = z.object({ wallet: z.string().min(32).max(44) });
 const WalletBindBody = z.object({
   challenge: z.string().min(1),
@@ -113,6 +114,20 @@ export function registerRoutes(server: FastifyInstance, deps: RouteDeps): void {
   server.get("/v1/inventory", { preHandler: requireUser }, async (req) => {
     const rows = await deps.inventory.list(req.userId!);
     return { cars: rows.map((r) => ({ carId: r.carId, acquiredAt: r.acquiredAt })) };
+  });
+
+  server.post("/v1/inventory/grant", { preHandler: requireUser }, async (req, reply) => {
+    const p = CarRef.safeParse(req.body);
+    if (!p.success) return reply.code(400).send({ error: "bad_request" });
+    const r = await deps.inventory.grant(req.userId!, p.data.carId);
+    return { carId: p.data.carId, isNew: r.isNew, count: r.count };
+  });
+
+  server.post("/v1/inventory/melt", { preHandler: requireUser }, async (req, reply) => {
+    const p = CarRef.safeParse(req.body);
+    if (!p.success) return reply.code(400).send({ error: "bad_request" });
+    const r = await deps.inventory.melt(req.userId!, p.data.carId);
+    return { carId: p.data.carId, melted: r.melted, count: r.count };
   });
 
   server.get("/v1/me", { preHandler: requireUser }, async (req) => {
