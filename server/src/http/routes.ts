@@ -82,15 +82,19 @@ export function registerRoutes(server: FastifyInstance, deps: RouteDeps): void {
     if (deps.signupFaucet) {
       await deps.ledger.credit(userId, "coin", deps.startBalance, "signup_faucet", userId);
     }
-    const [balance, rows, openRoundId] = await Promise.all([
+    const [balance, coins, scrap, rows, openRoundId] = await Promise.all([
       deps.ledger.balance(userId, deps.stakeAsset),
+      deps.ledger.balance(userId, "coin"),
+      deps.ledger.balance(userId, "scrap"),
       deps.inventory.list(userId),
       deps.rounds.getOpenRoundId(userId),
     ]);
     return {
       userId,
       balance,
-      cars: rows.map((r) => ({ carId: r.carId, acquiredAt: r.acquiredAt })),
+      coins,
+      scrap,
+      cars: rows.map((r) => ({ carId: r.carId, count: r.count, acquiredAt: r.acquiredAt })),
       openRoundId,
     };
   });
