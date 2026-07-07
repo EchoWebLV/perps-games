@@ -47,9 +47,13 @@ const DepositSendBody = z.object({
   signedTxBase64: z.string().min(1),
 });
 const MigrateBody = z.object({
-  coins: z.number().int().min(0),
-  scrap: z.number().int().min(0),
-  cars: z.record(z.string().min(1), z.number().int().positive()),
+  coins: z.number().int().min(0).max(1_000_000_000),
+  scrap: z.number().int().min(0).max(1_000_000_000),
+  // bound the per-car count AND the number of cars so a tiny payload can't drive unbounded
+  // DB work (this endpoint is reachable with a free anonymous session).
+  cars: z
+    .record(z.string().min(1), z.number().int().positive().max(1000))
+    .refine((c) => Object.keys(c).length <= 64, { message: "too_many_cars" }),
 });
 
 const OpenRound = z.object({
@@ -138,7 +142,9 @@ export function registerRoutes(server: FastifyInstance, deps: RouteDeps): void {
   // FIRST-BIND migration: seed a brand-new (empty) server account from the player's local save.
   // Refuses (and never sums) if the account already has any coins/scrap/cars — prevents a
   // returning player's local save from double-crediting a server balance that already moved.
-  // Ledger refs are namespaced by userId (`migrate:${userId}`) so a duplicate call can't double-credit.
+  // Coins/scrap are ref-idempotent (namespaced `migrate:${userId}`); cars are NOT — a concurrent
+  // or repeated first-bind on a still-empty account could double-grant cars. Accepted for now:
+  // cars are soft, non-withdrawable state.
   server.post("/v1/migrate", { preHandler: requireUser }, async (req, reply) => {
     const p = MigrateBody.safeParse(req.body);
     if (!p.success) return reply.code(400).send({ error: "bad_request" });
@@ -154,7 +160,7 @@ export function registerRoutes(server: FastifyInstance, deps: RouteDeps): void {
     if (p.data.coins > 0) await deps.ledger.credit(userId, "coin", p.data.coins, "migrate_seed", `migrate:${userId}`);
     if (p.data.scrap > 0) await deps.ledger.credit(userId, "scrap", p.data.scrap, "scrap_migrate_seed", `migrate:${userId}`);
     for (const [carId, n] of Object.entries(p.data.cars)) {
-      for (let i = 0; i < n; i++) await deps.inventory.grant(userId, carId);
+      await deps.inventory.grant(userId, carId, n); // one counted write per car, not n writes
     }
     return { seeded: true };
   });

@@ -12,18 +12,18 @@ export function makeInventory(db: any) {
   }
 
   return {
-    /** grant a copy; dupes stack. isNew = the 0->1 transition (a genuinely new unlock). */
-    async grant(userId: string, carId: string): Promise<{ isNew: boolean; count: number }> {
+    /** grant `n` copies (default 1) in a single write; dupes stack. isNew = the 0->N first unlock. */
+    async grant(userId: string, carId: string, n = 1): Promise<{ isNew: boolean; count: number }> {
       const rows = await db
         .insert(inventory)
-        .values({ userId, carId, count: 1 })
+        .values({ userId, carId, count: n })
         .onConflictDoUpdate({
           target: [inventory.userId, inventory.carId],
-          set: { count: sql`${inventory.count} + 1` },
+          set: { count: sql`${inventory.count} + ${n}` },
         })
         .returning({ count: inventory.count });
       const c = rows[0].count as number;
-      return { isNew: c === 1, count: c };
+      return { isNew: c === n, count: c };
     },
 
     /** shed one spare; the last copy is never lost. */

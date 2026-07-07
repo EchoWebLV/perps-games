@@ -36,4 +36,27 @@ describe("POST /v1/migrate (seed-if-empty)", () => {
     const me = await ctx.server.inject({ method: "GET", url: "/v1/me", headers: H });
     expect(me.json().coins).toBe(500); // unchanged, not 750
   });
+
+  it("rejects an oversized per-car count", async () => {
+    ctx = await makeTestDb({ signupFaucet: false });
+    const res = await ctx.server.inject({
+      method: "POST", url: "/v1/migrate", headers: H,
+      payload: { coins: 0, scrap: 0, cars: { orion: 100000 } },
+    });
+    expect(res.statusCode).toBe(400);
+  });
+
+  it("seeds a cars-only save with zero coins and scrap", async () => {
+    ctx = await makeTestDb({ signupFaucet: false });
+    const res = await ctx.server.inject({
+      method: "POST", url: "/v1/migrate", headers: H,
+      payload: { coins: 0, scrap: 0, cars: { orion: 2 } },
+    });
+    expect(res.json()).toEqual({ seeded: true });
+    const me = await ctx.server.inject({ method: "GET", url: "/v1/me", headers: H });
+    const body = me.json();
+    expect(body.coins).toBe(0);
+    expect(body.scrap).toBe(0);
+    expect(body.cars.find((c: any) => c.carId === "orion").count).toBe(2);
+  });
 });

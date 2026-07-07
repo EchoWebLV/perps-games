@@ -34,4 +34,11 @@ describe("counted inventory", () => {
     const list = (await ctx.inventory.list(userId)).map((r) => ({ carId: r.carId, count: r.count })).sort((a, b) => a.carId.localeCompare(b.carId));
     expect(list).toEqual([{ carId: "clowncar", count: 2 }, { carId: "orion", count: 1 }]);
   });
+
+  it("grants multiple copies in one call", async () => {
+    ctx = await makeTestDb();
+    userId = (await ctx.users.upsertByExternalId("dev:multi")).id;
+    expect(await ctx.inventory.grant(userId, "orion", 3)).toEqual({ isNew: true, count: 3 });
+    expect(await ctx.inventory.grant(userId, "orion", 2)).toEqual({ isNew: false, count: 5 });
+  });
 });
