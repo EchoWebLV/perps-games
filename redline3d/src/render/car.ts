@@ -1,6 +1,7 @@
 import * as THREE from "three";
 import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader.js";
 import { buildWheelRig, type WheelRig } from "./wheels";
+import { finishById } from "../core/paint";
 
 export interface Car {
   group: THREE.Group;
@@ -12,6 +13,8 @@ export interface Car {
   setModel(url: string, scale?: number, yaw?: number): void;
   /** turn the front wheels for steering (−1 full left … 0 straight … +1 full right) */
   setSteer(angle: number): void;
+  /** apply a cosmetic paint finish (id from core/paint), or null to leave the model's own colors */
+  setFinish(finishId: string | null): void;
 }
 
 const IDLE = "#4da6ff";
@@ -99,6 +102,16 @@ export function createCar(onReady?: () => void): Car {
     }
   };
 
+  // cosmetic paint (Scrap Yard). Recolors the model's standard materials; re-applied on each load
+  // because modelMats is rebuilt when the GLB swaps. Coexists with the equity emissive tint.
+  let finishS: string | null = null;
+  const applyFinish = () => {
+    if (!modelMats || !finishS) return;
+    const f = finishById(finishS);
+    if (!f) return;
+    for (const m of modelMats) { m.color.set(f.swatch); m.metalness = 0.9; m.roughness = 0.3; }
+  };
+
   // ---- model loading / swapping (car picker) ----
   const loader = new GLTFLoader();
   let current: THREE.Object3D | null = null;
@@ -106,7 +119,11 @@ export function createCar(onReady?: () => void): Car {
   // offline rig script stamped into every car GLB
   let rig: WheelRig | null = null;
   let loadGen = 0; // 40MB GLBs race: only the LATEST pick may win, not the last to finish
+  let lastReq = ""; // re-picking the shown car (incl. the picker's boot re-pick) must not re-fetch
   const loadModel = (url: string, scaleMul = 1, yawAdd = 0) => {
+    const req = `${url}|${scaleMul}|${yawAdd}`;
+    if (req === lastReq) return;
+    lastReq = req;
     const gen = ++loadGen;
     loader.load(
       url,
@@ -139,10 +156,11 @@ export function createCar(onReady?: () => void): Car {
         placeholder.visible = false;
         group.add(model);
         applyTint();
+        applyFinish();
         if (!readyFired) { readyFired = true; onReady?.(); }
       },
       undefined,
-      (err) => console.warn("[car] GLB failed to load:", url, err)
+      (err) => { if (gen === loadGen) lastReq = ""; console.warn("[car] GLB failed to load:", url, err); } // failed load → allow a retry pick
     );
   };
   loadModel(MODEL_URL);
@@ -165,6 +183,7 @@ export function createCar(onReady?: () => void): Car {
       rig?.steer(a);
     },
     setModel: loadModel,
+    setFinish(finishId) { finishS = finishId; applyFinish(); },
   };
   if (import.meta.env.DEV) (window as any).__car = api; // preview probe (Task 6 verification)
   return api;
