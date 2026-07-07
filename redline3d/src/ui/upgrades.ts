@@ -40,18 +40,20 @@ const TRACKS: TrackDef[] = [
 const ACTIVE = TRACKS.filter((t) => t.live);
 
 const STORE_KEY = "redline.garage.v1";
-type Saved = { coins: number; levels: Record<Track, number> };
+type Saved = { coins: number; scrap: number; levels: Record<Track, number>; finishes: Record<string, string> };
 function loadSaved(): Saved {
-  const fresh: Saved = { coins: 0, levels: { tank: 0, turbo: 0, suspension: 0 } };
+  const fresh: Saved = { coins: 0, scrap: 0, levels: { tank: 0, turbo: 0, suspension: 0 }, finishes: {} };
   try {
     const raw = localStorage.getItem(STORE_KEY);
     if (!raw) return fresh;
     const p = JSON.parse(raw);
     return {
       coins: Number.isFinite(p.coins) ? Math.max(0, Math.floor(p.coins)) : 0,
+      scrap: Number.isFinite(p.scrap) ? Math.max(0, Math.floor(p.scrap)) : 0,
       levels: {
         tank: clampLevel(p.levels?.tank), turbo: clampLevel(p.levels?.turbo), suspension: clampLevel(p.levels?.suspension),
       },
+      finishes: (p.finishes && typeof p.finishes === "object") ? p.finishes : {},
     };
   } catch { return fresh; }
 }
@@ -61,7 +63,21 @@ export interface Upgrades {
   coins(): number;
   /** credit collected coins (persists + notifies) */
   addCoins(n: number): void;
+  /** debit coins for a purchase (e.g. a crate); returns false + no-op if the balance can't cover it */
+  spend(n: number): boolean;
+  /** scrap earned by driving (every 3rd–5th pickup); banked to the garage save and
+   *  spent later at the Scrap Yard — never on the leverage upgrades below */
+  scrap(): number;
+  addScrap(n: number): void;
+  /** debit scrap for a Scrap Yard purchase; false + no-op if the balance can't cover it */
+  spendScrap(n: number): boolean;
+  /** the cosmetic finish applied to a car (by name), or undefined if unpainted */
+  finish(carId: string): string | undefined;
+  /** paint a car — persists the finish (the live car is repainted by the caller) */
+  setFinish(carId: string, finishId: string): void;
   open(): void;
+  /** the shop panel is on screen (a GO press must not launch behind it) */
+  isOpen(): boolean;
   /** hide the button + close the panel during a live round */
   setBusy(busy: boolean): void;
 }
@@ -104,7 +120,7 @@ function injectStyles() {
 
 export function createUpgrades(
   parent: HTMLElement,
-  opts: { onCoins?: (n: number) => void; onApply?: () => void; economicEffects?: boolean; onClose?: () => void } = {},
+  opts: { onCoins?: (n: number) => void; onScrap?: (n: number) => void; onApply?: () => void; economicEffects?: boolean; onClose?: () => void } = {},
 ): Upgrades {
   injectStyles();
   const saved = loadSaved();
@@ -196,7 +212,14 @@ export function createUpgrades(
   return {
     coins: () => saved.coins,
     addCoins(n) { saved.coins = addCoinsRaw(saved.coins, n); persist(); opts.onCoins?.(saved.coins); },
+    spend(n) { if (saved.coins < n) return false; saved.coins = Math.max(0, saved.coins - Math.floor(n)); persist(); opts.onCoins?.(saved.coins); return true; },
+    scrap: () => saved.scrap,
+    addScrap(n) { saved.scrap = addCoinsRaw(saved.scrap, n); persist(); opts.onScrap?.(saved.scrap); },
+    spendScrap(n) { if (saved.scrap < n) return false; saved.scrap = Math.max(0, saved.scrap - Math.floor(n)); persist(); opts.onScrap?.(saved.scrap); return true; },
+    finish: (carId) => saved.finishes[carId],
+    setFinish(carId, finishId) { saved.finishes[carId] = finishId; persist(); },
     open: () => setOpen(true),
+    isOpen: () => overlay.style.display !== "none",
     setBusy(b) { if (b) setOpen(false); }, // reachable only via the garage menu, which is itself gated
   };
 }
