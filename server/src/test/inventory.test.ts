@@ -11,13 +11,13 @@ describe("inventory (unlock-only)", () => {
   afterEach(async () => { await ctx.close(); });
 
   it("grants a car once", async () => {
-    expect(await ctx.inventory.grant(userId, "orion")).toBe(true);
+    expect(await ctx.inventory.grant(userId, "orion")).toEqual({ isNew: true, count: 1 });
     expect(await ctx.inventory.owns(userId, "orion")).toBe(true);
   });
 
-  it("granting an owned car is a no-op", async () => {
+  it("granting an owned car stacks a duplicate", async () => {
     await ctx.inventory.grant(userId, "orion");
-    expect(await ctx.inventory.grant(userId, "orion")).toBe(false);
+    expect(await ctx.inventory.grant(userId, "orion")).toEqual({ isNew: false, count: 2 });
     expect((await ctx.inventory.list(userId)).length).toBe(1);
   });
 

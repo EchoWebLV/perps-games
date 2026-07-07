@@ -142,7 +142,7 @@ export const withdrawals = pgTable(
 );
 export type Withdrawal = typeof withdrawals.$inferSelect;
 
-/** unlock-only car ownership. one row per owned car; cannot own the same car twice. */
+/** counted car ownership. one row per owned car; count stacks duplicate pulls (melt sheds spares, never the last). */
 export const inventory = pgTable(
   "inventory",
   {
@@ -151,6 +151,7 @@ export const inventory = pgTable(
       .notNull()
       .references(() => users.id),
     carId: text("car_id").notNull(),
+    count: integer("count").notNull().default(1),
     acquiredAt: timestamp("acquired_at", { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => ({
