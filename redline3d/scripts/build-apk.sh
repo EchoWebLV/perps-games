@@ -59,7 +59,7 @@ if [ "$INSTALL" = "1" ]; then
     exit 1
   fi
   adb install -r "$APK"
-  echo "✅ installed. Launch 'Redline 3D' from the Seeker app drawer."
+  echo "✅ installed. Launch 'Perps Raider' from the Seeker app drawer."
 fi
 
 if [ "$SERVE" = "1" ]; then
