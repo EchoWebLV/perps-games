@@ -176,8 +176,14 @@ export function mountPrivyIsland(): Promise<PrivyIsland> {
       const host = document.createElement("div");
       host.id = "privy-root";
       document.body.appendChild(host);
+      // Inside the Capacitor WebView (Seeker APK) social OAuth is blocked upstream
+      // (disallowed_useragent), so pin login to the in-page email OTP there — the one
+      // WebView-safe method. On the web the dashboard's full method list stays in charge.
+      // Runtime-gated: web and APK ship the same bundle; only the APK injects Capacitor.
+      const native = (globalThis as { Capacitor?: { isNativePlatform?: () => boolean } }).Capacitor?.isNativePlatform?.() === true;
       const config: PrivyClientConfig = {
         embeddedWallets: { solana: { createOnLogin: "users-without-wallets" }, showWalletUIs: false },
+        ...(native ? { loginMethods: ["email"] as PrivyClientConfig["loginMethods"] } : {}),
       };
       createRoot(host).render(createElement(PrivyProvider, { appId, config, children: createElement(Bridge) }));
     }
