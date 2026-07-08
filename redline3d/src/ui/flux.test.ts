@@ -1,8 +1,8 @@
 import { describe, expect, test } from "vitest";
-import { createFluxCore, FLUX_ACTIVE, FLUX_LEV } from "./flux";
+import { createFluxCore, FLUX_ACTIVE, FLUX_COOLDOWN, FLUX_LEV } from "./flux";
 
 describe("flux brake core (DeLorean)", () => {
-  test("freezes for ~4s, then is spent for the rest of the round (no re-fire)", () => {
+  test("freezes for ~4s, then cools down nitro-style and can fire again in the same round", () => {
     const f = createFluxCore();
     f.setEnabled(true);
 
@@ -11,20 +11,26 @@ describe("flux brake core (DeLorean)", () => {
     expect(f.update(0.1, true)).toBe(true);       // frozen
     expect(f.update(FLUX_ACTIVE - 0.5, true)).toBe(true); // still frozen near the end
     expect(f.update(0.6, true)).toBe(false);      // window over → unfrozen
-    expect(f.phase).toBe("spent");
+    expect(f.phase).toBe("cool");
 
-    // once per round: no re-fire while spent
+    // cooling: no re-fire yet
     expect(f.fire()).toBe(false);
-    expect(f.update(5, true)).toBe(false);
-    expect(f.phase).toBe("spent");
+    expect(f.update(FLUX_COOLDOWN - 0.5, true)).toBe(false);
+    expect(f.phase).toBe("cool");
+
+    // cooldown over → ready again — NOT once per round
+    f.update(0.6, true);
+    expect(f.phase).toBe("ready");
+    expect(f.fire()).toBe(true);
+    expect(f.update(0.1, true)).toBe(true);
   });
 
-  test("a new round re-arms it", () => {
+  test("a new round resets a mid-cooldown brake to ready", () => {
     const f = createFluxCore();
     f.setEnabled(true);
     f.update(0.1, true); f.fire();
     f.update(FLUX_ACTIVE + 1, true);
-    expect(f.phase).toBe("spent");
+    expect(f.phase).toBe("cool");
     f.update(0.1, false);                         // round ended
     f.update(0.1, true);                          // next round live
     expect(f.phase).toBe("ready");

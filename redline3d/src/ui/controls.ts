@@ -5,6 +5,44 @@ export const DEFAULT_PLAY_CAP = 10;
 /** step the play amount by ±1 within [1, cap] — also pulls an over-cap value back down */
 export const stepPlay = (v: number, delta: 1 | -1, cap: number) => Math.max(1, Math.min(cap, v + delta));
 
+const TEXT_INPUT_TYPES = new Set(["text", "email", "password", "search", "tel", "url", "number"]);
+/** True only for GENUINE text entry — the sole state where WASD must yield to typing.
+ *  A focused range slider (Pink Rod auto-exit), toggle button, checkbox, or a wallet modal's
+ *  leftover overlay element is NOT typing: keying driving-suppression off tagName alone left
+ *  `document.activeElement` non-body after a modal closed and silently killed the keyboard. */
+export const isTextEntry = (el: HTMLElement | null): boolean => {
+  if (!el) return false;
+  if (el.isContentEditable === true || el.tagName === "TEXTAREA") return true;
+  if (el.tagName === "INPUT") return TEXT_INPUT_TYPES.has((el.getAttribute("type") ?? "text").toLowerCase());
+  return false;
+};
+
+export type DriveKey = "gas" | "brake" | "left" | "right" | "go";
+/** Map a key event to its driving action, PHYSICAL key first (e.code) so WASD works on
+ *  every keyboard layout — on Bulgarian/AZERTY/Dvorak the physical W types something
+ *  else entirely, and matching e.key alone left production WASD dead. e.key stays as
+ *  the fallback for arrows, synthetic events, and virtual keyboards that send no code.
+ *  Modified chords (cmd/ctrl/alt) are never driving keys — cmd+W must stay "close tab";
+ *  pass ignoreModifiers on keyup so a chorded release still clears a held key. */
+export const driveKeyOf = (e: KeyboardEvent, ignoreModifiers = false): DriveKey | null => {
+  if (!ignoreModifiers && (e.ctrlKey || e.metaKey || e.altKey)) return null;
+  switch (e.code) {
+    case "KeyW": return "gas";
+    case "KeyS": return "brake";
+    case "KeyA": return "left";
+    case "KeyD": return "right";
+    case "Space": case "Enter": case "NumpadEnter": return "go";
+  }
+  switch (e.key) {
+    case "ArrowUp": case "w": case "W": return "gas";
+    case "ArrowDown": case "s": case "S": return "brake";
+    case "ArrowLeft": case "a": case "A": return "left";
+    case "ArrowRight": case "d": case "D": return "right";
+    case " ": case "Enter": return "go";
+  }
+  return null;
+};
+
 export interface Controls {
   dir(): 1 | -1;
   /** set the LONG/SHORT call externally (e.g. the Clown Car's lane-bet ability) — works live too */
@@ -80,30 +118,36 @@ export function createControls(ctrlMount: HTMLElement, goMount: HTMLElement, ped
 
   // keyboard driving (desktop): W/↑ gas, S/↓ brake, A/D or ←/→ steer, space/enter = go.
   // Touch driving (hold-anywhere) lives on the canvas in main.ts.
-  // Don't hijack keys while the user is typing in an input field.
-  const typingElsewhere = (e: KeyboardEvent): boolean => {
-    const cands = [e.target as HTMLElement | null, document.activeElement as HTMLElement | null];
-    return cands.some((el) => !!el && (
-      el.tagName === "INPUT" || el.tagName === "TEXTAREA" || el.tagName === "SELECT" ||
-      el.isContentEditable === true
-    ));
-  };
+  // Only genuine TEXT entry (isTextEntry, above) suppresses driving — a focused range slider,
+  // toggle, or a wallet modal's leftover overlay element must NOT kill WASD.
+  const typingElsewhere = (e: KeyboardEvent): boolean =>
+    isTextEntry(e.target as HTMLElement | null) || isTextEntry(document.activeElement as HTMLElement | null);
+  // Capture phase on window: the driving keys are seen BEFORE any overlay/focus-trap that
+  // might stopPropagation (a wallet modal's leftover DOM was eating them → "WASD stopped").
   addEventListener("keydown", (e) => {
     if (typingElsewhere(e)) return;
-    const k = e.key;
-    if (k === "ArrowUp" || k === "w" || k === "W") { gasOn = true; e.preventDefault(); }
-    else if (k === "ArrowDown" || k === "s" || k === "S") { brakeOn = true; e.preventDefault(); }
-    else if (k === "ArrowLeft" || k === "a" || k === "A") { steerL = true; e.preventDefault(); }
-    else if (k === "ArrowRight" || k === "d" || k === "D") { steerR = true; e.preventDefault(); }
-    else if (k === " " || k === "Enter") { go.click(); e.preventDefault(); }
-  });
+    const dk = driveKeyOf(e);
+    if (!dk) return;
+    if (dk === "gas") gasOn = true;
+    else if (dk === "brake") brakeOn = true;
+    else if (dk === "left") steerL = true;
+    else if (dk === "right") steerR = true;
+    else go.click();
+    e.preventDefault();
+  }, { capture: true });
   addEventListener("keyup", (e) => {
-    const k = e.key;
-    if (k === "ArrowUp" || k === "w" || k === "W") gasOn = false;
-    else if (k === "ArrowDown" || k === "s" || k === "S") brakeOn = false;
-    else if (k === "ArrowLeft" || k === "a" || k === "A") steerL = false;
-    else if (k === "ArrowRight" || k === "d" || k === "D") steerR = false;
-  });
+    const dk = driveKeyOf(e, true); // chorded release must still clear a held key
+    if (dk === "gas") gasOn = false;
+    else if (dk === "brake") brakeOn = false;
+    else if (dk === "left") steerL = false;
+    else if (dk === "right") steerR = false;
+  }, { capture: true });
+  // Losing window focus (alt-tab, a wallet/login modal, an OS prompt) swallows the keyup, so
+  // a held key latches ON — the car then drives itself or ignores new input ("controls stuck").
+  // Clear all key state whenever focus or visibility is lost.
+  const clearKeys = () => { gasOn = false; brakeOn = false; steerL = false; steerR = false; };
+  addEventListener("blur", clearKeys);
+  document.addEventListener("visibilitychange", () => { if (document.hidden) clearKeys(); });
 
   return {
     dir: () => d,

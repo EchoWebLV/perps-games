@@ -5,16 +5,17 @@ export interface Flux {
   update(dt: number, live: boolean): boolean;
 }
 
-export const FLUX_ACTIVE = 4; // seconds frozen
-export const FLUX_LEV = 10;   // leverage during the freeze — the program RMIN, ~zero price impact vs 2000×
-export type FluxPhase = "ready" | "active" | "spent";
+export const FLUX_ACTIVE = 4;   // seconds frozen
+export const FLUX_COOLDOWN = 8; // recharge after the window — longer than nitro's 6s, a freeze is stronger than a boost
+export const FLUX_LEV = 10;     // leverage during the freeze — the program RMIN, ~zero price impact vs 2000×
+export type FluxPhase = "ready" | "active" | "cool";
 
 /**
  * Pure timer/state machine for the DeLorean's Flux Brake — no DOM, unit-testable.
  * Firing banks the current P&L and pins leverage to FLUX_LEV for FLUX_ACTIVE seconds
  * (main.ts feeds the pinned lev to the engine + the on-chain lever sync, whose rebank
  * IS the freeze — gains lock into `banked`, the new segment barely moves at 10×).
- * Once per round: after the window it stays "spent" until the round ends.
+ * Nitro-style recharge: after the window it cools for FLUX_COOLDOWN, then re-arms.
  */
 export function createFluxCore() {
   let enabled = false, live = false;
@@ -37,7 +38,10 @@ export function createFluxCore() {
       live = isLive;
       if (phase === "active" && live) {
         timer -= dt;
-        if (timer <= 0) { phase = "spent"; timer = 0; }    // window over — once per round
+        if (timer <= 0) { phase = "cool"; timer = FLUX_COOLDOWN; } // window over → recharge
+      } else if (phase === "cool" && live) {
+        timer -= dt;
+        if (timer <= 0) phase = "ready";
       }
       return phase === "active" && live;
     },
@@ -93,12 +97,12 @@ export function createFlux(parent: HTMLElement, onFire?: () => void): Flux {
       btn.style.boxShadow = "0 0 28px rgba(120,240,255,.95)";
       btn.style.transform = "scale(1.08)";
       labelEl.textContent = core.timer.toFixed(1);
-    } else if (core.phase === "spent") {
-      btn.style.opacity = "0.35";
+    } else if (core.phase === "cool") {
+      btn.style.opacity = "0.4";
       btn.style.borderColor = "rgba(150,150,170,.6)";
       btn.style.boxShadow = "none";
       btn.style.transform = "scale(1)";
-      labelEl.textContent = "USED";
+      labelEl.textContent = Math.ceil(core.timer) + "s"; // nitro-style recharge countdown
     } else {
       btn.style.opacity = "1";
       btn.style.borderColor = "rgba(39,231,255,.85)";
