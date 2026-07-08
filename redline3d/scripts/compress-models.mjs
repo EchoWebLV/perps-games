@@ -31,7 +31,7 @@ const SKIP = new Set(["cybertruck", "vaporwave"]);
 // wheel QA (_wheelqa --assert) fails on these when decimated — thin tread bands lose
 // verts / pivots drift past the 2% gate. They get resize+weld only (textures are the
 // dominant memory cost anyway); the heavy-geometry models all pass QA with simplify.
-const NO_SIMPLIFY = new Set(["delorean", "flintstone", "helmet", "magnet", "orion", "pink-rod", "six-wheeler"]);
+const NO_SIMPLIFY = new Set(["delorean", "flintstone", "helmet", "kraken", "magnet", "orion", "pink-rod", "ramen", "six-wheeler"]);
 const SIMPLIFY_RATIO = "0.5";
 const SIMPLIFY_ERROR = "0.001";
 
