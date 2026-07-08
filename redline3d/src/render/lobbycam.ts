@@ -19,7 +19,11 @@ export function createLobbyCam(): LobbyCam {
       // RIGID chase: camera is always exactly behind the car's current heading.
       // No easing, no lag — "forward" is locked to up-screen.
       const fx = Math.sin(heading), fz = -Math.cos(heading);
-      camera.position.set(x - fx * BACK, y + HEIGHT, z - fz * BACK);
+      // Portrait pullback: a narrow viewport loses horizontal FOV, cropping the strip's
+      // parked cars and storefronts out of frame — back off (and rise) as aspect shrinks
+      // below ~4:3. Zero effect on landscape.
+      const extra = Math.max(0, 1.35 - camera.aspect) * 24;
+      camera.position.set(x - fx * (BACK + extra), y + HEIGHT + extra * 0.25, z - fz * (BACK + extra));
       if (camera.fov !== FOV) { camera.fov = FOV; camera.updateProjectionMatrix(); }
       camera.lookAt(x + fx * LOOK_AHEAD, y + LOOK_Y, z + fz * LOOK_AHEAD);
     },

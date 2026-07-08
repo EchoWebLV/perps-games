@@ -4,6 +4,8 @@ import { buildGarage } from "./garage";
 import { buildTrack } from "./track";
 import { buildUpgrades } from "./upgrades";
 import { buildCrates } from "./crates";
+import { buildScrapyard } from "./scrapyard";
+import { buildHighway } from "./highway";
 
 export type { BuiltBuilding, Track } from "./types";
 
@@ -15,6 +17,7 @@ export function buildBuilding(kind: BuildingKind, color: number, track: Track): 
     case "track": return buildTrack(color, track);
     case "upgrades": return buildUpgrades(color, track);
     case "crates": return buildCrates(color, track);
-    case "highway": return buildTrack(color, track); // same start-gantry look, its own color/sign
+    case "scrapyard": return buildScrapyard(color, track);
+    case "highway": return buildHighway(color, track); // freeway overpass — its own look, not the track gantry
   }
 }

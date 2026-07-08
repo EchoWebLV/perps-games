@@ -45,7 +45,8 @@ function garage() { lookBuilding("garage"); }
 function track() { lookBuilding("track"); }
 function upgrades() { lookBuilding("upgrades"); }
 function crates() { lookBuilding("crates"); }
-const PRESETS = { overview, garage, track, upgrades, crates };
+function highway() { lookBuilding("highway"); }
+const PRESETS = { overview, garage, track, upgrades, crates, highway };
 
 type CamKey = keyof typeof PRESETS;
 (window as unknown as { __cam: (k: string) => void }).__cam = (k) => {
@@ -61,10 +62,16 @@ addEventListener("resize", () => {
   camera.updateProjectionMatrix();
 });
 
+// cycle the entry-ring flare across the buildings so the active state can be surveyed too
+const KINDS = BUILDINGS.map((b) => b.kind);
+let elapsed = 0;
+
 let last = performance.now();
 function loop(now: number) {
   const dt = Math.min(0.05, (now - last) / 1000);
   last = now;
+  elapsed += dt;
+  lobby.setActiveDoor(KINDS[Math.floor(elapsed / 2.5) % KINDS.length]);
   lobby.update(dt);
   renderer.render(scene, camera);
   requestAnimationFrame(loop);

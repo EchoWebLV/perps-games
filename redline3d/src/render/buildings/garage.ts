@@ -176,6 +176,37 @@ export function buildGarage(color: number, track: Track): BuiltBuilding {
   roofStripNX.position.set(-HALF_X + 0.3, WALL_H + 0.05, 0);
   group.add(roofStripNX);
 
+  // ---- rooftop hologram: a wireframe ghost car slowly turning on a beam of light ----
+  const holoMat: THREE.MeshBasicMaterial = track(
+    new THREE.MeshBasicMaterial({
+      color, wireframe: true, transparent: true, opacity: 0.3,
+      blending: THREE.AdditiveBlending, depthWrite: false,
+    }),
+  );
+  const holo = new THREE.Group();
+  const holoBody = new THREE.Mesh(carBodyGeo, holoMat); // reuse the parked car's geometry
+  holo.add(holoBody);
+  const holoCabin = new THREE.Mesh(carCabinGeo, holoMat);
+  holoCabin.position.set(0, 1.15, -0.3);
+  holo.add(holoCabin);
+  // parked off-centre on the roof so it doesn't hide behind the floating name sign
+  const HOLO_X = -7.5;
+  const HOLO_Y = WALL_H + 3.2;
+  holo.position.set(HOLO_X, HOLO_Y, 0);
+  group.add(holo);
+
+  // faint projector beam from the roof up into the hologram
+  const holoBeamMat: THREE.MeshBasicMaterial = track(
+    new THREE.MeshBasicMaterial({
+      color, transparent: true, opacity: 0.1,
+      blending: THREE.AdditiveBlending, depthWrite: false, side: THREE.DoubleSide,
+    }),
+  );
+  const holoBeamGeo: THREE.CylinderGeometry = track(new THREE.CylinderGeometry(2.4, 0.5, 3.4, 12, 1, true));
+  const holoBeam = new THREE.Mesh(holoBeamGeo, holoBeamMat);
+  holoBeam.position.set(HOLO_X, WALL_H + 1.9, 0);
+  group.add(holoBeam);
+
   // ---- subtle pulse animation ----
   const pulseMaterials: THREE.MeshStandardMaterial[] = [roofStripPX, roofStripNX, underglow].map(
     (m) => m.material as THREE.MeshStandardMaterial,
@@ -185,6 +216,11 @@ export function buildGarage(color: number, track: Track): BuiltBuilding {
     for (const m of pulseMaterials) {
       m.emissiveIntensity = pulse;
     }
+    // the hologram turns, bobs and shimmers like a projection
+    holo.rotation.y = t * 0.7;
+    holo.position.y = HOLO_Y + 0.35 * Math.sin(t * 1.3);
+    holoMat.opacity = 0.24 + 0.1 * Math.sin(t * 2.7) + 0.04 * Math.sin(t * 11);
+    holoBeamMat.opacity = 0.08 + 0.04 * Math.sin(t * 2.7);
   };
 
   return { group, signY: 15, frontZ: 8, animate };

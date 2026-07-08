@@ -34,42 +34,73 @@ function installFakeDocument() {
 describe("createLobbyHud", () => {
   afterEach(() => vi.unstubAllGlobals());
 
-  test("hides by default, shows on show(), and fires onExit", () => {
+  test("hides by default, shows on show(), and carries no exit button (the strip is home)", () => {
     installFakeDocument();
     const parent = new FakeElement();
-    const onExit = vi.fn();
 
-    const hud = createLobbyHud(parent as unknown as HTMLElement, onExit);
+    const hud = createLobbyHud(parent as unknown as HTMLElement);
     const el = hud.el as unknown as FakeElement;
     expect(el.style.display).toBe("none");
 
     hud.show();
     expect(el.style.display).toBe("block");
 
-    el.querySelector("[data-exit]")!.onclick!();
-    expect(onExit).toHaveBeenCalledOnce();
+    // the strip is the home world now — no "leave the lobby" button, no duplicate driving hint
+    expect(el.querySelector("[data-exit]")).toBeNull();
+    expect(el.querySelector("button")).toBeNull();
   });
 
-  test("shows the prompt for a building and clears it on null", () => {
+  test("shows the offer card for a building and clears it on null", () => {
     installFakeDocument();
     const parent = new FakeElement();
 
-    const hud = createLobbyHud(parent as unknown as HTMLElement, () => {});
-    const prompt = (hud.el as unknown as FakeElement).querySelector("[data-prompt]")!;
+    const hud = createLobbyHud(parent as unknown as HTMLElement);
+    const el = hud.el as unknown as FakeElement;
+    const prompt = el.querySelector("[data-prompt]")!;
 
     hud.setPrompt("garage");
     expect(prompt.style.opacity).toBe("1");
-    expect(prompt.textContent).toContain("GARAGE");
+    expect(el.querySelector("[data-pname]")!.textContent).toContain("GARAGE");
+    expect(el.querySelector("[data-pdesc]")!.textContent.length).toBeGreaterThan(0);
 
     hud.setPrompt(null);
     expect(prompt.style.opacity).toBe("0");
+  });
+
+  test("setProgress drives the card's auto-open fill", () => {
+    installFakeDocument();
+    const parent = new FakeElement();
+
+    const hud = createLobbyHud(parent as unknown as HTMLElement);
+    const fill = (hud.el as unknown as FakeElement).querySelector("[data-pfill]")!;
+
+    hud.setPrompt("track");
+    hud.setProgress(0.5);
+    expect(fill.style.width).toBe("50%");
+    hud.setProgress(2); // clamped
+    expect(fill.style.width).toBe("100%");
+
+    hud.setPrompt(null); // leaving the ring resets the fill
+    expect(fill.style.width).toBe("0%");
+  });
+
+  test("marks the highway entry as coming soon", () => {
+    installFakeDocument();
+    const parent = new FakeElement();
+
+    const hud = createLobbyHud(parent as unknown as HTMLElement);
+    const el = hud.el as unknown as FakeElement;
+
+    hud.setPrompt("highway");
+    expect(el.querySelector("[data-pname]")!.textContent).toContain("HIGHWAY");
+    expect(el.querySelector("[data-pdesc]")!.textContent).toContain("coming soon");
   });
 
   test("toast shows a transient message", () => {
     installFakeDocument();
     const parent = new FakeElement();
 
-    const hud = createLobbyHud(parent as unknown as HTMLElement, () => {});
+    const hud = createLobbyHud(parent as unknown as HTMLElement);
     const toast = (hud.el as unknown as FakeElement).querySelector("[data-toast]")!;
 
     hud.toast("Crate Shop — coming soon");

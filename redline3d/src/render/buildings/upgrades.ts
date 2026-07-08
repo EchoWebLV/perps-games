@@ -91,18 +91,25 @@ export function buildUpgrades(color: number, track: Track): BuiltBuilding {
   addSeamRing(TIER3_W, TIER3_Y1);
 
   // ---- big up-arrow on the +Z front face, spanning tier1-tier2 ----
+  // The whole arrow rides a "level up" loop: it climbs the face and fades out at the top,
+  // so it needs its own transparent material + a group to translate.
   const ARROW_Z = FRONT_Z + 0.15; // proud of tier1's front face
+  const arrowMat: THREE.MeshStandardMaterial = track(
+    new THREE.MeshStandardMaterial({ color, emissive: color, emissiveIntensity: 1.5, transparent: true }),
+  );
+  const arrow = new THREE.Group();
   const shaftGeo: THREE.BoxGeometry = track(new THREE.BoxGeometry(2.2, 8, 0.3));
-  const shaft = new THREE.Mesh(shaftGeo, neon);
+  const shaft = new THREE.Mesh(shaftGeo, arrowMat);
   shaft.position.set(0, 6, ARROW_Z);
-  group.add(shaft);
+  arrow.add(shaft);
 
   // arrowhead: a 4-sided cone (flat-faced pyramid), apex up, rotated 45° so an edge faces forward
   const headGeo: THREE.ConeGeometry = track(new THREE.ConeGeometry(3.2, 4.5, 4));
-  const head = new THREE.Mesh(headGeo, neon);
+  const head = new THREE.Mesh(headGeo, arrowMat);
   head.rotation.y = Math.PI / 4;
   head.position.set(0, 12.25, ARROW_Z);
-  group.add(head);
+  arrow.add(head);
+  group.add(arrow);
 
   // ---- rooftop antenna on tier3: darkMetal mast + neon beacon sphere ----
   const MAST_H = 5;
@@ -149,6 +156,8 @@ export function buildUpgrades(color: number, track: Track): BuiltBuilding {
     (m) => m.material as THREE.MeshStandardMaterial,
   );
   const labLightPhases: number[] = labLightMaterials.map((_, i) => (i * Math.PI * 2) / labLightCount);
+  const ARROW_CYCLE = 2.4; // seconds per "level up": climb the face, fade out near the top
+  const ARROW_RISE = 3.4;
   const animate = (t: number): void => {
     for (let i = 0; i < labLightMaterials.length; i++) {
       // out-of-phase blink: mostly on, snapping dim on a short duty cycle per light
@@ -157,6 +166,9 @@ export function buildUpgrades(color: number, track: Track): BuiltBuilding {
       labLightMaterials[i].emissiveIntensity = wave > 0.6 ? 0.15 : 1.6;
     }
     beacon.emissiveIntensity = 1.1 + 0.9 * Math.sin(t * 2.2);
+    const ph = (t % ARROW_CYCLE) / ARROW_CYCLE;
+    arrow.position.y = ph * ph * ARROW_RISE; // ease-in climb
+    arrowMat.opacity = ph < 0.7 ? 1 : 1 - (ph - 0.7) / 0.3;
   };
 
   return { group, signY: 27, frontZ: FRONT_Z, animate };

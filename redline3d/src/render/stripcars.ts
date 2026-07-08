@@ -1,0 +1,153 @@
+import * as THREE from "three";
+import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader.js";
+
+/**
+ * Parked hero cars around the strip plaza — the "people meet here" dressing.
+ * Each slot holds a real car GLB angled into the loose circle of a car meet, with a
+ * floating gamertag sprite and a soft neon puddle underneath. Purely decorative today;
+ * the slot + tag structure is exactly what a live-presence feed will occupy later
+ * (swap "parked prop" for "remote player" without moving anything).
+ */
+
+export interface StripCarSpec {
+  /** GLB to park (same registry entries the garage uses) */
+  url: string;
+  /** per-model footprint multiplier (matches the garage registry's `scale`) */
+  scale?: number;
+  /** per-model facing tweak in radians (matches the garage registry's `yaw`) */
+  yaw?: number;
+  /** the floating gamertag */
+  tag: string;
+  /** neon accent for the tag + ground puddle */
+  color: string;
+}
+
+export interface StripCars {
+  group: THREE.Group;
+  dispose(): void;
+}
+
+// Same normalization the player car uses, so a parked Skull is the size of a driven Skull.
+const TARGET_LEN = 11.23;
+const MODEL_YAW = Math.PI;
+
+/**
+ * Parked slots in world coords: a car meet lining the mouth of Main Street, flanking the
+ * boot camera's view (player spawns at the south end facing north up the street) so it reads
+ * immediately. `rot` is the group yaw (model noses -Z at 0). Chosen clear of the spawn pad,
+ * the driving lane, and every door ring — asserted by stripcars.test.ts against the real
+ * layout, so a lobby-layout change that drifts a ring into a parked car fails loudly instead
+ * of clipping quietly.
+ */
+export const STRIP_SLOTS: Array<{ x: number; z: number; rot: number }> = [
+  // The meet flanks the OPEN south entrance to the plaza — the first thing you see as you drive
+  // in — angled toward the square. Clear of the loop road, every door ring, the spawn pad and
+  // each other (asserted by stripcars.test.ts). Hugging the entrance keeps them in a narrow
+  // portrait frustum on phones.
+  { x: 26, z: 82, rot: -0.5 },  // right of the entrance, angled in
+  { x: -26, z: 82, rot: 0.5 },  // left of the entrance, angled in
+  { x: 54, z: 92, rot: -0.8 },  // outer right of the entrance
+  { x: -54, z: 92, rot: 0.8 },  // outer left of the entrance
+  { x: -80, z: 72, rot: 1.0 },  // west tail of the meet
+];
+
+/** the floating gamertag pill — shared with the ambient cruisers (cruisers.ts) */
+export function tagTexture(text: string, css: string): THREE.CanvasTexture {
+  const c = document.createElement("canvas");
+  c.width = 512; c.height = 128;
+  const g = c.getContext("2d")!;
+  g.clearRect(0, 0, c.width, c.height);
+  // pill
+  const r = 46, w = c.width - 8, h = 92, x = 4, y = 14;
+  g.beginPath();
+  g.moveTo(x + r, y);
+  g.arcTo(x + w, y, x + w, y + h, r);
+  g.arcTo(x + w, y + h, x, y + h, r);
+  g.arcTo(x, y + h, x, y, r);
+  g.arcTo(x, y, x + w, y, r);
+  g.closePath();
+  g.fillStyle = "rgba(9,7,26,0.82)";
+  g.fill();
+  g.lineWidth = 3;
+  g.strokeStyle = css;
+  g.stroke();
+  // name
+  g.font = "700 52px 'Chakra Petch', ui-monospace, monospace";
+  g.textAlign = "center"; g.textBaseline = "middle";
+  g.shadowColor = css; g.shadowBlur = 18;
+  g.fillStyle = css;
+  g.fillText(text, c.width / 2, y + h / 2 + 2);
+  const tex = new THREE.CanvasTexture(c);
+  tex.anisotropy = 4;
+  return tex;
+}
+
+export function createStripCars(specs: StripCarSpec[]): StripCars {
+  const group = new THREE.Group();
+  const disposables: Array<{ dispose(): void }> = [];
+  const track = <T extends { dispose(): void }>(o: T): T => { disposables.push(o); return o; };
+  const loader = new GLTFLoader();
+
+  specs.slice(0, STRIP_SLOTS.length).forEach((spec, i) => {
+    const slot = STRIP_SLOTS[i];
+    const anchor = new THREE.Group();
+    anchor.position.set(slot.x, 0, slot.z);
+    anchor.rotation.y = slot.rot;
+    group.add(anchor);
+
+    // neon puddle under the car — reads "occupied bay" even before the GLB streams in
+    const color = new THREE.Color(spec.color);
+    const puddle = new THREE.Mesh(
+      track(new THREE.CircleGeometry(7.2, 40)),
+      track(new THREE.MeshBasicMaterial({
+        color, transparent: true, opacity: 0.12,
+        blending: THREE.AdditiveBlending, depthWrite: false, side: THREE.DoubleSide,
+      })),
+    );
+    puddle.rotation.x = -Math.PI / 2;
+    puddle.position.y = 0.04;
+    anchor.add(puddle);
+
+    // gamertag sprite floating over the roofline — the future remote-player nameplate
+    const sprite = new THREE.Sprite(track(new THREE.SpriteMaterial({
+      map: track(tagTexture(spec.tag, spec.color)),
+      transparent: true, depthWrite: false,
+    })));
+    sprite.scale.set(9, 2.25, 1);
+    sprite.position.y = 6.4 + (i % 2) * 1.1; // stagger neighbours so clustered tags don't stack
+    anchor.add(sprite);
+
+    // the car itself — same footprint/facing normalization as the driven car
+    loader.load(spec.url, (gltf) => {
+      const model = gltf.scene;
+      const box = new THREE.Box3().setFromObject(model);
+      const size = box.getSize(new THREE.Vector3());
+      model.scale.setScalar((TARGET_LEN / (Math.max(size.x, size.z) || 1)) * (spec.scale ?? 1));
+      model.rotation.y = MODEL_YAW + (spec.yaw ?? 0);
+      const box2 = new THREE.Box3().setFromObject(model);
+      const c = box2.getCenter(new THREE.Vector3());
+      model.position.set(-c.x, -box2.min.y, -c.z);
+      anchor.add(model);
+      // Lift the tag clear of THIS model's real roofline. Cars are normalized by LENGTH, so a
+      // tall model (Skull dome, Slot Machine) overshoots the fixed sprite height and swallows
+      // its tag — float it just above the scaled roof, keeping short cars at the tuned 6.4 and
+      // the neighbour stagger.
+      sprite.position.y = Math.max(6.4, box2.max.y - box2.min.y + 2.2) + (i % 2) * 1.1;
+    }, undefined, (err) => console.warn("[stripcars] GLB failed:", spec.url, err));
+  });
+
+  return {
+    group,
+    dispose() {
+      for (const d of disposables) d.dispose();
+      // GLB geometries/materials are shared with the garage's loads via the browser cache,
+      // but their GPU resources are ours — walk and free them
+      group.traverse((o) => {
+        const m = o as THREE.Mesh;
+        if (!m.isMesh) return;
+        m.geometry?.dispose();
+        (Array.isArray(m.material) ? m.material : [m.material]).forEach((mm) => mm?.dispose());
+      });
+    },
+  };
+}

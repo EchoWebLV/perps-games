@@ -115,8 +115,10 @@ export function buildTrack(color: number, track: Track): BuiltBuilding {
   roofSlab.position.set(0, roofY, topTierZ);
   group.add(roofSlab);
 
-  // A handful of tiny neon dots as spectators, scattered on the top tiers.
-  const SPECTATOR_COUNT = 4;
+  // A row of tiny neon dots as spectators, scattered on the top tiers — they do a stadium
+  // wave in animate(), so keep each one's base height + x for the phase offset.
+  const SPECTATOR_COUNT = 9;
+  const spectators: Array<{ dot: THREE.Mesh; baseY: number; x: number }> = [];
   for (let i = 0; i < SPECTATOR_COUNT; i++) {
     const tier = 2 + (i % 2); // sit on the two rearmost tiers
     const z = -1.5 - tier * 1.5;
@@ -125,6 +127,7 @@ export function buildTrack(color: number, track: Track): BuiltBuilding {
     const dot = new THREE.Mesh(spectatorGeo, neon);
     dot.position.set(x, y, z);
     group.add(dot);
+    spectators.push({ dot, baseY: y, x });
   }
 
   // ================= START-LIGHT TREE (beside the +X pillar) =================
@@ -158,6 +161,11 @@ export function buildTrack(color: number, track: Track): BuiltBuilding {
 
     // Subtle pulse on the banner checker neon.
     bannerNeon.emissiveIntensity = 1.5 + Math.sin(t * 2.2) * 0.35;
+
+    // Stadium wave: each spectator hops as the crest sweeps across the stand.
+    for (const s of spectators) {
+      s.dot.position.y = s.baseY + 0.45 * Math.max(0, Math.sin(t * 2.6 - s.x * 0.32));
+    }
   };
 
   return { group, signY: 17, frontZ: 6, animate };

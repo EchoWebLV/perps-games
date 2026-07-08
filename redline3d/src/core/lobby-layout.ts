@@ -1,47 +1,60 @@
 /** which functional building you drive into — the lobby is the economy town, not a market picker */
-export type BuildingKind = "garage" | "upgrades" | "crates" | "track" | "highway";
+export type BuildingKind = "garage" | "upgrades" | "crates" | "track" | "highway" | "scrapyard";
 
-export interface Building { kind: BuildingKind; x: number; z: number; w: number; d: number; rot: number; color: number; name: string }
+export interface Building { kind: BuildingKind; x: number; z: number; w: number; d: number; rot: number; color: number; name: string; comingSoon?: boolean }
 export interface DoorZone { kind: BuildingKind; x: number; z: number; r: number }
+export interface Point { x: number; z: number }
 
 // the drivable lot: half-extents in world units (240 x 240 — a big open plaza)
 export const LOT_BOUNDS = { x: 120, z: 120 };
 
-// You spawn here (south of the arc), facing north into the plaza. The rest of the big lot opens
-// out to the south and sides for free driving.
-export const LOBBY_SPAWN = { x: 0, z: 52 };
+// TOWN SQUARE: the buildings ring a central plaza and every one faces INWARD, so from anywhere in
+// the square you can read every storefront (the crescent's readability, but as an enclosed place).
+// You enter from the OPEN south side and drive into the plaza; a loop road circles it. The two race
+// venues (TRACK/HIGHWAY) sit at the north, facing you head-on as you come in.
+export const LOBBY_SPAWN = { x: 0, z: 95 };
 
-// The five storefronts sit along a shallow ARC across one (north) end of the lot, cupping the open
-// plaza. `ARC` is the focus the crescent wraps around; each building faces that focus, so the whole
-// row faces the approaching player. Positions + facing are derived from the arc so it stays tunable.
-// The arc is deliberately asymmetric now: Highway's 81° extends the row east past the old ±49° spread.
-// Garage = your cars · Upgrades = tune · Crates = (soon) · Track = race · Highway = free-drive oval.
-const ARC = { cx: 0, cz: 15, r: 72 };
-const ARC_SPEC: Array<{ kind: BuildingKind; deg: number; w: number; d: number; color: number; name: string }> = [
-  { kind: "garage", deg: -49, w: 26, d: 16, color: 0x27e7ff, name: "GARAGE" },
-  { kind: "upgrades", deg: -16.5, w: 20, d: 20, color: 0xffd166, name: "UPGRADES" },
-  { kind: "crates", deg: 16.5, w: 26, d: 18, color: 0xff39c0, name: "CRATES" },
-  { kind: "track", deg: 49, w: 30, d: 12, color: 0x14f195, name: "TRACK" },
-  { kind: "highway", deg: 81, w: 30, d: 12, color: 0xff6a3d, name: "HIGHWAY" },
+// the central plaza + its loop road, shared with the renderer so the road art and the layout can't
+// drift apart. The loop sits INSIDE the door rings; you circle it and pull outward into a doorway.
+export const PLAZA = {
+  center: { x: 0, z: 0 } as Point,
+  loopRadius: 40, // drivable loop centreline radius
+  loopWidth: 22,
+  entrance: { from: { x: 0, z: 100 }, to: { x: 0, z: 18 } }, // south approach into the plaza
+};
+
+// Buildings sit on a ring of radius `RING_R`, placed by compass angle (degrees clockwise from north,
+// north = −Z). The south sector is left empty for the entrance. Each faces the plaza centre: a group
+// rotated by `rot` maps local +Z → (sin rot, cos rot); facing the centre from angle θ means rot = −θ.
+const RING_R = 72;
+const RING_SPEC: Array<{ kind: BuildingKind; deg: number; w: number; d: number; color: number; name: string; comingSoon?: boolean }> = [
+  // race venues — north, head-on as you enter
+  { kind: "track",    deg:  35, w: 28, d: 12, color: 0x14f195, name: "TRACK" },
+  { kind: "highway",  deg: -35, w: 28, d: 12, color: 0xff6a3d, name: "HIGHWAY" },
+  // shops — east / west sides
+  { kind: "garage",   deg:  80, w: 24, d: 16, color: 0x27e7ff, name: "GARAGE" },
+  { kind: "upgrades", deg: -80, w: 24, d: 16, color: 0xffd166, name: "UPGRADES" },
+  // shops — nearer the entrance corners
+  { kind: "crates",   deg: 125, w: 24, d: 16, color: 0xff39c0, name: "CRATES" },
+  { kind: "scrapyard",deg:-125, w: 24, d: 16, color: 0xd94a2b, name: "SCRAPYARD", comingSoon: true },
 ];
 
-export const BUILDINGS: Building[] = ARC_SPEC.map((s) => {
-  const a = (s.deg * Math.PI) / 180;
-  const x = ARC.cx + ARC.r * Math.sin(a); // + deg = east
-  const z = ARC.cz - ARC.r * Math.cos(a); // north is −Z, so the arc bows away from the plaza
-  // heading that turns the building's local +Z (its front) to face the arc focus: a group rotated
-  // by rot maps local +Z → (sin rot, cos rot); we want that = normalize(focus − pos).
-  const rot = Math.atan2(ARC.cx - x, ARC.cz - z);
-  return { kind: s.kind, x, z, w: s.w, d: s.d, rot, color: s.color, name: s.name };
+export const BUILDINGS: Building[] = RING_SPEC.map((s) => {
+  const th = (s.deg * Math.PI) / 180;
+  const x = RING_R * Math.sin(th); // + deg = east
+  const z = -RING_R * Math.cos(th); // north is −Z
+  const rot = -th; // turn the front (local +Z) to point back at the plaza centre
+  return { kind: s.kind, x, z, w: s.w, d: s.d, rot, color: s.color, name: s.name, comingSoon: s.comingSoon };
 });
 
-// entrance trigger: a circle just in front of each building's door, out toward the plaza/focus.
-// front direction = (sin rot, cos rot); step out (depth/2 + 6) from the building centre.
+// entrance trigger: a storefront-wide circle hugging each building's front apron, out toward the
+// plaza — big enough to see and drive into on purpose, drawn as a glowing ring by the lobby.
+// front direction = (sin rot, cos rot); step out (depth/2 + 5) from the building centre (inward).
 export const DOORS: DoorZone[] = BUILDINGS.map((b) => ({
   kind: b.kind,
-  x: b.x + Math.sin(b.rot) * (b.d / 2 + 6),
-  z: b.z + Math.cos(b.rot) * (b.d / 2 + 6),
-  r: 7,
+  x: b.x + Math.sin(b.rot) * (b.d / 2 + 5),
+  z: b.z + Math.cos(b.rot) * (b.d / 2 + 5),
+  r: b.w / 2 + 4,
 }));
 
 /** which doorway the point (x,z) is inside, or null */

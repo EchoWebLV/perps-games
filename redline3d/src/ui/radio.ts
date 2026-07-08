@@ -13,14 +13,14 @@ export interface Radio {
 const STREAM = "https://stream.nightride.fm/nightride.ogg";
 
 /** A muteable synthwave radio. The on/off toggle lives in the menu (see carpicker). */
-export function createRadio(parent: HTMLElement): Radio {
+export function createRadio(parent: HTMLElement, startOn = true): Radio {
   const audio = document.createElement("audio");
   audio.src = STREAM;
   audio.preload = "none";
   audio.volume = 0.42; // sit under the engine/stings
   parent.appendChild(audio);
 
-  let want = true; // user intent to play
+  let want = startOn; // user intent to play
 
   return {
     resume() { if (want) void audio.play().catch(() => {}); },
