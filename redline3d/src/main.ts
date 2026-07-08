@@ -417,7 +417,10 @@ const CAR_DEFS: CarOption[] = [
   // +π/2 turns these length-on-X models to face DOWN the road (nose forward) — drive-test confirmed on all;
   // the RV is length-on-Z (yaw 0), just scaled up because it read small. (GLBs compressed 2026-07-06.)
   { name: "Banana", url: "/models/banana.glb", rarity: 1, yaw: Math.PI / 2, power: { name: "Peel Out", desc: "100% real potassium", icon: "flame" } },
-  { name: "Cook Wagon", url: "/models/breaking_rv.glb", rarity: 1, scale: 1.7, power: { name: "Cooking", desc: "99.1% pure horsepower", icon: "flame" } },
+  // BENCHED 2026-07-08 (user verdict: "not fun at all to drive"): pool:false drops it from crate
+  // pulls, comingSoon:true taps it off the pickable rotation. Its GLB, card art, and any already-
+  // owned copies stay intact — an owner just sees a COMING SOON card they can't equip.
+  { name: "Cook Wagon", url: "/models/breaking_rv.glb", rarity: 1, scale: 1.7, pool: false, comingSoon: true, power: { name: "Cooking", desc: "99.1% pure horsepower", icon: "flame" } },
   { name: "Trabbi", url: "/models/trabant.glb", rarity: 1, yaw: Math.PI / 2, power: { name: "Two-Stroke", desc: "0–60, eventually", icon: "clock" } },
   { name: "Big Frank", url: "/models/wiener.glb", rarity: 1, yaw: Math.PI / 2, power: { name: "Relish It", desc: "ketchup sold separately", icon: "flame" } },
   { name: "Dragon", url: "/models/dragon.glb", rarity: 1, yaw: Math.PI / 2, power: { name: "Fire Breather", desc: "runs on spicy noodles", icon: "flame" } },
