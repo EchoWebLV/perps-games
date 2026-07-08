@@ -15,10 +15,19 @@ export interface Inventory {
   all(): string[];
   /** cars that have at least one spare, with their total count */
   meltable(): { id: string; count: number }[];
+  /** current counts as a plain object — the first-bind migration snapshot */
+  snapshot(): Record<string, number>;
+  /** replace all counts from a server snapshot; the free floor is re-applied. No hooks fired. */
+  hydrate(counts: Record<string, number>): void;
 }
 
 /** `free` ids are always owned at count >= 1 (Starter / default level). `storage` is injectable for tests. */
-export function createInventory(key: string, free: string[] = [], storage: Storage = localStorage): Inventory {
+export function createInventory(
+  key: string,
+  free: string[] = [],
+  storage: Storage = localStorage,
+  hooks: { onGrant?: (id: string, isNew: boolean) => void; onMelt?: (id: string, melted: boolean) => void } = {},
+): Inventory {
   const counts = new Map<string, number>();
   try {
     const raw = storage.getItem(key);
@@ -48,17 +57,30 @@ export function createInventory(key: string, free: string[] = [], storage: Stora
       const prev = counts.get(id) ?? 0;
       counts.set(id, prev + 1);
       persist();
-      return prev === 0;
+      const isNew = prev === 0;
+      hooks.onGrant?.(id, isNew);
+      return isNew;
     },
     spares: (id) => Math.max(0, (counts.get(id) ?? 0) - 1),
     melt: (id) => {
       const prev = counts.get(id) ?? 0;
-      if (prev <= 1) return false; // keep the last copy — melting only sheds spares
+      if (prev <= 1) { hooks.onMelt?.(id, false); return false; } // keep the last copy — melting only sheds spares
       counts.set(id, prev - 1);
       persist();
+      hooks.onMelt?.(id, true);
       return true;
     },
     all: () => [...counts.entries()].filter(([, n]) => n > 0).map(([id]) => id),
     meltable: () => [...counts.entries()].filter(([, n]) => n > 1).map(([id, n]) => ({ id, count: n })),
+    snapshot: () => Object.fromEntries([...counts.entries()].filter(([, n]) => n > 0)),
+    hydrate: (next) => {
+      counts.clear();
+      for (const [id, n] of Object.entries(next)) {
+        const c = Math.max(0, Math.floor(Number(n) || 0));
+        if (c > 0) counts.set(id, c);
+      }
+      for (const id of free) if ((counts.get(id) ?? 0) < 1) counts.set(id, 1); // free floor survives
+      persist();
+    },
   };
 }

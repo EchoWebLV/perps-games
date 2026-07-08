@@ -120,4 +120,35 @@ describe("counted inventory", () => {
     const b = createInventory("k", [], store);
     expect(b.count("Orion")).toBe(2);
   });
+
+  test("fires hooks on grant/melt and snapshots counts", () => {
+    const grants: { id: string; isNew: boolean }[] = [];
+    const melts: { id: string; melted: boolean }[] = [];
+    const inv = createInventory("k", ["Starter"], memStore(), {
+      onGrant: (id, isNew) => grants.push({ id, isNew }),
+      onMelt: (id, melted) => melts.push({ id, melted }),
+    });
+
+    inv.grant("Orion");
+    inv.grant("Orion");
+    expect(grants).toEqual([{ id: "Orion", isNew: true }, { id: "Orion", isNew: false }]);
+
+    expect(inv.melt("Orion")).toBe(true);
+    expect(melts).toEqual([{ id: "Orion", melted: true }]);
+    expect(inv.melt("Orion")).toBe(false); // last copy kept → melted:false still reported
+    expect(melts[melts.length - 1]).toEqual({ id: "Orion", melted: false });
+
+    expect(inv.snapshot()).toEqual({ Starter: 1, Orion: 1 });
+  });
+
+  test("hydrate replaces counts from a server snapshot (free floor re-applied, no hooks)", () => {
+    const grants: unknown[] = [];
+    const inv = createInventory("k", ["Starter"], memStore(), { onGrant: () => grants.push(1) });
+    inv.grant("Orion");
+    inv.hydrate({ Skull: 2, Helmet: 1 }); // server truth; Starter must survive as free
+    expect(inv.owns("Orion")).toBe(false);
+    expect(inv.count("Skull")).toBe(2);
+    expect(inv.owns("Starter")).toBe(true);
+    expect(grants.length).toBe(1); // hydrate fired no onGrant
+  });
 });
