@@ -1,5 +1,6 @@
+// @vitest-environment jsdom
 import { describe, expect, test } from "vitest";
-import { setHudMenuMode } from "./carpicker";
+import { createCarPicker, setHudMenuMode, type CarOption } from "./carpicker";
 
 function fakeEl(display = "") {
   return { style: { display } } as HTMLElement;
@@ -8,6 +9,112 @@ function fakeEl(display = "") {
 function fakeParent(children: HTMLElement[]) {
   return { children } as unknown as HTMLElement;
 }
+
+describe("createCarPicker initial selection", () => {
+  const cars = (over: Partial<CarOption>[] = []): CarOption[] => {
+    const base: CarOption[] = [
+      { name: "DeLorean", url: "/models/delorean.glb", ability: "flux", power: { name: "Flux Brake", desc: "freeze", icon: "clock" } },
+      { name: "Starter", url: "/models/starter.glb" },
+    ];
+    over.forEach((o, i) => Object.assign(base[i], o));
+    return base;
+  };
+
+  test("creation fires onPick for the boot card — the default car's ability must actually apply", () => {
+    const picks: string[] = [];
+    createCarPicker(document.createElement("div"), cars(), (c) => picks.push(c.name));
+    expect(picks).toEqual(["DeLorean"]); // paint-only selection = boot car drives with a dead ability
+  });
+
+  test("initial pick skips locked cards", () => {
+    const picks: string[] = [];
+    createCarPicker(document.createElement("div"), cars([{ locked: true }]), (c) => picks.push(c.name));
+    expect(picks).toEqual(["Starter"]);
+  });
+});
+
+describe("coming-soon construction tape", () => {
+  const roster = (): CarOption[] => [
+    { name: "DeLorean", url: "/models/delorean.glb" },
+    { name: "Skull", url: "/models/skull.glb", comingSoon: true },
+    { name: "Helmet", url: "/models/helmet.glb", comingSoon: true },
+    { name: "Vaporwave", url: "/models/vaporwave.glb", comingSoon: true },
+  ];
+
+  test("a comingSoon card renders the tape with COMING SOON over the art", () => {
+    const parent = document.createElement("div");
+    createCarPicker(parent, roster(), () => {});
+    const tapes = parent.querySelectorAll(".gcard-tape");
+    expect(tapes.length).toBe(3);
+    expect(tapes[0].textContent).toContain("COMING SOON");
+  });
+
+  test("three taped cards get the three different tape angles", () => {
+    const parent = document.createElement("div");
+    createCarPicker(parent, roster(), () => {});
+    const variants = [...parent.querySelectorAll(".gcard-tape")].map((t) =>
+      [...t.classList].find((c) => c.startsWith("tape-")));
+    expect(new Set(variants).size).toBe(3); // 3 variants, 3 angles
+  });
+
+  test("clicking a taped card does NOT pick it", () => {
+    const picks: string[] = [];
+    const parent = document.createElement("div");
+    createCarPicker(parent, roster(), (c) => picks.push(c.name));
+    const cards = parent.querySelectorAll(".gcard");
+    (cards[1] as HTMLElement).click(); // Skull — taped
+    expect(picks).toEqual(["DeLorean"]); // only the boot pick fired
+  });
+
+  test("the boot pick skips comingSoon cards", () => {
+    const picks: string[] = [];
+    const cars = roster();
+    [cars[0], cars[1]] = [cars[1], cars[0]]; // taped Skull first in the roster
+    createCarPicker(document.createElement("div"), cars, (c) => picks.push(c.name));
+    expect(picks).toEqual(["DeLorean"]);
+  });
+});
+
+describe("world (level skin) picker locking", () => {
+  const worldsWith = (sets: string[]) => ({
+    list: () => [
+      { key: "synthwave", name: "Synthwave", colors: ["#ff39c0", "#27e7ff", "#ff39c0"], locked: false },
+      { key: "neon-city", name: "Neon City", colors: ["#27e7ff", "#0a0f1e", "#27e7ff"], locked: false },
+      { key: "volcano", name: "Volcano", colors: ["#ff4d6d", "#120a0a", "#ff4d6d"], locked: true },
+    ],
+    current: () => "synthwave",
+    set: (k: string) => { sets.push(k); },
+  });
+
+  const openWorlds = (worlds: ReturnType<typeof worldsWith>) => {
+    const parent = document.createElement("div");
+    createCarPicker(parent, [{ name: "Starter", url: "/models/starter.glb" }], () => {},
+      undefined, [], undefined, undefined, undefined, worlds);
+    (parent.querySelector('[data-go="worlds"]') as HTMLElement).click(); // open the World sub-view
+    return parent;
+  };
+
+  test("an unowned world is shown SEALED, not hidden", () => {
+    const parent = openWorlds(worldsWith([]));
+    expect(parent.querySelectorAll("[data-world]").length).toBe(3); // all three, not filtered to owned
+    const volcano = parent.querySelector('[data-world="volcano"]') as HTMLElement;
+    expect(volcano.classList.contains("locked")).toBe(true);
+  });
+
+  test("clicking a locked world does NOT switch the skin", () => {
+    const sets: string[] = [];
+    const parent = openWorlds(worldsWith(sets));
+    (parent.querySelector('[data-world="volcano"]') as HTMLElement).click();
+    expect(sets).toEqual([]); // sealed — no switch, like a locked card
+  });
+
+  test("an owned world is still selectable", () => {
+    const sets: string[] = [];
+    const parent = openWorlds(worldsWith(sets));
+    (parent.querySelector('[data-world="neon-city"]') as HTMLElement).click();
+    expect(sets).toEqual(["neon-city"]);
+  });
+});
 
 describe("setHudMenuMode", () => {
   test("hides every hud child except the menu root while menu is open", () => {

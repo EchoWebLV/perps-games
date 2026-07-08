@@ -104,54 +104,68 @@ export function buildCrates(color: number, track: Track): BuiltBuilding {
   placeContainer(4, 2, 0.5, containerA);
   placeContainer(4, 6, -1.75, containerA);
 
-  // ---- hero loot crate, near front-center ----
+  // ---- hero loot crate, near front-center — one group so it can hover + spin as a unit ----
   const heroCx = 0;
   const heroCy = 2;
   const heroCz = 5;
   const heroSize = 4;
+  const hero = new THREE.Group();
+  hero.position.set(heroCx, heroCy, heroCz);
+  group.add(hero);
 
   const heroCrateGeo: THREE.BoxGeometry = track(new THREE.BoxGeometry(heroSize, heroSize, heroSize));
   const heroCrate = new THREE.Mesh(heroCrateGeo, body);
-  heroCrate.position.set(heroCx, heroCy, heroCz);
-  group.add(heroCrate);
+  hero.add(heroCrate);
 
   // cross-straps: thin neon boxes forming an X across the +Z face
   const strapLen = Math.SQRT2 * heroSize + 0.2;
   const strapGeo: THREE.BoxGeometry = track(new THREE.BoxGeometry(0.3, strapLen, 0.15));
-  const strapZ = heroCz + heroSize / 2 + 0.08;
+  const strapZ = heroSize / 2 + 0.08;
   const strapA = new THREE.Mesh(strapGeo, neon);
   strapA.rotation.z = Math.PI / 4;
-  strapA.position.set(heroCx, heroCy, strapZ);
-  group.add(strapA);
+  strapA.position.set(0, 0, strapZ);
+  hero.add(strapA);
   const strapB = new THREE.Mesh(strapGeo, neon);
   strapB.rotation.z = -Math.PI / 4;
-  strapB.position.set(heroCx, heroCy, strapZ);
-  group.add(strapB);
+  strapB.position.set(0, 0, strapZ);
+  hero.add(strapB);
 
   // bands over the top of the crate, running +X/−Z to +X/+Z (front-to-back over the roofline)
   const topBandGeo: THREE.BoxGeometry = track(new THREE.BoxGeometry(0.3, 0.15, heroSize + 0.2));
   const topBandOffsets = [-1.2, 1.2];
   for (const ox of topBandOffsets) {
     const band = new THREE.Mesh(topBandGeo, neon);
-    band.position.set(heroCx + ox, heroCy + heroSize / 2 + 0.08, heroCz);
-    group.add(band);
+    band.position.set(ox, heroSize / 2 + 0.08, 0);
+    hero.add(band);
   }
 
   // glowing neon seam line around the crate's middle (four edge boxes forming a ring)
   const seamHGeo: THREE.BoxGeometry = track(new THREE.BoxGeometry(heroSize + 0.1, 0.2, 0.2));
   const seamVGeo: THREE.BoxGeometry = track(new THREE.BoxGeometry(0.2, 0.2, heroSize + 0.1));
   const seamFront = new THREE.Mesh(seamHGeo, seam);
-  seamFront.position.set(heroCx, heroCy, heroCz + heroSize / 2);
-  group.add(seamFront);
+  seamFront.position.set(0, 0, heroSize / 2);
+  hero.add(seamFront);
   const seamBack = new THREE.Mesh(seamHGeo, seam);
-  seamBack.position.set(heroCx, heroCy, heroCz - heroSize / 2);
-  group.add(seamBack);
+  seamBack.position.set(0, 0, -heroSize / 2);
+  hero.add(seamBack);
   const seamLeft = new THREE.Mesh(seamVGeo, seam);
-  seamLeft.position.set(heroCx - heroSize / 2, heroCy, heroCz);
-  group.add(seamLeft);
+  seamLeft.position.set(-heroSize / 2, 0, 0);
+  hero.add(seamLeft);
   const seamRight = new THREE.Mesh(seamVGeo, seam);
-  seamRight.position.set(heroCx + heroSize / 2, heroCy, heroCz);
-  group.add(seamRight);
+  seamRight.position.set(heroSize / 2, 0, 0);
+  hero.add(seamRight);
+
+  // vertical light beam rising off the crate — the "there's loot here" column
+  const beamUpMat: THREE.MeshBasicMaterial = track(
+    new THREE.MeshBasicMaterial({
+      color, transparent: true, opacity: 0.14,
+      blending: THREE.AdditiveBlending, depthWrite: false, side: THREE.DoubleSide,
+    }),
+  );
+  const beamUpGeo: THREE.CylinderGeometry = track(new THREE.CylinderGeometry(0.8, 1.5, 12, 14, 1, true));
+  const beamUp = new THREE.Mesh(beamUpGeo, beamUpMat);
+  beamUp.position.set(0, heroSize / 2 + 6, 0);
+  hero.add(beamUp);
 
   // ---- gantry crane over the yard ----
   const postGeo: THREE.BoxGeometry = track(new THREE.BoxGeometry(0.6, 12, 0.6));
@@ -210,12 +224,15 @@ export function buildCrates(color: number, track: Track): BuiltBuilding {
     group.add(stripe);
   }
 
-  // ---- animation: bob the crane hook, pulse the loot-crate seam ----
+  // ---- animation: bob the crane hook, levitate + spin the hero crate, pulse its seam + beam ----
   const seamMat = seam;
   const hookBaseY = hookGroup.position.y;
   const animate = (t: number): void => {
     hookGroup.position.y = hookBaseY + Math.sin(t * 1.1) * 0.6;
     seamMat.emissiveIntensity = 1.5 + 0.9 * Math.sin(t * 2.4);
+    hero.position.y = heroCy + 0.9 + 0.4 * Math.sin(t * 1.2); // hovers clear of the ground
+    hero.rotation.y = t * 0.5;
+    beamUpMat.opacity = 0.12 + 0.07 * Math.sin(t * 2.4);
   };
 
   return { group, signY: 15, frontZ: 9, animate };

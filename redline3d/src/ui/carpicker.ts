@@ -1,17 +1,20 @@
 import * as THREE from "three";
 import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader.js";
 import { RoomEnvironment } from "three/examples/jsm/environments/RoomEnvironment.js";
+import { TIERS, tierOf, pullChance, type Rarity } from "../core/rarity";
 
 /** a car's special ability id; drives in-game effects when that card is selected */
-export type CarAbility = "laneBet" | "nitro" | "rainbow" | "skull" | "pinkRod" | "sixWheeler" | "cartRod" | "flux" | "swerve" | "slots" | "airbag";
+export type CarAbility = "laneBet" | "nitro" | "rainbow" | "skull" | "pinkRod" | "sixWheeler" | "cartRod" | "flux" | "swerve" | "slots" | "airbag" | "magnet";
 /** card-face display of the car's power (the ability shown on the card) */
 export interface CarPower { name: string; desc: string; icon: string }
 export interface CarOption {
   name: string; url: string; scale?: number; yaw?: number;
   ability?: CarAbility; power?: CarPower;
   baseLev?: number;         // car's base max leverage (raises the dial ceiling, e.g. Cybertruck 1500)
-  rarity?: 1 | 2 | 3;       // collectible tier (gems on the card)
+  rarity?: Rarity;          // collectible tier 1–5 (Common→Legendary); colored gems on the card
+  pool?: boolean;           // false → out of the crate drop pool (free Starter, benched cars)
   locked?: boolean;         // not yet owned → shown sealed in the collection
+  comingSoon?: boolean;     // ability still in the shop → card shown taped off, can't be picked
 }
 export interface Garage {
   /** the wrap element (hamburger button + overlay) — lets the lobby toggle its chrome */
@@ -20,6 +23,16 @@ export interface Garage {
   setBusy(busy: boolean): void;
   /** open the overlay straight to the garage (car collection) view — used by the lobby Garage building */
   openGarage(): void;
+  /** unlock a car in the collection after a crate pull — flips its card from LOCKED to owned + renders its art */
+  grant(name: string): void;
+  /** the menu/garage/help overlay is on screen (a GO press must not launch behind it) */
+  isOpen(): boolean;
+  /** cruise chrome: lift the hamburger to the top corner (the price chip's slot is empty
+   *  on the strip); false drops it back to its usual row under the racing HUD */
+  setMenuTop(on: boolean): void;
+  /** showroom (drive-in garage): translucent backdrop + right-anchored panel so the 3D garage
+   *  shows behind the collection cards. off restores the opaque strip/hamburger overlay. */
+  setShowroom(on: boolean): void;
 }
 
 const MODEL_YAW = Math.PI;       // base facing (matches the in-game car)
@@ -45,11 +58,18 @@ const ICONS: Record<string, string> = {
   coin: '<circle cx="12" cy="12" r="8.5"/><path d="M12 7.6l3.2 4.4-3.2 4.4-3.2-4.4z"/>',
   swerve: '<path d="M5 19c7 0 3-7 9-7h5.5"/><path d="M16.5 8.5L20 12l-3.5 3.5"/>',
   bell: '<path d="M12 3.5a5.5 5.5 0 0 1 5.5 5.5v3.6l1.7 2.9H4.8l1.7-2.9V9A5.5 5.5 0 0 1 12 3.5z"/><path d="M10.3 18.5a1.8 1.8 0 0 0 3.4 0"/>',
+  sparkle: '<path d="M12 3l1.8 5.2L19 10l-5.2 1.8L12 17l-1.8-5.2L5 10l5.2-1.8z"/><path d="M18 4.2l.6 1.7 1.7.6-1.7.6-.6 1.7-.6-1.7-1.7-.6 1.7-.6z"/>',
 };
 const icon = (id: string, size = 15) =>
   `<svg viewBox="0 0 24 24" width="${size}" height="${size}" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">${ICONS[id] || ""}</svg>`;
 const backIcon = (size: number) => icon("chevron", size).replace('d="M9 6l6 6-6 6"', 'd="M15 6l-6 6 6 6"');
-const gems = (n: number) => Array.from({ length: 3 }, (_, k) => `<span class="gem${k < n ? " on" : ""}"></span>`).join("");
+// rarity pips: count = tier (1–5), each colored by its tier (gray→green→blue→purple→gold);
+// 0 renders nothing (locked cards show no pips).
+const gems = (r: number) => {
+  if (!r) return "";
+  const c = tierOf(r).color;
+  return Array.from({ length: r }, () => `<span class="gem on" style="background:${c};box-shadow:0 0 5px ${c}cc"></span>`).join("");
+};
 
 const hudDisplayBeforeMenu = new WeakMap<HTMLElement, string>();
 
@@ -74,8 +94,19 @@ function injectStyles() {
   stylesInjected = true;
   const s = document.createElement("style");
   s.textContent = `
-    .gpanel{width:min(384px,94vw);padding:15px;display:flex;flex-direction:column;gap:13px;
+    .gpanel{width:min(384px,94vw);max-height:100%;padding:15px;display:flex;flex-direction:column;gap:13px;
       background:rgba(12,10,26,.9);border-color:rgba(132,150,224,.28);pointer-events:auto}
+    /* drive-in showroom: translucent so the 3D garage shows behind the cards */
+    .gover-showroom{background:rgba(6,4,16,.42)!important;backdrop-filter:blur(1px)!important;-webkit-backdrop-filter:blur(1px)!important}
+    /* landscape → a side panel on the right (car sits left) */
+    @media (orientation:landscape){ .gover-showroom{justify-content:flex-end!important} }
+    /* portrait (the mobile game) → a bottom sheet so the hero car owns the top third */
+    @media (orientation:portrait){
+      .gover-showroom{align-items:flex-end!important;justify-content:center!important;padding:0!important}
+      .gover-showroom .gpanel{width:100%!important;max-width:none!important;max-height:66vh!important;
+        border-radius:20px 20px 0 0;padding-bottom:max(15px,env(safe-area-inset-bottom));
+        box-shadow:0 -18px 44px -12px rgba(0,0,0,.8)}
+    }
     .ghead{display:flex;align-items:center;gap:10px}
     .ghead .lbl{flex:1}
     .gicon-btn{display:grid;place-items:center;width:30px;height:30px;border:0;background:transparent;cursor:pointer;color:var(--mut);border-radius:8px}
@@ -90,6 +121,9 @@ function injectStyles() {
     .gmenu-tx b{font:700 14px/1 'Chakra Petch',ui-monospace,monospace;letter-spacing:.05em}
     .gmenu-tx small{font:500 10px/1.2 'Chakra Petch',ui-monospace,monospace;color:var(--mut)}
     .gmenu-arr{display:flex;color:var(--mut)}
+    .gmenu-item.locked{cursor:not-allowed;filter:grayscale(.72) brightness(.66);border-color:rgba(132,150,224,.16)}
+    .gmenu-item.locked:hover{border-color:rgba(132,150,224,.16);background:rgba(18,14,40,.72);transform:none}
+    .gmenu-item.locked .gmenu-arr{color:rgba(220,225,255,.82)}
     .ghelp{font:500 12px/1.7 'Chakra Petch',ui-monospace,monospace;color:rgba(216,222,255,.8)}
     .ghelp b{color:var(--cyan)}
     .gbusy{display:flex;align-items:center;gap:7px;margin:0 6px;padding:7px 10px;border-radius:8px;
@@ -97,8 +131,12 @@ function injectStyles() {
       font:700 9px/1 'Chakra Petch',ui-monospace,monospace;letter-spacing:.1em;text-transform:uppercase}
     .ggrid.locked .gcard:not(.locked){cursor:not-allowed}
     .ggrid.locked .gcard:not(.locked):hover{transform:none;box-shadow:0 9px 22px rgba(0,0,0,.55)}
-    .ggrid{display:grid;grid-template-columns:1fr 1fr;gap:13px;overflow-y:auto;overflow-x:hidden;
-      max-height:min(72vh,560px);padding:8px 6px 10px;-webkit-overflow-scrolling:touch}
+    .ggrid{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:13px;overflow-y:auto;overflow-x:hidden;overscroll-behavior:contain;
+      min-height:0;max-height:min(72vh,560px);padding:16px 6px 16px;
+      scrollbar-width:thin;scrollbar-color:rgba(132,150,224,.45) transparent;-webkit-overflow-scrolling:touch}
+    .ggrid::-webkit-scrollbar{width:8px}
+    .ggrid::-webkit-scrollbar-thumb{background:rgba(132,150,224,.45);border-radius:8px}
+    .ggrid::-webkit-scrollbar-track{background:transparent}
     .gcard{position:relative;border-radius:13px;cursor:pointer;padding:9px 8px 7px;isolation:isolate;
       display:flex;flex-direction:column;gap:6px;border:2px solid transparent;
       background:linear-gradient(168deg,#241a63,#3c1d6b 42%,#7d1f6a) padding-box,
@@ -122,6 +160,10 @@ function injectStyles() {
     .grarity{display:flex;gap:3px;flex:none}
     .gem{width:6px;height:6px;transform:rotate(45deg);background:rgba(255,255,255,.18);border-radius:1px}
     .gem.on{background:#ffd166;box-shadow:0 0 5px rgba(255,209,102,.85)}
+    .godds{display:flex;flex-wrap:wrap;align-items:center;gap:5px 11px;padding:7px 12px 9px;border-bottom:1px solid rgba(255,255,255,.08)}
+    .godds-lbl{font:800 9px/1 'Chakra Petch',ui-monospace,monospace;letter-spacing:.16em;text-transform:uppercase;color:rgba(216,222,255,.5)}
+    .godds-t{display:flex;align-items:center;gap:5px;font:700 10px/1 'Chakra Petch',ui-monospace,monospace;letter-spacing:.03em;color:rgba(226,230,255,.86)}
+    .godds-t i{width:8px;height:8px;transform:rotate(45deg);border-radius:1px;background:var(--tc);box-shadow:0 0 6px var(--tc)}
     .gcard-win{position:relative;height:116px;border-radius:10px;overflow:hidden;z-index:1;border:1px solid rgba(255,255,255,.2);
       background:radial-gradient(120% 80% at 50% 98%,rgba(39,231,255,.2),rgba(255,57,192,.07) 54%,transparent 78%),
         linear-gradient(150deg,rgba(255,255,255,.2) 0%,rgba(255,255,255,.04) 26%,transparent 44%);
@@ -148,6 +190,68 @@ function injectStyles() {
       background:linear-gradient(168deg,#1b1830,#241f3a) padding-box,linear-gradient(135deg,#555,#888) border-box}
     .gcard-lock{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:6px;color:rgba(220,225,255,.85);z-index:1}
     .gcard-lock span{font:700 10px/1 'Chakra Petch',ui-monospace,monospace;letter-spacing:.22em}
+    /* --- "coming soon" construction tape (Skull now; reused for future cars) --- */
+    .gcard.soon{cursor:not-allowed}
+    .gcard.soon:hover{transform:none;box-shadow:0 9px 22px rgba(0,0,0,.55)}
+    .gcard.soon .gcard-win,.gcard.soon .gcard-ab{filter:grayscale(.62) brightness(.58) contrast(.92)}
+    .gcard.soon .gcard-holo{opacity:.1}
+    .gcard.soon .gtitle-name{color:rgba(220,225,255,.6);text-shadow:none}
+    .gcard-tape{position:absolute;left:-9%;width:118%;height:30px;z-index:7;pointer-events:none;
+      display:grid;place-items:center;overflow:hidden;
+      background:repeating-linear-gradient(-45deg,#f4c81a 0 13px,#141008 13px 26px);
+      border-top:1.5px solid rgba(0,0,0,.55);border-bottom:1.5px solid rgba(0,0,0,.55);
+      box-shadow:0 3px 10px rgba(0,0,0,.5),inset 0 1px 0 rgba(255,255,255,.28),inset 0 -3px 6px rgba(0,0,0,.35)}
+    .gcard-tape-txt{font:800 11px/1 'Chakra Petch',ui-monospace,monospace;letter-spacing:.18em;color:#140f02;white-space:nowrap;
+      text-shadow:0 0 3px #f4c81a,0 1px 0 #f4c81a,0 -1px 0 #f4c81a,1px 0 0 #f4c81a,-1px 0 0 #f4c81a}
+    .tape-1{top:43%;transform:translateY(-50%) rotate(-16deg)}
+    .tape-2{top:52%;transform:translateY(-50%) rotate(11deg)}
+    .tape-3{top:38%;transform:translateY(-50%) rotate(-6deg)}
+    /* ---- card detail zoom (tap a card → big collectible card, gold frame + dark interior) ---- */
+    .gdetail-scrim{position:fixed;inset:0;z-index:12;display:none;align-items:center;justify-content:center;padding:20px;
+      background:rgba(4,3,12,.82);backdrop-filter:blur(3px);perspective:1400px}
+    .gdetail-scrim.on{display:flex}
+    .gdcard{width:min(330px,90vw);border-radius:20px;padding:9px;position:relative;transform-style:preserve-3d;transition:transform .14s ease;
+      background:linear-gradient(135deg,#ffe37a,#dfa42a 40%,#fff1a8 60%,#c9902a);
+      box-shadow:0 26px 64px -18px rgba(0,0,0,.9),0 0 26px -8px rgba(255,209,102,.5)}
+    .gdcard-face{position:relative;overflow:hidden;border-radius:13px;padding:13px;
+      background:radial-gradient(130% 80% at 50% -12%,rgba(39,231,255,.16),transparent 55%),linear-gradient(168deg,#181327,#0d0a1a);
+      box-shadow:inset 0 0 0 1px rgba(255,255,255,.08),inset 0 1px 0 rgba(255,255,255,.14)}
+    .gdcard-glare{position:absolute;inset:0;z-index:6;pointer-events:none;opacity:0;transition:opacity .2s;mix-blend-mode:soft-light;
+      background:radial-gradient(180px 180px at var(--gx,50%) var(--gy,0%),rgba(255,255,255,.4),transparent 60%)}
+    .gdcard:hover .gdcard-glare{opacity:1}
+    .gdcard-x{position:absolute;top:9px;left:9px;z-index:7;width:30px;height:30px;display:grid;place-items:center;border:0;border-radius:8px;
+      cursor:pointer;color:#fff;background:rgba(0,0,0,.35)}
+    .gdcard-x:hover{background:rgba(0,0,0,.55)}
+    .gdcard-head{display:flex;align-items:center;justify-content:space-between;gap:8px;margin:2px 0 10px 34px;position:relative;z-index:2}
+    .gdcard-name{font:800 20px/1 'Chakra Petch',ui-monospace,monospace;letter-spacing:.03em;color:#fff;text-shadow:0 0 10px rgba(39,231,255,.55)}
+    .gdcard-rar{display:flex;gap:4px}
+    .gdcard-rar .gem{width:9px;height:9px}
+    .gdcard-tier{display:flex;align-items:center;justify-content:space-between;gap:8px;margin:-4px 0 10px 34px;position:relative;z-index:2;
+      font:800 11px/1 'Chakra Petch',ui-monospace,monospace;letter-spacing:.15em;text-transform:uppercase;text-shadow:0 0 9px currentColor}
+    .gdcard-pull{font-weight:600;letter-spacing:.06em;color:rgba(216,222,255,.6);text-shadow:none}
+    .gdcard-win{position:relative;height:200px;border-radius:10px;overflow:hidden;border:1px solid rgba(255,255,255,.18);z-index:1;
+      background:radial-gradient(90% 70% at 50% 16%,rgba(255,60,160,.32),transparent 62%),linear-gradient(180deg,#291a4c,#0b0816 74%)}
+    .gdcard-win::before{content:"";position:absolute;inset:0;background:repeating-linear-gradient(90deg,rgba(39,231,255,.10) 0 2px,transparent 2px 28px)}
+    .gdcard-holo{position:absolute;inset:0;z-index:1;mix-blend-mode:screen;opacity:.16;
+      background:conic-gradient(from 0deg,#ff3ca0,#ffd84d,#3cff9e,#3cc8ff,#b06bff,#ff3ca0)}
+    .gdcard-shine{position:absolute;inset:-40% -60%;z-index:3;pointer-events:none;
+      background:linear-gradient(115deg,transparent 44%,rgba(255,255,255,.22) 50%,transparent 56%);animation:gdshine 4.2s ease-in-out infinite}
+    @keyframes gdshine{0%,100%{transform:translateX(-32%)}50%{transform:translateX(32%)}}
+    .gdcard-art{position:absolute;inset:8px;width:calc(100% - 16px);height:calc(100% - 16px);object-fit:contain;z-index:4;filter:drop-shadow(0 7px 15px rgba(0,0,0,.7));transition:opacity .4s ease}
+    .gdcard-art.hide{opacity:0}
+    .gdcard-3d{position:absolute;inset:8px;width:calc(100% - 16px);height:calc(100% - 16px);z-index:5;opacity:0;transition:opacity .45s ease;pointer-events:none}
+    .gdcard-3d.on{opacity:1}
+    .gdcard-ab{display:flex;align-items:flex-start;gap:10px;margin:12px 0;padding:10px 12px;border-radius:10px;position:relative;z-index:2;
+      background:rgba(7,5,18,.55);border:1px solid rgba(39,231,255,.32);box-shadow:inset 0 0 12px rgba(39,231,255,.08)}
+    .gdcard-ab-ic{display:flex;color:#ffd166;filter:drop-shadow(0 0 5px rgba(255,209,102,.6));margin-top:1px}
+    .gdcard-ab-tx{display:flex;flex-direction:column;gap:3px;min-width:0}
+    .gdcard-ab-nm{font:700 13px/1 'Chakra Petch',ui-monospace,monospace;letter-spacing:.05em;color:var(--cyan);text-transform:uppercase}
+    .gdcard-ab-ds{font:500 11px/1.4 'Chakra Petch',ui-monospace,monospace;color:rgba(216,222,255,.72)}
+    .gdcard-equip{position:relative;z-index:2;width:100%;padding:12px;border:0;border-radius:10px;cursor:pointer;
+      font:800 13px/1 'Chakra Petch',ui-monospace,monospace;letter-spacing:.12em;color:#04222b;
+      background:linear-gradient(180deg,#5cf0ff,#12c7e6);box-shadow:0 0 18px -4px #27e7ff,inset 0 1px 0 rgba(255,255,255,.6)}
+    .gdcard-equip:hover{filter:brightness(1.08)}
+    .gdcard-equip.dis{background:rgba(255,77,109,.16);color:#ff9aa6;box-shadow:none;cursor:not-allowed;letter-spacing:.06em}
   `;
   document.head.appendChild(s);
 }
@@ -162,7 +266,14 @@ export interface MenuToggle {
   set: (on: boolean) => void;
 }
 
-export function createCarPicker(parent: HTMLElement, cars: CarOption[], onPick: (c: CarOption) => void, onUpgrades?: () => void, toggles: MenuToggle[] = [], onLogout?: () => void, onClose?: () => void): Garage {
+/** race-level skin picker for the menu — `list()` is the seam the crate-reward system filters later */
+export interface WorldPicker {
+  list: () => { key: string; name: string; colors: string[]; locked?: boolean }[];
+  current: () => string;
+  set: (key: string) => void;
+}
+
+export function createCarPicker(parent: HTMLElement, cars: CarOption[], onPick: (c: CarOption) => void, onUpgrades?: () => void, toggles: MenuToggle[] = [], onLogout?: () => void, onClose?: (reason?: "dismiss" | "chain") => void, accountInfo?: () => { label: string; sub: string }, worlds?: WorldPicker): Garage {
   injectStyles();
 
   const wrap = document.createElement("div");
@@ -176,7 +287,14 @@ export function createCarPicker(parent: HTMLElement, cars: CarOption[], onPick: 
     "background:rgba(0,0,0,.8)", "backdrop-filter:blur(2px)", "pointer-events:auto",
   ].join(";");
 
-  type View = "menu" | "garage" | "help";
+  // showroom (drive-in garage): the `.gover-showroom` class makes the backdrop translucent and
+  // re-anchors the panel — a right-side panel in landscape, a bottom sheet in portrait (mobile) —
+  // so the rotating car stays visible. off = the opaque strip/hamburger overlay.
+  overlay.className = "gover";
+  let showroom = false;
+  const applyShowroom = () => { overlay.classList.toggle("gover-showroom", showroom); };
+
+  type View = "menu" | "garage" | "help" | "worlds";
   let view: View = "menu";
 
   const menuPanel = document.createElement("div");
@@ -191,6 +309,17 @@ export function createCarPicker(parent: HTMLElement, cars: CarOption[], onPick: 
 
   // audio on/off toggles (Music / SFX) appended at the bottom of the menu list
   const gmenu = menuPanel.querySelector(".gmenu") as HTMLElement | null;
+  // World (race-level skin) picker — opens a sub-view listing every skin
+  if (worlds && gmenu) {
+    const b = document.createElement("button");
+    b.className = "gmenu-item";
+    b.dataset.go = "worlds";
+    b.innerHTML =
+      `<span class="gmenu-ic">${icon("sparkle", 20)}</span>` +
+      `<span class="gmenu-tx"><b>World</b><small>race level skin</small></span>` +
+      `<span class="gmenu-arr">${icon("chevron", 16)}</span>`;
+    gmenu.appendChild(b);
+  }
   if (toggles.length && gmenu) {
     const sep = document.createElement("div");
     sep.textContent = "audio";
@@ -219,12 +348,21 @@ export function createCarPicker(parent: HTMLElement, cars: CarOption[], onPick: 
     b.dataset.act = "logout";
     b.innerHTML =
       `<span class="gmenu-ic">${icon("logout", 20)}</span>` +
-      `<span class="gmenu-tx"><b>Log out</b><small>sign out of your account</small></span>` +
+      `<span class="gmenu-tx"><b data-acclabel="1">Log out</b><small data-accsub="1">sign out of your account</small></span>` +
       `<span class="gmenu-arr">${icon("chevron", 16)}</span>`;
     gmenu.appendChild(b);
   }
 
   const renderToggles = () => {
+    // the account row reads out WHO is riding and what the action is (guest → "Sign in",
+    // signed-in → "Log out") — refreshed on every menu open
+    if (accountInfo) {
+      const info = accountInfo();
+      const label = menuPanel.querySelector("[data-acclabel]") as HTMLElement | null;
+      const sub = menuPanel.querySelector("[data-accsub]") as HTMLElement | null;
+      if (label) label.textContent = info.label;
+      if (sub) sub.textContent = info.sub;
+    }
     toggles.forEach((t, i) => {
       const sw = menuPanel.querySelector(`[data-toggle="${i}"] .gmenu-sw`) as HTMLElement | null;
       if (!sw) return;
@@ -243,6 +381,29 @@ export function createCarPicker(parent: HTMLElement, cars: CarOption[], onPick: 
     `<div class="ghead"><button class="gicon-btn" data-act="back" aria-label="Back">${backIcon(18)}</button><span class="lbl">how to play</span><button class="gicon-btn" data-act="close" aria-label="Close">✕</button></div>` +
     `<div class="ghelp"><b>Hold the road</b> to drive · <b>drag</b> to steer · <b>pull back</b> to brake.<br>Tap <b>GO</b> to open your bet — <b>rev</b> for leverage, <b>cash out</b> before you liquidate.<br>Pick a car in the <b>Garage</b>; each has its own power.</div>`;
 
+  // ---- world (race-level skin) picker sub-view ----
+  const worldsPanel = document.createElement("div");
+  worldsPanel.className = "panel gpanel";
+  worldsPanel.style.display = "none";
+  worldsPanel.innerHTML =
+    `<div class="ghead"><button class="gicon-btn" data-act="back" aria-label="Back">${backIcon(18)}</button><span class="lbl">world · level skin</span><button class="gicon-btn" data-act="close" aria-label="Close">✕</button></div>` +
+    `<div class="gmenu" data-worlds-list></div>`;
+  const renderWorlds = () => {
+    if (!worlds) return;
+    const list = worldsPanel.querySelector("[data-worlds-list]") as HTMLElement;
+    const cur = worlds.current();
+    list.innerHTML = worlds.list().map((w) => {
+      const locked = !!w.locked;                 // unowned skins show sealed (like a locked card), not hidden
+      const active = !locked && w.key === cur;
+      const sw = `linear-gradient(135deg, ${w.colors.join(", ")})`;
+      return `<button class="gmenu-item${locked ? " locked" : ""}" data-world="${w.key}"${active ? ' style="border-color:var(--cyan);background:rgba(39,231,255,.10)"' : ""}>` +
+        `<span class="gmenu-ic" style="width:22px;height:22px;border-radius:6px;background:${sw};box-shadow:0 0 9px ${w.colors[w.colors.length - 1]}"></span>` +
+        `<span class="gmenu-tx"><b>${w.name}</b><small>${locked ? "locked · unlock from crates" : active ? "active" : "tap to switch"}</small></span>` +
+        `<span class="gmenu-arr"${locked ? "" : ' style="color:var(--cyan);font:700 15px/1 \'Chakra Petch\',ui-monospace,monospace"'}>${locked ? icon("lock", 15) : active ? "✓" : ""}</span>` +
+        `</button>`;
+    }).join("");
+  };
+
   const garagePanel = document.createElement("div");
   garagePanel.className = "panel gpanel";
   garagePanel.style.display = "none";
@@ -253,6 +414,13 @@ export function createCarPicker(parent: HTMLElement, cars: CarOption[], onPick: 
     `<span class="lbl">garage · your collection</span>` +
     `<button class="gicon-btn" data-act="close" aria-label="Close">✕</button>`;
   garagePanel.appendChild(garageHead);
+  // crate odds legend — the drop chance per tier, so players see "what chance there is to get"
+  // (same weights the crate opener rolls against; single source of truth in core/rarity.ts)
+  const odds = document.createElement("div");
+  odds.className = "godds";
+  odds.innerHTML = `<span class="godds-lbl">crate odds</span>` + TIERS.map((t) =>
+    `<span class="godds-t" style="--tc:${t.color}"><i></i>${t.name.charAt(0) + t.name.slice(1).toLowerCase()} ${t.weight}%</span>`).join("");
+  garagePanel.appendChild(odds);
   const busyNote = document.createElement("div");
   busyNote.className = "gbusy";
   busyNote.style.display = "none";
@@ -268,7 +436,7 @@ export function createCarPicker(parent: HTMLElement, cars: CarOption[], onPick: 
   const cards: Card[] = [];
   let selectedEl: HTMLElement | null = null;
   const select = (el: HTMLElement, c: CarOption) => {
-    if (c.locked) return;
+    if (c.locked || c.comingSoon) return; // taped-off cards aren't drivable yet
     if (busy) { busyNote.animate([{ transform: "translateX(0)" }, { transform: "translateX(-4px)" }, { transform: "translateX(4px)" }, { transform: "translateX(0)" }], { duration: 240 }); return; }
     if (selectedEl) selectedEl.classList.remove("sel");
     el.classList.add("sel");
@@ -276,11 +444,13 @@ export function createCarPicker(parent: HTMLElement, cars: CarOption[], onPick: 
     onPick(c);
   };
 
-  cars.forEach((c, i) => {
-    const card = document.createElement("div");
-    card.className = "gcard" + (c.locked ? " locked" : "");
+  let tapeSeen = 0; // cycles the 3 tape angles across taped cards so no two adjacent match
+  // (re)paint a card element for car `c` — locked (sealed) vs unlocked (art + ability). Extracted
+  // so grant() can flip a card from LOCKED to owned after a crate pull without duplicating the build.
+  const fillCard = (card: HTMLElement, c: CarOption, i: number): Card => {
+    card.className = "gcard" + (c.locked ? " locked" : "") + (c.comingSoon ? " soon" : "");
     const series = `${String(i + 1).padStart(2, "0")} / ${String(cars.length).padStart(2, "0")}`;
-    const rarity = c.rarity ?? (c.ability ? 3 : 2);
+    const rarity = c.rarity ?? 1;
     if (c.locked) {
       card.innerHTML =
         `<div class="gtitle"><span class="gtitle-name" style="color:var(--mut)">${c.name}</span><span class="grarity">${gems(0)}</span></div>` +
@@ -304,15 +474,30 @@ export function createCarPicker(parent: HTMLElement, cars: CarOption[], onPick: 
         holo.style.setProperty("--gx", `${((e.clientX - r.left) / r.width) * 100}%`);
         holo.style.setProperty("--gy", `${((e.clientY - r.top) / r.height) * 100}%`);
       });
+      if (c.comingSoon) {
+        // construction tape stretched across the card: 3 angle variants, cycled so the
+        // wall of "coming soon" cards reads varied rather than stamped
+        const v = (tapeSeen++ % 3) + 1;
+        const tape = document.createElement("div");
+        tape.className = `gcard-tape tape-${v}`;
+        tape.innerHTML = `<span class="gcard-tape-txt">COMING SOON</span>`;
+        card.appendChild(tape);
+      }
     }
     const art = card.querySelector(".gcard-art") as HTMLImageElement;
     const spinner = card.querySelector(".gcard-ld") as HTMLElement;
-    card.onclick = () => select(card, c);
+    card.onclick = () => { if (c.locked || c.comingSoon) return; openDetail(c, i, card); };
+    return { art, spinner, locked: !!c.locked };
+  };
+  cars.forEach((c, i) => {
+    const card = document.createElement("div");
+    cards.push(fillCard(card, c, i));
     grid.appendChild(card);
-    cards.push({ art, spinner, locked: !!c.locked });
   });
-  const firstOpen = cars.findIndex((c) => !c.locked);
-  if (firstOpen >= 0) { (grid.children[firstOpen] as HTMLElement).classList.add("sel"); selectedEl = grid.children[firstOpen] as HTMLElement; }
+  // the boot car must be PICKED, not just painted — a class-only "sel" leaves the
+  // default card's ability dead until the player re-clicks it in the garage
+  const firstOpen = cars.findIndex((c) => !c.locked && !c.comingSoon);
+  if (firstOpen >= 0) select(grid.children[firstOpen] as HTMLElement, cars[firstOpen]);
 
   // ---- render each car to a STATIC image once (no persistent canvas → light + no stuck frames) ----
   let rendered = false;
@@ -329,10 +514,14 @@ export function createCarPicker(parent: HTMLElement, cars: CarOption[], onPick: 
     const env = pmrem.fromScene(new RoomEnvironment(), 0.04).texture;
     pmrem.dispose();
     const loader = new GLTFLoader();
-    let pending = 0;
-    cars.forEach((c, i) => {
-      if (c.locked) return;
-      pending++;
+    // ONE model in flight at a time: 13 parallel GLB decodes into this second WebGL
+    // context was the mobile memory peak (tab-killed Chrome/Safari on phones). The
+    // queue drains sequentially and the renderer tears down even if a load errors.
+    const queue = cars.map((c, i) => ({ c, i })).filter(({ c }) => !c.locked);
+    const next = () => {
+      const item = queue.shift();
+      if (!item) { env.dispose(); r.dispose(); return; }
+      const { c, i } = item;
       loader.load(c.url, (gltf) => {
         const model = gltf.scene;
         model.rotation.y = MODEL_YAW + (c.yaw ?? 0);
@@ -362,10 +551,129 @@ export function createCarPicker(parent: HTMLElement, cars: CarOption[], onPick: 
         card.spinner.style.display = "none";
         // free the GPU resources for this car
         model.traverse((o) => { const m = o as THREE.Mesh; if (m.isMesh) { m.geometry?.dispose(); (Array.isArray(m.material) ? m.material : [m.material]).forEach((mm) => mm?.dispose()); } });
-        if (--pending === 0) { env.dispose(); r.dispose(); } // last one in → tear the renderer down
-      }, undefined, (err) => { console.warn("[garage] GLB failed:", c.url, err); pending--; });
-    });
+        next();
+      }, undefined, (err) => { console.warn("[garage] GLB failed:", c.url, err); next(); });
+    };
+    next();
   };
+
+  // ---- card detail zoom: tap a grid card → big collectible card with Equip ----
+  const detailScrim = document.createElement("div");
+  detailScrim.className = "gdetail-scrim";
+  const detailCard = document.createElement("div");
+  detailCard.className = "gdcard";
+  detailScrim.appendChild(detailCard);
+  let detailPoll = 0;
+
+  // ---- lazy live-3D for the OPEN detail card ----
+  // one shared renderer/canvas, one model at a time, rAF only while a card is open, model
+  // disposed on close. The grid stays static PNGs (25 live models tank mobile); a single open
+  // card is cheap. The static PNG shows instantly and the live model fades in over it.
+  let live: { canvas: HTMLCanvasElement; renderer: THREE.WebGLRenderer; scene: THREE.Scene; cam: THREE.PerspectiveCamera; pivot: THREE.Group; loader: GLTFLoader } | null = null;
+  let liveModel: THREE.Object3D | null = null;
+  let liveRaf = 0;
+  let liveToken = 0;
+  const disposeTree = (root: THREE.Object3D) => root.traverse((o) => {
+    const m = o as THREE.Mesh;
+    if (m.isMesh) { m.geometry?.dispose(); (Array.isArray(m.material) ? m.material : [m.material]).forEach((mm) => mm?.dispose()); }
+  });
+  const ensureLive = () => {
+    if (live) return live;
+    const canvas = document.createElement("canvas");
+    canvas.className = "gdcard-3d";
+    const renderer = new THREE.WebGLRenderer({ canvas, alpha: true, antialias: true });
+    renderer.setPixelRatio(Math.min(2, window.devicePixelRatio || 1));
+    renderer.setSize(300, 200, false);
+    const cam = new THREE.PerspectiveCamera(32, 1.5, 0.1, 100);
+    cam.position.set(1.19, 0.85, 2.25); cam.lookAt(0, -0.05, 0);
+    const pmrem = new THREE.PMREMGenerator(renderer);
+    const env = pmrem.fromScene(new RoomEnvironment(), 0.04).texture; pmrem.dispose();
+    const scene = new THREE.Scene();
+    scene.environment = env;
+    scene.add(new THREE.AmbientLight("#8a78ff", 0.85));
+    const key = new THREE.DirectionalLight("#27e7ff", 1.7); key.position.set(2.2, 3, 2.4); scene.add(key);
+    const rim = new THREE.DirectionalLight("#ff39c0", 1.5); rim.position.set(-2.4, 1.2, -2); scene.add(rim);
+    const pivot = new THREE.Group(); scene.add(pivot);
+    live = { canvas, renderer, scene, cam, pivot, loader: new GLTFLoader() };
+    return live;
+  };
+  const stopLive = () => {
+    liveToken++; // invalidate any in-flight load / running loop
+    if (liveRaf) { cancelAnimationFrame(liveRaf); liveRaf = 0; }
+    if (live && liveModel) { live.pivot.remove(liveModel); disposeTree(liveModel); liveModel = null; }
+    live?.canvas.classList.remove("on");
+  };
+  const startLive = (c: CarOption) => {
+    const L = ensureLive();
+    detailCard.querySelector(".gdcard-win")?.appendChild(L.canvas); // move the shared canvas into this card
+    L.pivot.rotation.set(0, HERO_YAW, 0);
+    const token = ++liveToken;
+    L.loader.load(c.url, (gltf) => {
+      const model = gltf.scene;
+      if (token !== liveToken) { disposeTree(model); return; } // superseded by a newer open/close
+      model.rotation.y = MODEL_YAW + (c.yaw ?? 0);
+      const sph = new THREE.Box3().setFromObject(model).getBoundingSphere(new THREE.Sphere());
+      model.scale.setScalar((1 / (sph.radius || 1)) * (c.scale ?? 1));
+      const ctr = new THREE.Box3().setFromObject(model).getCenter(new THREE.Vector3());
+      model.position.set(-ctr.x, -ctr.y, -ctr.z);
+      model.traverse((o) => { const mesh = o as THREE.Mesh; if (mesh.isMesh) (Array.isArray(mesh.material) ? mesh.material : [mesh.material]).forEach((m) => { if ((m as THREE.MeshStandardMaterial).isMeshStandardMaterial) (m as THREE.MeshStandardMaterial).envMapIntensity = 0.7; }); });
+      L.pivot.add(model); liveModel = model; L.canvas.classList.add("on");
+      detailCard.querySelector(".gdcard-art")?.classList.add("hide"); // drop the placeholder PNG so only the live car shows
+      let last = 0;
+      const loop = (t: number) => {
+        if (token !== liveToken) return;
+        const dt = last ? Math.min(0.05, (t - last) / 1000) : 0; last = t;
+        L.pivot.rotation.y += dt * 0.5;
+        L.renderer.render(L.scene, L.cam);
+        liveRaf = requestAnimationFrame(loop);
+      };
+      liveRaf = requestAnimationFrame(loop);
+    }, undefined, (err) => { console.warn("[garage] live GLB failed:", c.url, err); });
+  };
+
+  const closeDetail = () => {
+    stopLive();
+    detailScrim.classList.remove("on");
+    detailCard.style.transform = "";
+    if (detailPoll) { clearInterval(detailPoll); detailPoll = 0; }
+  };
+  const openDetail = (c: CarOption, i: number, gridEl: HTMLElement) => {
+    const rarity = c.rarity ?? 1;
+    const t = tierOf(rarity);
+    const pull = pullChance(c, cars);
+    const pullTxt = pull > 0 ? `${pull.toFixed(pull < 1 ? 2 : 1)}% crate pull` : "not in crates";
+    const p = c.power;
+    const ab = p
+      ? `<span class="gdcard-ab-ic">${icon(p.icon, 18)}</span><span class="gdcard-ab-tx"><span class="gdcard-ab-nm">${p.name}</span><span class="gdcard-ab-ds">${p.desc}</span></span>`
+      : `<span class="gdcard-ab-tx"><span class="gdcard-ab-nm" style="color:var(--mut)">Stock</span><span class="gdcard-ab-ds">no special ability — pure drive</span></span>`;
+    const holo = rarity >= 4 ? `<div class="gdcard-holo"></div><div class="gdcard-shine"></div>` : "";
+    detailCard.innerHTML =
+      `<div class="gdcard-face">` +
+        `<div class="gdcard-glare"></div>` +
+        `<button class="gdcard-x" data-dact="close" aria-label="Back">${backIcon(18)}</button>` +
+        `<div class="gdcard-head"><span class="gdcard-name">${c.name}</span><span class="gdcard-rar">${gems(rarity)}</span></div>` +
+        `<div class="gdcard-tier" style="color:${t.color}"><span>${t.name}</span><span class="gdcard-pull">${pullTxt}</span></div>` +
+        `<div class="gdcard-win">${holo}<img class="gdcard-art" alt="${c.name}"></div>` +
+        `<div class="gdcard-ab">${ab}</div>` +
+        `<button class="gdcard-equip${busy ? " dis" : ""}" data-dact="equip">${busy ? "ROUND LIVE — CASH OUT TO SWITCH" : "EQUIP"}</button>` +
+      `</div>`;
+    const dart = detailCard.querySelector(".gdcard-art") as HTMLImageElement;
+    const setArt = () => { const src = cards[i].art.src; if (src) { dart.src = src; return true; } return false; };
+    if (!setArt()) detailPoll = window.setInterval(() => { if (setArt()) { clearInterval(detailPoll); detailPoll = 0; } }, 160);
+    (detailCard.querySelector('[data-dact="equip"]') as HTMLButtonElement).onclick = () => { if (busy) return; select(gridEl, c); closeDetail(); };
+    (detailCard.querySelector('[data-dact="close"]') as HTMLButtonElement).onclick = closeDetail;
+    startLive(c); // lazy live-3D fades in over the static PNG
+    detailScrim.classList.add("on");
+  };
+  detailScrim.addEventListener("click", (e) => { if (e.target === detailScrim) closeDetail(); });
+  detailCard.addEventListener("pointermove", (e) => {
+    const r = detailCard.getBoundingClientRect();
+    const px = (e.clientX - r.left) / r.width, py = (e.clientY - r.top) / r.height;
+    detailCard.style.transform = `rotateY(${((px - 0.5) * 12).toFixed(2)}deg) rotateX(${((0.5 - py) * 12).toFixed(2)}deg)`;
+    const g = detailCard.querySelector(".gdcard-glare") as HTMLElement | null;
+    if (g) { g.style.setProperty("--gx", `${(px * 100).toFixed(1)}%`); g.style.setProperty("--gy", `${(py * 100).toFixed(1)}%`); }
+  });
+  detailCard.addEventListener("pointerleave", () => { detailCard.style.transform = ""; });
 
   const menuButton = document.createElement("button");
   menuButton.type = "button";
@@ -383,7 +691,9 @@ export function createCarPicker(parent: HTMLElement, cars: CarOption[], onPick: 
     menuPanel.style.display = v === "menu" ? "flex" : "none";
     garagePanel.style.display = v === "garage" ? "flex" : "none";
     helpPanel.style.display = v === "help" ? "flex" : "none";
+    worldsPanel.style.display = v === "worlds" ? "flex" : "none";
     if (v === "garage") { renderArt(); updateBusyUI(); }
+    if (v === "worlds") renderWorlds(); // reflect the active skin + highlight it
     if (v === "menu") renderToggles(); // reflect current Music/SFX state each time the menu shows
   };
 
@@ -391,35 +701,42 @@ export function createCarPicker(parent: HTMLElement, cars: CarOption[], onPick: 
     overlay.style.display = "flex";
     menuButton.style.display = "none";
     setHudMenuMode(parent, wrap, true);
+    applyShowroom(); // reopening via the hamburger in the garage keeps the translucent backdrop
     setView("menu");
   };
-  const close = () => {
+  const close = (reason: "dismiss" | "chain" = "dismiss") => {
     overlay.style.display = "none";
     setHudMenuMode(parent, wrap, false);
     menuButton.style.display = "grid"; // the menu button is always available
-    onClose?.(); // let the lobby re-assert its chrome (hide the hamburger again, restore the back button)
+    // reason "dismiss" (✕/Esc/backdrop) → the lobby/showroom may fully close; "chain" (Upgrades/
+    // Logout) opens another panel over the same place, so the showroom must stay standing
+    onClose?.(reason);
   };
 
   menuButton.onclick = open;
   overlay.onclick = (e) => { if (e.target === overlay) close(); };
   addEventListener("keydown", (e) => {
     if (e.key !== "Escape" || overlay.style.display === "none") return;
+    if (detailScrim.classList.contains("on")) { closeDetail(); return; }
     if (view === "menu") close(); else setView("menu");
   });
   overlay.addEventListener("click", (e) => {
-    const t = (e.target as HTMLElement).closest("[data-act],[data-go],[data-toggle]") as HTMLElement | null;
+    const t = (e.target as HTMLElement).closest("[data-act],[data-go],[data-toggle],[data-world]") as HTMLElement | null;
     if (!t) return;
+    if (t.dataset.world !== undefined) { if (t.classList.contains("locked")) return; worlds?.set(t.dataset.world); renderWorlds(); return; } // switch level skin (sealed skins ignore the tap), stay open
     if (t.dataset.toggle !== undefined) { const i = +t.dataset.toggle; toggles[i].set(!toggles[i].get()); renderToggles(); return; }
     if (t.dataset.act === "close") close();
     else if (t.dataset.act === "back") setView("menu");
-    else if (t.dataset.act === "upgrades") { close(); onUpgrades?.(); }
-    else if (t.dataset.act === "logout") { close(); onLogout?.(); }
+    else if (t.dataset.act === "upgrades") { close("chain"); onUpgrades?.(); }
+    else if (t.dataset.act === "logout") { close("chain"); onLogout?.(); }
     else if (t.dataset.go) setView(t.dataset.go as View);
   });
 
   overlay.appendChild(menuPanel);
   overlay.appendChild(garagePanel);
   overlay.appendChild(helpPanel);
+  overlay.appendChild(worldsPanel);
+  overlay.appendChild(detailScrim);
   wrap.appendChild(menuButton);
   wrap.appendChild(overlay);
   parent.appendChild(wrap);
@@ -428,5 +745,15 @@ export function createCarPicker(parent: HTMLElement, cars: CarOption[], onPick: 
     el: wrap,
     setBusy(b: boolean) { busy = b; updateBusyUI(); },
     openGarage() { wrap.style.display = "block"; open(); setView("garage"); },
+    grant(name: string) {
+      const idx = cars.findIndex((c) => c.name === name);
+      if (idx < 0 || !cars[idx].locked) return; // unknown car or already owned
+      cars[idx].locked = false;
+      cards[idx] = fillCard(grid.children[idx] as HTMLElement, cars[idx], idx);
+      rendered = false; renderArt(); // re-render owned card art (the newly-unlocked one now included)
+    },
+    isOpen: () => overlay.style.display !== "none",
+    setMenuTop(on: boolean) { wrap.style.top = on ? "max(10px,env(safe-area-inset-top))" : "144px"; },
+    setShowroom(on: boolean) { showroom = on; applyShowroom(); },
   };
 }

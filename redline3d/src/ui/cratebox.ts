@@ -1,0 +1,293 @@
+import * as THREE from "three";
+import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader.js";
+import { RoomEnvironment } from "three/examples/jsm/environments/RoomEnvironment.js";
+import { tierOf } from "../core/rarity";
+import { rollCrate, dupeScrap, pickLevel, clientRandom, CRATES, crateByKey, type CrateType, type CrateCar, type RandomnessProvider } from "../core/crate";
+
+// The Crate Shop: pick one of three crates (Wooden / Silver / Gold), buy with coins → roll a car by
+// that crate's rarity odds + bank the crate's scrap → reveal. A NEW car unlocks in the garage; a
+// DUPLICATE adds bonus scrap. Randomness is a RandomnessProvider (client RNG now, MagicBlock VRF
+// behind the same port later). The $ price is stubbed until a payment rail is wired.
+export interface CrateBoxDeps {
+  cars: () => CrateCar[];               // the roster to roll from (owned + not-yet-owned)
+  grantCar: (name: string) => boolean;  // inventory.grant → true if NEWLY owned, false if a dupe
+  unlockUI: (name: string) => void;     // garage.grant → flip the collection card to owned
+  coins: () => number;
+  spend: (n: number) => boolean;        // debit coins; false if the balance can't cover it
+  addScrap: (n: number) => void;
+  lockedLevels: () => string[];         // level-skin keys not yet owned (empty → nothing left to drop)
+  grantLevel: (key: string) => void;    // unlock a level skin
+  levelInfo: (key: string) => { name: string; colors: string[] };
+  onBuyUsd?: (crateKey: string) => void; // real-money option (stubbed → toast for now)
+  onClose?: () => void;
+  rng?: RandomnessProvider;
+}
+export interface CrateBox {
+  open(): void;
+  /** first-login welcome: show the overlay and run a FREE Wooden open (no coin cost) */
+  openGift(crateKey: string): void;
+  isOpen(): boolean;
+  /** hide during a live round (a GO must not launch behind it) */
+  setBusy(busy: boolean): void;
+}
+
+const gems = (r: number) => {
+  const c = tierOf(r).color;
+  return Array.from({ length: r }, () => `<span class="cb-gem" style="background:${c};box-shadow:0 0 6px ${c}"></span>`).join("");
+};
+// coloured dots for the tier RANGE a crate can drop (one per weighted tier)
+const rangeDots = (c: CrateType) =>
+  Object.keys(c.tierWeights).map((k) => { const col = tierOf(+k).color; return `<i style="background:${col};box-shadow:0 0 5px ${col}"></i>`; }).join("");
+
+let stylesInjected = false;
+function injectStyles() {
+  if (stylesInjected) return;
+  stylesInjected = true;
+  const s = document.createElement("style");
+  s.textContent = `
+    @keyframes cbBurst{0%{transform:scale(1);opacity:1}100%{transform:scale(1.9);opacity:0}}
+    @keyframes cbFlash{0%{opacity:0}30%{opacity:.95}100%{opacity:0}}
+    @keyframes cbCardIn{0%{transform:translateY(20px) scale(.6) rotateY(85deg);opacity:0}60%{transform:translateY(0) scale(1.05) rotateY(0);opacity:1}100%{transform:scale(1)}}
+    @keyframes cbScrapIn{0%{transform:translateY(10px);opacity:0}100%{transform:translateY(0);opacity:1}}
+    @keyframes cbGlow{0%,100%{opacity:.55}50%{opacity:.95}}
+    @keyframes cbShake{10%,90%{transform:translate3d(-1px,0,0)}30%,50%,70%{transform:translate3d(-4px,0,0) rotate(-3deg)}40%,60%{transform:translate3d(4px,0,0) rotate(3deg)}}
+    @keyframes cbBob{0%,100%{transform:translateY(0)}50%{transform:translateY(-5px)}}
+    @keyframes cbSheen{0%,100%{background-position:150% 0}55%{background-position:-60% 0}}
+    .cb-panel{width:min(560px,96vw);padding:16px;display:flex;flex-direction:column;gap:12px;background:rgba(12,10,26,.94);
+      border-color:rgba(132,150,224,.28);pointer-events:auto;position:relative;overflow:hidden}
+    .cb-head{display:flex;align-items:center;gap:10px}
+    .cb-head .lbl{flex:1}
+    .cb-coins{display:flex;align-items:center;gap:5px;font:700 14px/1 'Chakra Petch',ui-monospace,monospace;color:var(--amb);text-shadow:0 0 9px rgba(255,209,102,.5)}
+    .cb-x{cursor:pointer;color:var(--mut);font:700 16px/1 'Chakra Petch',ui-monospace,monospace;padding:3px 5px;border:0;background:transparent}
+    /* shop: three fancy crate columns */
+    .cb-cols{display:grid;grid-template-columns:repeat(3,1fr);gap:10px}
+    .cb-col{position:relative;overflow:hidden;display:flex;flex-direction:column;align-items:center;gap:7px;padding:14px 8px 11px;border-radius:14px;
+      cursor:default;transition:transform .18s ease,box-shadow .18s ease;border:1.5px solid color-mix(in srgb,var(--cc) 70%,transparent);
+      background:linear-gradient(180deg,color-mix(in srgb,var(--cc) 17%,rgba(16,12,34,.92)),rgba(9,6,20,.97));
+      box-shadow:0 0 16px color-mix(in srgb,var(--cc) 20%,transparent),inset 0 1px 0 color-mix(in srgb,var(--cc) 32%,transparent)}
+    .cb-col:hover{transform:translateY(-4px);box-shadow:0 10px 28px color-mix(in srgb,var(--cc) 42%,transparent),inset 0 1px 0 color-mix(in srgb,var(--cc) 48%,transparent)}
+    .cb-col-glow{position:absolute;top:2px;left:50%;transform:translateX(-50%);width:120px;height:120px;border-radius:50%;pointer-events:none;
+      background:radial-gradient(circle,color-mix(in srgb,var(--cc) 55%,transparent),transparent 65%);opacity:.5}
+    .cb-col-sheen{position:absolute;inset:0;pointer-events:none;background:linear-gradient(115deg,transparent 38%,rgba(255,255,255,.13) 48%,transparent 58%);
+      background-size:250% 100%;animation:cbSheen 5s ease-in-out infinite}
+    .cb-col-crate{position:relative;width:82px;height:74px;background-size:contain;background-repeat:no-repeat;background-position:center;
+      filter:drop-shadow(0 4px 10px color-mix(in srgb,var(--cc) 60%,transparent));animation:cbBob 3.4s ease-in-out infinite}
+    .cb-col-nm{position:relative;font:800 15px/1 'Chakra Petch',ui-monospace,monospace;color:#fff;letter-spacing:.04em;text-shadow:0 0 10px color-mix(in srgb,var(--cc) 75%,transparent)}
+    .cb-col-dots{display:flex;gap:4px}.cb-col-dots i{width:7px;height:7px;border-radius:50%;display:inline-block}
+    .cb-col-scrap{font:700 11px/1 'Chakra Petch',ui-monospace,monospace;color:#c2cad6}
+    .cb-col-buy{position:relative;display:flex;flex-direction:column;gap:5px;width:100%;margin-top:4px}
+    .cb-coin{border:0;border-radius:9px;padding:9px 4px;cursor:pointer;font:800 12px/1 'Chakra Petch',ui-monospace,monospace;white-space:nowrap;width:100%;
+      color:#04130d;background:linear-gradient(180deg,#48f0b6,#14c78c);box-shadow:0 3px 10px rgba(46,230,166,.32)}
+    .cb-coin:disabled{cursor:not-allowed;color:var(--mut);background:rgba(255,255,255,.08);box-shadow:none}
+    .cb-usd{border:1px solid rgba(255,209,102,.4);border-radius:9px;padding:7px 4px;cursor:pointer;font:800 11px/1 'Chakra Petch',ui-monospace,monospace;width:100%;
+      color:var(--amb);background:rgba(255,209,102,.1)}
+    /* reveal */
+    .cb-stage{display:none;flex-direction:column;align-items:center;gap:14px;padding:6px 0 2px;position:relative;min-height:230px;justify-content:center}
+    .cb-stage.on{display:flex}
+    .cb-crate{width:96px;height:84px;border-radius:11px;position:relative;background:linear-gradient(160deg,color-mix(in srgb,var(--cc) 55%,#1a1330),#150e28);
+      border:2px solid var(--cc);box-shadow:0 0 22px color-mix(in srgb,var(--cc) 50%,transparent)}
+    .cb-crate::after{content:"";position:absolute;left:0;right:0;top:50%;height:12px;transform:translateY(-50%);background:var(--cc);opacity:.9}
+    .cb-crate.shake{animation:cbShake .5s cubic-bezier(.36,.07,.19,.97) both}
+    .cb-crate.gone{animation:cbBurst .3s ease-out forwards}
+    .cb-crate3d{width:124px;height:112px;object-fit:contain;filter:drop-shadow(0 0 20px var(--cc,#fff))}
+    .cb-crate3d.shake{animation:cbShake .5s cubic-bezier(.36,.07,.19,.97) both}
+    .cb-crate3d.gone{animation:cbBurst .3s ease-out forwards}
+    .cb-flash{position:absolute;top:20px;width:200px;height:200px;background:radial-gradient(circle,#fff,transparent 62%);opacity:0;pointer-events:none}
+    .cb-flash.go{animation:cbFlash .5s ease-out}
+    .cb-halo{position:absolute;top:8px;width:210px;height:210px;border-radius:50%;background:radial-gradient(circle,var(--tc),transparent 66%);opacity:.6;animation:cbGlow 2.4s ease-in-out infinite;pointer-events:none}
+    .cb-card{position:relative;width:180px;padding:14px;border-radius:14px;text-align:center;background:linear-gradient(180deg,rgba(20,14,40,.96),rgba(10,7,22,.98));
+      border:2px solid var(--tc);box-shadow:0 0 26px var(--tc);animation:cbCardIn .55s cubic-bezier(.22,1.2,.36,1) both}
+    .cb-badge{display:inline-block;font:800 11px/1 'Chakra Petch',ui-monospace,monospace;letter-spacing:.12em;padding:4px 9px;border-radius:6px;margin-bottom:8px}
+    .cb-badge.new{color:#04130d;background:linear-gradient(180deg,#48f0b6,#14c78c);box-shadow:0 0 12px rgba(46,230,166,.5)}
+    .cb-badge.dupe{color:var(--amb);background:rgba(255,209,102,.14);border:1px solid rgba(255,209,102,.4)}
+    .cb-tier{font:800 13px/1 'Chakra Petch',ui-monospace,monospace;letter-spacing:.16em;color:var(--tc);text-shadow:0 0 10px var(--tc)}
+    .cb-gems{display:flex;gap:4px;justify-content:center;margin:8px 0}.cb-gem{width:9px;height:9px;border-radius:50%;display:inline-block}
+    .cb-name{font:800 19px/1.1 'Chakra Petch',ui-monospace,monospace;color:#fff;text-shadow:0 0 12px var(--tc)}
+    .cb-loot{display:flex;gap:9px;animation:cbScrapIn .4s ease-out .35s both}
+    .cb-chip{display:flex;align-items:center;gap:6px;padding:8px 13px;border-radius:10px;background:rgba(18,14,40,.85);border:1px solid rgba(132,150,224,.3);
+      font:800 14px/1 'Chakra Petch',ui-monospace,monospace;color:#c2cad6}
+    .cb-chip b{color:#e6ecf7}
+    .cb-lvl{border-color:var(--l1);color:#fff;background:linear-gradient(120deg,color-mix(in srgb,var(--l1) 45%,rgba(18,14,40,.9)),color-mix(in srgb,var(--l2) 45%,rgba(18,14,40,.9)));box-shadow:0 0 12px color-mix(in srgb,var(--l1) 45%,transparent)}
+    .cb-lvl b{color:#fff}
+    .cb-btns{display:flex;gap:9px;width:100%}
+    .cb-btn{flex:1;border:0;border-radius:10px;padding:12px;cursor:pointer;font:800 13px/1 'Chakra Petch',ui-monospace,monospace;letter-spacing:.06em;text-transform:uppercase;
+      color:#04130d;background:linear-gradient(180deg,#48f0b6,#14c78c);box-shadow:0 4px 14px rgba(46,230,166,.34)}
+    .cb-btn:disabled{cursor:not-allowed;color:var(--mut);background:rgba(255,255,255,.08);box-shadow:none}
+    .cb-btn.ghost{color:var(--ink);background:rgba(255,255,255,.08);box-shadow:none}
+  `;
+  document.head.appendChild(s);
+}
+
+export function createCrateBox(parent: HTMLElement, deps: CrateBoxDeps): CrateBox {
+  injectStyles();
+  const rng = deps.rng ?? clientRandom;
+
+  const overlay = document.createElement("div");
+  overlay.style.cssText = [
+    "position:fixed", "inset:0", "z-index:11", "display:none", "align-items:center", "justify-content:center",
+    "padding:max(22px,env(safe-area-inset-top)) 18px", "background:rgba(0,0,0,.82)", "backdrop-filter:blur(2px)", "pointer-events:auto",
+  ].join(";");
+
+  const panel = document.createElement("div");
+  panel.className = "panel cb-panel";
+  const rowsHtml = CRATES.map((c) => `
+    <div class="cb-col" style="--cc:${c.color}">
+      <div class="cb-col-glow"></div><div class="cb-col-sheen"></div>
+      <div class="cb-col-crate" data-ico="${c.key}"></div>
+      <div class="cb-col-nm">${c.name.replace(" Crate", "")}</div>
+      <div class="cb-col-dots">${rangeDots(c)}</div>
+      <div class="cb-col-scrap">+${c.scrap} scrap</div>
+      <div class="cb-col-buy">
+        <button class="cb-coin" data-open="${c.key}">${c.priceCoins} ◈</button>
+        ${c.priceUsd ? `<button class="cb-usd" data-usd="${c.key}">$${c.priceUsd.toFixed(2)}</button>` : ""}
+      </div>
+    </div>`).join("");
+  panel.innerHTML =
+    `<div class="cb-head"><span class="lbl">crate shop</span><span class="cb-coins">◈ <span data-cb="coins">0</span></span><button class="cb-x" data-cb="close" aria-label="Close">✕</button></div>` +
+    `<div class="cb-cols" data-cb="rows">${rowsHtml}</div>` +
+    `<div class="cb-stage" data-cb="stage"></div>` +
+    `<div class="cb-btns" data-cb="btns" style="display:none"></div>`;
+  overlay.appendChild(panel);
+  parent.appendChild(overlay);
+
+  const q = (k: string) => panel.querySelector(`[data-cb="${k}"]`) as HTMLElement;
+  const coinsEl = q("coins"), rows = q("rows"), stage = q("stage"), btns = q("btns");
+  let opening = false, giftMode = false; // giftMode: the free welcome open → its reveal "Done" closes to the strip
+
+  // ---- render the 3D crate GLBs to images once (transient renderer, disposed after) → used for the
+  // shop icons + the opening animation. Mirrors the car-card render in carpicker.ts. ----
+  const cratePng: Record<string, string> = {};
+  let crates3dStarted = false;
+  const renderCrates3d = () => {
+    if (crates3dStarted) return;
+    crates3dStarted = true;
+    const r = new THREE.WebGLRenderer({ alpha: true, antialias: true, preserveDrawingBuffer: true });
+    r.setPixelRatio(2); r.setSize(220, 220, false);
+    const cam = new THREE.PerspectiveCamera(30, 1, 0.1, 100);
+    cam.position.set(2.1, 1.7, 2.5); cam.lookAt(0, -0.05, 0);
+    const pmrem = new THREE.PMREMGenerator(r);
+    const env = pmrem.fromScene(new RoomEnvironment(), 0.04).texture; pmrem.dispose();
+    const loader = new GLTFLoader();
+    const queue = CRATES.map((c) => c.key);
+    const next = () => {
+      const key = queue.shift();
+      if (!key) { env.dispose(); r.dispose(); return; }
+      loader.load(`/models/crate-${key}.glb`, (gltf) => {
+        const model = gltf.scene;
+        model.scale.setScalar(1 / (new THREE.Box3().setFromObject(model).getBoundingSphere(new THREE.Sphere()).radius || 1));
+        const ctr = new THREE.Box3().setFromObject(model).getCenter(new THREE.Vector3());
+        model.position.set(-ctr.x, -ctr.y, -ctr.z);
+        const scene = new THREE.Scene();
+        scene.environment = env;
+        scene.add(new THREE.AmbientLight("#8a78ff", 0.85));
+        const kl = new THREE.DirectionalLight("#27e7ff", 1.7); kl.position.set(2.2, 3, 2.4); scene.add(kl);
+        const rl = new THREE.DirectionalLight("#ff39c0", 1.5); rl.position.set(-2.4, 1.2, -2); scene.add(rl);
+        const pivot = new THREE.Group(); pivot.rotation.y = -0.6; pivot.add(model); scene.add(pivot);
+        r.render(scene, cam);
+        cratePng[key] = r.domElement.toDataURL("image/png");
+        const ico = panel.querySelector(`[data-ico="${key}"]`) as HTMLElement | null;
+        if (ico) { ico.style.backgroundImage = `url(${cratePng[key]})`; ico.classList.add("has3d"); }
+        model.traverse((o) => { const m = o as THREE.Mesh; if (m.isMesh) { m.geometry?.dispose(); (Array.isArray(m.material) ? m.material : [m.material]).forEach((mm) => mm?.dispose()); } });
+        next();
+      }, undefined, (err) => { console.warn("[crate] GLB failed:", key, err); next(); });
+    };
+    next();
+  };
+
+  const syncCoins = () => {
+    coinsEl.textContent = String(deps.coins());
+    panel.querySelectorAll<HTMLButtonElement>("[data-open]").forEach((b) => {
+      const c = CRATES.find((x) => x.key === b.dataset.open)!;
+      b.disabled = deps.coins() < c.priceCoins;
+    });
+  };
+
+  const showShop = () => {
+    opening = false;
+    rows.style.display = ""; // revert to the CSS grid (3 columns), not flex
+    stage.classList.remove("on"); stage.innerHTML = "";
+    btns.style.display = "none"; btns.innerHTML = "";
+    syncCoins();
+  };
+
+  const showReveal = (crate: CrateType, car: CrateCar, isNew: boolean, scrap: number, lvlKey: string | null) => {
+    opening = false; // animation done → Again/close allowed
+    const t = tierOf(car.rarity);
+    const lvl = lvlKey ? deps.levelInfo(lvlKey) : null;
+    stage.innerHTML =
+      `<div class="cb-halo" style="--tc:${t.color}"></div>` +
+      `<div class="cb-card" style="--tc:${t.color}">` +
+        `<span class="cb-badge ${isNew ? "new" : "dupe"}">${isNew ? "NEW" : "DUPLICATE"}</span>` +
+        `<div class="cb-tier">${t.name}</div><div class="cb-gems">${gems(t.id)}</div><div class="cb-name">${car.name}</div>` +
+      `</div>` +
+      `<div class="cb-loot">` +
+        `<span class="cb-chip">⬡ <b>+${scrap}</b> scrap</span>` +
+        (lvl ? `<span class="cb-chip cb-lvl" style="--l1:${lvl.colors[0]};--l2:${lvl.colors[1] || lvl.colors[0]}">🗺 <b>${lvl.name}</b> level!</span>`
+             : (isNew ? "" : `<span class="cb-chip">${car.name} owned</span>`)) +
+      `</div>`;
+    stage.classList.add("on");
+    const again = deps.coins() >= crate.priceCoins;
+    btns.style.display = "flex";
+    btns.innerHTML =
+      `<button class="cb-btn ghost" data-cb="done">Done</button>` +
+      (again ? `<button class="cb-btn" data-open="${crate.key}">${crate.name.split(" ")[0]} again · ${crate.priceCoins} ◈</button>` : "");
+  };
+
+  const doOpen = (crate: CrateType, free = false) => {
+    if (opening) return;
+    if (!free) giftMode = false; // a paid open ends the welcome flow → its reveal returns to the shop
+    if (!free && deps.coins() < crate.priceCoins) { syncCoins(); return; }
+    const car = rollCrate(deps.cars(), crate.tierWeights, rng.next(), rng.next());
+    if (!car) { if (free) { giftMode = false; close(); } return; } // nothing droppable — never charge
+    if (!free && !deps.spend(crate.priceCoins)) return;
+    opening = true;
+    syncCoins(); // reflect the debit in the shop header right away (rows are hidden during the reveal)
+    // resolve up front, then animate
+    const isNew = deps.grantCar(car.name);
+    let scrap = crate.scrap;
+    if (isNew) deps.unlockUI(car.name);
+    else scrap += dupeScrap(car.rarity); // dupe adds a melt bonus on top of the crate scrap
+    deps.addScrap(scrap);
+    const lvlKey = pickLevel(deps.lockedLevels(), crate.levelChance, rng.next(), rng.next()); // additive level roll
+    if (lvlKey) deps.grantLevel(lvlKey);
+    // opening animation: a crate in the tier's colour shakes → bursts → reveal
+    rows.style.display = "none";
+    btns.style.display = "none"; btns.innerHTML = "";
+    stage.innerHTML = (cratePng[crate.key]
+      ? `<img class="cb-crate3d shake" src="${cratePng[crate.key]}" style="--cc:${crate.color}">`
+      : `<div class="cb-crate shake" style="--cc:${crate.color}"></div>`) + `<div class="cb-flash"></div>`;
+    stage.classList.add("on");
+    const crateEl = stage.querySelector(".cb-crate3d, .cb-crate") as HTMLElement;
+    const flash = stage.querySelector(".cb-flash") as HTMLElement;
+    window.setTimeout(() => {
+      crateEl.classList.remove("shake"); crateEl.classList.add("gone");
+      flash.classList.add("go");
+      window.setTimeout(() => showReveal(crate, car, isNew, scrap, lvlKey), 230);
+    }, 500);
+  };
+
+  panel.addEventListener("click", (e) => {
+    const el = (e.target as HTMLElement).closest("[data-open],[data-usd],[data-cb]") as HTMLElement | null;
+    if (!el) return;
+    if (el.dataset.open) { const c = CRATES.find((x) => x.key === el.dataset.open); if (c) doOpen(c); return; }
+    if (el.dataset.usd) { deps.onBuyUsd?.(el.dataset.usd); return; }
+    const k = el.dataset.cb;
+    if (k === "done") { if (giftMode) { giftMode = false; close(); } else showShop(); }
+    else if (k === "close") close();
+  });
+  overlay.addEventListener("click", (e) => { if (e.target === overlay) close(); });
+  addEventListener("keydown", (e) => { if (e.key === "Escape" && overlay.style.display !== "none") close(); });
+
+  function close() {
+    if (opening) return; // don't bail mid-open (the grant already happened)
+    overlay.style.display = "none";
+    deps.onClose?.();
+  }
+
+  return {
+    open() { renderCrates3d(); showShop(); overlay.style.display = "flex"; },
+    openGift(key) { renderCrates3d(); giftMode = true; overlay.style.display = "flex"; doOpen(crateByKey(key), true); },
+    isOpen: () => overlay.style.display !== "none",
+    setBusy(b) { if (b && !opening) overlay.style.display = "none"; },
+  };
+}
