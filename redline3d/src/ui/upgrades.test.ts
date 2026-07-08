@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { describe, expect, test, beforeEach } from "vitest";
+import { describe, expect, test, it, beforeEach } from "vitest";
 import { upgradeCost, trackValue, MAX_LEVEL, createUpgrades } from "./upgrades";
 
 describe("upgrade tree math", () => {
@@ -50,5 +50,28 @@ describe("scrap sink + finishes", () => {
     const b = make(); // fresh instance reads the same localStorage
     expect(b.finish("Orion")).toBe("gold");
     expect(b.finish("Helmet")).toBeUndefined();
+  });
+
+  it("fires onMutate for earns and spends, and hydrate overwrites without firing", () => {
+    const root = document.createElement("div");
+    const events: { kind: string; amount: number }[] = [];
+    const up = createUpgrades(root, { onMutate: (e) => events.push(e) });
+
+    up.addCoins(40);
+    up.addScrap(6);
+    expect(events).toEqual([{ kind: "coinsEarn", amount: 40 }, { kind: "scrapEarn", amount: 6 }]);
+
+    expect(up.spend(15)).toBe(true);
+    expect(events[events.length - 1]).toEqual({ kind: "coinsSpend", amount: 15 });
+
+    expect(up.spend(9999)).toBe(false); // can't afford → no event
+    expect(events.filter((e) => e.kind === "coinsSpend").length).toBe(1);
+
+    // hydrate = accept server truth; it must NOT echo back as a mutation
+    const before = events.length;
+    up.hydrate({ coins: 500, scrap: 20 });
+    expect(up.coins()).toBe(500);
+    expect(up.scrap()).toBe(20);
+    expect(events.length).toBe(before);
   });
 });

@@ -80,6 +80,8 @@ export interface Upgrades {
   isOpen(): boolean;
   /** hide the button + close the panel during a live round */
   setBusy(busy: boolean): void;
+  /** overwrite the cached balances from server truth (no onMutate fired) + refresh the HUD */
+  hydrate(s: { coins: number; scrap: number }): void;
 }
 
 let stylesInjected = false;
@@ -120,7 +122,7 @@ function injectStyles() {
 
 export function createUpgrades(
   parent: HTMLElement,
-  opts: { onCoins?: (n: number) => void; onScrap?: (n: number) => void; onApply?: () => void; economicEffects?: boolean; onClose?: () => void } = {},
+  opts: { onCoins?: (n: number) => void; onScrap?: (n: number) => void; onApply?: () => void; economicEffects?: boolean; onClose?: () => void; onMutate?: (ev: { kind: "coinsEarn" | "coinsSpend" | "scrapEarn" | "scrapSpend"; amount: number }) => void } = {},
 ): Upgrades {
   injectStyles();
   const saved = loadSaved();
@@ -193,6 +195,7 @@ export function createUpgrades(
     saved.levels[key] = lvl + 1;
     apply(); persist(); render();
     opts.onCoins?.(saved.coins);
+    opts.onMutate?.({ kind: "coinsSpend", amount: cost });
   };
   panel.querySelectorAll("[data-buy]").forEach((b) =>
     b.addEventListener("click", () => buy((b as HTMLElement).dataset.buy as Track)));
@@ -211,15 +214,16 @@ export function createUpgrades(
 
   return {
     coins: () => saved.coins,
-    addCoins(n) { saved.coins = addCoinsRaw(saved.coins, n); persist(); opts.onCoins?.(saved.coins); },
-    spend(n) { if (saved.coins < n) return false; saved.coins = Math.max(0, saved.coins - Math.floor(n)); persist(); opts.onCoins?.(saved.coins); return true; },
+    addCoins(n) { saved.coins = addCoinsRaw(saved.coins, n); persist(); opts.onCoins?.(saved.coins); opts.onMutate?.({ kind: "coinsEarn", amount: Math.floor(n) }); },
+    spend(n) { if (saved.coins < n) return false; const amt = Math.floor(n); saved.coins = Math.max(0, saved.coins - amt); persist(); opts.onCoins?.(saved.coins); opts.onMutate?.({ kind: "coinsSpend", amount: amt }); return true; },
     scrap: () => saved.scrap,
-    addScrap(n) { saved.scrap = addCoinsRaw(saved.scrap, n); persist(); opts.onScrap?.(saved.scrap); },
-    spendScrap(n) { if (saved.scrap < n) return false; saved.scrap = Math.max(0, saved.scrap - Math.floor(n)); persist(); opts.onScrap?.(saved.scrap); return true; },
+    addScrap(n) { saved.scrap = addCoinsRaw(saved.scrap, n); persist(); opts.onScrap?.(saved.scrap); opts.onMutate?.({ kind: "scrapEarn", amount: Math.floor(n) }); },
+    spendScrap(n) { if (saved.scrap < n) return false; const amt = Math.floor(n); saved.scrap = Math.max(0, saved.scrap - amt); persist(); opts.onScrap?.(saved.scrap); opts.onMutate?.({ kind: "scrapSpend", amount: amt }); return true; },
     finish: (carId) => saved.finishes[carId],
     setFinish(carId, finishId) { saved.finishes[carId] = finishId; persist(); },
     open: () => setOpen(true),
     isOpen: () => overlay.style.display !== "none",
     setBusy(b) { if (b) setOpen(false); }, // reachable only via the garage menu, which is itself gated
+    hydrate(s) { saved.coins = Math.max(0, Math.floor(s.coins)); saved.scrap = Math.max(0, Math.floor(s.scrap)); persist(); opts.onCoins?.(saved.coins); opts.onScrap?.(saved.scrap); if (overlay.style.display !== "none") render(); },
   };
 }
