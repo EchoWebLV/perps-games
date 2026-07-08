@@ -192,4 +192,38 @@ describe("createApi", () => {
       { depositIntent: "di_1", signedTxBase64: "tx-signed" },
     ]);
   });
+
+  it("posts coin/scrap deltas and inventory ops to the account endpoints", async () => {
+    const seen: { url: string; body: unknown }[] = [];
+    const mk = (body: unknown) =>
+      createApi({
+        baseUrl: "http://x", userId: "u",
+        fetch: async (url, init) => {
+          seen.push({ url: String(url), body: init?.body ? JSON.parse(String(init.body)) : undefined });
+          return res(200, body);
+        },
+      });
+
+    expect(await mk({ coins: 30 }).coinsEarn({ amount: 30, ref: "e1" })).toEqual({ coins: 30 });
+    expect(seen[0]).toEqual({ url: "http://x/v1/coins/earn", body: { amount: 30, ref: "e1" } });
+
+    expect(await mk({ coins: 18 }).coinsSpend({ amount: 12, ref: "s1" })).toEqual({ coins: 18 });
+    expect(seen[1].url).toBe("http://x/v1/coins/spend");
+
+    expect(await mk({ scrap: 5 }).scrapEarn({ amount: 5, ref: "se1" })).toEqual({ scrap: 5 });
+    expect(seen[2].url).toBe("http://x/v1/scrap/earn");
+
+    expect(await mk({ carId: "orion", isNew: true, count: 1 }).inventoryGrant({ carId: "orion" }))
+      .toEqual({ carId: "orion", isNew: true, count: 1 });
+    expect(seen[3]).toEqual({ url: "http://x/v1/inventory/grant", body: { carId: "orion" } });
+
+    expect(await mk({ seeded: true }).migrate({ coins: 10, scrap: 2, cars: { orion: 1 } }))
+      .toEqual({ seeded: true });
+    expect(seen[4].url).toBe("http://x/v1/migrate");
+  });
+
+  it("maps a 402 coin spend to insufficient_balance", async () => {
+    const api = createApi({ baseUrl: "http://x", userId: "u", fetch: async () => res(402, { error: "insufficient_balance" }) });
+    await expect(api.coinsSpend({ amount: 9, ref: "x" })).rejects.toMatchObject({ code: "insufficient_balance" });
+  });
 });

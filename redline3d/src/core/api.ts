@@ -4,7 +4,7 @@ import type { AuthProvider } from "./auth";
 export type Asset = "BTC" | "ETH" | "SOL";
 export type Dir = 1 | -1;
 
-export interface MeResult { userId: string; balance: number; cars: { carId: string }[]; openRoundId: string | null; }
+export interface MeResult { userId: string; balance: number; coins: number; scrap: number; cars: { carId: string; count: number; acquiredAt?: string }[]; openRoundId: string | null; }
 export interface OpenResult { roundId: string; asset: Asset; dir: Dir; lev: number; stake: number; entryRaw: number; entryTsUs: number; }
 export interface CloseResult { outcome: string; payoutCoins: number; pnlCoins: number; equity: number; exitRaw: number; balance: number; }
 /** live read-only mark: the server's CURRENT equity for an open round (what the client displays) */
@@ -32,6 +32,13 @@ function codeFor(status: number, bodyError?: string): ApiErrorCode {
 
 export interface Api {
   me(): Promise<MeResult>;
+  coinsEarn(p: { amount: number; ref: string }): Promise<{ coins: number }>;
+  coinsSpend(p: { amount: number; ref: string }): Promise<{ coins: number }>;
+  scrapEarn(p: { amount: number; ref: string }): Promise<{ scrap: number }>;
+  scrapSpend(p: { amount: number; ref: string }): Promise<{ scrap: number }>;
+  inventoryGrant(p: { carId: string }): Promise<{ carId: string; isNew: boolean; count: number }>;
+  inventoryMelt(p: { carId: string }): Promise<{ carId: string; melted: boolean; count: number }>;
+  migrate(p: { coins: number; scrap: number; cars: Record<string, number> }): Promise<{ seeded: boolean; reason?: string }>;
   openRound(p: { asset: Asset; dir: Dir; lev: number; stake: number }): Promise<OpenResult>;
   roundAction(p: { roundId: string; actionId: string; kind: "flip" | "lever"; dir?: Dir; lev?: number }): Promise<void>;
   closeRound(p: { roundId: string; reason: "cashout" | "expire" }): Promise<CloseResult>;
@@ -127,6 +134,13 @@ export function createApi(opts: ApiOpts = {}): Api {
 
   return {
     me: () => call<MeResult>("GET", "/v1/me"),
+    coinsEarn: (p) => call("POST", "/v1/coins/earn", p),
+    coinsSpend: (p) => call("POST", "/v1/coins/spend", p),
+    scrapEarn: (p) => call("POST", "/v1/scrap/earn", p),
+    scrapSpend: (p) => call("POST", "/v1/scrap/spend", p),
+    inventoryGrant: (p) => call("POST", "/v1/inventory/grant", p),
+    inventoryMelt: (p) => call("POST", "/v1/inventory/melt", p),
+    migrate: (p) => call("POST", "/v1/migrate", p),
     openRound: (p) => call<OpenResult>("POST", "/v1/round/open", p),
     roundAction: (p) => call<void>("POST", "/v1/round/action", p),
     closeRound: (p) => call<CloseResult>("POST", "/v1/round/close", p),
