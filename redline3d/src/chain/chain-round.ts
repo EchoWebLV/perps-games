@@ -40,7 +40,7 @@ export function rawToHuman(raw: number | bigint, expo: number): number {
 export type AssetSym = "BTC" | "ETH" | "SOL";
 
 export interface OpenedRound { entryRaw: bigint; entryExpo: number; entryHuman: number; deadlineTs: number; feed: string; }
-export interface SettledRound { outcome: number; outcomeName: string; payout: bigint; exitRaw: bigint; exitHuman: number; balance: bigint; }
+export interface SettledRound { outcome: number; outcomeName: string; payout: bigint; exitRaw: bigint; exitHuman: number; balance: bigint; deadlineTs: number; }
 const OUTCOME = ["cashout", "cap", "liq", "time"];
 
 /** A delegate attempt that can't proceed because the shared house is held (foreign or torn). */
@@ -112,7 +112,7 @@ export function roundToSnap(r: {
 /** Shape a flip/lever outcome: settled payload when the action hit a terminal (status 2), else the re-anchored round. */
 export function actionResultFromSnap(snap: RoundSnap, balance: bigint): ActionResult {
   if (snap.status === 2) {
-    return { settled: true, outcome: snap.outcome, outcomeName: snap.outcomeName, payout: snap.payout, exitRaw: snap.exitRaw, exitHuman: snap.exitHuman, balance };
+    return { settled: true, outcome: snap.outcome, outcomeName: snap.outcomeName, payout: snap.payout, exitRaw: snap.exitRaw, exitHuman: snap.exitHuman, balance, deadlineTs: snap.deadlineTs };
   }
   return { settled: false, banked: snap.banked, dir: snap.dir, lev: snap.lev, entryHuman: snap.entryHuman };
 }
@@ -123,6 +123,8 @@ export interface ChainRound {
   walletFunds(): Promise<{ sol: bigint; stake: bigint }>;
   /** The master pot's UNLOCKED balance — how much bankroll a new session can still carve. */
   houseAvailable(): Promise<bigint>;
+  /** This session's till UNLOCKED balance (ER copy when delegated) — the buffer left for the next round's lock. */
+  tillAvailable(onEr?: boolean): Promise<bigint>;
   readPlayerBalance(onEr?: boolean): Promise<bigint>;
   readRoundStatus(onEr?: boolean): Promise<number>;
   readRound(onEr?: boolean): Promise<RoundSnap | null>;
@@ -230,6 +232,13 @@ export function createChainRound(deps: { wallet: AnchorWalletLike; mint: PublicK
       return BigInt(m.balance.toString()) - BigInt(m.locked.toString());
     },
 
+    async tillAvailable(onEr = false) {
+      const prog = onEr ? programER : program;
+      const t = await prog.account.houseBalance.fetchNullable(pdas.till);
+      if (!t) return 0n;
+      return BigInt(t.balance.toString()) - BigInt(t.locked.toString());
+    },
+
     async readPlayerBalance(onEr = false) {
       const prog = onEr ? programER : program;
       const acct = await prog.account.playerBalance.fetchNullable(pdas.player);
@@ -315,7 +324,7 @@ export function createChainRound(deps: { wallet: AnchorWalletLike; mint: PublicK
       }));
       const r = await programER.account.round.fetch(pdas.round);
       const p = await programER.account.playerBalance.fetch(pdas.player);
-      return { outcome: Number(r.outcome), outcomeName: OUTCOME[Number(r.outcome)] ?? "?", payout: BigInt(r.payout.toString()), exitRaw: BigInt(r.exitRaw.toString()), exitHuman: rawToHuman(BigInt(r.exitRaw.toString()), Number(r.entryExpo)), balance: BigInt(p.balance.toString()) };
+      return { outcome: Number(r.outcome), outcomeName: OUTCOME[Number(r.outcome)] ?? "?", payout: BigInt(r.payout.toString()), exitRaw: BigInt(r.exitRaw.toString()), exitHuman: rawToHuman(BigInt(r.exitRaw.toString()), Number(r.entryExpo)), balance: BigInt(p.balance.toString()), deadlineTs: Number(r.deadlineTs) };
     },
 
     async forceClose() {
@@ -324,7 +333,7 @@ export function createChainRound(deps: { wallet: AnchorWalletLike; mint: PublicK
       }));
       const r = await programER.account.round.fetch(pdas.round);
       const p = await programER.account.playerBalance.fetch(pdas.player);
-      return { outcome: Number(r.outcome), outcomeName: OUTCOME[Number(r.outcome)] ?? "?", payout: BigInt(r.payout.toString()), exitRaw: BigInt(r.exitRaw.toString()), exitHuman: rawToHuman(BigInt(r.exitRaw.toString()), Number(r.entryExpo)), balance: BigInt(p.balance.toString()) };
+      return { outcome: Number(r.outcome), outcomeName: OUTCOME[Number(r.outcome)] ?? "?", payout: BigInt(r.payout.toString()), exitRaw: BigInt(r.exitRaw.toString()), exitHuman: rawToHuman(BigInt(r.exitRaw.toString()), Number(r.entryExpo)), balance: BigInt(p.balance.toString()), deadlineTs: Number(r.deadlineTs) };
     },
 
     async readRound(onEr = false) {

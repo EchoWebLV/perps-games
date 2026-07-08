@@ -36,6 +36,16 @@ export function selectChainWalletPort(): SolanaWalletPort {
   return createDevKeypairPort();
 }
 
+/** Privy persists its auth under `privy:`-prefixed localStorage keys — presence is the cheap
+ *  "might still be logged in" probe that decides whether mounting the island is worth it. */
+function hasPrivySession(): boolean {
+  try {
+    return Object.keys(globalThis.localStorage ?? {}).some((k) => k.startsWith("privy:"));
+  } catch {
+    return false;
+  }
+}
+
 function createLazyPrivyPort(): SolanaWalletPort {
   let inner: SolanaWalletPort | null = null;
   let loading: Promise<SolanaWalletPort> | null = null;
@@ -57,12 +67,17 @@ function createLazyPrivyPort(): SolanaWalletPort {
     async reconnect() {
       // Boot-time silent restore. Skip mounting the island entirely unless Privy left a
       // session in localStorage — fresh visitors keep the react chunk out of their boot.
-      const hasSession = Object.keys(globalThis.localStorage ?? {}).some((k) => k.startsWith("privy:"));
-      if (!inner && !hasSession) return null;
+      if (!inner && !hasPrivySession()) return null;
       const p = await ensure();
       return p.reconnect ? p.reconnect() : null;
     },
-    async disconnect() { if (inner) await inner.disconnect(); },
+    async disconnect() {
+      // A Privy session can outlive the island (mount failed, or sign-out before any
+      // connect this boot) — mount on demand so sign-out REALLY clears it. Skipping here
+      // would let the next connect() silently resume the account just signed out of.
+      if (!inner && !hasPrivySession()) return;
+      await (await ensure()).disconnect();
+    },
     currentAddress() { return inner?.currentAddress() ?? null; },
     async signMessage(message) { return (await ensure()).signMessage(message); },
     async signTransaction(txBase64) { return (await ensure()).signTransaction(txBase64); },
