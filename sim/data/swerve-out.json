@@ -1,0 +1,1534 @@
+{
+ "ranAt": "2026-07-03T17:13:34.804Z",
+ "config": {
+  "EDGE": 0.05,
+  "CAP": 25,
+  "MAXSEC": 60,
+  "SWERVE_BUFFER": 0.1,
+  "LEVS": [
+   50,
+   200,
+   500,
+   1000,
+   2000,
+   3000
+  ],
+  "FLOORS": [
+   0.1,
+   0.2
+  ],
+  "SPIKE_SEQS": 1500,
+  "DRIFT_SEQS": 800,
+  "STRIDE_REAL": 1,
+  "BLOCK": 240
+ },
+ "provenance": {
+  "calm": {
+   "source": "Binance SOLUSDT 1s klines",
+   "candles": 8000,
+   "fromIso": "2026-06-22T18:20:25.000Z",
+   "toIso": "2026-06-22T20:33:44.000Z",
+   "perSecVol": 0.00010840385569686247
+  },
+  "fresh": {
+   "source": "Binance SOLUSDT 1s klines (fresh window, fetched 2026-07-03)",
+   "fromIso": "2026-07-03T14:57:30.000Z",
+   "toIso": "2026-07-03T17:10:49.000Z",
+   "perSecVol": 0.0000961020354858283
+  },
+  "spike": "synthetic 1s calibrated to real high-vol SOL window (sim/paths.ts buildSpike)",
+  "driftless": "pure-martingale GBM @4.19e-4/s (theory check)"
+ },
+ "totalPairs": 3693120,
+ "rows": [
+  {
+   "market": "calm",
+   "lev": 50,
+   "liq": 0.1,
+   "pairs": 15880,
+   "fireRatePct": 0,
+   "base": {
+    "liqPct": 0,
+    "capPct": 0,
+    "timePct": 100,
+    "meanMult": 0.9500000000000209,
+    "houseEvPct": 4.999999999997906
+   },
+   "swerve": {
+    "liqPct": 0,
+    "capPct": 0,
+    "timePct": 100,
+    "meanMult": 0.9500000000000209,
+    "houseEvPct": 4.999999999997906
+   },
+   "houseDeltaPct": 0,
+   "houseDeltaCi95": 0,
+   "onFired": {
+    "fired": 0,
+    "saved": 0,
+    "killed": 0,
+    "bothLiq": 0,
+    "bothLive": 0,
+    "meanPlayerDeltaMult": 0
+   }
+  },
+  {
+   "market": "calm",
+   "lev": 50,
+   "liq": 0.2,
+   "pairs": 15880,
+   "fireRatePct": 0,
+   "base": {
+    "liqPct": 0,
+    "capPct": 0,
+    "timePct": 100,
+    "meanMult": 0.9500000000000209,
+    "houseEvPct": 4.999999999997906
+   },
+   "swerve": {
+    "liqPct": 0,
+    "capPct": 0,
+    "timePct": 100,
+    "meanMult": 0.9500000000000209,
+    "houseEvPct": 4.999999999997906
+   },
+   "houseDeltaPct": 0,
+   "houseDeltaCi95": 0,
+   "onFired": {
+    "fired": 0,
+    "saved": 0,
+    "killed": 0,
+    "bothLiq": 0,
+    "bothLive": 0,
+    "meanPlayerDeltaMult": 0
+   }
+  },
+  {
+   "market": "calm",
+   "lev": 200,
+   "liq": 0.1,
+   "pairs": 15880,
+   "fireRatePct": 0,
+   "base": {
+    "liqPct": 0,
+    "capPct": 0,
+    "timePct": 100,
+    "meanMult": 0.9500000000000032,
+    "houseEvPct": 4.999999999999682
+   },
+   "swerve": {
+    "liqPct": 0,
+    "capPct": 0,
+    "timePct": 100,
+    "meanMult": 0.9500000000000032,
+    "houseEvPct": 4.999999999999682
+   },
+   "houseDeltaPct": 0,
+   "houseDeltaCi95": 0,
+   "onFired": {
+    "fired": 0,
+    "saved": 0,
+    "killed": 0,
+    "bothLiq": 0,
+    "bothLive": 0,
+    "meanPlayerDeltaMult": 0
+   }
+  },
+  {
+   "market": "calm",
+   "lev": 200,
+   "liq": 0.2,
+   "pairs": 15880,
+   "fireRatePct": 0,
+   "base": {
+    "liqPct": 0,
+    "capPct": 0,
+    "timePct": 100,
+    "meanMult": 0.9500000000000032,
+    "houseEvPct": 4.999999999999682
+   },
+   "swerve": {
+    "liqPct": 0,
+    "capPct": 0,
+    "timePct": 100,
+    "meanMult": 0.9500000000000032,
+    "houseEvPct": 4.999999999999682
+   },
+   "houseDeltaPct": 0,
+   "houseDeltaCi95": 0,
+   "onFired": {
+    "fired": 0,
+    "saved": 0,
+    "killed": 0,
+    "bothLiq": 0,
+    "bothLive": 0,
+    "meanPlayerDeltaMult": 0
+   }
+  },
+  {
+   "market": "calm",
+   "lev": 500,
+   "liq": 0.1,
+   "pairs": 15880,
+   "fireRatePct": 2.279596977329975,
+   "base": {
+    "liqPct": 1.756926952141058,
+    "capPct": 0,
+    "timePct": 98.24307304785894,
+    "meanMult": 0.9500465790662778,
+    "houseEvPct": 4.995342093372224
+   },
+   "swerve": {
+    "liqPct": 1.6120906801007557,
+    "capPct": 0,
+    "timePct": 98.38790931989925,
+    "meanMult": 0.9512632299840862,
+    "houseEvPct": 4.873677001591381
+   },
+   "houseDeltaPct": -0.12166509178084062,
+   "houseDeltaCi95": 0.37128068446795404,
+   "onFired": {
+    "fired": 362,
+    "saved": 116,
+    "killed": 93,
+    "bothLiq": 72,
+    "bothLive": 81,
+    "meanPlayerDeltaMult": 0.053371316504965446
+   }
+  },
+  {
+   "market": "calm",
+   "lev": 500,
+   "liq": 0.2,
+   "pairs": 15880,
+   "fireRatePct": 2.544080604534005,
+   "base": {
+    "liqPct": 2.8526448362720402,
+    "capPct": 0,
+    "timePct": 97.14735516372797,
+    "meanMult": 0.9474268158234143,
+    "houseEvPct": 5.257318417658574
+   },
+   "swerve": {
+    "liqPct": 3.0415617128463475,
+    "capPct": 0,
+    "timePct": 96.95843828715365,
+    "meanMult": 0.9474163349953015,
+    "houseEvPct": 5.2583665004698465
+   },
+   "houseDeltaPct": 0.0010480828112633686,
+   "houseDeltaCi95": 0.38628765040176255,
+   "onFired": {
+    "fired": 404,
+    "saved": 113,
+    "killed": 143,
+    "bothLiq": 92,
+    "bothLive": 56,
+    "meanPlayerDeltaMult": -0.00041196918422926475
+   }
+  },
+  {
+   "market": "calm",
+   "lev": 1000,
+   "liq": 0.1,
+   "pairs": 15880,
+   "fireRatePct": 15.6360201511335,
+   "base": {
+    "liqPct": 16.429471032745592,
+    "capPct": 0,
+    "timePct": 83.5705289672544,
+    "meanMult": 0.9495443552827076,
+    "houseEvPct": 5.045564471729236
+   },
+   "swerve": {
+    "liqPct": 17.808564231738035,
+    "capPct": 0,
+    "timePct": 82.19143576826197,
+    "meanMult": 0.9459154707467246,
+    "houseEvPct": 5.408452925327545
+   },
+   "houseDeltaPct": 0.3628884535984512,
+   "houseDeltaCi95": 1.2386681278882579,
+   "onFired": {
+    "fired": 2483,
+    "saved": 552,
+    "killed": 771,
+    "bothLiq": 1028,
+    "bothLive": 132,
+    "meanPlayerDeltaMult": -0.023208492320352013
+   }
+  },
+  {
+   "market": "calm",
+   "lev": 1000,
+   "liq": 0.2,
+   "pairs": 15880,
+   "fireRatePct": 0,
+   "base": {
+    "liqPct": 22.115869017632242,
+    "capPct": 0,
+    "timePct": 77.88413098236776,
+    "meanMult": 0.9242057568161839,
+    "houseEvPct": 7.579424318381611
+   },
+   "swerve": {
+    "liqPct": 22.115869017632242,
+    "capPct": 0,
+    "timePct": 77.88413098236776,
+    "meanMult": 0.9242057568161839,
+    "houseEvPct": 7.579424318381611
+   },
+   "houseDeltaPct": 0,
+   "houseDeltaCi95": 0,
+   "onFired": {
+    "fired": 0,
+    "saved": 0,
+    "killed": 0,
+    "bothLiq": 0,
+    "bothLive": 0,
+    "meanPlayerDeltaMult": 0
+   }
+  },
+  {
+   "market": "calm",
+   "lev": 2000,
+   "liq": 0.1,
+   "pairs": 15880,
+   "fireRatePct": 37.41813602015113,
+   "base": {
+    "liqPct": 39.5088161209068,
+    "capPct": 0,
+    "timePct": 60.4911838790932,
+    "meanMult": 1.0138001322029777,
+    "houseEvPct": -1.380013220297771
+   },
+   "swerve": {
+    "liqPct": 42.36146095717884,
+    "capPct": 0,
+    "timePct": 57.63853904282116,
+    "meanMult": 0.9893575000016521,
+    "houseEvPct": 1.0642499998347876
+   },
+   "houseDeltaPct": 2.4442632201321497,
+   "houseDeltaCi95": 2.8448591960251046,
+   "onFired": {
+    "fired": 5942,
+    "saved": 1272,
+    "killed": 1725,
+    "bothLiq": 2799,
+    "bothLive": 146,
+    "meanPlayerDeltaMult": -0.06532295512571279
+   }
+  },
+  {
+   "market": "calm",
+   "lev": 2000,
+   "liq": 0.2,
+   "pairs": 15880,
+   "fireRatePct": 0,
+   "base": {
+    "liqPct": 51.29093198992443,
+    "capPct": 0,
+    "timePct": 48.70906801007557,
+    "meanMult": 0.8994933673287206,
+    "houseEvPct": 10.050663267127934
+   },
+   "swerve": {
+    "liqPct": 51.29093198992443,
+    "capPct": 0,
+    "timePct": 48.70906801007557,
+    "meanMult": 0.8994933673287206,
+    "houseEvPct": 10.050663267127934
+   },
+   "houseDeltaPct": 0,
+   "houseDeltaCi95": 0,
+   "onFired": {
+    "fired": 0,
+    "saved": 0,
+    "killed": 0,
+    "bothLiq": 0,
+    "bothLive": 0,
+    "meanPlayerDeltaMult": 0
+   }
+  },
+  {
+   "market": "calm",
+   "lev": 3000,
+   "liq": 0.1,
+   "pairs": 15880,
+   "fireRatePct": 47.60705289672544,
+   "base": {
+    "liqPct": 51.29093198992443,
+    "capPct": 0,
+    "timePct": 48.70906801007557,
+    "meanMult": 1.1178719779452069,
+    "houseEvPct": -11.787197794520687
+   },
+   "swerve": {
+    "liqPct": 52.512594458438286,
+    "capPct": 0,
+    "timePct": 47.487405541561714,
+    "meanMult": 1.0982729933506474,
+    "houseEvPct": -9.827299335064744
+   },
+   "houseDeltaPct": 1.9598984594549635,
+   "houseDeltaCi95": 5.138193632815466,
+   "onFired": {
+    "fired": 7560,
+    "saved": 1564,
+    "killed": 1758,
+    "bothLiq": 4114,
+    "bothLive": 124,
+    "meanPlayerDeltaMult": -0.041168237481673045
+   }
+  },
+  {
+   "market": "calm",
+   "lev": 3000,
+   "liq": 0.2,
+   "pairs": 15880,
+   "fireRatePct": 0,
+   "base": {
+    "liqPct": 63.142317380352644,
+    "capPct": 0,
+    "timePct": 36.857682619647356,
+    "meanMult": 0.9328216607354227,
+    "houseEvPct": 6.717833926457728
+   },
+   "swerve": {
+    "liqPct": 63.142317380352644,
+    "capPct": 0,
+    "timePct": 36.857682619647356,
+    "meanMult": 0.9328216607354227,
+    "houseEvPct": 6.717833926457728
+   },
+   "houseDeltaPct": 0,
+   "houseDeltaCi95": 0,
+   "onFired": {
+    "fired": 0,
+    "saved": 0,
+    "killed": 0,
+    "bothLiq": 0,
+    "bothLive": 0,
+    "meanPlayerDeltaMult": 0
+   }
+  },
+  {
+   "market": "fresh",
+   "lev": 50,
+   "liq": 0.1,
+   "pairs": 15880,
+   "fireRatePct": 0,
+   "base": {
+    "liqPct": 0,
+    "capPct": 0,
+    "timePct": 100,
+    "meanMult": 0.9500000000000286,
+    "houseEvPct": 4.99999999999714
+   },
+   "swerve": {
+    "liqPct": 0,
+    "capPct": 0,
+    "timePct": 100,
+    "meanMult": 0.9500000000000286,
+    "houseEvPct": 4.99999999999714
+   },
+   "houseDeltaPct": 0,
+   "houseDeltaCi95": 0,
+   "onFired": {
+    "fired": 0,
+    "saved": 0,
+    "killed": 0,
+    "bothLiq": 0,
+    "bothLive": 0,
+    "meanPlayerDeltaMult": 0
+   }
+  },
+  {
+   "market": "fresh",
+   "lev": 50,
+   "liq": 0.2,
+   "pairs": 15880,
+   "fireRatePct": 0,
+   "base": {
+    "liqPct": 0,
+    "capPct": 0,
+    "timePct": 100,
+    "meanMult": 0.9500000000000286,
+    "houseEvPct": 4.99999999999714
+   },
+   "swerve": {
+    "liqPct": 0,
+    "capPct": 0,
+    "timePct": 100,
+    "meanMult": 0.9500000000000286,
+    "houseEvPct": 4.99999999999714
+   },
+   "houseDeltaPct": 0,
+   "houseDeltaCi95": 0,
+   "onFired": {
+    "fired": 0,
+    "saved": 0,
+    "killed": 0,
+    "bothLiq": 0,
+    "bothLive": 0,
+    "meanPlayerDeltaMult": 0
+   }
+  },
+  {
+   "market": "fresh",
+   "lev": 200,
+   "liq": 0.1,
+   "pairs": 15880,
+   "fireRatePct": 0,
+   "base": {
+    "liqPct": 0,
+    "capPct": 0,
+    "timePct": 100,
+    "meanMult": 0.9500000000000285,
+    "houseEvPct": 4.999999999997151
+   },
+   "swerve": {
+    "liqPct": 0,
+    "capPct": 0,
+    "timePct": 100,
+    "meanMult": 0.9500000000000285,
+    "houseEvPct": 4.999999999997151
+   },
+   "houseDeltaPct": 0,
+   "houseDeltaCi95": 0,
+   "onFired": {
+    "fired": 0,
+    "saved": 0,
+    "killed": 0,
+    "bothLiq": 0,
+    "bothLive": 0,
+    "meanPlayerDeltaMult": 0
+   }
+  },
+  {
+   "market": "fresh",
+   "lev": 200,
+   "liq": 0.2,
+   "pairs": 15880,
+   "fireRatePct": 0,
+   "base": {
+    "liqPct": 0,
+    "capPct": 0,
+    "timePct": 100,
+    "meanMult": 0.9500000000000285,
+    "houseEvPct": 4.999999999997151
+   },
+   "swerve": {
+    "liqPct": 0,
+    "capPct": 0,
+    "timePct": 100,
+    "meanMult": 0.9500000000000285,
+    "houseEvPct": 4.999999999997151
+   },
+   "houseDeltaPct": 0,
+   "houseDeltaCi95": 0,
+   "onFired": {
+    "fired": 0,
+    "saved": 0,
+    "killed": 0,
+    "bothLiq": 0,
+    "bothLive": 0,
+    "meanPlayerDeltaMult": 0
+   }
+  },
+  {
+   "market": "fresh",
+   "lev": 500,
+   "liq": 0.1,
+   "pairs": 15880,
+   "fireRatePct": 0.818639798488665,
+   "base": {
+    "liqPct": 1.6309823677581865,
+    "capPct": 0,
+    "timePct": 98.3690176322418,
+    "meanMult": 0.9477425724835016,
+    "houseEvPct": 5.225742751649842
+   },
+   "swerve": {
+    "liqPct": 1.9143576826196473,
+    "capPct": 0,
+    "timePct": 98.08564231738035,
+    "meanMult": 0.9470708627874187,
+    "houseEvPct": 5.29291372125813
+   },
+   "houseDeltaPct": 0.0671709696083291,
+   "houseDeltaCi95": 0.05698454659999701,
+   "onFired": {
+    "fired": 130,
+    "saved": 13,
+    "killed": 58,
+    "bothLiq": 51,
+    "bothLive": 8,
+    "meanPlayerDeltaMult": -0.0820519228754051
+   }
+  },
+  {
+   "market": "fresh",
+   "lev": 500,
+   "liq": 0.2,
+   "pairs": 15880,
+   "fireRatePct": 1.9269521410579344,
+   "base": {
+    "liqPct": 2.096977329974811,
+    "capPct": 0,
+    "timePct": 97.9030226700252,
+    "meanMult": 0.9466561728144053,
+    "houseEvPct": 5.334382718559471
+   },
+   "swerve": {
+    "liqPct": 2.392947103274559,
+    "capPct": 0,
+    "timePct": 97.60705289672543,
+    "meanMult": 0.945532209774144,
+    "houseEvPct": 5.446779022585602
+   },
+   "houseDeltaPct": 0.11239630402606912,
+   "houseDeltaCi95": 0.1988770837171822,
+   "onFired": {
+    "fired": 306,
+    "saved": 76,
+    "killed": 123,
+    "bothLiq": 67,
+    "bothLive": 40,
+    "meanPlayerDeltaMult": -0.05832853947496659
+   }
+  },
+  {
+   "market": "fresh",
+   "lev": 1000,
+   "liq": 0.1,
+   "pairs": 15880,
+   "fireRatePct": 11.171284634760704,
+   "base": {
+    "liqPct": 11.26574307304786,
+    "capPct": 0,
+    "timePct": 88.73425692695214,
+    "meanMult": 0.9520202125836066,
+    "houseEvPct": 4.797978741639342
+   },
+   "swerve": {
+    "liqPct": 12.732997481108312,
+    "capPct": 0,
+    "timePct": 87.26700251889169,
+    "meanMult": 0.9458744464561246,
+    "houseEvPct": 5.412555354387538
+   },
+   "houseDeltaPct": 0.6145766127483037,
+   "houseDeltaCi95": 0.62344097605102,
+   "onFired": {
+    "fired": 1774,
+    "saved": 387,
+    "killed": 620,
+    "bothLiq": 663,
+    "bothLive": 104,
+    "meanPlayerDeltaMult": -0.05501396060001726
+   }
+  },
+  {
+   "market": "fresh",
+   "lev": 1000,
+   "liq": 0.2,
+   "pairs": 15880,
+   "fireRatePct": 16.297229219143578,
+   "base": {
+    "liqPct": 15.824937027707808,
+    "capPct": 0,
+    "timePct": 84.1750629722922,
+    "meanMult": 0.9340120316573047,
+    "houseEvPct": 6.5987968342695265
+   },
+   "swerve": {
+    "liqPct": 18.387909319899244,
+    "capPct": 0,
+    "timePct": 81.61209068010075,
+    "meanMult": 0.9188880637800284,
+    "houseEvPct": 8.11119362199716
+   },
+   "houseDeltaPct": 1.5123967877271325,
+   "houseDeltaCi95": 0.8135699036922159,
+   "onFired": {
+    "fired": 2588,
+    "saved": 449,
+    "killed": 856,
+    "bothLiq": 1141,
+    "bothLive": 142,
+    "meanPlayerDeltaMult": -0.09280085389917644
+   }
+  },
+  {
+   "market": "fresh",
+   "lev": 2000,
+   "liq": 0.1,
+   "pairs": 15880,
+   "fireRatePct": 0,
+   "base": {
+    "liqPct": 37.97229219143577,
+    "capPct": 0,
+    "timePct": 62.02770780856423,
+    "meanMult": 0.9832746195109435,
+    "houseEvPct": 1.6725380489056474
+   },
+   "swerve": {
+    "liqPct": 37.97229219143577,
+    "capPct": 0,
+    "timePct": 62.02770780856423,
+    "meanMult": 0.9832746195109435,
+    "houseEvPct": 1.6725380489056474
+   },
+   "houseDeltaPct": 0,
+   "houseDeltaCi95": 0,
+   "onFired": {
+    "fired": 0,
+    "saved": 0,
+    "killed": 0,
+    "bothLiq": 0,
+    "bothLive": 0,
+    "meanPlayerDeltaMult": 0
+   }
+  },
+  {
+   "market": "fresh",
+   "lev": 2000,
+   "liq": 0.2,
+   "pairs": 15880,
+   "fireRatePct": 40.54785894206549,
+   "base": {
+    "liqPct": 37.97229219143577,
+    "capPct": 0,
+    "timePct": 62.02770780856423,
+    "meanMult": 0.9832746195109435,
+    "houseEvPct": 1.6725380489056474
+   },
+   "swerve": {
+    "liqPct": 40.044080604534,
+    "capPct": 0,
+    "timePct": 59.955919395466,
+    "meanMult": 0.9569981486660433,
+    "houseEvPct": 4.300185133395673
+   },
+   "houseDeltaPct": 2.627647084489119,
+   "houseDeltaCi95": 2.699230487835708,
+   "onFired": {
+    "fired": 6439,
+    "saved": 1402,
+    "killed": 1731,
+    "bothLiq": 3203,
+    "bothLive": 103,
+    "meanPlayerDeltaMult": -0.06480359636851563
+   }
+  },
+  {
+   "market": "fresh",
+   "lev": 3000,
+   "liq": 0.1,
+   "pairs": 15880,
+   "fireRatePct": 0,
+   "base": {
+    "liqPct": 49.52141057934509,
+    "capPct": 0,
+    "timePct": 50.47858942065491,
+    "meanMult": 1.0567969319926644,
+    "houseEvPct": -5.679693199266445
+   },
+   "swerve": {
+    "liqPct": 49.52141057934509,
+    "capPct": 0,
+    "timePct": 50.47858942065491,
+    "meanMult": 1.0567969319926644,
+    "houseEvPct": -5.679693199266445
+   },
+   "houseDeltaPct": 0,
+   "houseDeltaCi95": 0,
+   "onFired": {
+    "fired": 0,
+    "saved": 0,
+    "killed": 0,
+    "bothLiq": 0,
+    "bothLive": 0,
+    "meanPlayerDeltaMult": 0
+   }
+  },
+  {
+   "market": "fresh",
+   "lev": 3000,
+   "liq": 0.2,
+   "pairs": 15880,
+   "fireRatePct": 51.341309823677584,
+   "base": {
+    "liqPct": 49.52141057934509,
+    "capPct": 0,
+    "timePct": 50.47858942065491,
+    "meanMult": 1.0567969319926644,
+    "houseEvPct": -5.679693199266445
+   },
+   "swerve": {
+    "liqPct": 50.976070528967256,
+    "capPct": 0,
+    "timePct": 49.023929471032744,
+    "meanMult": 1.0308328853656255,
+    "houseEvPct": -3.083288536562545
+   },
+   "houseDeltaPct": 2.5964046627036788,
+   "houseDeltaCi95": 4.760660010646321,
+   "onFired": {
+    "fired": 8153,
+    "saved": 1781,
+    "killed": 2012,
+    "bothLiq": 4242,
+    "bothLive": 118,
+    "meanPlayerDeltaMult": -0.050571453506358915
+   }
+  },
+  {
+   "market": "spike",
+   "lev": 50,
+   "liq": 0.1,
+   "pairs": 180000,
+   "fireRatePct": 4.045,
+   "base": {
+    "liqPct": 6.230555555555555,
+    "capPct": 0,
+    "timePct": 93.76944444444445,
+    "meanMult": 0.954160847678688,
+    "houseEvPct": 4.583915232131197
+   },
+   "swerve": {
+    "liqPct": 6.256111111111111,
+    "capPct": 0,
+    "timePct": 93.74388888888889,
+    "meanMult": 0.9540141750185812,
+    "houseEvPct": 4.598582498141878
+   },
+   "houseDeltaPct": 0.014667266011144002,
+   "houseDeltaCi95": 0.0340659079474512,
+   "onFired": {
+    "fired": 7281,
+    "saved": 2077,
+    "killed": 2123,
+    "bothLiq": 1138,
+    "bothLive": 1943,
+    "meanPlayerDeltaMult": -0.003626023735758715
+   }
+  },
+  {
+   "market": "spike",
+   "lev": 50,
+   "liq": 0.2,
+   "pairs": 180000,
+   "fireRatePct": 6.484444444444445,
+   "base": {
+    "liqPct": 8.849444444444444,
+    "capPct": 0,
+    "timePct": 91.15055555555556,
+    "meanMult": 0.9463265546277201,
+    "houseEvPct": 5.367344537227991
+   },
+   "swerve": {
+    "liqPct": 8.828888888888889,
+    "capPct": 0,
+    "timePct": 91.17111111111112,
+    "meanMult": 0.9466209389441016,
+    "houseEvPct": 5.33790610558984
+   },
+   "houseDeltaPct": -0.029438431638115888,
+   "houseDeltaCi95": 0.0539204202625564,
+   "onFired": {
+    "fired": 11672,
+    "saved": 3482,
+    "killed": 3445,
+    "bothLiq": 2652,
+    "bothLive": 2093,
+    "meanPlayerDeltaMult": 0.0045398540908677685
+   }
+  },
+  {
+   "market": "spike",
+   "lev": 200,
+   "liq": 0.1,
+   "pairs": 180000,
+   "fireRatePct": 10.295,
+   "base": {
+    "liqPct": 39.60722222222222,
+    "capPct": 0,
+    "timePct": 60.39277777777778,
+    "meanMult": 1.2351167234647487,
+    "houseEvPct": -23.511672346474867
+   },
+   "swerve": {
+    "liqPct": 39.58,
+    "capPct": 0,
+    "timePct": 60.42,
+    "meanMult": 1.2350418594695924,
+    "houseEvPct": -23.504185946959243
+   },
+   "houseDeltaPct": 0.0074863995157895165,
+   "houseDeltaCi95": 0.1377191842950857,
+   "onFired": {
+    "fired": 18531,
+    "saved": 3840,
+    "killed": 3791,
+    "bothLiq": 10368,
+    "bothLive": 532,
+    "meanPlayerDeltaMult": -0.0007271879082845572
+   }
+  },
+  {
+   "market": "spike",
+   "lev": 200,
+   "liq": 0.2,
+   "pairs": 180000,
+   "fireRatePct": 12.105,
+   "base": {
+    "liqPct": 42.321666666666665,
+    "capPct": 0,
+    "timePct": 57.678333333333335,
+    "meanMult": 1.210988647910535,
+    "houseEvPct": -21.098864791053494
+   },
+   "swerve": {
+    "liqPct": 42.26777777777778,
+    "capPct": 0,
+    "timePct": 57.73222222222222,
+    "meanMult": 1.2113476684885267,
+    "houseEvPct": -21.13476684885267
+   },
+   "houseDeltaPct": -0.035902057798576636,
+   "houseDeltaCi95": 0.1600396941745186,
+   "onFired": {
+    "fired": 21789,
+    "saved": 4144,
+    "killed": 4047,
+    "bothLiq": 13113,
+    "bothLive": 485,
+    "meanPlayerDeltaMult": 0.0029658866417659343
+   }
+  },
+  {
+   "market": "spike",
+   "lev": 500,
+   "liq": 0.1,
+   "pairs": 180000,
+   "fireRatePct": 20.032222222222224,
+   "base": {
+    "liqPct": 62.33,
+    "capPct": 0.020555555555555556,
+    "timePct": 37.64944444444444,
+    "meanMult": 1.7665847391476217,
+    "houseEvPct": -76.65847391476217
+   },
+   "swerve": {
+    "liqPct": 62.33111111111111,
+    "capPct": 0.019444444444444445,
+    "timePct": 37.64944444444444,
+    "meanMult": 1.766984262270272,
+    "houseEvPct": -76.6984262270272
+   },
+   "houseDeltaPct": -0.03995231226476358,
+   "houseDeltaCi95": 0.4656213159583379,
+   "onFired": {
+    "fired": 36058,
+    "saved": 4237,
+    "killed": 4239,
+    "bothLiq": 27429,
+    "bothLive": 153,
+    "meanPlayerDeltaMult": 0.0019944024093564382
+   }
+  },
+  {
+   "market": "spike",
+   "lev": 500,
+   "liq": 0.2,
+   "pairs": 180000,
+   "fireRatePct": 20.002777777777776,
+   "base": {
+    "liqPct": 65.05888888888889,
+    "capPct": 0.019444444444444445,
+    "timePct": 34.92166666666667,
+    "meanMult": 1.6767348531925999,
+    "houseEvPct": -67.67348531925998
+   },
+   "swerve": {
+    "liqPct": 65.01444444444445,
+    "capPct": 0.018333333333333333,
+    "timePct": 34.96722222222222,
+    "meanMult": 1.67742612349332,
+    "houseEvPct": -67.742612349332
+   },
+   "houseDeltaPct": -0.06912703007102762,
+   "houseDeltaCi95": 0.4829029713491577,
+   "onFired": {
+    "fired": 36005,
+    "saved": 4070,
+    "killed": 3990,
+    "bothLiq": 27810,
+    "bothLive": 135,
+    "meanPlayerDeltaMult": 0.003455871521395632
+   }
+  },
+  {
+   "market": "spike",
+   "lev": 1000,
+   "liq": 0.1,
+   "pairs": 180000,
+   "fireRatePct": 16.738333333333333,
+   "base": {
+    "liqPct": 76.07833333333333,
+    "capPct": 1.681111111111111,
+    "timePct": 22.240555555555556,
+    "meanMult": 2.2165406623030113,
+    "houseEvPct": -121.65406623030113
+   },
+   "swerve": {
+    "liqPct": 76.15333333333334,
+    "capPct": 1.6572222222222222,
+    "timePct": 22.189444444444444,
+    "meanMult": 2.2102133368141326,
+    "houseEvPct": -121.02133368141325
+   },
+   "houseDeltaPct": 0.6327325488870799,
+   "houseDeltaCi95": 0.8542973341489586,
+   "onFired": {
+    "fired": 30129,
+    "saved": 2734,
+    "killed": 2869,
+    "bothLiq": 24487,
+    "bothLive": 39,
+    "meanPlayerDeltaMult": -0.0378014068836252
+   }
+  },
+  {
+   "market": "spike",
+   "lev": 1000,
+   "liq": 0.2,
+   "pairs": 180000,
+   "fireRatePct": 15.693333333333333,
+   "base": {
+    "liqPct": 77.85388888888889,
+    "capPct": 1.575,
+    "timePct": 20.57111111111111,
+    "meanMult": 2.075350817474776,
+    "houseEvPct": -107.53508174747762
+   },
+   "swerve": {
+    "liqPct": 77.87833333333333,
+    "capPct": 1.5611111111111111,
+    "timePct": 20.560555555555556,
+    "meanMult": 2.072648667624956,
+    "houseEvPct": -107.26486676249559
+   },
+   "houseDeltaPct": 0.2702149849817753,
+   "houseDeltaCi95": 0.8107123809781797,
+   "onFired": {
+    "fired": 28248,
+    "saved": 2581,
+    "killed": 2625,
+    "bothLiq": 22993,
+    "bothLive": 49,
+    "meanPlayerDeltaMult": -0.01721845698694405
+   }
+  },
+  {
+   "market": "spike",
+   "lev": 2000,
+   "liq": 0.1,
+   "pairs": 180000,
+   "fireRatePct": 10.303888888888888,
+   "base": {
+    "liqPct": 83.9588888888889,
+    "capPct": 7.481111111111111,
+    "timePct": 8.56,
+    "meanMult": 2.58717466648533,
+    "houseEvPct": -158.71746664853302
+   },
+   "swerve": {
+    "liqPct": 83.94444444444444,
+    "capPct": 7.478888888888889,
+    "timePct": 8.576666666666666,
+    "meanMult": 2.589647496751368,
+    "houseEvPct": -158.96474967513677
+   },
+   "houseDeltaPct": -0.24728302660341686,
+   "houseDeltaCi95": 1.0951715848552737,
+   "onFired": {
+    "fired": 18547,
+    "saved": 1635,
+    "killed": 1609,
+    "bothLiq": 15279,
+    "bothLive": 24,
+    "meanPlayerDeltaMult": 0.02399899972427618
+   }
+  },
+  {
+   "market": "spike",
+   "lev": 2000,
+   "liq": 0.2,
+   "pairs": 180000,
+   "fireRatePct": 9.281666666666666,
+   "base": {
+    "liqPct": 84.95277777777778,
+    "capPct": 7.078888888888889,
+    "timePct": 7.968333333333334,
+    "meanMult": 2.441598976077921,
+    "houseEvPct": -144.15989760779212
+   },
+   "swerve": {
+    "liqPct": 84.935,
+    "capPct": 7.077222222222222,
+    "timePct": 7.987777777777778,
+    "meanMult": 2.4433377620072516,
+    "houseEvPct": -144.33377620072517
+   },
+   "houseDeltaPct": -0.17387859293298646,
+   "houseDeltaCi95": 1.0029806637287295,
+   "onFired": {
+    "fired": 16707,
+    "saved": 1424,
+    "killed": 1392,
+    "bothLiq": 13875,
+    "bothLive": 16,
+    "meanPlayerDeltaMult": 0.018733552838892418
+   }
+  },
+  {
+   "market": "spike",
+   "lev": 3000,
+   "liq": 0.1,
+   "pairs": 180000,
+   "fireRatePct": 6.958888888888889,
+   "base": {
+    "liqPct": 86.26833333333333,
+    "capPct": 8.815,
+    "timePct": 4.916666666666667,
+    "meanMult": 2.6105289675061325,
+    "houseEvPct": -161.05289675061326
+   },
+   "swerve": {
+    "liqPct": 86.25222222222222,
+    "capPct": 8.858333333333333,
+    "timePct": 4.889444444444444,
+    "meanMult": 2.6189665630811194,
+    "houseEvPct": -161.89665630811194
+   },
+   "houseDeltaPct": -0.8437595574983238,
+   "houseDeltaCi95": 0.9564491607505731,
+   "onFired": {
+    "fired": 12526,
+    "saved": 1105,
+    "killed": 1076,
+    "bothLiq": 10339,
+    "bothLive": 6,
+    "meanPlayerDeltaMult": 0.12124917798954038
+   }
+  },
+  {
+   "market": "spike",
+   "lev": 3000,
+   "liq": 0.2,
+   "pairs": 180000,
+   "fireRatePct": 6.1866666666666665,
+   "base": {
+    "liqPct": 86.94,
+    "capPct": 8.437777777777777,
+    "timePct": 4.622222222222222,
+    "meanMult": 2.494134573327521,
+    "houseEvPct": -149.41345733275207
+   },
+   "swerve": {
+    "liqPct": 86.96222222222222,
+    "capPct": 8.437222222222223,
+    "timePct": 4.600555555555555,
+    "meanMult": 2.4916897105714373,
+    "houseEvPct": -149.16897105714372
+   },
+   "houseDeltaPct": 0.2444862756081452,
+   "houseDeltaCi95": 0.9391822625480611,
+   "onFired": {
+    "fired": 11136,
+    "saved": 949,
+    "killed": 989,
+    "bothLiq": 9192,
+    "bothLive": 6,
+    "meanPlayerDeltaMult": -0.03951825575562692
+   }
+  },
+  {
+   "market": "driftless",
+   "lev": 50,
+   "liq": 0.1,
+   "pairs": 96000,
+   "fireRatePct": 0,
+   "base": {
+    "liqPct": 0,
+    "capPct": 0,
+    "timePct": 100,
+    "meanMult": 0.9500000000000014,
+    "houseEvPct": 4.99999999999986
+   },
+   "swerve": {
+    "liqPct": 0,
+    "capPct": 0,
+    "timePct": 100,
+    "meanMult": 0.9500000000000014,
+    "houseEvPct": 4.99999999999986
+   },
+   "houseDeltaPct": 0,
+   "houseDeltaCi95": 0,
+   "onFired": {
+    "fired": 0,
+    "saved": 0,
+    "killed": 0,
+    "bothLiq": 0,
+    "bothLive": 0,
+    "meanPlayerDeltaMult": 0
+   }
+  },
+  {
+   "market": "driftless",
+   "lev": 50,
+   "liq": 0.2,
+   "pairs": 96000,
+   "fireRatePct": 0,
+   "base": {
+    "liqPct": 0,
+    "capPct": 0,
+    "timePct": 100,
+    "meanMult": 0.9500000000000014,
+    "houseEvPct": 4.99999999999986
+   },
+   "swerve": {
+    "liqPct": 0,
+    "capPct": 0,
+    "timePct": 100,
+    "meanMult": 0.9500000000000014,
+    "houseEvPct": 4.99999999999986
+   },
+   "houseDeltaPct": 0,
+   "houseDeltaCi95": 0,
+   "onFired": {
+    "fired": 0,
+    "saved": 0,
+    "killed": 0,
+    "bothLiq": 0,
+    "bothLive": 0,
+    "meanPlayerDeltaMult": 0
+   }
+  },
+  {
+   "market": "driftless",
+   "lev": 200,
+   "liq": 0.1,
+   "pairs": 96000,
+   "fireRatePct": 15.982291666666667,
+   "base": {
+    "liqPct": 14.560416666666667,
+    "capPct": 0,
+    "timePct": 85.43958333333333,
+    "meanMult": 0.9428339229173922,
+    "houseEvPct": 5.71660770826078
+   },
+   "swerve": {
+    "liqPct": 14.659375,
+    "capPct": 0,
+    "timePct": 85.340625,
+    "meanMult": 0.9427121788652673,
+    "houseEvPct": 5.728782113473274
+   },
+   "houseDeltaPct": 0.012174405211990032,
+   "houseDeltaCi95": 0.09054945473195566,
+   "onFired": {
+    "fired": 15343,
+    "saved": 3403,
+    "killed": 3498,
+    "bothLiq": 7804,
+    "bothLive": 638,
+    "meanPlayerDeltaMult": -0.0007617434011282299
+   }
+  },
+  {
+   "market": "driftless",
+   "lev": 200,
+   "liq": 0.2,
+   "pairs": 96000,
+   "fireRatePct": 19.130208333333332,
+   "base": {
+    "liqPct": 19.396875,
+    "capPct": 0,
+    "timePct": 80.603125,
+    "meanMult": 0.9218965082142397,
+    "houseEvPct": 7.8103491785760255
+   },
+   "swerve": {
+    "liqPct": 19.465625,
+    "capPct": 0,
+    "timePct": 80.534375,
+    "meanMult": 0.9216540955673418,
+    "houseEvPct": 7.834590443265821
+   },
+   "houseDeltaPct": 0.024241264689709704,
+   "houseDeltaCi95": 0.11171520121549759,
+   "onFired": {
+    "fired": 18365,
+    "saved": 3741,
+    "killed": 3807,
+    "bothLiq": 10279,
+    "bothLive": 538,
+    "meanPlayerDeltaMult": -0.0012671720175399573
+   }
+  },
+  {
+   "market": "driftless",
+   "lev": 500,
+   "liq": 0.1,
+   "pairs": 96000,
+   "fireRatePct": 27.172916666666666,
+   "base": {
+    "liqPct": 52.98229166666667,
+    "capPct": 0,
+    "timePct": 47.01770833333333,
+    "meanMult": 0.9656308449005525,
+    "houseEvPct": 3.436915509944749
+   },
+   "swerve": {
+    "liqPct": 53.02395833333333,
+    "capPct": 0,
+    "timePct": 46.97604166666667,
+    "meanMult": 0.9658148882589073,
+    "houseEvPct": 3.4185111741092733
+   },
+   "houseDeltaPct": -0.018404335835788883,
+   "houseDeltaCi95": 0.24342159365383864,
+   "onFired": {
+    "fired": 26086,
+    "saved": 3330,
+    "killed": 3370,
+    "bothLiq": 19211,
+    "bothLive": 175,
+    "meanPlayerDeltaMult": 0.0006773043932514502
+   }
+  },
+  {
+   "market": "driftless",
+   "lev": 500,
+   "liq": 0.2,
+   "pairs": 96000,
+   "fireRatePct": 26.609375,
+   "base": {
+    "liqPct": 57.12083333333333,
+    "capPct": 0,
+    "timePct": 42.87916666666667,
+    "meanMult": 0.9116953381102737,
+    "houseEvPct": 8.830466188972629
+   },
+   "swerve": {
+    "liqPct": 57.01875,
+    "capPct": 0,
+    "timePct": 42.98125,
+    "meanMult": 0.9124212930816145,
+    "houseEvPct": 8.757870691838555
+   },
+   "houseDeltaPct": -0.0725954971342883,
+   "houseDeltaCi95": 0.28168613067591586,
+   "onFired": {
+    "fired": 25545,
+    "saved": 3149,
+    "killed": 3051,
+    "bothLiq": 19215,
+    "bothLive": 130,
+    "meanPlayerDeltaMult": 0.002728192493596272
+   }
+  },
+  {
+   "market": "driftless",
+   "lev": 1000,
+   "liq": 0.1,
+   "pairs": 96000,
+   "fireRatePct": 20.161458333333332,
+   "base": {
+    "liqPct": 72.31979166666666,
+    "capPct": 0,
+    "timePct": 27.680208333333333,
+    "meanMult": 1.0577785736103882,
+    "houseEvPct": -5.777857361038818
+   },
+   "swerve": {
+    "liqPct": 72.14479166666666,
+    "capPct": 0,
+    "timePct": 27.855208333333334,
+    "meanMult": 1.0640677138739318,
+    "houseEvPct": -6.406771387393184
+   },
+   "houseDeltaPct": -0.6289140263540912,
+   "houseDeltaCi95": 0.46249080349132965,
+   "onFired": {
+    "fired": 19355,
+    "saved": 2072,
+    "killed": 1904,
+    "bothLiq": 15325,
+    "bothLive": 54,
+    "meanPlayerDeltaMult": 0.031193875758198274
+   }
+  },
+  {
+   "market": "driftless",
+   "lev": 1000,
+   "liq": 0.2,
+   "pairs": 96000,
+   "fireRatePct": 18.878125,
+   "base": {
+    "liqPct": 74.60416666666667,
+    "capPct": 0,
+    "timePct": 25.395833333333332,
+    "meanMult": 0.9907610194021248,
+    "houseEvPct": 0.9238980597875202
+   },
+   "swerve": {
+    "liqPct": 74.60208333333334,
+    "capPct": 0,
+    "timePct": 25.397916666666667,
+    "meanMult": 0.991998884863086,
+    "houseEvPct": 0.8001115136914039
+   },
+   "houseDeltaPct": -0.12378654609625402,
+   "houseDeltaCi95": 0.4072300328851686,
+   "onFired": {
+    "fired": 18123,
+    "saved": 1774,
+    "killed": 1772,
+    "bothLiq": 14532,
+    "bothLive": 45,
+    "meanPlayerDeltaMult": 0.006557141988214084
+   }
+  },
+  {
+   "market": "driftless",
+   "lev": 2000,
+   "liq": 0.1,
+   "pairs": 96000,
+   "fireRatePct": 11.733333333333333,
+   "base": {
+    "liqPct": 82.98958333333333,
+    "capPct": 0.013541666666666667,
+    "timePct": 16.996875,
+    "meanMult": 1.2674507552121932,
+    "houseEvPct": -26.74507552121932
+   },
+   "swerve": {
+    "liqPct": 82.99583333333334,
+    "capPct": 0.013541666666666667,
+    "timePct": 16.990625,
+    "meanMult": 1.2695409738485743,
+    "houseEvPct": -26.954097384857434
+   },
+   "houseDeltaPct": -0.20902186363821093,
+   "houseDeltaCi95": 0.6946715233619789,
+   "onFired": {
+    "fired": 11264,
+    "saved": 987,
+    "killed": 993,
+    "bothLiq": 9270,
+    "bothLive": 14,
+    "meanPlayerDeltaMult": 0.017814363378256617
+   }
+  },
+  {
+   "market": "driftless",
+   "lev": 2000,
+   "liq": 0.2,
+   "pairs": 96000,
+   "fireRatePct": 10.428125,
+   "base": {
+    "liqPct": 84.16458333333334,
+    "capPct": 0.013541666666666667,
+    "timePct": 15.821875,
+    "meanMult": 1.1937006872149745,
+    "houseEvPct": -19.370068721497447
+   },
+   "swerve": {
+    "liqPct": 84.18958333333333,
+    "capPct": 0.013541666666666667,
+    "timePct": 15.796875,
+    "meanMult": 1.1901003526775429,
+    "houseEvPct": -19.01003526775429
+   },
+   "houseDeltaPct": 0.36003345374321205,
+   "houseDeltaCi95": 0.6536155714295497,
+   "onFired": {
+    "fired": 10011,
+    "saved": 860,
+    "killed": 884,
+    "bothLiq": 8255,
+    "bothLive": 12,
+    "meanPlayerDeltaMult": -0.034525233802165975
+   }
+  },
+  {
+   "market": "driftless",
+   "lev": 3000,
+   "liq": 0.1,
+   "pairs": 96000,
+   "fireRatePct": 7.813541666666667,
+   "base": {
+    "liqPct": 86.48958333333333,
+    "capPct": 0.7645833333333333,
+    "timePct": 12.745833333333334,
+    "meanMult": 1.4933456647112378,
+    "houseEvPct": -49.33456647112378
+   },
+   "swerve": {
+    "liqPct": 86.503125,
+    "capPct": 0.7666666666666667,
+    "timePct": 12.730208333333334,
+    "meanMult": 1.4942944873627266,
+    "houseEvPct": -49.42944873627266
+   },
+   "houseDeltaPct": -0.09488226514859875,
+   "houseDeltaCi95": 0.8458394578362874,
+   "onFired": {
+    "fired": 7501,
+    "saved": 653,
+    "killed": 666,
+    "bothLiq": 6172,
+    "bothLive": 10,
+    "meanPlayerDeltaMult": 0.012143310830909852
+   }
+  },
+  {
+   "market": "driftless",
+   "lev": 3000,
+   "liq": 0.2,
+   "pairs": 96000,
+   "fireRatePct": 6.995833333333334,
+   "base": {
+    "liqPct": 87.26770833333333,
+    "capPct": 0.740625,
+    "timePct": 11.991666666666667,
+    "meanMult": 1.4191081756127009,
+    "houseEvPct": -41.910817561270086
+   },
+   "swerve": {
+    "liqPct": 87.27604166666667,
+    "capPct": 0.7364583333333333,
+    "timePct": 11.9875,
+    "meanMult": 1.4190967076700958,
+    "houseEvPct": -41.90967076700958
+   },
+   "houseDeltaPct": 0.0011467942605653573,
+   "houseDeltaCi95": 0.7526114927658704,
+   "onFired": {
+    "fired": 6716,
+    "saved": 556,
+    "killed": 564,
+    "bothLiq": 5587,
+    "bothLive": 9,
+    "meanPlayerDeltaMult": -0.00016392532610821068
+   }
+  }
+ ],
+ "secs": 1.732
+}
