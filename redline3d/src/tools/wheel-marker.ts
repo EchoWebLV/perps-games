@@ -7,9 +7,12 @@ import * as THREE from "three";
 import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader.js";
 
 const MODELS = [
-  "clown-car", "cybertruck", "delorean", "flintstone", "helmet", "orion",
-  "pink-rod", "shopping-cart", "six-wheeler", "skull", "slot-machine",
+  "clown-car", "cybertruck", "delorean", "flintstone", "helmet", "magnet",
+  "orion", "pink-rod", "shopping-cart", "six-wheeler", "skull", "slot-machine",
   "starter", "vaporwave",
+  // new common cars (2026-07-06) — not yet wheel-rigged
+  "banana", "breaking_rv", "cat", "dragon", "house", "knockout", "trabant", "wiener",
+  "cactus", "kraken", "ramen",
 ];
 
 /** wheels appear as circles only when viewed along their axle */
@@ -160,7 +163,9 @@ async function loadModel(name: string): Promise<void> {
 function frame(): void {
   const rect = stage.getBoundingClientRect();
   renderer.setSize(rect.width, rect.height);
-  const aspect = rect.width / Math.max(rect.height, 1);
+  // a zero-size stage (page loaded in a hidden/detached tab) would make
+  // aspect 0 → halfH Infinity → NaN camera the resize handler can't undo
+  const aspect = rect.width > 0 && rect.height > 0 ? rect.width / rect.height : 16 / 9;
   const horizSize = viewAxis === "x" ? size.z : size.x;
   const halfH = Math.max(size.y / 2, horizSize / 2 / aspect) * 1.35;
   camera.top = halfH;
@@ -627,6 +632,17 @@ if (import.meta.env.DEV) {
         out[p.o.name] = [b.min.x, b.min.y, b.min.z, b.max.x, b.max.y, b.max.z].map((v) => +v.toFixed(4));
       }
       return out;
+    },
+    /** camera + fit state — NaN here means frame() got bad inputs */
+    get camState() {
+      return {
+        pos: camera.position.toArray(),
+        tblr: [camera.top, camera.bottom, camera.left, camera.right],
+        zoom: camera.zoom,
+        size: size.toArray(),
+        center: center.toArray(),
+        proj: camera.projectionMatrix.elements.slice(0, 4),
+      };
     },
     /** world point -> client pixel coords, for synthetic-pointer tests */
     screenOf(x: number, y: number, z: number) {

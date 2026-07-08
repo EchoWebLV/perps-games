@@ -14,6 +14,8 @@
     "apk:serve": "bash scripts/build-apk.sh --serve",
     "bake:cards": "node scripts/bake-cards.mjs",
     "rig:wheels": "node scripts/rig-wheels.mjs",
+    "wheels:fix": "node scripts/fix-wheels.mjs",
+    "models:compress": "node scripts/compress-models.mjs",
     "chain:bootstrap": "node scripts/bootstrap-devnet.mjs",
     "chain:fund": "node scripts/fund-wallet.mjs",
     "chain:itest": "RAIDER_DEVNET=1 vitest run --config vitest.config.devnet.ts"
@@ -23,6 +25,7 @@
     "@gltf-transform/core": "^4.4.0",
     "@types/three": "^0.169.0",
     "buffer": "^6.0.3",
+    "jsdom": "^29.1.1",
     "puppeteer": "^25.1.0",
     "typescript": "^5.5.0",
     "vite": "^5.4.0",

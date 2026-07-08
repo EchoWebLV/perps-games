@@ -13,7 +13,7 @@ const seeds = {
   house: [Buffer.from("house2"), mint.toBuffer()],
   till: [Buffer.from("house2"), mint.toBuffer(), owner.toBuffer()],
 };
-const conn = new Connection("https://api.devnet.solana.com", "confirmed");
+const conn = new Connection("https://devnet.helius-rpc.com/?api-key=e0eb777f-deda-4f69-bfcd-726807ad1a42", "confirmed");
 const DELEG = "DELeGGvXpWV2fqJUhqcF5ZSYMS4JTLjteaAMARRSaeSh";
 for (const [name, s] of Object.entries(seeds)) {
   const [pda] = PublicKey.findProgramAddressSync(s, pid);

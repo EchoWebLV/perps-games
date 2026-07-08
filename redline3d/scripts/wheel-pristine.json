@@ -1,0 +1,24 @@
+{
+  "_comment": "Pristine (pre-rig) GLB git blobs — the input rig-wheels.mjs must run against. All 13 models were first rigged in 0301df9, so pristine = the blob just before it. fix-wheels.mjs restores from here by blob SHA (survives branch moves as long as the commit is reachable). If a model is ever re-exported from the art tool, update its blob here.",
+  "source": "0301df9^",
+  "blobs": {
+    "clown-car": "5c72fd01389c01e95018196a7fb9109afe757c48",
+    "cybertruck": "916520ebc5a663ace677469679f0d5ca2156e953",
+    "delorean": "ddf6d9d24a764bb9a2361711e7507f9822848568",
+    "flintstone": "efa9f9f93e6997008256d50c779163ad0010b035",
+    "helmet": "bdb2397d81f7c4c132b0ff6e36e3e32951d7e247",
+    "magnet": "da97f6ac9b7b3fcb74ebef7f83d060e80e6c5bcf",
+    "orion": "883f8ae03a4f02e06d72210913b9dd2deb1aa601",
+    "pink-rod": "0f3063883aa1bc1d7422e492b11b1797403c6000",
+    "shopping-cart": "b0cf1628ac86953b823e54f8083167adcec0c675",
+    "six-wheeler": "9f56a43af6a734ec4c9baf54351472a18c027abc",
+    "skull": "dee32641de0d970050a8e61f26f037d9816960ad",
+    "slot-machine": "edfaca1f54a491c969bb1ea964e043c970ee4049",
+    "starter": "512eb3b7a5e4eff73f922aaa21234637218f40e8",
+    "vaporwave": "dc6cf6c8a994f9a9d645dcaff8f25744a4509808",
+    "cactus": "8799370db36949572932762662ad7824432d7e95",
+    "ramen": "b51239b04a45d632b4fb73edcd700dff786d5b9c",
+    "kraken": "9c5e86953220bffdd7136cb22432c11e22b0fbac",
+    "breaking_rv": "86e54d398d032b571df6c1e8b6afc675489b61cb"
+  }
+}

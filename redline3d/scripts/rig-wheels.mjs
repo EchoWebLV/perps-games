@@ -26,8 +26,15 @@ const MODELS_DIR = resolve(dirname(fileURLToPath(import.meta.url)), "../public/m
 // Regression table — detection must find exactly this many wheels per model.
 const EXPECTED = {
   "clown-car": 4, cybertruck: 4, delorean: 4, flintstone: 2, helmet: 4,
+  // magnet: 4-wheeled hot-rod (thin front, fat rear); side-view circles each cover a L/R pair
+  magnet: 4,
+  // shopping-cart: dual rear wheels per side (inner+outer split by the basket) = 6 groups
   orion: 2, "pink-rod": 4, "shopping-cart": 4, "six-wheeler": 6,
   skull: 4, "slot-machine": 4, starter: 4, vaporwave: 4,
+  // new common cars — 2 side-view circles each (L/R pair) = 4 wheels. banana still unmarked.
+  breaking_rv: 4, cactus: 4, cat: 4, dragon: 4, house: 4, knockout: 4, ramen: 4, trabant: 4, wiener: 4,
+  // kraken: only the REAR axle marked so far (1 circle → 2 wheels); front axle pending a circle → bump to 4 then.
+  kraken: 2,
 };
 // delorean/flintstone: welded-detection fails (0 / noisy clusters) but they
 // have proper wheel nodes/joints — the named path handles them. orion's
@@ -74,6 +81,53 @@ function sceneDirToLocal(worldMat, v) {
     [worldMat[8], worldMat[9], worldMat[10]],
   ].map((c) => { const l = Math.hypot(...c) || 1; return c.map((x) => x / l); });
   return [0, 1, 2].map((i) => cols[i][0] * v[0] + cols[i][1] * v[1] + cols[i][2] * v[2]);
+}
+// scene vector -> local units: inverse of the world 3x3 (incl. scale) applied to v
+function sceneVecToLocal(m, v) {
+  const a = m[0], b = m[4], c = m[8], d = m[1], e = m[5], f = m[9], g = m[2], h = m[6], i = m[10];
+  const A = e * i - f * h, B = f * g - d * i, C = d * h - e * g;
+  const det = a * A + b * B + c * C || 1;
+  return [
+    (A * v[0] + (c * h - b * i) * v[1] + (b * f - c * e) * v[2]) / det,
+    (B * v[0] + (a * i - c * g) * v[1] + (c * d - a * f) * v[2]) / det,
+    (C * v[0] + (b * g - a * h) * v[1] + (a * e - b * d) * v[2]) / det,
+  ];
+}
+
+// Slide a TAGGED wheel's pivot along the scene axle by w.axleShift WITHOUT
+// moving any rendered geometry: the node translation moves; a skinned joint
+// gets the inverse translation folded into its inverse-bind matrix, a plain
+// node gets its mesh re-hung on a counter-shifted carrier child (and any
+// child nodes nudged back). Rest pose is bit-identical by construction —
+// only the steer/spin pivot relocates.
+function slidePivot(doc, w) {
+  const node = w.tagNode;
+  const D = [0, 0, 0];
+  D[w.axleAxis] = w.axleShift;
+  const dLocal = sceneVecToLocal(node.getWorldMatrix(), D);
+  const parentNode = node.listParents().find((p) => p.propertyType === "Node") ?? null;
+  const dParent = parentNode ? sceneVecToLocal(parentNode.getWorldMatrix(), D) : D.slice();
+  const t = node.getTranslation();
+  node.setTranslation([t[0] + dParent[0], t[1] + dParent[1], t[2] + dParent[2]]);
+  const skins = doc.getRoot().listSkins().filter((s) => s.listJoints().includes(node));
+  for (const skin of skins) {
+    const j = skin.listJoints().indexOf(node);
+    const acc = skin.getInverseBindMatrices();
+    const arr = acc.getArray().slice();
+    arr[j * 16 + 12] -= dLocal[0]; arr[j * 16 + 13] -= dLocal[1]; arr[j * 16 + 14] -= dLocal[2];
+    acc.setArray(arr);
+  }
+  for (const c of node.listChildren()) {
+    const ct = c.getTranslation();
+    c.setTranslation([ct[0] - dLocal[0], ct[1] - dLocal[1], ct[2] - dLocal[2]]);
+  }
+  if (node.getMesh() && !skins.length) {
+    const carrier = doc.createNode(`${node.getName()}_geo`)
+      .setTranslation([-dLocal[0], -dLocal[1], -dLocal[2]])
+      .setMesh(node.getMesh());
+    node.setMesh(null);
+    node.addChild(carrier);
+  }
 }
 
 // ---------- gather the triangle soup (scene space) ----------
@@ -288,9 +342,9 @@ function detectByName(doc, prims) {
     const isJoint = !rootPrims.has(node);
     if (isJoint) {
       if (offRoll > dy * 0.125) throw new Error(`${node.getName()}: joint pivot ${offRoll.toFixed(2)} off the axle line (dy=${dy.toFixed(2)}) — cannot extract skinned verts`);
-      wheels.push({ hub: center, radius: dy / 2, axleAxis, halfWidth: (axleAxis === 0 ? dx : dz) / 2, tagNode: node });
+      wheels.push({ hub: center, radius: dy / 2, axleAxis, halfWidth: (axleAxis === 0 ? dx : dz) / 2, tagNode: node, isJoint: true, memberVerts: verts, pivot });
     } else if (offRoll <= dy * 0.025) {
-      wheels.push({ hub: center, radius: dy / 2, axleAxis, halfWidth: (axleAxis === 0 ? dx : dz) / 2, tagNode: node });
+      wheels.push({ hub: center, radius: dy / 2, axleAxis, halfWidth: (axleAxis === 0 ? dx : dz) / 2, tagNode: node, memberVerts: verts, pivot });
     } else {
       wheels.push({ hub: center, radius: dy / 2, axleAxis, halfWidth: (axleAxis === 0 ? dx : dz) / 2, srcPrims: rootPrims.get(node), srcNode: node });
     }
@@ -313,9 +367,11 @@ function detectByNodeShape(prims, mn, mx) {
   for (const [node, list] of byNode) {
     let bmn = [1e9, 1e9, 1e9], bmx = [-1e9, -1e9, -1e9];
     let count = 0;
+    const verts = [];
     for (const p of list) for (let i = 0; i < p.pos.length; i += 3) {
       const w = xform(p.matrix, p.pos[i], p.pos[i + 1], p.pos[i + 2]);
       count++;
+      verts.push(w);
       for (let k = 0; k < 3; k++) { if (w[k] < bmn[k]) bmn[k] = w[k]; if (w[k] > bmx[k]) bmx[k] = w[k]; }
     }
     if (count < 40) continue;
@@ -331,7 +387,7 @@ function detectByNodeShape(prims, mn, mx) {
     const pivot = [wm[12], wm[13], wm[14]];
     const rollAxes = axleAxis === 0 ? [1, 2] : [1, 0];
     const offRoll = Math.hypot(pivot[rollAxes[0]] - center[rollAxes[0]], pivot[rollAxes[1]] - center[rollAxes[1]]);
-    if (offRoll <= dy * 0.025) wheels.push({ hub: center, radius: dy / 2, axleAxis, halfWidth: width / 2, tagNode: node });
+    if (offRoll <= dy * 0.025) wheels.push({ hub: center, radius: dy / 2, axleAxis, halfWidth: width / 2, tagNode: node, memberVerts: verts, pivot });
     else wheels.push({ hub: center, radius: dy / 2, axleAxis, halfWidth: width / 2, srcPrims: list, srcNode: node });
   }
   return wheels;
@@ -362,6 +418,7 @@ function rigModel(doc, prims, wheels) {
   const finalWheels = [];
   wheels.forEach((w, wi) => {
     if (!w.tagNode) return;
+    if (w.axleShift) slidePivot(doc, w);
     const wm = w.tagNode.getWorldMatrix();
     const axleScene = w.axleAxis === 0 ? [1, 0, 0] : [0, 0, 1];
     w.tagNode.setName(`wheel_${wi}`);
@@ -490,7 +547,17 @@ function rigModel(doc, prims, wheels) {
     // and the length extent is the pure circular diameter — so anchor the
     // center at bottom + diameter/2 instead of trusting the y midpoint.
     const d = z1 - z0;
-    const cLoc = [(x0 + x1) / 2, y0 + d / 2, (z0 + z1) / 2];
+    const cy = y0 + d / 2, cz = (z0 + z1) / 2;
+    // Along the axle, pivot on the TREAD RING's center, not the assembly bbox
+    // mid: deep-dish wheels (pink-rod's wire fronts) put the tread plane ~25%
+    // of r off the rim+spokes middle, and steering must yaw about the contact
+    // patch (the wheelqa steer-arm gate). Bbox mid stays the sparse fallback.
+    const treadXs = [];
+    for (const b of buckets[wi].values()) for (let i = 0; i < b.pos.length; i += 3) {
+      if (Math.hypot(b.pos[i + 1] - cy, b.pos[i + 2] - cz) >= d * 0.425) treadXs.push(b.pos[i]); // 0.85·(d/2)
+    }
+    const [tx0, tx1] = treadXs.length >= 30 ? ext(treadXs) : [x0, x1];
+    const cLoc = [(tx0 + tx1) / 2, cy, cz];
     for (const b of buckets[wi].values()) for (let i = 0; i < b.pos.length; i += 3) {
       b.pos[i] -= cLoc[0]; b.pos[i + 1] -= cLoc[1]; b.pos[i + 2] -= cLoc[2];
     }
@@ -709,6 +776,11 @@ function groupWheels(wheels) {
 async function processModel(io, file, { dry, manual }) {
   const name = basename(file, ".glb");
   const doc = await io.read(file);
+  // rigging is a CUT — running it on an already-rigged model cuts the cut
+  // (duplicate wheel_N nodes, hollow wheels). Only pristine input is valid;
+  // fix-wheels.mjs restores it from the wheel-pristine.json blob first.
+  if (doc.getRoot().listNodes().some((n) => /^wheel_\d+$/.test(n.getName())))
+    throw new Error(`${name}: input is already rigged — restore the pristine GLB first (npm run wheels:fix -- ${name})`);
   const { prims, mn, mx } = gatherPrims(doc);
   const wheels = manual
     ? detectByManual(manual, worldVerts(prims), mn, mx)
@@ -734,6 +806,32 @@ async function processModel(io, file, { dry, manual }) {
   if (new Set(wheels.map((w) => w.axleAxis)).size !== 1) throw new Error(`${name}: mixed axle axes`);
   const rs = groups.map((g) => Math.max(...g.map((w) => w.radius)));
   if (Math.max(...rs) / Math.min(...rs) > 3.5) throw new Error(`${name}: radius spread too large`);
+  // Steer-pivot slide for TAGGED wheels: an artist pivot off the tread center
+  // ALONG THE AXLE makes a steered wheel swing sideways (wheelqa steer-arm
+  // gate — delorean's inboard joints sat 29-36% of r off, cybertruck 10%).
+  // Slide the pivot onto the group's tread center; geometry does not move
+  // (joints get IBM compensation, mesh nodes a counter-shifted carrier).
+  for (const g of groups) {
+    const ref = g.reduce((a, b) => (b.radius > a.radius ? b : a));
+    if (!ref.memberVerts) continue; // cut/extracted wheels recenter themselves
+    const rollAxes = ref.axleAxis === 0 ? [1, 2] : [1, 0];
+    const treadA = [];
+    for (const v of ref.memberVerts) {
+      const d = Math.hypot(v[rollAxes[0]] - ref.hub[rollAxes[0]], v[rollAxes[1]] - ref.hub[rollAxes[1]]);
+      if (d >= ref.radius * 0.85 && d <= ref.radius * 1.15) treadA.push(v[ref.axleAxis]);
+    }
+    if (treadA.length < 30) continue;
+    treadA.sort((a, b) => a - b);
+    const qt = (f) => treadA[Math.min(treadA.length - 1, Math.floor(treadA.length * f))];
+    const treadMid = (qt(0.01) + qt(0.99)) / 2;
+    for (const w of g) {
+      if (!w.tagNode || !w.pivot) continue;
+      const delta = treadMid - w.pivot[w.axleAxis];
+      if (Math.abs(delta) <= ref.radius * 0.025) continue;
+      w.axleShift = delta;
+      console.log(`  ${w.tagNode.getName()}: pivot ${(100 * delta / ref.radius).toFixed(1)}% of r off the tread center along the axle — sliding pivot`);
+    }
+  }
   if (!dry) {
     const finals = rigModel(doc, prims, wheels) ?? [];
     // Radius harmonization — wheels that turn together must be stamped with
