@@ -7,7 +7,7 @@ import { createWorld } from "./render/world";
 import { THEMES, themeKeys, nextThemeKey } from "./render/world-themes";
 import { createCar } from "./render/car";
 import { createChaseCam, ROAD_SPEED_MAX, roadSpeed } from "./render/camera";
-import { detectQuality } from "./platform/perf";
+import { detectQuality, gpuRendererString } from "./platform/perf";
 import { createPost } from "./render/post";
 import { createHud } from "./ui/hud";
 import { createTach } from "./ui/tach";
@@ -41,6 +41,7 @@ import { createAudio } from "./core/audio";
 import { createRadio } from "./ui/radio";
 import { createCoinCounter } from "./ui/coins";
 import { createScrapCounter } from "./ui/scrap";
+import { createFpsMeter } from "./ui/fpsmeter";
 import { createNitro } from "./ui/nitro";
 import { createFlux, FLUX_LEV } from "./ui/flux";
 import { createMagnet } from "./ui/magnet";
@@ -76,8 +77,11 @@ const hudRoot = document.getElementById("hud") as HTMLElement;
 
 const ctx = createScene(canvas);
 
-// quality / post-processing (perf-gated)
-const quality = detectQuality();
+// quality / post-processing (perf-gated) — the GPU string catches weak GPUs behind strong
+// CPUs (Seeker: 8GB/8-core but Mali-G615); ?perf=low|high overrides for on-device tuning
+const gpu = gpuRendererString(ctx.renderer.getContext());
+const quality = detectQuality({ gpuRenderer: gpu, search: location.search });
+console.log(`redline3d quality: ${quality.tier}${gpu ? ` (${gpu})` : ""}`);
 ctx.renderer.setPixelRatio(Math.min(quality.pixelRatioCap, window.devicePixelRatio || 1));
 const post = quality.bloom ? createPost(ctx.renderer, ctx.scene, ctx.camera, quality.bloomScale) : null;
 addEventListener("resize", () => {
@@ -241,6 +245,7 @@ const AUDIO_DEFAULT_ON = !import.meta.env.DEV;
 const audio = createAudio(AUDIO_DEFAULT_ON);
 const coins = createCoinCounter(hudRoot);
 const scrap = createScrapCounter(hudRoot); // banks scrap caught while driving (every 3rd–5th pickup)
+const fpsMeter = createFpsMeter(hudRoot); // ?fps diagnostic chip for on-device perf tuning — inert without the flag
 // Orion's Nitro Overdrive — 2× leverage burst; the button fires it, main applies the boost
 const nitro = createNitro(hudRoot, () => { fx.nitro(); chase.shake(0.7); navigator.vibrate?.([0, 30, 20, 40]); });
 // DeLorean's Flux Brake — bank the P&L + pin leverage to 10× for ~4s; the lever rebank IS
@@ -1093,7 +1098,8 @@ function stepFreedriveBody(tune: DriveTune, dt: number) {
   body = stepBody(body, drive.steer / tune.MAX_STEER_LOW, Math.min(1, Math.abs(drive.speed) / tune.MAX_FWD), accel, tune.ACCEL, dt);
 }
 
-function frame() {
+function frame(now: number) {
+  fpsMeter.tick(now); // rAF timestamp — every mode path funnels through here
   const dt = Math.min(0.05, ctx.clock.getDelta()); // clamp so a frame hitch can't teleport the world
 
   if (mode === "lobby") {
