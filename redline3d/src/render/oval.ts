@@ -283,6 +283,7 @@ export function createOval(): Oval {
     show() { group.visible = true; },
     hide() { group.visible = false; },
     setRemoteCars(states) {
+      if (states.length === 0 && remoteMap.size === 0) return; // hot path: the ghost seam idles every frame today
       const seen = new Set<string>();
       for (const s of states) {
         seen.add(s.id);

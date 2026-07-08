@@ -71,6 +71,11 @@ export function createHud(parent: HTMLElement): Hud {
     status = q("#status"), assetEl = q("#asset"), timer = q("#timer"), balchip = q("#balchip");
   const tabs = Array.from(parent.querySelectorAll<HTMLElement>(".atab"));
 
+  // Last-written values for the setters the rAF loop hits at 60fps (price/multiplier/timer).
+  // Most frames the strings are unchanged (idle price, 1s timer granularity) — skipping the
+  // identical DOM/style writes keeps text/CSSOM churn out of the WebView's frame budget.
+  let lastPx = "", lastFeed = "", lastMulti = "", lastMultiCol = "", lastTimer = "", lastTimerCol = "";
+
   return {
     root: parent,
     tachMount: q("#tachMount"),
@@ -78,7 +83,12 @@ export function createHud(parent: HTMLElement): Hud {
     goMount: q("#goMount"),
     pedalMount: q("#pedalMount"),
     miniCanvas: q("#mini") as HTMLCanvasElement,
-    setPrice(p, live) { px.textContent = "$" + (p ? p.toFixed(2) : "—"); feed.textContent = live ? "live" : "sim"; feed.style.color = live ? "var(--grn)" : "var(--amb)"; },
+    setPrice(p, live) {
+      const t = "$" + (p ? p.toFixed(2) : "—");
+      if (t !== lastPx) { lastPx = t; px.textContent = t; }
+      const f = live ? "live" : "sim";
+      if (f !== lastFeed) { lastFeed = f; feed.textContent = f; feed.style.color = live ? "var(--grn)" : "var(--amb)"; }
+    },
     setBalance(b) { bal.textContent = sol3(b); }, // centi-SOL units → "0.917 SOL"
     onAsset(cb) { for (const t of tabs) t.onclick = () => cb(t.dataset.asset!); },
     setActiveAsset(a) {
@@ -91,16 +101,18 @@ export function createHud(parent: HTMLElement): Hud {
       }
     },
     setMultiplier(equity, phase) {
-      multi.textContent = "×" + equity.toFixed(2);
+      const t = "×" + equity.toFixed(2);
+      if (t !== lastMulti) { lastMulti = t; multi.textContent = t; }
       const col = phase === "liquidated" ? "#ff4d6d" : phase === "settled" ? (equity >= 1 ? "#2ee6a6" : "#ffd166") : equity >= 1 ? "#2ee6a6" : "#ff5067";
-      multi.style.color = col;
-      multi.style.textShadow = "0 0 26px " + col + "8c";
+      if (col !== lastMultiCol) { lastMultiCol = col; multi.style.color = col; multi.style.textShadow = "0 0 26px " + col + "8c"; }
     },
     setTimer(secLeft, live) {
       const s = Math.max(0, Math.ceil(secLeft));
-      timer.textContent = Math.floor(s / 60) + ":" + String(s % 60).padStart(2, "0");
+      const t = Math.floor(s / 60) + ":" + String(s % 60).padStart(2, "0");
+      if (t !== lastTimer) { lastTimer = t; timer.textContent = t; }
       // dim when idle; colour-coded by urgency once a round is live
-      timer.style.color = !live ? "var(--mut)" : secLeft > 20 ? "#aef0d0" : secLeft > 8 ? "#ffd166" : "#ff5067";
+      const col = !live ? "var(--mut)" : secLeft > 20 ? "#aef0d0" : secLeft > 8 ? "#ffd166" : "#ff5067";
+      if (col !== lastTimerCol) { lastTimerCol = col; timer.style.color = col; }
     },
     setStatus(t) { status.textContent = t; },
     setTryMode(on) {

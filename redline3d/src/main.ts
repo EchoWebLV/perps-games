@@ -81,7 +81,7 @@ const ctx = createScene(canvas);
 // CPUs (Seeker: 8GB/8-core but Mali-G615); ?perf=low|high overrides for on-device tuning
 const gpu = gpuRendererString(ctx.renderer.getContext());
 const quality = detectQuality({ gpuRenderer: gpu, search: location.search });
-console.log(`redline3d quality: ${quality.tier}${gpu ? ` (${gpu})` : ""}`);
+console.log(`redline3d quality: ${quality.tier} · bloom ×${quality.bloomScale} · dpr≤${quality.pixelRatioCap} · ${quality.detail}${gpu ? ` (${gpu})` : ""}`);
 ctx.renderer.setPixelRatio(Math.min(quality.pixelRatioCap, window.devicePixelRatio || 1));
 const post = quality.bloom ? createPost(ctx.renderer, ctx.scene, ctx.camera, quality.bloomScale) : null;
 addEventListener("resize", () => {
@@ -90,14 +90,22 @@ addEventListener("resize", () => {
 });
 
 // world + car
-const world = createWorld();
+const world = createWorld(quality.detail);
 ctx.scene.add(world.group);
+/** swap the race-world skin AND re-warm its brand-new shader programs off the hot path —
+ *  setTheme rebuilds env/lamp materials, and compiling them from a menu beats a first-corner
+ *  stall on the next track entry (precompileModes is defined below, hoisted). */
+function setWorldTheme(key: string): string {
+  world.setTheme(key);
+  requestAnimationFrame(() => precompileModes());
+  return world.currentTheme();
+}
 // dev/test switcher for race-level skins — the crate-reward system will call world.setTheme() later.
 //   __skin.list() · __skin.set('volcano') · __skin.next() · __skin.current()
 (window as any).__skin = {
   list: () => themeKeys(),
-  set: (key: string) => { world.setTheme(key); return world.currentTheme(); },
-  next: () => { world.setTheme(nextThemeKey(world.currentTheme())); return world.currentTheme(); },
+  set: (key: string) => setWorldTheme(key),
+  next: () => setWorldTheme(nextThemeKey(world.currentTheme())),
   current: () => world.currentTheme(),
 };
 // dismiss the loading splash (index.html) once the real car model is in
@@ -483,10 +491,10 @@ const garage = createCarPicker(hudRoot, CAR_DEFS, (c) => { car.setModel(c.url, c
     : { label: "Log out", sub: `riding as ${identity.name}` }, {
   // race-level skin picker (menu → World). Shows EVERY skin; unowned ones render SEALED (like a
   // locked car card) and can't be selected — they unlock from crates (Silver/Gold mostly).
-  // world.setTheme() is the shared seam.
+  // setWorldTheme (world.setTheme + shader re-warm) is the shared seam.
   list: () => THEMES.map((t) => ({ key: t.key, name: t.name, colors: [t.sky[0], t.sky[1], t.roadEdge], locked: !levels.owns(t.key) })),
   current: () => world.currentTheme(),
-  set: (key: string) => world.setTheme(key),
+  set: (key: string) => { setWorldTheme(key); },
 });
 
 // Crate Shop (lobby Crates building): buy a crate → roll a car by rarity odds → reveal. A NEW car
@@ -508,7 +516,7 @@ const crateBox = createCrateBox(hudRoot, {
 // ── lobby: the economy-hub town ─────────────────────────────────────────────
 // the map button drops you into a giant drivable neon lot with 4 functional buildings —
 // Garage (cars), Upgrades, Crates (coming soon), Track (back to the race). Solo / no netcode.
-const lobby = createLobby();
+const lobby = createLobby(quality.detail);
 ctx.scene.add(lobby.group);
 // live dial / kill-switch for the lobby's synthwave backdrop — tweak from the console:
 //   __backdrop.setOpacity(0.5) · __backdrop.black() · __backdrop.show()
@@ -543,6 +551,16 @@ const cruisers = createCruisers([
   { url: "/models/shopping-cart.glb", scale: 0.65, yaw: Math.PI / 2, tag: "cart_bandit", color: "#ff8c42" },
 ]);
 lobby.group.add(cruisers.group);
+// Lobby-dressing GLBs (~120MB across 7 cars) used to start streaming at construction time —
+// decode + texture uploads landing as hitches under the first seconds of play. Load them
+// AFTER the first rendered frame instead (double rAF: frame() is registered later this same
+// tick, so tick 1 renders the strip, tick 2 starts the loads), SEQUENTIALLY (each GLB starts
+// when the previous is in — one long smear, never a burst), each shader-warmed via
+// compileAsync before it attaches. Pop-in of parked dressing is the accepted trade.
+requestAnimationFrame(() => requestAnimationFrame(() => {
+  const warm = (o: THREE.Object3D) => ctx.renderer.compileAsync(o, ctx.camera, ctx.scene);
+  void stripCars.load(warm).then(() => cruisers.load(warm));
+}));
 const lobbyCam = createLobbyCam();
 const oval = createOval();
 ctx.scene.add(oval.group);
@@ -550,6 +568,30 @@ ctx.scene.add(oval.group);
 garageRoom = createGarageRoom(ctx.renderer);
 ctx.scene.add(garageRoom.group);
 garageRoom.setCar(equippedCar);
+
+// ── shader precompile: kill the first-sight compile stall ──────────────────
+// three builds one GPU program per (material × visible-light-set), and every mode — strip,
+// race road, highway, showroom — shows a DIFFERENT light set. Entering a mode for the first
+// time used to glCompileShader its whole program set mid-frame (a hitch spike right as you
+// drive through a gate). Warm each mode's visibility configuration up front (called at boot
+// under the splash, and again after setTheme builds fresh materials): flip only the `visible`
+// flags, compile, restore — nothing renders in between, so the player never sees the flip.
+function precompileModes(): void {
+  const showroom = garageRoom?.group;
+  const groups = [world.group, pickups.group, fireTrail.group, lobby.group, oval.group, ...(showroom ? [showroom] : [])];
+  const configs = [
+    [world.group, pickups.group, fireTrail.group], // race road
+    [lobby.group],                                 // the strip
+    [oval.group],                                  // highway
+    showroom ? [showroom] : [],                    // garage showroom
+  ];
+  const before = groups.map((g) => g.visible);
+  for (const on of configs) {
+    for (const g of groups) g.visible = on.includes(g);
+    ctx.renderer.compile(ctx.scene, ctx.camera);
+  }
+  groups.forEach((g, i) => { g.visible = before[i]; });
+}
 let hwGear = 0; // current highway gear (index into GEARS)
 // drive-mode body language (all modes): eased roll into corners + squat/dive on
 // throttle/brake — core/body-language owns the math. Visual only — never physics or money.
@@ -725,6 +767,9 @@ const ROAD_ACCEL_SCALE = 120; // road-speed delta (u/s²) that reads as FULL squ
 let roundStartMs = 0;
 let roundMaxSec = 0; // this round's time cap, frozen at GO (Heavy Load runs longer than CONFIG.MAXSEC)
 const round = { entryPx: 0, dir: 1 as 1 | -1 };
+// frame-loop scratch (hot rAF path — zero per-frame allocation):
+const NO_REMOTE_CARS: never[] = [];    // shared empty for the multiplayer/ghost seams, fed every frame
+const _popNdc = new THREE.Vector3();   // coin-pop screen projection scratch
 
 // asset switching (BTC/ETH/SOL) — blocked mid-bet; resets the chart for the new asset
 hud.onAsset((a) => {
@@ -1150,7 +1195,7 @@ function frame(now: number) {
     lobby.update(dt);
     stripBoard.update(dt); // jumbotron cycles its action feed
     cruisers.update(dt);   // ambient laps around the plaza
-    lobby.setRemoteCars([]); // multiplayer seam — empty today
+    lobby.setRemoteCars(NO_REMOTE_CARS); // multiplayer seam — empty today (shared const: no per-frame alloc)
     lobbyCam.update(ctx.camera, dt, drive.x, drive.z, drive.heading);
 
     if (post) post.render();
@@ -1236,7 +1281,7 @@ function frame(now: number) {
     oval.update(dt);
     // ghost seam — Phase 2 replaces this with live presence; the window var is the
     // Preview verification hook (persists across frames, unlike a one-shot call)
-    oval.setRemoteCars(((window as any).__hwGhostStates as import("./render/oval").OvalRemoteCar[] | undefined) ?? []);
+    oval.setRemoteCars(((window as any).__hwGhostStates as import("./render/oval").OvalRemoteCar[] | undefined) ?? NO_REMOTE_CARS);
     lobbyCam.update(ctx.camera, dt, drive.x, drive.z, drive.heading, yHere);
 
     if (post) post.render();
@@ -1407,7 +1452,7 @@ function frame(now: number) {
     audio.coin(hit.count);
     if (hit.pops.length) {
       // project a point just above the car to screen space so the ×N rises over IT
-      const ndc = new THREE.Vector3(lane.x, carY + 3.5, CAR_Z).project(ctx.camera);
+      const ndc = _popNdc.set(lane.x, carY + 3.5, CAR_Z).project(ctx.camera);
       const sx = (ndc.x * 0.5 + 0.5) * window.innerWidth;
       const sy = (-ndc.y * 0.5 + 0.5) * window.innerHeight;
       hit.pops.forEach((m, k) => fx.coinPop(m, sx + (k - (hit.pops.length - 1) / 2) * 34, sy)); // stagger multiples
@@ -1439,6 +1484,9 @@ setInterval(async () => {
   finally { polling = false; }
 }, 650);
 
+// Warm every mode's shader programs while the splash still covers the canvas — first gate
+// entries then swap worlds without a single mid-drive glCompileShader (the hitch spike).
+precompileModes();
 // Boot into the strip: the hub IS the intro screen — clean cruise chrome from frame one.
 // The race world hosts runs; the bet sheet (TRACK gate / Space) launches into it.
 enterLobby();

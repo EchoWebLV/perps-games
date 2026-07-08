@@ -81,9 +81,15 @@ export function createTach(mount: HTMLElement): Tach {
   const tticks = mount.querySelector("#tticks") as SVGGElement;
   const redzone = mount.querySelector("#tredzone") as SVGPathElement;
 
+  // Called every rAF frame, but the gauge only MOVES while the throttle does — at idle the
+  // (frac, lev, rmax) triple is constant, so skip the whole redraw (the fill `d` alone is a
+  // ~56-segment path string rebuilt per call — real churn in a throttled WebView).
+  let lastF = -1, lastLev = -1, lastRmax = -1;
   return {
     setThrottle(frac, lev) {
       const f = Math.max(0, Math.min(1, frac));
+      if (f === lastF && lev === lastLev && rmax === lastRmax) return;
+      lastF = f; lastLev = lev; lastRmax = rmax;
       const c = gcol(f, rmax);
       fill.setAttribute("d", arc(0, Math.max(0.001, f), R, Math.max(2, Math.round(f * 56))));
       const tip = pt(f, R - 30);

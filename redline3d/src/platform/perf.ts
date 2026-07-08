@@ -4,6 +4,10 @@ export interface Quality {
   /** bloom internal-resolution scale — lower = cheaper blur passes on weak GPUs */
   bloomScale: number;
   pixelRatioCap: number;
+  /** content scaling: "reduced" thins decorative counts (stars/dust), trims the roving
+   *  point-lights and distance-culls the deep lamp corridor — the low tier's draw-call
+   *  diet. "full" leaves every module exactly as designed (the high-tier look is fixed). */
+  detail: "full" | "reduced";
 }
 
 /** Detection inputs, all injectable for tests. Absent fields fall back to the real browser. */
@@ -20,6 +24,9 @@ export interface QualitySignals {
    * Injectable for tests; defaults to `import.meta.env?.VITE_PERF` when absent.
    */
   envPerf?: string;
+  /** navigator.userAgent — when the GPU string is masked (extension unavailable), an Android
+   *  UA is the honest "phone WebView" tell; defaults to the real navigator when absent */
+  ua?: string;
 }
 
 /**
@@ -55,13 +62,14 @@ export function gpuRendererString(
 
 export function detectQuality(signals: QualitySignals = {}): Quality {
   const q = (low: boolean): Quality =>
-    // Bloom is the game's signature neon glow — and most of its perceived brightness.
-    // We want phones to look IDENTICAL to desktop, so bloom runs at full resolution on
-    // every device (bloomScale 1). The only tier concession left is a slightly lower
-    // pixel-ratio cap on weak GPUs, which affects sharpness — not the glow or brightness.
-    // (If a low-end device ever struggles, drop bloomScale to 0.5 on the `low` path —
-    //  the scene keeps the glow, just with a cheaper blur chain.)
-    ({ tier: low ? "low" : "high", bloom: true, bloomScale: 1, pixelRatioCap: low ? 1.5 : 2 });
+    // Bloom is the game's signature neon glow, so it stays ON for every tier. The low tier
+    // runs the blur chain at HALF resolution (bloomScale 0.5 — the glow survives, ~¼ the
+    // blurred fragments) and caps devicePixelRatio at 1.25: on-device measurement (Seeker,
+    // Mali-G615 WebView) showed the full-res chain at dpr 1.5 swinging 70→22fps. The high
+    // tier is byte-identical to the original config — devices that earn it match desktop.
+    low
+      ? { tier: "low", bloom: true, bloomScale: 0.5, pixelRatioCap: 1.25, detail: "reduced" }
+      : { tier: "high", bloom: true, bloomScale: 1, pixelRatioCap: 2, detail: "full" };
 
   // `?perf=low|high` — same runtime escape hatch pattern as `?wallet=` (chain/wallet-select.ts),
   // so on-device measurement can force either tier without a rebuild.
@@ -78,5 +86,10 @@ export function detectQuality(signals: QualitySignals = {}): Quality {
   const mem = nav?.deviceMemory ?? 4;
   const cores = nav?.hardwareConcurrency ?? 4;
   const weakGpu = signals.gpuRenderer !== undefined && isWeakGpu(signals.gpuRenderer);
-  return q(weakGpu || mem <= 3 || cores <= 4);
+  // Android WebViews can mask WEBGL_debug_renderer_info entirely — then the RAM/core sniff
+  // alone lands HIGH on the Seeker's 8GB/8-core (strapped to a Mali). With no GPU string to
+  // read, an Android UA defaults to low; a present renderer string (either verdict) wins.
+  const ua = signals.ua ?? globalThis.navigator?.userAgent ?? "";
+  const maskedAndroid = signals.gpuRenderer === undefined && /android/i.test(ua);
+  return q(weakGpu || maskedAndroid || mem <= 3 || cores <= 4);
 }

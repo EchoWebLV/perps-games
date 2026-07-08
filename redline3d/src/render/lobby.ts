@@ -34,7 +34,10 @@ function signTexture(name: string, css: string, px = 84): THREE.CanvasTexture {
   return tex;
 }
 
-export function createLobby(): Lobby {
+/** `detail` — "full" is the designed look (high tier, untouched); "reduced" (low tier)
+ *  halves the drifting neon dust. Buildings, door rings and storefront lights stay — the
+ *  town has to read as the town on every tier. */
+export function createLobby(detail: "full" | "reduced" = "full"): Lobby {
   const group = new THREE.Group();
   group.visible = false;
   const disposables: Array<{ dispose(): void }> = [];
@@ -218,7 +221,7 @@ export function createLobby(): Lobby {
   let activeDoor: BuildingKind | null = null;
 
   // ---- drifting neon dust over the plaza — slow ambient motion so the lot feels alive ----
-  const DUST_N = 90;
+  const DUST_N = detail === "reduced" ? 45 : 90;
   const dustPos = new Float32Array(DUST_N * 3);
   const dustCol = new Float32Array(DUST_N * 3);
   const palette = [new THREE.Color(0xff4dd2), new THREE.Color(0x27e7ff), new THREE.Color(0x6a2bd9)];
@@ -255,6 +258,7 @@ export function createLobby(): Lobby {
     show() { group.visible = true; },
     hide() { group.visible = false; },
     setRemoteCars(states) {
+      if (states.length === 0 && remoteMap.size === 0) return; // hot path: the seam idles every frame today
       const seen = new Set<string>();
       for (const s of states) {
         seen.add(s.id);

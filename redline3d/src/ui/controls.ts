@@ -90,6 +90,7 @@ export function createControls(ctrlMount: HTMLElement, goMount: HTMLElement, ped
   // tap would instantly cash out the round you just opened. Ignore bail taps for a short beat.
   const BAIL_LOCK_MS = 1500;
   let cashLockUntil = 0;
+  let lastBuffer = ""; // last --b written by setBuffer (per-frame caller — skip identical writes)
   const long = q("#long"), short = q("#short"), sval = q("#sval"), go = q("#go"),
     golabel = q("#golabel"), gofill = q("#gofill"), callbox = q("#callbox");
 
@@ -164,7 +165,9 @@ export function createControls(ctrlMount: HTMLElement, goMount: HTMLElement, ped
     setLive(l, label, warn) {
       if (l && !live) cashLockUntil = performance.now() + BAIL_LOCK_MS; // just went live → lock bail for a beat
       live = l;
-      golabel.textContent = label;
+      // per-frame caller (live payout label): skip the text write when unchanged. The rest of
+      // the body must still run every call — `locked` un-dims on a TIMER, not on an arg change.
+      if (golabel.textContent !== label) golabel.textContent = label;
       // the LIVE button becomes the liquidation gauge; idle is the green GO!
       go.classList.toggle("gauge", l);
       go.classList.toggle("warn", !!(l && warn)); // red glow when losing / near liq
@@ -172,13 +175,14 @@ export function createControls(ctrlMount: HTMLElement, goMount: HTMLElement, ped
       const locked = l && performance.now() < cashLockUntil;
       go.style.opacity = locked ? "0.5" : "";
       go.style.cursor = locked ? "not-allowed" : "";
-      if (!l) gofill.style.setProperty("--b", "100%"); // reset the fill for next round
+      if (!l) { gofill.style.setProperty("--b", "100%"); lastBuffer = "100%"; } // reset the fill for next round (keep the cache honest)
       // long/short fades out for the live round (kept as a live readout in lane mode)
       refreshCall();
     },
     setBuffer(buf) {
       const b = Math.max(0, Math.min(1, buf));
-      gofill.style.setProperty("--b", (b * 100).toFixed(1) + "%");
+      const v = (b * 100).toFixed(1) + "%";
+      if (v !== lastBuffer) { lastBuffer = v; gofill.style.setProperty("--b", v); } // per-frame caller — write on change
     },
     onLaunch: (cb) => (launchCb = cb),
     onCashout: (cb) => (cashCb = cb),

@@ -24,6 +24,16 @@ export interface StripCarSpec {
 
 export interface StripCars {
   group: THREE.Group;
+  /**
+   * Fetch the parked cars' GLBs — deliberately NOT started by the constructor. These are
+   * heavyweight dressing (~tens of MB each); decoding them during the first seconds of play
+   * was a hitch source, so main.ts kicks this off after the first rendered frame. Loads run
+   * SEQUENTIALLY (each starts when the previous car is in), smearing decode + GPU uploads
+   * over time instead of one burst; the puddles + gamertags mark the bays until then.
+   * `prepare` (renderer.compileAsync) warms a model's shaders BEFORE it attaches, so its
+   * first on-screen frame pays no compile stall. Repeat calls return the same run.
+   */
+  load(prepare?: (model: THREE.Object3D) => Promise<unknown>): Promise<void>;
   dispose(): void;
 }
 
@@ -87,6 +97,8 @@ export function createStripCars(specs: StripCarSpec[]): StripCars {
   const disposables: Array<{ dispose(): void }> = [];
   const track = <T extends { dispose(): void }>(o: T): T => { disposables.push(o); return o; };
   const loader = new GLTFLoader();
+  // one deferred fetch-and-attach job per slot — run in order by load() below
+  const jobs: Array<(prepare?: (model: THREE.Object3D) => Promise<unknown>) => Promise<void>> = [];
 
   specs.slice(0, STRIP_SLOTS.length).forEach((spec, i) => {
     const slot = STRIP_SLOTS[i];
@@ -117,27 +129,39 @@ export function createStripCars(specs: StripCarSpec[]): StripCars {
     sprite.position.y = 6.4 + (i % 2) * 1.1; // stagger neighbours so clustered tags don't stack
     anchor.add(sprite);
 
-    // the car itself — same footprint/facing normalization as the driven car
-    loader.load(spec.url, (gltf) => {
-      const model = gltf.scene;
-      const box = new THREE.Box3().setFromObject(model);
-      const size = box.getSize(new THREE.Vector3());
-      model.scale.setScalar((TARGET_LEN / (Math.max(size.x, size.z) || 1)) * (spec.scale ?? 1));
-      model.rotation.y = MODEL_YAW + (spec.yaw ?? 0);
-      const box2 = new THREE.Box3().setFromObject(model);
-      const c = box2.getCenter(new THREE.Vector3());
-      model.position.set(-c.x, -box2.min.y, -c.z);
-      anchor.add(model);
-      // Lift the tag clear of THIS model's real roofline. Cars are normalized by LENGTH, so a
-      // tall model (Skull dome, Slot Machine) overshoots the fixed sprite height and swallows
-      // its tag — float it just above the scaled roof, keeping short cars at the tuned 6.4 and
-      // the neighbour stagger.
-      sprite.position.y = Math.max(6.4, box2.max.y - box2.min.y + 2.2) + (i % 2) * 1.1;
-    }, undefined, (err) => console.warn("[stripcars] GLB failed:", spec.url, err));
+    // the car itself — same footprint/facing normalization as the driven car. Deferred:
+    // the job only FETCHES when load() reaches it (see the interface note on sequencing).
+    jobs.push((prepare) => new Promise<void>((done) => {
+      loader.load(spec.url, (gltf) => {
+        const model = gltf.scene;
+        const box = new THREE.Box3().setFromObject(model);
+        const size = box.getSize(new THREE.Vector3());
+        model.scale.setScalar((TARGET_LEN / (Math.max(size.x, size.z) || 1)) * (spec.scale ?? 1));
+        model.rotation.y = MODEL_YAW + (spec.yaw ?? 0);
+        const box2 = new THREE.Box3().setFromObject(model);
+        const c = box2.getCenter(new THREE.Vector3());
+        model.position.set(-c.x, -box2.min.y, -c.z);
+        // warm the shaders off-screen (best effort), THEN attach — first sight compiles nothing
+        const ready = prepare ? prepare(model).catch(() => undefined) : Promise.resolve(undefined);
+        void ready.then(() => {
+          anchor.add(model);
+          // Lift the tag clear of THIS model's real roofline. Cars are normalized by LENGTH, so a
+          // tall model (Skull dome, Slot Machine) overshoots the fixed sprite height and swallows
+          // its tag — float it just above the scaled roof, keeping short cars at the tuned 6.4 and
+          // the neighbour stagger.
+          sprite.position.y = Math.max(6.4, box2.max.y - box2.min.y + 2.2) + (i % 2) * 1.1;
+          done();
+        });
+      }, undefined, (err) => { console.warn("[stripcars] GLB failed:", spec.url, err); done(); });
+    }));
   });
 
+  let loading: Promise<void> | null = null;
   return {
     group,
+    load(prepare) {
+      return (loading ??= (async () => { for (const job of jobs) await job(prepare); })());
+    },
     dispose() {
       for (const d of disposables) d.dispose();
       // GLB geometries/materials are shared with the garage's loads via the browser cache,

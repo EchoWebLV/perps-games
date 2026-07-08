@@ -18,8 +18,9 @@ export function createPost(renderer: THREE.WebGLRenderer, scene: THREE.Scene, ca
   composer.renderTarget1.samples = samples;
   composer.renderTarget2.samples = samples;
   composer.addPass(new RenderPass(scene, camera));
-  // The scene renders at full resolution; the bloom blur chain is scaled by bloomScale
-  // (kept at 1 so phones match desktop).
+  // The scene renders at full resolution; the bloom blur chain is scaled by bloomScale —
+  // 1 on the high tier (devices that earn it match desktop exactly), 0.5 on the low tier
+  // (same glow, ~¼ the blurred fragments — the Mali-class win; see platform/perf.ts).
   const bloom = new UnrealBloomPass(new THREE.Vector2(window.innerWidth * bloomScale, window.innerHeight * bloomScale), 0.9, 0.6, 0.85);
   composer.addPass(bloom);
   return {

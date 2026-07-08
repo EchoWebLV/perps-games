@@ -12,6 +12,9 @@ import { tagTexture } from "./stripcars";
 export interface CruiserSpec { url: string; scale?: number; yaw?: number; tag?: string; color?: string }
 export interface Cruisers {
   group: THREE.Group;
+  /** fetch the cruiser GLBs — deferred + sequential, same contract as StripCars.load()
+   *  (constructor loads nothing; the tags lap the plaza alone until the cars stream in) */
+  load(prepare?: (model: THREE.Object3D) => Promise<unknown>): Promise<void>;
   update(dt: number): void;
   dispose(): void;
 }
@@ -37,6 +40,7 @@ export function cruiserPose(theta: number): { x: number; z: number; rot: number 
 export function createCruisers(specs: CruiserSpec[]): Cruisers {
   const group = new THREE.Group();
   const loader = new GLTFLoader();
+  const jobs: Array<(prepare?: (model: THREE.Object3D) => Promise<unknown>) => Promise<void>> = [];
 
   const anchors: Array<{ node: THREE.Group; theta: number }> = [];
   specs.slice(0, 2).forEach((spec, i) => {
@@ -56,27 +60,39 @@ export function createCruisers(specs: CruiserSpec[]): Cruisers {
       anchor.add(tagSprite);
     }
 
-    loader.load(spec.url, (gltf) => {
-      const model = gltf.scene;
-      const box = new THREE.Box3().setFromObject(model);
-      const size = box.getSize(new THREE.Vector3());
-      model.scale.setScalar((TARGET_LEN / (Math.max(size.x, size.z) || 1)) * (spec.scale ?? 1));
-      model.rotation.y = MODEL_YAW + (spec.yaw ?? 0);
-      const box2 = new THREE.Box3().setFromObject(model);
-      const c = box2.getCenter(new THREE.Vector3());
-      model.position.set(-c.x, -box2.min.y, -c.z);
-      anchor.add(model);
-      // float the tag clear of THIS cruiser's roofline (magnet is tall, the cart is squat)
-      if (tagSprite) tagSprite.position.y = Math.max(6.4, box2.max.y - box2.min.y + 2.2);
-    }, undefined, (err) => console.warn("[cruisers] GLB failed:", spec.url, err));
+    // deferred fetch-and-attach (run by load() in slot order — see the interface note)
+    jobs.push((prepare) => new Promise<void>((done) => {
+      loader.load(spec.url, (gltf) => {
+        const model = gltf.scene;
+        const box = new THREE.Box3().setFromObject(model);
+        const size = box.getSize(new THREE.Vector3());
+        model.scale.setScalar((TARGET_LEN / (Math.max(size.x, size.z) || 1)) * (spec.scale ?? 1));
+        model.rotation.y = MODEL_YAW + (spec.yaw ?? 0);
+        const box2 = new THREE.Box3().setFromObject(model);
+        const c = box2.getCenter(new THREE.Vector3());
+        model.position.set(-c.x, -box2.min.y, -c.z);
+        // warm the shaders (best effort), THEN attach — first sight compiles nothing
+        const ready = prepare ? prepare(model).catch(() => undefined) : Promise.resolve(undefined);
+        void ready.then(() => {
+          anchor.add(model);
+          // float the tag clear of THIS cruiser's roofline (magnet is tall, the cart is squat)
+          if (tagSprite) tagSprite.position.y = Math.max(6.4, box2.max.y - box2.min.y + 2.2);
+          done();
+        });
+      }, undefined, (err) => { console.warn("[cruisers] GLB failed:", spec.url, err); done(); });
+    }));
   });
 
   // angular speed varies with local radius; a mean-radius approximation keeps the pace
   // visually constant without arc-length integration
   const w = SPEED / ((LAP.rx + LAP.rz) / 2);
 
+  let loading: Promise<void> | null = null;
   return {
     group,
+    load(prepare) {
+      return (loading ??= (async () => { for (const job of jobs) await job(prepare); })());
+    },
     update(dt) {
       for (const a of anchors) {
         a.theta += w * dt;

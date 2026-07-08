@@ -3,7 +3,9 @@ import { mergeGeometries } from "three/examples/jsm/utils/BufferGeometryUtils.js
 
 /** result of a frame's collection: physical coins caught, total coin VALUE (with Vaporwave
  * multipliers), the >1 multipliers caught (for the floating ×N pops), and SCRAP POINTS caught
- * — every 3rd–5th pickup comes up as a scrap heap worth its grade's points (1/3/5) */
+ * — every 3rd–5th pickup comes up as a scrap heap worth its grade's points (1/3/5).
+ * update() REUSES one instance across calls (hot rAF path — no per-frame garbage): read the
+ * fields immediately, never store the object across frames. */
 export interface CoinHit { count: number; value: number; pops: number[]; scrap: number; }
 
 export interface Pickups {
@@ -188,6 +190,7 @@ export function createPickups(): Pickups {
   let rate = 1;
   let magnet = false;
   let time = 0;
+  const hit: CoinHit = { count: 0, value: 0, pops: [], scrap: 0 }; // reused every update — see the CoinHit note
 
   return {
     group,
@@ -203,9 +206,9 @@ export function createPickups(): Pickups {
     },
     update(dt, speed, carX, surfaceY, collect = true) {
       time += dt;
-      let count = 0, value = 0, scrap = 0;
-      const pops: number[] = [];
-      coins.forEach((m, i) => {
+      hit.count = 0; hit.value = 0; hit.scrap = 0; hit.pops.length = 0;
+      for (let i = 0; i < coins.length; i++) {
+        const m = coins[i];
         m.position.z += speed * dt;
         m.position.y = 1.8 + surfaceY(m.position.z);
         m.rotation.y += dt * 3.2;
@@ -222,17 +225,17 @@ export function createPickups(): Pickups {
         if (collect && m.visible && m.position.z > CATCH_Z0 && m.position.z < CATCH_Z1 && Math.abs(m.position.x - carX) < catchX) {
           m.visible = false;
           if (m.userData.scrap) {
-            scrap += m.userData.scrapPts; // grade points (1/3/5) → banked to the garage save for the Scrap Yard
+            hit.scrap += m.userData.scrapPts; // grade points (1/3/5) → banked to the garage save for the Scrap Yard
           } else {
-            count++;
+            hit.count++;
             const mult = rainbow ? coinMult(Math.random()) : 1;
-            value += mult;
-            if (mult > 1) pops.push(mult);
+            hit.value += mult;
+            if (mult > 1) hit.pops.push(mult);
           }
         }
         if (m.position.z > RECYCLE) place(m, m.position.z - recycleSpan(rate));
-      });
-      return { count, value, pops, scrap };
+      }
+      return hit;
     },
   };
 }

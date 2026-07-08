@@ -52,9 +52,9 @@ function buildSky(theme: WorldTheme, junk: Junk): THREE.Object3D {
   return new THREE.Mesh(geo, mat);
 }
 
-function buildStars(theme: WorldTheme, junk: Junk): THREE.Object3D {
+function buildStars(theme: WorldTheme, junk: Junk, count = 320): THREE.Object3D {
   const geo = new THREE.BufferGeometry();
-  const STAR_N = 320;
+  const STAR_N = count;
   const sp = new Float32Array(STAR_N * 3);
   for (let i = 0; i < STAR_N; i++) {
     sp[i * 3] = (Math.random() - 0.5) * 1700;
@@ -519,8 +519,12 @@ function lampDeco(junk: Junk): MakeLamp {
   };
 }
 
-export function createWorld(): World {
+/** `detail` — "full" is the designed look, untouched on the high tier; "reduced" (low tier)
+ *  halves the starfield, runs 2 roving point-lights per side instead of 3, and distance-culls
+ *  the deep lamp corridor (the fog:false glow sprites otherwise draw ~40 lamps every frame). */
+export function createWorld(detail: "full" | "reduced" = "full"): World {
   const group = new THREE.Group();
+  const reduced = detail === "reduced";
 
   // ---- swappable environment (sky, celestial, stars, scenery) — rebuilt on setTheme() ----
   let envGroup: THREE.Group | null = null;
@@ -532,7 +536,7 @@ export function createWorld(): World {
     const g = new THREE.Group();
     g.add(buildSky(theme, envJunk));
     g.add(buildCelestial(theme, envJunk));
-    g.add(buildStars(theme, envJunk));
+    g.add(buildStars(theme, envJunk, reduced ? 160 : 320));
     g.add(buildScenery(theme, envJunk));
     if (theme.aurora) { const a = buildAurora(envJunk); g.add(a.obj); envAnim = a.tick; }
     group.add(g);
@@ -590,6 +594,7 @@ export function createWorld(): World {
   road.rotation.x = -Math.PI / 2;
   road.position.set(0, 0.05, PLANE_Z);
   group.add(road);
+  const scrollMats = [gridMat, roadMat]; // shared-uniform pair, hoisted off the per-frame path
 
   // roadside street lamps — the fixture DESIGN is per-theme (lampStyle), rebuilt on setTheme() by
   // buildLamps(); the scroll + recycle + flicker + the real point-lights below are shared by every
@@ -622,7 +627,9 @@ export function createWorld(): World {
   // a few REAL point-lights ride the lamps nearest the car, so the car + poles
   // actually get lit as lamps sweep past (the road/grid are custom shaders and
   // don't receive scene lights — the car catching the light is what sells it)
-  const LIGHT_N = 6; // 3 per side — enough that the cutoff lamp is already past the fade (dark)
+  // 3 per side — enough that the cutoff lamp is already past the fade (dark); the low tier
+  // runs 2 per side (same continuity logic, one fewer live light in every lit shader)
+  const LIGHT_N = reduced ? 4 : 6;
   const realLights: THREE.PointLight[] = [];
   for (let i = 0; i < LIGHT_N; i++) {
     const pl = new THREE.PointLight(0xffffff, 0, 36, 2);
@@ -698,6 +705,29 @@ export function createWorld(): World {
     return Math.sin((localY + scroll) * FREQ) * AMP + biasCur;
   };
 
+  // update()'s helpers, hoisted so the hot rAF path allocates no closures per frame
+  const byCar = (a: Lamp, b: Lamp) => Math.abs(a.o.position.z - CAR_Z) - Math.abs(b.o.position.z - CAR_Z);
+  const setLight = (idx: number, pl: THREE.PointLight, l: Lamp | undefined) => {
+    let target = 0;
+    if (l) {
+      const inward = l.side < 0 ? 1 : -1;
+      pl.position.set(l.o.position.x + inward * 3.05, l.o.position.y + 12, l.o.position.z);
+      pl.color.copy(l.side < 0 ? colA : colB);
+      const lit = l.mode === 2 ? l.lights[1].visible : true; // respect flicker
+      const t = Math.max(0, 1 - Math.abs(l.o.position.z - CAR_Z) / 64);
+      target = lit ? t * t * REAL_I : 0;
+    }
+    // when a light HOPS to a different lamp, snap to that lamp's brightness instead
+    // of carrying the old value across the teleport (that carry-over was the flicker).
+    // Same lamp → smooth lerp as it sweeps past.
+    if (lampOf[idx] !== l) { lampOf[idx] = l; pl.intensity = target; }
+    else pl.intensity += (target - pl.intensity) * 0.3;
+  };
+  // low tier only: lamps deeper than this stop rendering. Their neon/halo/beam are fog:false
+  // (the glow trail is meant to run to the horizon), so on "reduced" the trail ends here
+  // instead — a dozen fixtures' draws saved per side. "full" never touches visibility.
+  const LAMP_CULL_Z = -560;
+
   return {
     group,
     surfaceY,
@@ -710,7 +740,7 @@ export function createWorld(): World {
       time += dt;
       if (envAnim) envAnim(time); // aurora drift, etc.
       biasCur += (bias - biasCur) * 0.06;
-      for (const mat of [gridMat, roadMat]) {
+      for (const mat of scrollMats) {
         mat.uniforms.uOffset.value += flow * 0.06;
         mat.uniforms.uScroll.value = scroll;
         mat.uniforms.uBias.value = biasCur;
@@ -721,6 +751,7 @@ export function createWorld(): World {
         l.o.position.z += flow;
         if (l.o.position.z > RECYCLE) l.o.position.z -= TOTAL;
         l.o.position.y = surfaceY(l.o.position.z);
+        if (reduced) l.o.visible = l.o.position.z > LAMP_CULL_Z; // low tier: cull the deep corridor
         if (l.mode === 2) {
           // dying-lamp flicker: solid most of the time, fast buzz in the dips
           const ph = Math.sin(time * 12 + l.seed);
@@ -733,24 +764,7 @@ export function createWorld(): World {
       // as lamps pass (mixing both sides + an odd light count was the flicker bug).
       leftScratch.length = 0; rightScratch.length = 0;
       for (const l of lamps) { if (l.mode === 1) continue; (l.side < 0 ? leftScratch : rightScratch).push(l); }
-      const byCar = (a: Lamp, b: Lamp) => Math.abs(a.o.position.z - CAR_Z) - Math.abs(b.o.position.z - CAR_Z);
       leftScratch.sort(byCar); rightScratch.sort(byCar);
-      const setLight = (idx: number, pl: THREE.PointLight, l: Lamp | undefined) => {
-        let target = 0;
-        if (l) {
-          const inward = l.side < 0 ? 1 : -1;
-          pl.position.set(l.o.position.x + inward * 3.05, l.o.position.y + 12, l.o.position.z);
-          pl.color.copy(l.side < 0 ? colA : colB);
-          const lit = l.mode === 2 ? l.lights[1].visible : true; // respect flicker
-          const t = Math.max(0, 1 - Math.abs(l.o.position.z - CAR_Z) / 64);
-          target = lit ? t * t * REAL_I : 0;
-        }
-        // when a light HOPS to a different lamp, snap to that lamp's brightness instead
-        // of carrying the old value across the teleport (that carry-over was the flicker).
-        // Same lamp → smooth lerp as it sweeps past.
-        if (lampOf[idx] !== l) { lampOf[idx] = l; pl.intensity = target; }
-        else pl.intensity += (target - pl.intensity) * 0.3;
-      };
       const PER = LIGHT_N / 2;
       for (let i = 0; i < PER; i++) {
         setLight(i, realLights[i], leftScratch[i]);

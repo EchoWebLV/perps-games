@@ -11,25 +11,33 @@ describe("detectQuality", () => {
     expect(detectQuality({ nav: strongNav }).pixelRatioCap).toBe(2);
     expect(detectQuality({ nav: weakNav }).tier).toBe("low");
     expect(detectQuality({ nav: { deviceMemory: 8, hardwareConcurrency: 4 } }).tier).toBe("low");
-    expect(detectQuality({ nav: weakNav }).pixelRatioCap).toBe(1.5);
+    expect(detectQuality({ nav: weakNav }).pixelRatioCap).toBe(1.25);
   });
 
   test("missing nav fields default to 4 (cores<=4 → low), matching the old behavior", () => {
     expect(detectQuality({ nav: {} }).tier).toBe("low");
   });
 
-  test("bloom stays full-resolution on every tier (phones must look identical to desktop)", () => {
-    for (const nav of [strongNav, weakNav]) {
-      const q = detectQuality({ nav });
-      expect(q.bloom).toBe(true);
-      expect(q.bloomScale).toBe(1);
-    }
+  test("high tier is byte-identical to the original config: full-res bloom, dpr 2, full detail", () => {
+    const q = detectQuality({ nav: strongNav });
+    expect(q.bloom).toBe(true);
+    expect(q.bloomScale).toBe(1);
+    expect(q.pixelRatioCap).toBe(2);
+    expect(q.detail).toBe("full");
+  });
+
+  test("low tier is actually light: bloom stays ON but at half resolution, tighter dpr, reduced detail", () => {
+    const q = detectQuality({ nav: weakNav });
+    expect(q.bloom).toBe(true); // the neon look survives on low — just a cheaper blur chain
+    expect(q.bloomScale).toBe(0.5);
+    expect(q.pixelRatioCap).toBe(1.25);
+    expect(q.detail).toBe("reduced");
   });
 
   test("weak GPU forces low even on a strong-RAM device (the Seeker case: 8GB/8-core Mali)", () => {
     const q = detectQuality({ nav: strongNav, gpuRenderer: "ARM Mali-G615 MC2" });
     expect(q.tier).toBe("low");
-    expect(q.pixelRatioCap).toBe(1.5);
+    expect(q.pixelRatioCap).toBe(1.25);
   });
 
   test("strong GPU does not rescue a weak-RAM device (existing rule still applies)", () => {
@@ -62,7 +70,7 @@ describe("detectQuality", () => {
     // env low forces low on a machine that detects high
     const low = detectQuality({ nav: strongNav, gpuRenderer: "Apple GPU", envPerf: "low" });
     expect(low.tier).toBe("low");
-    expect(low.pixelRatioCap).toBe(1.5);
+    expect(low.pixelRatioCap).toBe(1.25);
     // env high forces high on a machine that detects low (weak GPU AND weak RAM)
     expect(detectQuality({ nav: weakNav, gpuRenderer: "ARM Mali-G615", envPerf: "high" }).tier).toBe("high");
   });
@@ -76,6 +84,34 @@ describe("detectQuality", () => {
     expect(detectQuality({ nav: strongNav, envPerf: "medium" }).tier).toBe("high");
     expect(detectQuality({ nav: strongNav, envPerf: "" }).tier).toBe("high"); // neither param nor pin → detection
     expect(detectQuality({ nav: weakNav, envPerf: "" }).tier).toBe("low");
+  });
+
+  // The Seeker's WebView can mask WEBGL_debug_renderer_info entirely — no renderer string at
+  // all. Its 8GB/8-core CPU then sails through the RAM/core sniff and lands HIGH on a
+  // Mali-G615. With the GPU signal gone, an Android UA is the honest "phone WebView" tell.
+  describe("Android UA fallback when the GPU string is masked", () => {
+    const seekerUA = "Mozilla/5.0 (Linux; Android 14; Seeker) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Mobile Safari/537.36";
+    const macUA = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36";
+
+    test("no renderer string + Android UA → low, even on strong RAM/cores (the Seeker WebView case)", () => {
+      const q = detectQuality({ nav: strongNav, ua: seekerUA });
+      expect(q.tier).toBe("low");
+      expect(q.bloomScale).toBe(0.5);
+    });
+
+    test("a present renderer string still decides — a flagship Adreno keeps high on Android", () => {
+      expect(detectQuality({ nav: strongNav, ua: seekerUA, gpuRenderer: "ANGLE (Qualcomm, Adreno (TM) 830, OpenGL ES 3.2)" }).tier).toBe("high");
+    });
+
+    test("no renderer string on a non-Android UA keeps the plain RAM/core sniff", () => {
+      expect(detectQuality({ nav: strongNav, ua: macUA }).tier).toBe("high");
+      expect(detectQuality({ nav: weakNav, ua: macUA }).tier).toBe("low");
+    });
+
+    test("?perf=high and the VITE_PERF pin still override the Android fallback", () => {
+      expect(detectQuality({ nav: strongNav, ua: seekerUA, search: "?perf=high" }).tier).toBe("high");
+      expect(detectQuality({ nav: strongNav, ua: seekerUA, envPerf: "high" }).tier).toBe("high");
+    });
   });
 });
 
