@@ -22,10 +22,16 @@ export const SESSION_BUFFER_BETS = 5;
 
 export interface GameSession {
   address(): string;
+  /** sign a message with the connected wallet (server nonce-challenge binding). Throws if no wallet. */
+  signMessage(message: Uint8Array): Promise<Uint8Array>;
   delegated(): boolean;
   crankArmed(): boolean;
   balance(): bigint;
   init(): Promise<bigint>;
+  /** Sign-in with ACCOUNT-CHOOSER semantics (the identity gate's SIGN IN): any lingering
+   *  wallet auth is cleared FIRST so connect() always shows the login UI. A persisted Privy
+   *  session would otherwise silently resume the previous account — with no way to switch. */
+  loginFresh(): Promise<bigint>;
   /** Silent boot restore: true if the port had a persisted login (no login UI shown). */
   reconnect(): Promise<boolean>;
   refreshBalance(onEr?: boolean): Promise<bigint>;
@@ -35,6 +41,10 @@ export interface GameSession {
   open(asset: AssetSym, dir: 1 | -1, lev: number, stakeBase: number, durationSecs: number, liqFp: number, graceSecs?: number, slFp?: number, tpFp?: number, refundFp?: number): Promise<OpenedRound>;
   /** The owner wallet's native SOL (lamports) — the fundable balance the wallet panel shows. */
   walletSol(): Promise<bigint>;
+  /** Max stake (base units) the table can host for the NEXT round, or null when unknown
+   *  (not connected / RPC down). Pot + this session's till: a drained till transparently
+   *  rebuilds from the pot on GO, so the two together are what a bet can draw on. */
+  tableLimit(): Promise<bigint | null>;
   noteLeverage(lev: number): void;
   flip(dir: 1 | -1): Promise<ActionResult>;
   close(): Promise<SettledRound>;
@@ -60,6 +70,10 @@ export function createGameSession(opts: {
   let isDelegated = false;
   let armed = false;
   let bal = 0n;
+  // THIS round's identity (its on-chain deadlineTs). The ER router can serve the previous
+  // round's settled state for a while after a fresh open — every settle consumer checks
+  // its snap against this before treating the round as over. 0 = no round known yet.
+  let curDeadline = 0;
   // The stake wrap/unwrap (native SOL ⇄ wSOL) only applies to the canonical wSOL mint; for
   // any other stake mint (e.g. a devnet test token) the token is held directly, no wrap.
   const isWsol = opts.mint.toBase58() === "So11111111111111111111111111111111111111112";
@@ -94,6 +108,12 @@ export function createGameSession(opts: {
     const state = await c.delegationState().catch(() => "fresh" as const);
     isDelegated = state === "reuse";
     bal = await c.readPlayerBalance(isDelegated);
+    if (isDelegated) {
+      // adopting a live session mid-round: pick up the round's identity so the corpse
+      // guard below keys on it (a still-open round has the only trustworthy deadline)
+      const snap = await c.readRound(true).catch(() => null);
+      if (snap && snap.status === 1) curDeadline = snap.deadlineTs;
+    }
   }
 
   // Background coalesced on-chain leverage: instant local feel lives in main.ts; this trails to latest.
@@ -101,21 +121,53 @@ export function createGameSession(opts: {
     send: async (lev) => {
       if (!chain) return;
       const res = await chain.lever(lev);
-      if (res.settled) opts.onSettled(res);
+      if (res.settled) {
+        // ER reads have no cross-node read-after-write guarantee: a lever fired right
+        // after open can fetch the PREVIOUS round's settled corpse. Only a settle carrying
+        // THIS round's identity may end the round (phantom "Settled at ×…" live-hit).
+        if (curDeadline && res.deadlineTs !== curDeadline) { console.warn("[session] ignored stale settle (lever raced a fresh open)"); return; }
+        opts.onSettled(res);
+      }
     },
   });
 
+  // Connect the wallet + build the chain client (idempotent — a live chain is kept).
+  async function connectChain(): Promise<void> {
+    if (!chain) {
+      await port!.connect();
+      chain = createChainRound({ wallet: portToAnchorWallet(port!), mint: opts.mint });
+    }
+  }
+
   return {
     address: () => opts.injectAddress ?? port?.currentAddress() ?? "",
+    signMessage: (message) => {
+      if (!port) throw new Error("no_wallet");
+      return port.signMessage(message);
+    },
     delegated: () => isDelegated,
     crankArmed: () => armed,
     balance: () => bal,
 
     async init() {
-      if (!chain) {
-        await port!.connect();
-        chain = createChainRound({ wallet: portToAnchorWallet(port!), mint: opts.mint });
-      }
+      await connectChain();
+      await adoptAndRead();
+      return bal;
+    },
+
+    async loginFresh() {
+      // Account-chooser semantics: drop any lingering wallet auth BEFORE connecting, so
+      // connect() opens the login UI instead of silently resuming the previous account.
+      // A disconnect failure PROPAGATES — falling through to connect() would resume the
+      // very session we just failed to clear (the "every sign-in lands in the same
+      // account" trap this method exists to close).
+      await port?.disconnect();
+      chain = opts.injectChain ?? null;
+      isDelegated = false;
+      armed = false;
+      bal = 0n;
+      curDeadline = 0; // the old account's round identity must not gate the new one's settles
+      await connectChain();
       await adoptAndRead();
       return bal;
     },
@@ -234,6 +286,21 @@ export function createGameSession(opts: {
       return (await need().walletFunds()).sol;
     },
 
+    async tableLimit() {
+      if (!chain) return null;
+      try {
+        // pot is NEVER delegated → L1 read is authoritative; the till lives wherever the
+        // session does. An undelegated leftover till counts too — ensureSession sweeps it
+        // into the pot before slicing, so a GO can draw on it.
+        const pot = await chain.houseAvailable();
+        const till = await chain.tillAvailable(isDelegated).catch(() => 0n);
+        // invert settle::max_payout (floor(stake × 23.75)): the largest stake whose lock fits
+        return ((pot + till) * 1_000_000n * 1_000_000n) / (25_000_000n * 950_000n);
+      } catch {
+        return null;
+      }
+    },
+
     async open(asset, dir, lev, stakeBase, durationSecs, liqFp, graceSecs = 0, slFp = 0, tpFp = 0, refundFp = 0) {
       const c = need();
       // Reconcile a leftover OPEN round before starting a new one. After a page reload,
@@ -249,7 +316,20 @@ export function createGameSession(opts: {
           bal = await c.readPlayerBalance(true);
         }
       } catch (e) { console.warn("open: stale-round reconcile skipped:", e); }
-      const opened = await c.open(asset, dir, lev, stakeBase, durationSecs, liqFp, graceSecs, slFp, tpFp, refundFp);
+      let opened = await c.open(asset, dir, lev, stakeBase, durationSecs, liqFp, graceSecs, slFp, tpFp, refundFp);
+      // Stamp the round's identity from a VERIFIED live read (status 1). open()'s own
+      // post-send fetch can itself be the stale corpse — if the verified read disagrees,
+      // its entry/deadline win (they come from the round that is actually running).
+      let live: Awaited<ReturnType<typeof c.readRound>> = null;
+      for (let i = 0; i < 3 && !live; i++) {
+        if (i > 0) await new Promise((r) => setTimeout(r, 250));
+        const snap = await c.readRound(true).catch(() => null);
+        if (snap && snap.status === 1) live = snap;
+      }
+      curDeadline = live ? live.deadlineTs : opened.deadlineTs;
+      if (live && live.deadlineTs !== opened.deadlineTs) {
+        opened = { entryRaw: live.entryRaw, entryExpo: live.entryExpo, entryHuman: live.entryHuman, deadlineTs: live.deadlineTs, feed: opened.feed };
+      }
       armed = false;
       // Size the crank to THIS round: 1s ticks for the round's full duration + settle margin.
       // A fixed 70-tick schedule let a 90s Heavy-Load round outlive its own crank (the 90s
@@ -263,7 +343,13 @@ export function createGameSession(opts: {
     },
 
     async flip(dir) {
-      return need().flip(dir);
+      const res = await need().flip(dir);
+      if (res.settled && curDeadline && res.deadlineTs !== curDeadline) {
+        // the flip landed but its fetch raced onto the previous round's corpse — re-read
+        const fresh = await need().readRound(true).catch(() => null);
+        if (fresh && fresh.status === 1) return { settled: false as const, banked: fresh.banked, dir: fresh.dir, lev: fresh.lev, entryHuman: fresh.entryHuman };
+      }
+      return res;
     },
 
     async close() {
@@ -273,7 +359,10 @@ export function createGameSession(opts: {
     },
 
     async poll() {
-      return need().readRound(true);
+      const snap = await need().readRound(true);
+      // a settled snap from a PREVIOUS round (stale ER node) must not end THIS round
+      if (snap && snap.status === 2 && curDeadline && snap.deadlineTs !== curDeadline) return null;
+      return snap;
     },
 
     async endSession() {

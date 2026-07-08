@@ -20,12 +20,13 @@ function fakeChain(over: Partial<ChainRound> = {}): ChainRound {
     sweepTill: vi.fn(async () => {}),
     walletFunds: vi.fn(async () => ({ sol: 1_000_000_000n, stake: 1_000_000_000n })),
     houseAvailable: vi.fn(async () => 1_000_000_000_000n), // roomy pot by default
+    tillAvailable: vi.fn(async () => 0n),
     open: vi.fn(async () => ({ entryRaw: 0n, entryExpo: 8, entryHuman: 60000, deadlineTs: 0, feed: "71wtTRDY8Gxgw56bXFt2oc6qeAbTxzStdNiC425Z51sr" })),
-    close: vi.fn(async () => ({ outcome: 0, outcomeName: "cashout", payout: 1_500_000n, exitRaw: 0n, exitHuman: 0, balance: 4_500_000n })),
+    close: vi.fn(async () => ({ outcome: 0, outcomeName: "cashout", payout: 1_500_000n, exitRaw: 0n, exitHuman: 0, balance: 4_500_000n, deadlineTs: 0 })),
     flip: vi.fn(async () => ({ settled: false as const, banked: 0n, dir: -1, lev: 100, entryHuman: 60000 })),
     lever: vi.fn(async () => ({ settled: false as const, banked: 0n, dir: 1, lev: 2000, entryHuman: 60000 })),
     scheduleCrank: vi.fn(async () => {}),
-    forceClose: vi.fn(async () => ({ outcome: 3, outcomeName: "time", payout: 0n, exitRaw: 0n, exitHuman: 0, balance: 0n })),
+    forceClose: vi.fn(async () => ({ outcome: 3, outcomeName: "time", payout: 0n, exitRaw: 0n, exitHuman: 0, balance: 0n, deadlineTs: 0 })),
     commitAndUndelegate: vi.fn(async () => {}),
     withdraw: vi.fn(async () => {}),
     wrapForBuyIn: vi.fn(async () => {}),
@@ -176,7 +177,7 @@ describe("createGameSession", () => {
   it("a terminal-first background lever fires onSettled", async () => {
     const onSettled = vi.fn();
     const chain = fakeChain({
-      lever: vi.fn(async () => ({ settled: true as const, outcome: 2, outcomeName: "liq", payout: 0n, exitRaw: 0n, exitHuman: 0, balance: 4_000_000n })),
+      lever: vi.fn(async () => ({ settled: true as const, outcome: 2, outcomeName: "liq", payout: 0n, exitRaw: 0n, exitHuman: 0, balance: 4_000_000n, deadlineTs: 0 })),
     });
     const s = createGameSession({ mint: MINT, onSettled, injectChain: chain, injectAddress: "Fake111" });
     await s.init();
@@ -419,5 +420,142 @@ describe("createGameSession", () => {
     await expect(s.logout()).resolves.toBeUndefined();
     expect(port.disconnect).toHaveBeenCalled();
     expect(s.balance()).toBe(0n);
+  });
+
+  it("loginFresh() signs the wallet out FIRST, then rebuilds — the gate's SIGN IN always offers the account picker", async () => {
+    // A persisted Privy session makes connect() silently resume the previous account; the
+    // gate's SIGN IN must clear it so the login modal (the account chooser) always shows.
+    const port = {
+      kind: "web-standard" as const,
+      connect: vi.fn(async () => ({ address: "PrivyAddr2222" })),
+      disconnect: vi.fn(async () => {}),
+      currentAddress: () => "PrivyAddr2222",
+      signMessage: vi.fn(async () => new Uint8Array()),
+      signTransaction: vi.fn(async (b64: string) => b64),
+    };
+    const s = createGameSession({ mint: MINT, onSettled: vi.fn(), port, injectChain: fakeChain({ readPlayerBalance: vi.fn(async () => 7_000_000n) }) });
+    await s.init();
+    expect(await s.loginFresh()).toBe(7_000_000n); // the NEW account's balance, freshly read
+    expect(port.disconnect).toHaveBeenCalled();
+    expect(s.delegated()).toBe(false);
+  });
+
+  it("signMessage delegates to the wallet port", async () => {
+    const signed = new Uint8Array([9, 8, 7]);
+    const port = {
+      kind: "web-standard" as const,
+      connect: vi.fn(async () => ({ address: "PrivyAddr1111" })),
+      disconnect: vi.fn(async () => {}),
+      currentAddress: () => "PrivyAddr1111",
+      signMessage: vi.fn(async (_m: Uint8Array) => signed),
+      signTransaction: vi.fn(async (b64: string) => b64),
+    };
+    const s = createGameSession({ mint: MINT, onSettled: vi.fn(), port });
+    expect(await s.signMessage(new TextEncoder().encode("hi"))).toEqual(signed);
+    expect(port.signMessage).toHaveBeenCalled();
+  });
+
+  it("loginFresh() propagates a failed sign-out — never falls through to silently resume the old account", async () => {
+    const port = {
+      kind: "web-standard" as const,
+      connect: vi.fn(async () => ({ address: "PrivyAddr1111" })),
+      disconnect: vi.fn(async () => { throw new Error("privy_logout_timeout"); }),
+      currentAddress: () => "PrivyAddr1111",
+      signMessage: vi.fn(async () => new Uint8Array()),
+      signTransaction: vi.fn(async (b64: string) => b64),
+    };
+    const s = createGameSession({ mint: MINT, onSettled: vi.fn(), port });
+    await expect(s.loginFresh()).rejects.toThrow("privy_logout_timeout");
+    expect(port.connect).not.toHaveBeenCalled(); // the session we failed to clear must NOT be resumed
+  });
+
+  it("tableLimit() inverts max_payout exactly: largest stake whose lock fits pot+till", async () => {
+    // 0.475 SOL pot → 0.02 SOL limit — the live devnet state that surfaced the table-limit message
+    const chain = fakeChain({ houseAvailable: vi.fn(async () => 475_000_000n) });
+    const s = createGameSession({ mint: MINT, onSettled: vi.fn(), injectChain: chain, injectAddress: "Fake111" });
+    const lim = Number((await s.tableLimit())!);
+    expect(lim).toBe(20_000_000);
+    expect(maxPayoutBase(lim)).toBeLessThanOrEqual(475_000_000);
+    expect(maxPayoutBase(lim + 1)).toBeGreaterThan(475_000_000);
+  });
+
+  it("tableLimit() counts the session till buffer alongside the pot", async () => {
+    const chain = fakeChain({
+      houseAvailable: vi.fn(async () => 237_500_000n),
+      tillAvailable: vi.fn(async () => 237_500_000n),
+    });
+    const s = createGameSession({ mint: MINT, onSettled: vi.fn(), injectChain: chain, injectAddress: "Fake111" });
+    expect(Number((await s.tableLimit())!)).toBe(20_000_000);
+  });
+
+  it("tableLimit() is null when the read fails (caller keeps the last cap)", async () => {
+    const chain = fakeChain({ houseAvailable: vi.fn(async () => { throw new Error("rpc down"); }) });
+    const s = createGameSession({ mint: MINT, onSettled: vi.fn(), injectChain: chain, injectAddress: "Fake111" });
+    expect(await s.tableLimit()).toBeNull();
+  });
+});
+
+describe("round identity — the previous round's settled corpse must not settle THIS round", () => {
+  // The ER router has no read-after-write guarantee across nodes: right after `open`,
+  // reads can still serve the PREVIOUS round's settled state (status 2). Live-hit as
+  // phantom "Settled at ×…" toasts that killed brand-new rounds ~seconds after GO,
+  // leaving the real round to run orphaned until the crank reaped it.
+  const snap = (deadlineTs: number, over: Record<string, unknown> = {}) => ({
+    status: 1, outcome: 0, outcomeName: "cashout", payout: 0n, banked: 0n, dir: 1, lev: 50,
+    entryRaw: 8_100_000_000n, entryExpo: 8, entryHuman: 81, exitRaw: 0n, exitHuman: 0, deadlineTs, ...over,
+  });
+  const corpse = (deadlineTs: number) => snap(deadlineTs, { status: 2, outcome: 3, outcomeName: "time", payout: 47_000_000n });
+
+  it("poll() suppresses a settled snap whose deadlineTs is not this round's", async () => {
+    // reconcile-read (pre-open), verify-read, stale corpse, real settle
+    const reads = [corpse(1000), snap(2000), corpse(1000), corpse(2000)];
+    const chain = fakeChain({
+      open: vi.fn(async () => ({ entryRaw: 8_100_000_000n, entryExpo: 8, entryHuman: 81, deadlineTs: 2000, feed: "F" })),
+      readRound: vi.fn(async () => reads.shift() ?? corpse(2000)),
+    });
+    const s = createGameSession({ mint: MINT, onSettled: vi.fn(), injectChain: chain, injectAddress: "Fake111" });
+    await s.init();
+    await s.open("SOL", 1, 50, 1_000_000, 60, 200_000);
+    expect(await s.poll()).toBeNull();               // previous round's corpse → suppressed
+    expect((await s.poll())?.status).toBe(2);        // THIS round's settle → surfaced
+  });
+
+  it("a lever fetch that raced onto the corpse does NOT fire onSettled; the real settle does", async () => {
+    let leverResult: any = { settled: true, outcome: 3, outcomeName: "time", payout: 47_000_000n, exitRaw: 0n, exitHuman: 0, balance: 1n, deadlineTs: 1000 };
+    const chain = fakeChain({
+      delegationState: vi.fn(async () => "reuse" as const),
+      open: vi.fn(async () => ({ entryRaw: 8_100_000_000n, entryExpo: 8, entryHuman: 81, deadlineTs: 2000, feed: "F" })),
+      readRound: vi.fn(async () => snap(2000)),
+      lever: vi.fn(async () => leverResult),
+    });
+    const onSettled = vi.fn();
+    const s = createGameSession({ mint: MINT, onSettled, injectChain: chain, injectAddress: "Fake111" });
+    await s.init();
+    await s.open("SOL", 1, 50, 1_000_000, 60, 200_000);
+
+    s.noteLeverage(40);
+    await tick(); await tick();
+    expect(onSettled).not.toHaveBeenCalled();        // corpse (deadline 1000 ≠ 2000) swallowed
+
+    leverResult = { ...leverResult, deadlineTs: 2000 };
+    s.noteLeverage(30);
+    await tick(); await tick();
+    expect(onSettled).toHaveBeenCalledTimes(1);      // genuine settle of THIS round
+  });
+
+  it("open() trusts the verified live read over its own possibly-stale fetch", async () => {
+    // open's post-send fetch itself hit the corpse (old deadline/entry); the verify read
+    // sees the live round — its identity and entry win, and the guard keys on it.
+    const reads = [corpse(1000), snap(2000, { entryHuman: 81 }), corpse(1000)]; // reconcile, verify, poll
+    const chain = fakeChain({
+      open: vi.fn(async () => ({ entryRaw: 7_900_000_000n, entryExpo: 8, entryHuman: 79, deadlineTs: 1000, feed: "F" })),
+      readRound: vi.fn(async () => reads.shift() ?? null),
+    });
+    const s = createGameSession({ mint: MINT, onSettled: vi.fn(), injectChain: chain, injectAddress: "Fake111" });
+    await s.init();
+    const opened = await s.open("SOL", 1, 50, 1_000_000, 60, 200_000);
+    expect(opened.deadlineTs).toBe(2000);
+    expect(opened.entryHuman).toBe(81);
+    expect(await s.poll()).toBeNull();               // corpse at the OLD deadline still suppressed
   });
 });
