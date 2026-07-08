@@ -71,7 +71,14 @@ import type { Api } from "./api";
 
 function fakeApi(over: Partial<Api> = {}): Api {
   return {
-    me: async () => ({ userId: "u", balance: 100, cars: [], openRoundId: null }),
+    me: async () => ({ userId: "u", balance: 100, coins: 0, scrap: 0, cars: [], openRoundId: null }),
+    coinsEarn: async () => ({ coins: 0 }),
+    coinsSpend: async () => ({ coins: 0 }),
+    scrapEarn: async () => ({ scrap: 0 }),
+    scrapSpend: async () => ({ scrap: 0 }),
+    inventoryGrant: async (p) => ({ carId: p.carId, isNew: true, count: 1 }),
+    inventoryMelt: async (p) => ({ carId: p.carId, melted: true, count: 0 }),
+    migrate: async () => ({ seeded: true }),
     openRound: async (p) => ({ roundId: "R", asset: p.asset, dir: p.dir, lev: p.lev, stake: p.stake, entryRaw: 100, entryTsUs: 5_000_000 }),
     roundAction: async () => {},
     closeRound: async () => ({ outcome: "cashout", payoutCoins: 7, pnlCoins: 2, equity: 1.4, exitRaw: 101, balance: 107 }),
@@ -125,7 +132,7 @@ describe("round-sync session", () => {
   // roundId. Without mid-session reconciliation the next GO silently no-ops on open()'s single-round
   // guard and the UI sticks on "Launching…". reconcile() is the self-heal the GO handler calls.
   it("reconcile() clears a stale local round the server already settled", async () => {
-    const api = fakeApi({ me: async () => ({ userId: "u", balance: 100, cars: [], openRoundId: null }) });
+    const api = fakeApi({ me: async () => ({ userId: "u", balance: 100, coins: 0, scrap: 0, cars: [], openRoundId: null }) });
     const rs = createRoundSync({ api, clock: clock(), store: store() });
     await rs.open({ asset: "SOL", dir: 1, lev: 50, stake: 5 }); // local roundId = "R"
     expect(rs.roundId()).toBe("R");
@@ -137,7 +144,7 @@ describe("round-sync session", () => {
   it("reconcile() settles a still-open dangling round, then clears", async () => {
     let closed = 0;
     const api = fakeApi({
-      me: async () => ({ userId: "u", balance: 100, cars: [], openRoundId: "R" }),
+      me: async () => ({ userId: "u", balance: 100, coins: 0, scrap: 0, cars: [], openRoundId: "R" }),
       closeRound: async () => { closed++; return { outcome: "expire", payoutCoins: 0, pnlCoins: 0, equity: 0.5, exitRaw: 99, balance: 100 }; },
     });
     const rs = createRoundSync({ api, clock: clock(), store: store() });
@@ -150,7 +157,7 @@ describe("round-sync session", () => {
 
   it("reconcile() stays blocked (keeps the round) when it can't settle on a halted feed", async () => {
     const api = fakeApi({
-      me: async () => ({ userId: "u", balance: 100, cars: [], openRoundId: "R" }),
+      me: async () => ({ userId: "u", balance: 100, coins: 0, scrap: 0, cars: [], openRoundId: "R" }),
       closeRound: async () => { const e: any = new Error("feed_halt"); e.code = "feed_halt"; throw e; },
     });
     const rs = createRoundSync({ api, clock: clock(), store: store(), closeBackoffMs: [0, 0] });
