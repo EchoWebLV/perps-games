@@ -1,7 +1,7 @@
 <?xml version='1.0' encoding='utf-8'?>
 <resources>
-    <string name="app_name">Redline 3D</string>
-    <string name="title_activity_main">Redline 3D</string>
+    <string name="app_name">Perps Raider</string>
+    <string name="title_activity_main">Perps Raider</string>
     <string name="package_name">xyz.redline.game</string>
     <string name="custom_url_scheme">xyz.redline.game</string>
 </resources>
