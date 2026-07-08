@@ -34,7 +34,32 @@ export interface StripCars {
    * first on-screen frame pays no compile stall. Repeat calls return the same run.
    */
   load(prepare?: (model: THREE.Object3D) => Promise<unknown>): Promise<void>;
+  /** low-tier distance cull: hide whole parked-car anchors (car + tag + puddle) beyond
+   *  maxDist of the player at (x,z). Roots only, zero allocation — called per frame by
+   *  main.ts on the reduced tier; the full tier never calls it. */
+  cull(x: number, z: number, maxDist: number): void;
   dispose(): void;
+}
+
+/** On-disk GLB weights (KB, measured 2026-07-08) for the lobby-dressing pool. The low tier
+ *  parks only the lightest few — the five heroes plus two cruisers total ~120MB on disk,
+ *  the single biggest vertex/texture pile facing the town square on a Mali-class GPU. */
+export const DRESSING_KB: Record<string, number> = {
+  "/models/skull.glb": 11939,
+  "/models/clown-car.glb": 15124,
+  "/models/pink-rod.glb": 19697,
+  "/models/six-wheeler.glb": 20047,
+  "/models/slot-machine.glb": 21664,
+  "/models/magnet.glb": 13863,
+  "/models/shopping-cart.glb": 17449,
+};
+
+/** The n lightest specs by GLB weight, lightest first — the low tier's dressing diet.
+ *  Unknown urls rank heaviest so they can never displace a known-light model. Pure
+ *  (never mutates `specs`); the picked cars then fill STRIP_SLOTS from slot 0, keeping
+ *  the thinned meet flanking the entrance where it reads. */
+export function lightestSpecs<T extends { url: string }>(specs: readonly T[], n: number, kb: Record<string, number> = DRESSING_KB): T[] {
+  return [...specs].sort((a, b) => (kb[a.url] ?? Infinity) - (kb[b.url] ?? Infinity)).slice(0, n);
 }
 
 // Same normalization the player car uses, so a parked Skull is the size of a driven Skull.
@@ -99,6 +124,7 @@ export function createStripCars(specs: StripCarSpec[]): StripCars {
   const loader = new GLTFLoader();
   // one deferred fetch-and-attach job per slot — run in order by load() below
   const jobs: Array<(prepare?: (model: THREE.Object3D) => Promise<unknown>) => Promise<void>> = [];
+  const anchors: THREE.Group[] = []; // slot roots — what cull() toggles
 
   specs.slice(0, STRIP_SLOTS.length).forEach((spec, i) => {
     const slot = STRIP_SLOTS[i];
@@ -106,6 +132,7 @@ export function createStripCars(specs: StripCarSpec[]): StripCars {
     anchor.position.set(slot.x, 0, slot.z);
     anchor.rotation.y = slot.rot;
     group.add(anchor);
+    anchors.push(anchor);
 
     // neon puddle under the car — reads "occupied bay" even before the GLB streams in
     const color = new THREE.Color(spec.color);
@@ -161,6 +188,13 @@ export function createStripCars(specs: StripCarSpec[]): StripCars {
     group,
     load(prepare) {
       return (loading ??= (async () => { for (const job of jobs) await job(prepare); })());
+    },
+    cull(x, z, maxDist) {
+      const d2 = maxDist * maxDist;
+      for (const a of anchors) {
+        const dx = a.position.x - x, dz = a.position.z - z;
+        a.visible = dx * dx + dz * dz <= d2;
+      }
     },
     dispose() {
       for (const d of disposables) d.dispose();

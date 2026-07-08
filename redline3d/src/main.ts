@@ -51,7 +51,7 @@ import { jackpotRoll } from "./core/slots";
 import { createWallet } from "./ui/wallet";
 import { createLobby } from "./render/lobby";
 import { createLobbyCam } from "./render/lobbycam";
-import { createStripCars } from "./render/stripcars";
+import { createStripCars, lightestSpecs } from "./render/stripcars";
 import { createStripBillboard } from "./render/billboard";
 import { createCruisers } from "./render/cruisers";
 import { clearIdentity, createIdentityGate, loadIdentity, saveIdentity } from "./ui/identity";
@@ -528,13 +528,17 @@ ctx.scene.add(lobby.group);
 };
 // parked hero cars + gamertags around the plaza — the car-meet dressing (rides the lobby
 // group's visibility). Names are set dressing today; a presence feed fills these slots later.
-const stripCars = createStripCars([
+const stripMeetSpecs = [
   { url: "/models/skull.glb", yaw: Math.PI / 2, tag: "liq_dodger", color: "#ff4d6d" },
   { url: "/models/pink-rod.glb", yaw: Math.PI / 2, tag: "moonbag_mia", color: "#ff39c0" },
   { url: "/models/six-wheeler.glb", yaw: Math.PI / 2, tag: "haulin_hal", color: "#ffd166" },
   { url: "/models/clown-car.glb", yaw: Math.PI / 2, tag: "honkmaster", color: "#27e7ff" },
   { url: "/models/slot-machine.glb", yaw: Math.PI / 2, tag: "triple7s_tony", color: "#14f195" },
-]);
+];
+// Low tier: the five hero GLBs are the vertex mountain facing the town square — park only
+// the two LIGHTEST (they land in the entrance-flanking slots, so the meet still reads).
+// The heavier three are never even fetched. High tier parks the full meet, untouched.
+const stripCars = createStripCars(quality.detail === "reduced" ? lightestSpecs(stripMeetSpecs, 2) : stripMeetSpecs);
 lobby.group.add(stripCars.group);
 // the jumbotron over the arc — recent action in lights. Simulated feed until presence
 // lands; the player's own settles push onto it live (finalizeSettled → noteSettle).
@@ -545,12 +549,19 @@ const stripBoardPos = { x: 0, z: -100 };
 stripBoard.group.position.set(stripBoardPos.x, 0, stripBoardPos.z);
 stripBoard.group.rotation.y = Math.atan2(LOBBY_SPAWN.x - stripBoardPos.x, LOBBY_SPAWN.z - stripBoardPos.z); // face the starting point
 lobby.group.add(stripBoard.group);
-// two ambient cruisers lapping the plaza — motion so the strip never reads frozen
+// two ambient cruisers lapping the plaza — motion so the strip never reads frozen.
+// (Two IS the low-tier dressing cap — cruisers.ts hard-slices to 2 — so no tier filter here;
+// on `reduced` they're distance-culled per frame with the parked meet instead.)
 const cruisers = createCruisers([
   { url: "/models/magnet.glb", scale: 0.75, yaw: Math.PI / 2, tag: "coin_goblin", color: "#b06bff" },
   { url: "/models/shopping-cart.glb", scale: 0.65, yaw: Math.PI / 2, tag: "cart_bandit", color: "#ff8c42" },
 ]);
 lobby.group.add(cruisers.group);
+// Low tier: dressing beyond this player-distance stops rendering entirely (roots hidden).
+// Derived from the real lot scale (core/lobby-layout LOT_BOUNDS 120-half): 150 keeps the
+// whole meet + both cruisers visible from spawn, and drops the entrance meet only once
+// you're across the plaza at the north arc — where it's sub-pixel dressing anyway.
+const DRESSING_CULL_D = LOT_BOUNDS.z * 1.25;
 // Lobby-dressing GLBs (~120MB across 7 cars) used to start streaming at construction time —
 // decode + texture uploads landing as hitches under the first seconds of play. Load them
 // AFTER the first rendered frame instead (double rAF: frame() is registered later this same
@@ -1195,6 +1206,12 @@ function frame(now: number) {
     lobby.update(dt);
     stripBoard.update(dt); // jumbotron cycles its action feed
     cruisers.update(dt);   // ambient laps around the plaza
+    if (quality.detail === "reduced") {
+      // low tier: far-side dressing is sub-pixel on a phone but still the heaviest draws in
+      // the square — hide whole car anchors beyond the lot-scaled radius (no alloc, roots only)
+      stripCars.cull(drive.x, drive.z, DRESSING_CULL_D);
+      cruisers.cull(drive.x, drive.z, DRESSING_CULL_D);
+    }
     lobby.setRemoteCars(NO_REMOTE_CARS); // multiplayer seam — empty today (shared const: no per-frame alloc)
     lobbyCam.update(ctx.camera, dt, drive.x, drive.z, drive.heading);
 

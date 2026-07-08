@@ -16,6 +16,10 @@ export interface Cruisers {
    *  (constructor loads nothing; the tags lap the plaza alone until the cars stream in) */
   load(prepare?: (model: THREE.Object3D) => Promise<unknown>): Promise<void>;
   update(dt: number): void;
+  /** low-tier distance cull, same contract as StripCars.cull(): hide a whole cruiser
+   *  (car + tag) beyond maxDist of the player — update() keeps moving it while hidden,
+   *  so it re-enters the lap seamlessly when it comes back in range */
+  cull(x: number, z: number, maxDist: number): void;
   dispose(): void;
 }
 
@@ -99,6 +103,13 @@ export function createCruisers(specs: CruiserSpec[]): Cruisers {
         const p = cruiserPose(a.theta);
         a.node.position.set(p.x, 0, p.z);
         a.node.rotation.y = p.rot;
+      }
+    },
+    cull(x, z, maxDist) {
+      const d2 = maxDist * maxDist;
+      for (const a of anchors) {
+        const dx = a.node.position.x - x, dz = a.node.position.z - z;
+        a.node.visible = dx * dx + dz * dz <= d2;
       }
     },
     dispose() {
