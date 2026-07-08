@@ -34,7 +34,7 @@ export interface RouteDeps {
 }
 
 const GrantCoins = z.object({ amount: z.number().int().positive() });
-const CoinDelta = z.object({ amount: z.number().int().positive(), ref: z.string().min(1).max(200) });
+const CoinDelta = z.object({ amount: z.number().int().positive().max(1_000_000_000), ref: z.string().min(1).max(200) });
 const GrantCar = z.object({ carId: z.string().min(1) });
 const CarRef = z.object({ carId: z.string().min(1) });
 const WalletBindChallengeBody = z.object({ wallet: z.string().min(32).max(44) });
@@ -122,7 +122,7 @@ export function registerRoutes(server: FastifyInstance, deps: RouteDeps): void {
 
   server.get("/v1/inventory", { preHandler: requireUser }, async (req) => {
     const rows = await deps.inventory.list(req.userId!);
-    return { cars: rows.map((r) => ({ carId: r.carId, acquiredAt: r.acquiredAt })) };
+    return { cars: rows.map((r) => ({ carId: r.carId, count: r.count, acquiredAt: r.acquiredAt })) };
   });
 
   server.post("/v1/inventory/grant", { preHandler: requireUser }, async (req, reply) => {

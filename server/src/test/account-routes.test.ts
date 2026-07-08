@@ -115,3 +115,24 @@ describe("inventory grant/melt endpoints", () => {
     expect(res.statusCode).toBe(400);
   });
 });
+
+describe("coherence fixes", () => {
+  let ctx: TestCtx;
+  afterEach(async () => { await ctx?.close(); });
+
+  it("GET /v1/inventory includes the car count", async () => {
+    ctx = await makeTestDb({ signupFaucet: false });
+    const userId = (await ctx.users.upsertByExternalId("dev:alice")).id;
+    await ctx.inventory.grant(userId, "orion");
+    await ctx.inventory.grant(userId, "orion");
+    const res = await ctx.server.inject({ method: "GET", url: "/v1/inventory", headers: H });
+    expect(res.statusCode).toBe(200);
+    expect(res.json().cars).toEqual([{ carId: "orion", count: 2, acquiredAt: expect.anything() }]);
+  });
+
+  it("rejects an absurdly large earn amount", async () => {
+    ctx = await makeTestDb({ signupFaucet: false });
+    const res = await ctx.server.inject({ method: "POST", url: "/v1/coins/earn", headers: H, payload: { amount: 2_000_000_000, ref: "big" } });
+    expect(res.statusCode).toBe(400);
+  });
+});
