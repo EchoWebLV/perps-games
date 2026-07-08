@@ -2,6 +2,8 @@ import { coinLabel, coinPulseClass } from "../core/coins";
 
 export interface CoinCounter {
   set(total: number, animate?: boolean): void;
+  /** the chip is race chrome — hidden while cruising/betting on the strip */
+  setVisible(visible: boolean): void;
 }
 
 let stylesInjected = false;
@@ -67,5 +69,6 @@ export function createCoinCounter(parent: HTMLElement): CoinCounter {
       }
       previous = total;
     },
+    setVisible(visible) { wrap.style.display = visible ? "flex" : "none"; },
   };
 }

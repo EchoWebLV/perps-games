@@ -9,13 +9,17 @@ export interface Hud {
   miniCanvas: HTMLCanvasElement;
   setPrice(px: number, live: boolean): void;
   setBalance(b: number): void;
-  /** Live SOL/USD so the SOL balance can show a ~$ equivalent. */
-  setSolUsd(v: number): void;
   onAsset(cb: (asset: string) => void): void;
   setActiveAsset(asset: string): void;
   setMultiplier(equity: number, phase: "idle" | "live" | "settled" | "liquidated"): void;
   setTimer(secLeft: number, live: boolean): void;
   setStatus(text: string): void;
+  /** cruise chrome: hide the whole trading cluster (price chip, timer, ×N, the graph) —
+   *  cruising the strip keeps ONLY the balance chip (+ the hamburger, owned elsewhere) */
+  setMinimal(on: boolean): void;
+  /** guest practice mode: the money chip reads "practice" instead of a SOL balance
+   *  (tapping it is the sign-in upsell — wired via onWallet) */
+  setTryMode(on: boolean): void;
   /** tapping the balance chip opens the wallet page */
   onWallet(cb: () => void): void;
 }
@@ -66,9 +70,6 @@ export function createHud(parent: HTMLElement): Hud {
   const bal = q("#bal"), px = q("#solpx"), feed = q("#feed"), multi = q("#multi"),
     status = q("#status"), assetEl = q("#asset"), timer = q("#timer"), balchip = q("#balchip");
   const tabs = Array.from(parent.querySelectorAll<HTMLElement>(".atab"));
-  // Balance is in centi-SOL units; show SOL + a ~$ equivalent off the live SOL price.
-  let lastBal = 0, solUsd = 0;
-  const renderBal = () => { bal.textContent = sol3(lastBal) + (solUsd > 0 ? ` · ~$${(lastBal / 100 * solUsd).toFixed(2)}` : ""); };
 
   return {
     root: parent,
@@ -78,8 +79,7 @@ export function createHud(parent: HTMLElement): Hud {
     pedalMount: q("#pedalMount"),
     miniCanvas: q("#mini") as HTMLCanvasElement,
     setPrice(p, live) { px.textContent = "$" + (p ? p.toFixed(2) : "—"); feed.textContent = live ? "live" : "sim"; feed.style.color = live ? "var(--grn)" : "var(--amb)"; },
-    setBalance(b) { lastBal = b; renderBal(); },
-    setSolUsd(v) { solUsd = v; renderBal(); },
+    setBalance(b) { bal.textContent = sol3(b); }, // centi-SOL units → "0.917 SOL"
     onAsset(cb) { for (const t of tabs) t.onclick = () => cb(t.dataset.asset!); },
     setActiveAsset(a) {
       assetEl.textContent = a;
@@ -103,6 +103,21 @@ export function createHud(parent: HTMLElement): Hud {
       timer.style.color = !live ? "var(--mut)" : secLeft > 20 ? "#aef0d0" : secLeft > 8 ? "#ffd166" : "#ff5067";
     },
     setStatus(t) { status.textContent = t; },
+    setTryMode(on) {
+      const label = balchip.querySelector(".lbl") as HTMLElement | null;
+      const add = balchip.querySelector("#baladd") as HTMLElement | null;
+      if (label) label.textContent = on ? "guest" : "balance";
+      if (add) add.style.display = on ? "none" : "grid";
+      if (on) bal.textContent = "practice";
+    },
+    setMinimal(on) {
+      const d = on ? "none" : "";
+      q("#pxchip").style.display = d;
+      q("#tmrchip").style.display = d;
+      q("#ctr").style.display = d;
+      q("#minipanel").style.display = d;
+      q("#dock").style.display = on ? "none" : "flex";
+    },
     onWallet(cb) { balchip.onclick = cb; },
   };
 }

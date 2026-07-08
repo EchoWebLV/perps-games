@@ -23,7 +23,7 @@ const MASTER_VOL = 0.45;
  * for cash-out / liquidation. The context is created lazily on the first gesture so
  * it never trips the autoplay policy.
  */
-export function createAudio(): GameAudio {
+export function createAudio(startEnabled = true): GameAudio {
   let ctx: AudioContext | null = null;
   let master: GainNode | null = null;
   let lp: BiquadFilterNode | null = null;  // tone — opens with throttle
@@ -34,7 +34,7 @@ export function createAudio(): GameAudio {
   let ng: GainNode | null = null;          // combustion / intake noise level
   let coinPool: HTMLAudioElement[] | null = null;
   let coinI = 0;
-  let enabled = true; // SFX master switch (Music is the separate radio)
+  let enabled = startEnabled; // SFX master switch (Music is the separate radio)
 
   // soft-clip (tanh) distortion — grit/roar
   const driveCurve = (k: number) => {
