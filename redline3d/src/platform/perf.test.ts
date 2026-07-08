@@ -55,6 +55,28 @@ describe("detectQuality", () => {
     expect(detectQuality({ nav: strongNav, search: "?perf=medium" }).tier).toBe("high");
     expect(detectQuality({ nav: weakNav, search: "?perf=" }).tier).toBe("low");
   });
+
+  // Build-time pin for the APK, whose WebView loads a fixed https://localhost/ with no
+  // address bar — `?perf` is unreachable on the exact device (Seeker) we need to tune.
+  test("VITE_PERF env pin acts like ?perf when no param is present (both directions)", () => {
+    // env low forces low on a machine that detects high
+    const low = detectQuality({ nav: strongNav, gpuRenderer: "Apple GPU", envPerf: "low" });
+    expect(low.tier).toBe("low");
+    expect(low.pixelRatioCap).toBe(1.5);
+    // env high forces high on a machine that detects low (weak GPU AND weak RAM)
+    expect(detectQuality({ nav: weakNav, gpuRenderer: "ARM Mali-G615", envPerf: "high" }).tier).toBe("high");
+  });
+
+  test("a ?perf param beats the VITE_PERF env pin in both directions (URL wins so web debugging stays ergonomic)", () => {
+    expect(detectQuality({ nav: strongNav, envPerf: "high", search: "?perf=low" }).tier).toBe("low");
+    expect(detectQuality({ nav: weakNav, envPerf: "low", search: "?perf=high" }).tier).toBe("high");
+  });
+
+  test("unknown/empty VITE_PERF is ignored — detection applies (explicit injected env isolates the real one)", () => {
+    expect(detectQuality({ nav: strongNav, envPerf: "medium" }).tier).toBe("high");
+    expect(detectQuality({ nav: strongNav, envPerf: "" }).tier).toBe("high"); // neither param nor pin → detection
+    expect(detectQuality({ nav: weakNav, envPerf: "" }).tier).toBe("low");
+  });
 });
 
 describe("isWeakGpu", () => {

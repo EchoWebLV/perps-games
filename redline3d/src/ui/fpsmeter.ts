@@ -15,10 +15,22 @@ const MAX_DT_MS = 1000; // tab-switch guard: a backgrounded rAF gap must not poi
  * `?fps` diagnostic chip — the on-device frame-rate readout for perf-tier tuning
  * (the Seeker's WebView has no devtools overlay). Without the flag nothing mounts
  * and tick() is inert, so shipping it costs the player path nothing.
+ *
+ * `VITE_FPS=1` (or "true") is the build-time equivalent for the APK, whose WebView loads a
+ * fixed https://localhost/ with no address bar to carry `?fps` on-device. A present `?fps`
+ * param still enables; an explicit `opts.enabled` boolean wins over both. `envFps` is injectable
+ * for tests and defaults to `import.meta.env?.VITE_FPS`.
  */
-export function createFpsMeter(parent: HTMLElement, opts?: { enabled?: boolean; search?: string }): FpsMeter {
+export function createFpsMeter(
+  parent: HTMLElement,
+  opts?: { enabled?: boolean; search?: string; envFps?: string },
+): FpsMeter {
+  const envFps = opts?.envFps ?? (import.meta.env?.VITE_FPS as string | undefined);
   const enabled =
-    opts?.enabled ?? new URLSearchParams(opts?.search ?? globalThis.location?.search ?? "").has("fps");
+    opts?.enabled ??
+    (new URLSearchParams(opts?.search ?? globalThis.location?.search ?? "").has("fps") ||
+      envFps === "1" ||
+      envFps === "true");
   if (!enabled) return { tick() {}, fps: () => 0 };
 
   const el = document.createElement("div");

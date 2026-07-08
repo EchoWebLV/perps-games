@@ -39,6 +39,33 @@ describe("createFpsMeter", () => {
     expect(meter.el!.getAttribute("aria-label")).toBe("Frames per second");
   });
 
+  // Build-time pin for the APK, whose WebView has no address bar to carry `?fps` on-device.
+  test("VITE_FPS truthy env mounts the chip when no ?fps param is present", () => {
+    for (const v of ["1", "true"]) {
+      const parent = document.createElement("div");
+      const meter = createFpsMeter(parent, { search: "", envFps: v });
+      expect(meter.el).toBeDefined();
+      expect(parent.children.length).toBe(1);
+    }
+    // falsy / non-truthy / empty env stays disabled (explicit injected env isolates the real one)
+    expect(createFpsMeter(document.createElement("div"), { search: "", envFps: "0" }).el).toBeUndefined();
+    expect(createFpsMeter(document.createElement("div"), { search: "", envFps: "" }).el).toBeUndefined();
+  });
+
+  test("a present ?fps param beats the env (enables even when VITE_FPS is falsy)", () => {
+    const parent = document.createElement("div");
+    const meter = createFpsMeter(parent, { search: "?fps", envFps: "0" });
+    expect(meter.el).toBeDefined();
+    expect(parent.children.length).toBe(1);
+  });
+
+  test("explicit enabled:false still wins over both the ?fps flag and the VITE_FPS env", () => {
+    const parent = document.createElement("div");
+    const meter = createFpsMeter(parent, { enabled: false, search: "?fps", envFps: "1" });
+    expect(meter.el).toBeUndefined();
+    expect(parent.children.length).toBe(0);
+  });
+
   test("EMA converges to a steady frame rate", () => {
     const meter = createFpsMeter(document.createElement("div"), { enabled: true });
     expect(meter.fps()).toBe(0); // no samples yet

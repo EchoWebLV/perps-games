@@ -46,6 +46,12 @@ at the bottom, then keep going where you can.
       (`VITE_API_BASE`)? Either is fine — just note **"server on"** or **"server off"** so the
       cross-device step (step 9) is interpreted correctly.
 - [ ] Phone and Mac on the **same Wi-Fi** (needed for the download-install route below).
+- [ ] **(Optional) Perf-diagnostic build.** The frame-rate levers are **build-time env pins**,
+      baked in like `VITE_PRIVY_APP_ID`, because the APK's address-bar-less WebView can't take the
+      `?fps` / `?perf` URL params you'd use in the browser. Only needed for the on-device fps
+      readout or a forced tier in **step 11** (recipes there). A **default** build needs none of
+      this — the tier the game auto-picks already prints at boot as `redline3d quality: <tier>`,
+      readable over `adb logcat`.
 
 ---
 
@@ -184,6 +190,21 @@ Drive around the lobby and a round. Note if it feels smooth or choppy. The Seeke
 scene is busy (crate reveal, garage showroom, many cruisers).
 
 - [ ] Smooth enough to play / demo? (yes / borderline / no)
+
+> **On-device perf diagnostics (optional — reach for these if it feels choppy).** The `?fps` /
+> `?perf` URL levers you'd use in the browser **don't work inside the APK** — the WebView loads a
+> fixed `https://localhost/` with no address bar to add them to (same reason as Fallback E). The
+> APK-reachable equivalents are **build-time env pins**, baked in like `VITE_PRIVY_APP_ID`. From
+> `redline3d/`:
+> - `VITE_FPS=1 npm run apk:serve` — bakes in the **fps chip** (top-left, stacked under the scrap
+>   chip) so you can read the live frame rate on the phone.
+> - `VITE_PERF=low npm run apk:serve` — **forces the low tier** (caps pixelRatio at 1.5) to check
+>   whether the low path is smooth enough to demo; `VITE_PERF=high` forces the high tier to see the
+>   worst case. On a web build a `?perf` / `?fps` URL param still wins over the pin, so desktop
+>   debugging is unchanged.
+> - On a **default** build (no pins) you don't need to rebuild to learn the tier: the one the game
+>   auto-picked prints at boot as `redline3d quality: <tier> (<gpu>)` — read it over USB with
+>   **`adb logcat | grep redline3d`**.
 
 **12. Battery & heat.**
 After ~10 minutes of play, note if the phone is **hot** or the **battery** dropped fast. A 3D

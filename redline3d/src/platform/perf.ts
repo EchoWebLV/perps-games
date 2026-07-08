@@ -13,6 +13,13 @@ export interface QualitySignals {
   gpuRenderer?: string;
   /** location.search — `?perf=low|high` is a manual override that wins over detection */
   search?: string;
+  /**
+   * `VITE_PERF=low|high` build-time pin — the same tier lever as `?perf`, for the APK whose
+   * WebView loads a fixed https://localhost/ with no address bar (so URL params are unreachable
+   * on the exact device — the Seeker — we need to tune). A `?perf` param still wins over it.
+   * Injectable for tests; defaults to `import.meta.env?.VITE_PERF` when absent.
+   */
+  envPerf?: string;
 }
 
 /**
@@ -60,6 +67,11 @@ export function detectQuality(signals: QualitySignals = {}): Quality {
   // so on-device measurement can force either tier without a rebuild.
   const forced = new URLSearchParams(signals.search ?? globalThis.location?.search ?? "").get("perf");
   if (forced === "low" || forced === "high") return q(forced === "low");
+
+  // `VITE_PERF=low|high` build-time pin — a diagnostic APK build carries the tier lever the
+  // address-bar-less WebView can't. The URL param above wins, so web debugging stays ergonomic.
+  const envPerf = signals.envPerf ?? (import.meta.env?.VITE_PERF as string | undefined);
+  if (envPerf === "low" || envPerf === "high") return q(envPerf === "low");
 
   const nav =
     signals.nav ?? (globalThis.navigator as unknown as { deviceMemory?: number; hardwareConcurrency?: number } | undefined);
