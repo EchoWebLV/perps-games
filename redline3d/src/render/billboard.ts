@@ -76,7 +76,7 @@ export function createStripBillboard(): StripBillboard {
     g.fillText("THE STRIP · LIVE", 36, 64);
     g.textAlign = "right";
     g.fillStyle = "#ffd166";
-    g.fillText("record ×2000", canvas.width - 36, 64);
+    g.fillText("record ×3000", canvas.width - 36, 64);
     g.strokeStyle = "rgba(143,155,214,0.35)";
     g.lineWidth = 2;
     g.beginPath(); g.moveTo(30, 104); g.lineTo(canvas.width - 30, 104); g.stroke();

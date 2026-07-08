@@ -15,13 +15,13 @@
 
 **Short pitch (~100 words):**
 
-> Perps Raider is a real perp position you drive. The tachometer is a leverage dial up to 2000×; the live price of BTC, ETH or SOL pushes your car down a synthwave strip, and a liquidation is a wreck. It is not a slot machine and not a simulation — the whole round runs on-chain on a MagicBlock Ephemeral Rollup, settled in-rollup against a real Pyth Lazer price. A native crank settles continuously, so a liquidation costs the player zero transactions. Non-custodial by construction: your Privy wallet holds the stake, and anyone can recompute the payout from on-chain data.
+> Perps Raider is a real perp position you drive. The tachometer is a leverage dial up to 3000×; the live price of BTC, ETH or SOL pushes your car down a synthwave strip, and a liquidation is a wreck. It is not a slot machine and not a simulation — the whole round runs on-chain on a MagicBlock Ephemeral Rollup, settled in-rollup against a real Pyth Lazer price. A native crank settles continuously, so a liquidation costs the player zero transactions. Non-custodial by construction: your Privy wallet holds the stake, and anyone can recompute the payout from on-chain data.
 
 ---
 
 ## 2. Full submission description
 
-**What it is.** Perps Raider is an arcade racer built on a real perpetual-futures position. You pick an asset (BTC, ETH, SOL) and a direction (LONG/SHORT), then set leverage by revving a tachometer that climbs to 2000×. The live price drives your car: move your way to bank profit, against you past the liquidation floor and you wreck, cash out first to keep the winnings. Under the synthwave skin every beat is a genuine leveraged position on a live feed, not an animation of one.
+**What it is.** Perps Raider is an arcade racer built on a real perpetual-futures position. You pick an asset (BTC, ETH, SOL) and a direction (LONG/SHORT), then set leverage by revving a tachometer that climbs to 3000× (a 1500× car on Nitro Overdrive tops out the dial). The live price drives your car: move your way to bank profit, against you past the liquidation floor and you wreck, cash out first to keep the winnings. Under the synthwave skin every beat is a genuine leveraged position on a live feed, not an animation of one.
 
 **What runs on MagicBlock, and why it matters.** The entire round loop runs on-chain on a MagicBlock Ephemeral Rollup, not a server. The `raider` program co-delegates the player, house and round accounts into the rollup, `open`s the position against a Pyth Lazer price MagicBlock refreshes *inside* the rollup every 50–200 ms — the oracle-in-ER pattern perp DEXes use — then commits final state to Solana L1. Three properties fall out:
 
@@ -48,7 +48,7 @@ Target total ≈ 82s. Two moments the video **must make legible** are marked ★
 | 3 | 0:14–0:24 (10s) | Drive the lobby: the car cruises the synthwave town square past Garage / Crates / Track / Highway. | "The lobby is a drivable hub — garage, crates, and the track." |
 | 4 | 0:24–0:32 (8s) | Open a crate: a Gold crate cracks, a Legendary car reveals and lands in the garage. | "Crates roll cars across five rarities — VRF-ready randomness." |
 | 5 | 0:32–0:38 (6s) | Enter TRACK; tap the asset (BTC) and a side (LONG). | "Pick an asset. Pick a side." |
-| 6 | 0:38–0:50 (12s) | Race: tap GO, rev the tachometer toward 2000×, the live BTC price drives the car, equity/P&L ticks up. | "The tachometer IS your leverage — the real BTC price drives the car." |
+| 6 | 0:38–0:50 (12s) | Race: tap GO, rev the tachometer toward 3000×, the live BTC price drives the car, equity/P&L ticks up. | "The tachometer IS your leverage — the real BTC price drives the car." |
 | 7 | 0:50–0:58 (8s) | ★ **ON-CHAIN PROOF #1 — the settle beat.** The price crosses the floor; the car wrecks (or you cash out) with no button press. Overlay: "settled on-chain · 0 player transactions." | "Liquidation settles itself on the Ephemeral Rollup — zero transactions from you." |
 | 8 | 0:58–1:08 (10s) | ★ **ON-CHAIN PROOF #2 — the balance / cash-out proof.** Wallet panel shows the wSOL/SOL balance update; a devnet round view / explorer shows the settled round and the recomputed payout. | "Non-custodial payout — recomputable by anyone from on-chain data." |
 | 9 | 1:08–1:16 (8s) | Cross-device beat: the same account opened on desktop shows the same car and balance. | "One identity, one set of stuff — desktop, phone, Seeker." |
@@ -64,7 +64,7 @@ Target total ≈ 82s. Two moments the video **must make legible** are marked ★
 It's a real, symmetric perpetual-futures position on a live oracle — not a house-rigged game of chance. The outcome is decided by public BTC/ETH/SOL price movement; the settlement math is deterministic integer arithmetic recomputable by anyone from on-chain data; and there's a genuine skill layer (entry, direction, leverage, when to cash out, plus car abilities like stop-loss / take-profit). The demo runs on devnet with no real money. Mainnet real-money is a later, gated pillar with its own payment rail and jurisdiction legal read — deliberately out of scope for this submission.
 
 **Q: Why an Ephemeral Rollup instead of settling on L1?**
-The round is a live, per-tick state machine. At up to 2000× a ~0.05% move can liquidate, and we settle continuously against a price refreshed every 50–200 ms — that cadence and cost are not viable on base-layer Solana. The ER gives near-free ticks and sub-400 ms warm settles (measured on devnet, `RESULT.md`) while still reading an authentic in-rollup Pyth Lazer price and committing final state back to L1. We get arcade speed without giving up L1 finality or provability.
+The round is a live, per-tick state machine. At up to 3000× a ~0.05% move can liquidate, and we settle continuously against a price refreshed every 50–200 ms — that cadence and cost are not viable on base-layer Solana. The ER gives near-free ticks and sub-400 ms warm settles (measured on devnet, `RESULT.md`) while still reading an authentic in-rollup Pyth Lazer price and committing final state back to L1. We get arcade speed without giving up L1 finality or provability.
 
 **Q: What is actually decentralized / non-custodial?**
 Funds: stakes are wSOL in program PDA vaults, and only the player's own wallet can withdraw — a non-owner withdraw is rejected by the program's seed/owner constraints (verified on devnet). Settlement: the program reads an owner- and feed-id-pinned Pyth Lazer price and renders the verdict itself, so no operator — including us — can choose an outcome. What is *not* decentralized yet, stated plainly: the crank/keeper is operator-run (but permissionless and outcome-blind — it can only poke `tick`, never pick a result), and the collectible/account layer is a server (next answer).
