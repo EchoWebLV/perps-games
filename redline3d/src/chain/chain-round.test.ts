@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { PublicKey } from "@solana/web3.js";
-import { deriveRaiderPdas, rawToHuman, roundToSnap, actionResultFromSnap, maxPayoutBase } from "./chain-round";
+import { deriveRaiderPdas, rawToHuman, roundToSnap, actionResultFromSnap, maxPayoutBase, roundKey } from "./chain-round";
 import { classifyDelegateState, DelegateBusyError } from "./chain-round";
 import { CHAIN } from "./config";
 
@@ -47,10 +47,31 @@ describe("chain-round pure helpers", () => {
     expect(s.entryHuman).toBeCloseTo(59217.57, 1);
   });
 
+  it("roundKey distinguishes two same-duration/same-second rounds by their entry snapshot", () => {
+    // deadline_ts = now + secs is NOT unique — two rounds of the same duration opened in the same
+    // second collide. The Lazer entry snapshot (publish_time + price mantissa) is distinct per open,
+    // so the composite key tells them apart even when deadlineTs is identical.
+    const dl = 1_751_000_060;
+    const a = roundKey({ entryTs: 1_751_000_000, entryRaw: 8_100_000_000n, deadlineTs: dl }, "Owner1111");
+    const b = roundKey({ entryTs: 1_751_000_001, entryRaw: 8_100_050_000n, deadlineTs: dl }, "Owner1111");
+    expect(a).not.toBe(b);
+  });
+
+  it("roundKey is stable for the same round and owner-scoped", () => {
+    const r = { entryTs: 111, entryRaw: 222n, deadlineTs: 333 };
+    expect(roundKey(r, "OwnerA")).toBe(roundKey(r, "OwnerA")); // same round → same key
+    expect(roundKey(r, "OwnerA")).not.toBe(roundKey(r, "OwnerB")); // different owner → different key
+  });
+
+  it("roundKey tolerates a settled result missing the entry snapshot (deadline still distinguishes)", () => {
+    // flip/lever settled corpses may omit entryTs/entryRaw; a deadline difference must still key apart.
+    expect(roundKey({ deadlineTs: 1000 } as any, "O")).not.toBe(roundKey({ deadlineTs: 2000 } as any, "O"));
+  });
+
   it("actionResultFromSnap exposes the settled payload only when status==2", () => {
     const base = {
       status: 1, outcome: 0, outcomeName: "cashout", payout: 0n, banked: 123n, dir: 1, lev: 100,
-      entryRaw: 0n, entryExpo: 8, entryHuman: 59000, exitRaw: 0n, exitHuman: 0, deadlineTs: 0,
+      entryRaw: 0n, entryExpo: 8, entryHuman: 59000, entryTs: 0, exitRaw: 0n, exitHuman: 0, deadlineTs: 0,
     };
     const open = actionResultFromSnap(base, 0n);
     expect(open.settled).toBe(false);

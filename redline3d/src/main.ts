@@ -20,6 +20,7 @@ import { sol3 } from "./core/money";
 import { clampInt } from "./core/round-sync";
 import { niceLev, tToLev } from "./core/leverage";
 import { liqPriceOf } from "./core/economics";
+import { reconcileFlip } from "./core/flip-reconcile";
 import { createUpgrades } from "./ui/upgrades";
 import { CONFIG } from "./core/config";
 import { createMinimap } from "./ui/minimap";
@@ -27,6 +28,7 @@ import { CART_COIN_RATE, createPickups } from "./render/pickups";
 import { createFireTrail } from "./render/firetrail";
 import { createCarPicker, type CarAbility, type CarOption } from "./ui/carpicker";
 import { createCrateBox } from "./ui/cratebox";
+import { createHowTo, howToSeen, markHowToSeen } from "./ui/howto";
 import { createInventory } from "./core/inventory";
 import { createSessionAuth } from "./core/auth-session";
 import { createApi } from "./core/api";
@@ -248,6 +250,11 @@ const priceSource = createPriceSource({
   },
 });
 addEventListener("pagehide", () => priceSource.stop());
+// bfcache restore: pagehide stop()'d the feed, but the last real tick can still be recent enough
+// that live() would lie true on a frozen price — a money GO could then open on it. Re-subscribe
+// and force not-live until a fresh tick lands. (Only persisted/bfcache restores need this; a normal
+// load re-creates the source, and a tab-switch never stops it, so visibilitychange isn't involved.)
+addEventListener("pageshow", (e) => { if ((e as PageTransitionEvent).persisted) priceSource.restart(); });
 
 // ui
 const hud = createHud(hudRoot);
@@ -526,6 +533,11 @@ const crateBox = createCrateBox(hudRoot, {
   onBuyUsd: () => lobbyHud.toast("Card payment coming soon — use coins for now"),
   onClose: () => { if (mode === "lobby") lobbyHud.show(); },
 });
+
+// First-run "How to Play" walkthrough — also reachable from the hamburger "How to play" row, which
+// dispatches `raider:howto` on hudRoot. Created here so it exists before the identity-gate callbacks.
+const howto = createHowTo(hudRoot);
+hudRoot.addEventListener("raider:howto", () => howto.open());
 
 // ── lobby: the economy-hub town ─────────────────────────────────────────────
 // the map button drops you into a giant drivable neon lot with 4 functional buildings —
@@ -980,6 +992,14 @@ async function closeRound(reason: "cashout" | "expire") {
 // they describe a real state, not a hiccup): delegate busy / table limit / needs a deposit.
 const FRIENDLY_CODES = new Set(["delegate_busy", "bankroll_full", "wallet_unfunded"]);
 
+// A keyboard GO (Space/Enter) must respect the same guards the click path has: never launch off
+// the track (lobby/showroom), nor behind an open shop/crate/garage/how-to overlay. Wiring the
+// panels' isOpen() here is the check main.ts was previously missing entirely.
+controls.setKeyLaunchBlocked(() =>
+  mode === "lobby" || mode === "garage" ||
+  upgrades.isOpen() || garage.isOpen() || crateBox.isOpen() || howto.isOpen(),
+);
+
 controls.onLaunch(async () => {
   // GO launches from the strip too — but never behind an open panel (garage menu or upgrades
   // shop over the world; Space/Enter would otherwise start a round invisibly behind it)
@@ -991,6 +1011,10 @@ controls.onLaunch(async () => {
   // Guests race in PRACTICE mode: the round runs entirely on the local engine off the live
   // feed — no wallet, no chain, no SOL. Sign-in upgrades the same GO to real money.
   if (identity.mode === "guest") { launchPractice(); return; }
+  // Real-money rounds must never open on a simulated or frozen price. price() returns the sim
+  // drift indistinguishably from a real tick, so gate the money GO on live() (a real, fresh tick)
+  // — not price() > 0. Guests keep racing the sim above; only this signed-in path is gated.
+  if (!priceSource.live()) { hud.setStatus("Waiting for the live price feed…"); return; }
   opening = true;
   // The round opens on whatever asset the BTC/ETH/SOL tabs have selected; the registry binds the
   // round to that asset's feed and `hud.onAsset` blocks switching once live, so the local engine's ×
@@ -1161,12 +1185,31 @@ async function doFlip(dir: 1 | -1) {
   flipping = true;
   try {
     const res = await session.flip(dir);
-    if (res.settled) finalizeSettled(res);
+    if (res.settled) { finalizeSettled(res); return; }
+    // The flip landed but re-anchored to a direction that disagrees with our optimistic one →
+    // the confirmed chain read wins (reconcile back to it).
+    applyFlipReconcile(dir, { status: 1, dir: res.dir, entryHuman: res.entryHuman });
   } catch {
-    /* keep playing; the local flip already applied and close() settles at on-chain truth */
+    // The on-chain flip did NOT land — the optimistic local flip is now ahead of the chain. Snap the
+    // HUD/engine back to the confirmed chain direction so we never show a position the chain doesn't
+    // hold (best-effort: if the read also fails there's nothing to revert to, and close()/the crank
+    // still settle at on-chain truth).
+    const snap = await session.poll().catch(() => null);
+    applyFlipReconcile(dir, snap);
   } finally {
     flipping = false;
   }
+}
+// Desired-vs-confirmed: when the confirmed chain read disagrees with the optimistic flip, revert the
+// local dir + entry to the chain's — otherwise the HUD (and liq line) show a position the chain never took.
+function applyFlipReconcile(optimisticDir: 1 | -1, confirmed: { status: number; dir: number; entryHuman: number } | null) {
+  const fix = reconcileFlip(optimisticDir, confirmed);
+  if (!fix || !roundActive) return;
+  engine.setDir(fix.dir, fix.entryPx); // re-anchor the engine to the chain's dir + entry
+  round.dir = fix.dir;
+  round.entryPx = fix.entryPx;
+  controls.setDir(fix.dir);
+  hud.setStatus(`Flip didn't take — back to ${fix.dir === 1 ? "LONG" : "SHORT"}.`);
 }
 
 // One price update per frame, shared by the race and highway branches: eases the display
@@ -1573,6 +1616,12 @@ function maybeWelcomeGift() {
   markWelcome();
   setTimeout(() => crateBox.openGift("wooden"), 0);
 }
+// Show the how-to walkthrough once to a new player, THEN run the follow-up (the welcome gift).
+// A returning player (flag already set) skips straight to `after`.
+function maybeShowHowTo(after: () => void) {
+  if (howToSeen()) { after(); return; }
+  howto.open(() => { markHowToSeen(); after(); });
+}
 // The access wall's grant seams — HOISTED so both identity paths (and the reconnect block) can wire
 // their own redeem into the same wall. "magic" grants all cars + 1,000 coins through the exact seams
 // a crate pull uses; "perpz" unlocks entry and nothing else. Already-owned cars are skipped (no dup
@@ -1631,7 +1680,7 @@ function showIdentityGate() {
       gateUp = false;
       // GUEST: the access wall (LOCAL) stands between the gate and the world; the welcome gift stays
       // local and fires only once the wall clears.
-      guestAccessThenEnter(() => { maybeWelcomeGift(); });
+      guestAccessThenEnter(() => { maybeShowHowTo(() => maybeWelcomeGift()); });
     },
     async onSignIn(name) {
       // fresh = the account picker ALWAYS opens (a lingering Privy session is signed out
@@ -1646,7 +1695,7 @@ function showIdentityGate() {
         // accountSync.accessCodes() is populated — the wall shows only if THIS account hasn't redeemed.
         // The welcome crate (ONCE PER ACCOUNT, server-side) fires AFTER the wall clears so its reveal
         // isn't drawn behind the wall.
-        accountAccessThenEnter(() => { void claimWelcomeAccount(); });
+        accountAccessThenEnter(() => { maybeShowHowTo(() => { void claimWelcomeAccount(); }); });
       }
       return ok;
     },

@@ -39,8 +39,8 @@ export function rawToHuman(raw: number | bigint, expo: number): number {
 
 export type AssetSym = "BTC" | "ETH" | "SOL";
 
-export interface OpenedRound { entryRaw: bigint; entryExpo: number; entryHuman: number; deadlineTs: number; feed: string; }
-export interface SettledRound { outcome: number; outcomeName: string; payout: bigint; exitRaw: bigint; exitHuman: number; balance: bigint; deadlineTs: number; }
+export interface OpenedRound { entryRaw: bigint; entryExpo: number; entryHuman: number; entryTs?: number; deadlineTs: number; feed: string; }
+export interface SettledRound { outcome: number; outcomeName: string; payout: bigint; exitRaw: bigint; exitHuman: number; balance: bigint; entryTs?: number; entryRaw?: bigint; deadlineTs: number; }
 const OUTCOME = ["cashout", "cap", "liq", "time"];
 
 /** A delegate attempt that can't proceed because the shared house is held (foreign or torn). */
@@ -82,8 +82,17 @@ export function classifyDelegateState(owners: {
 export interface RoundSnap {
   status: number; outcome: number; outcomeName: string;
   payout: bigint; banked: bigint; dir: number; lev: number;
-  entryRaw: bigint; entryExpo: number; entryHuman: number;
+  entryRaw: bigint; entryExpo: number; entryHuman: number; entryTs: number;
   exitRaw: bigint; exitHuman: number; deadlineTs: number;
+}
+
+/** A round's composite on-chain identity. `deadline_ts` (= now + secs) is NOT unique — two rounds of
+ *  the same duration opened in the same second collide — so the ER's stale-corpse guards must not key
+ *  on it alone. Fold in the entry snapshot (Lazer `publish_time` entryTs + the price mantissa entryRaw,
+ *  distinct per open in practice) plus the owner, all from data the client already reads. Tolerates a
+ *  settled corpse missing the entry fields (a deadline difference still keys them apart). */
+export function roundKey(r: { entryTs?: number; entryRaw?: bigint; deadlineTs: number }, owner: string): string {
+  return `${owner}:${r.entryTs ?? 0}:${(r.entryRaw ?? 0n).toString()}:${r.deadlineTs}`;
 }
 
 /** Result of a mid-round flip/lever: either re-anchored (still open) or settled (terminal-first hit). */
@@ -94,7 +103,7 @@ export type ActionResult =
 /** Map an anchor-decoded Round account into a typed, BN-free snapshot. */
 export function roundToSnap(r: {
   status: number; outcome: number; payout: { toString(): string }; banked: { toString(): string };
-  dir: number; lev: number; entryRaw: { toString(): string }; entryExpo: number;
+  dir: number; lev: number; entryRaw: { toString(): string }; entryExpo: number; entryTs?: number;
   exitRaw: { toString(): string }; deadlineTs: number;
 }): RoundSnap {
   const entryExpo = Number(r.entryExpo);
@@ -104,7 +113,7 @@ export function roundToSnap(r: {
     status: Number(r.status), outcome: Number(r.outcome), outcomeName: OUTCOME[Number(r.outcome)] ?? "?",
     payout: BigInt(r.payout.toString()), banked: BigInt(r.banked.toString()),
     dir: Number(r.dir), lev: Number(r.lev),
-    entryRaw, entryExpo, entryHuman: rawToHuman(entryRaw, entryExpo),
+    entryRaw, entryExpo, entryHuman: rawToHuman(entryRaw, entryExpo), entryTs: Number(r.entryTs ?? 0),
     exitRaw, exitHuman: rawToHuman(exitRaw, entryExpo), deadlineTs: Number(r.deadlineTs),
   };
 }
@@ -112,7 +121,9 @@ export function roundToSnap(r: {
 /** Shape a flip/lever outcome: settled payload when the action hit a terminal (status 2), else the re-anchored round. */
 export function actionResultFromSnap(snap: RoundSnap, balance: bigint): ActionResult {
   if (snap.status === 2) {
-    return { settled: true, outcome: snap.outcome, outcomeName: snap.outcomeName, payout: snap.payout, exitRaw: snap.exitRaw, exitHuman: snap.exitHuman, balance, deadlineTs: snap.deadlineTs };
+    // carry the entry snapshot (entryTs/entryRaw) so the caller can key the settle to THIS round —
+    // a bare deadlineTs can't distinguish it from the previous round's corpse (see roundKey).
+    return { settled: true, outcome: snap.outcome, outcomeName: snap.outcomeName, payout: snap.payout, exitRaw: snap.exitRaw, exitHuman: snap.exitHuman, balance, entryTs: snap.entryTs, entryRaw: snap.entryRaw, deadlineTs: snap.deadlineTs };
   }
   return { settled: false, banked: snap.banked, dir: snap.dir, lev: snap.lev, entryHuman: snap.entryHuman };
 }
@@ -315,7 +326,7 @@ export function createChainRound(deps: { wallet: AnchorWalletLike; mint: PublicK
         player: pdas.player, house: pdas.till, round: pdas.round, mint, priceUpdate: feedFor(asset), registry, playerAuthority: owner,
       }));
       const r = await programER.account.round.fetch(pdas.round);
-      return { entryRaw: BigInt(r.entryRaw.toString()), entryExpo: Number(r.entryExpo), entryHuman: rawToHuman(BigInt(r.entryRaw.toString()), Number(r.entryExpo)), deadlineTs: Number(r.deadlineTs), feed: r.feed.toBase58() };
+      return { entryRaw: BigInt(r.entryRaw.toString()), entryExpo: Number(r.entryExpo), entryHuman: rawToHuman(BigInt(r.entryRaw.toString()), Number(r.entryExpo)), entryTs: Number(r.entryTs), deadlineTs: Number(r.deadlineTs), feed: r.feed.toBase58() };
     },
 
     async close() {
@@ -324,7 +335,7 @@ export function createChainRound(deps: { wallet: AnchorWalletLike; mint: PublicK
       }));
       const r = await programER.account.round.fetch(pdas.round);
       const p = await programER.account.playerBalance.fetch(pdas.player);
-      return { outcome: Number(r.outcome), outcomeName: OUTCOME[Number(r.outcome)] ?? "?", payout: BigInt(r.payout.toString()), exitRaw: BigInt(r.exitRaw.toString()), exitHuman: rawToHuman(BigInt(r.exitRaw.toString()), Number(r.entryExpo)), balance: BigInt(p.balance.toString()), deadlineTs: Number(r.deadlineTs) };
+      return { outcome: Number(r.outcome), outcomeName: OUTCOME[Number(r.outcome)] ?? "?", payout: BigInt(r.payout.toString()), exitRaw: BigInt(r.exitRaw.toString()), exitHuman: rawToHuman(BigInt(r.exitRaw.toString()), Number(r.entryExpo)), balance: BigInt(p.balance.toString()), entryTs: Number(r.entryTs), entryRaw: BigInt(r.entryRaw.toString()), deadlineTs: Number(r.deadlineTs) };
     },
 
     async forceClose() {
@@ -333,7 +344,7 @@ export function createChainRound(deps: { wallet: AnchorWalletLike; mint: PublicK
       }));
       const r = await programER.account.round.fetch(pdas.round);
       const p = await programER.account.playerBalance.fetch(pdas.player);
-      return { outcome: Number(r.outcome), outcomeName: OUTCOME[Number(r.outcome)] ?? "?", payout: BigInt(r.payout.toString()), exitRaw: BigInt(r.exitRaw.toString()), exitHuman: rawToHuman(BigInt(r.exitRaw.toString()), Number(r.entryExpo)), balance: BigInt(p.balance.toString()), deadlineTs: Number(r.deadlineTs) };
+      return { outcome: Number(r.outcome), outcomeName: OUTCOME[Number(r.outcome)] ?? "?", payout: BigInt(r.payout.toString()), exitRaw: BigInt(r.exitRaw.toString()), exitHuman: rawToHuman(BigInt(r.exitRaw.toString()), Number(r.entryExpo)), balance: BigInt(p.balance.toString()), entryTs: Number(r.entryTs), entryRaw: BigInt(r.entryRaw.toString()), deadlineTs: Number(r.deadlineTs) };
     },
 
     async readRound(onEr = false) {

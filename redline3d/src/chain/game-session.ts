@@ -2,7 +2,7 @@ import { PublicKey } from "@solana/web3.js";
 import type { SolanaWalletPort } from "../core/solana-wallet";
 import { createDevKeypairPort } from "./dev-keypair-port";
 import { portToAnchorWallet } from "./anchor-wallet";
-import { createChainRound, maxPayoutBase, WalletUnfundedError, BankrollFullError, type ChainRound, type OpenedRound, type SettledRound, type ActionResult, type RoundSnap, type AssetSym } from "./chain-round";
+import { createChainRound, maxPayoutBase, roundKey, WalletUnfundedError, BankrollFullError, type ChainRound, type OpenedRound, type SettledRound, type ActionResult, type RoundSnap, type AssetSym } from "./chain-round";
 import { createLeverSync } from "./lever-sync";
 
 /** The settled shape main.ts needs to finalize a round in the HUD. */
@@ -70,10 +70,18 @@ export function createGameSession(opts: {
   let isDelegated = false;
   let armed = false;
   let bal = 0n;
-  // THIS round's identity (its on-chain deadlineTs). The ER router can serve the previous
-  // round's settled state for a while after a fresh open — every settle consumer checks
-  // its snap against this before treating the round as over. 0 = no round known yet.
-  let curDeadline = 0;
+  // THIS round's composite identity (owner + entry snapshot + deadline — see roundKey). The ER
+  // router can serve the PREVIOUS round's settled state for a while after a fresh open, so every
+  // settle consumer checks its snap's key against this before treating the round as over. A bare
+  // deadlineTs isn't unique (two same-second/same-duration rounds collide), hence the composite.
+  // null = no round known yet.
+  let curKey: string | null = null;
+  // The identity of a round a PRIOR open attempt (this same GO) opened but couldn't confirm —
+  // captured so a retry ADOPTS it instead of the stale-round reconcile settling our own fresh
+  // round (see open()). null = nothing uncertain to adopt.
+  let pendingOpenKey: string | null = null;
+  // owner address for round-key scoping; stable per session (all round reads are our own PDA).
+  const ownerId = () => opts.injectAddress ?? port?.currentAddress() ?? "";
   // The stake wrap/unwrap (native SOL ⇄ wSOL) only applies to the canonical wSOL mint; for
   // any other stake mint (e.g. a devnet test token) the token is held directly, no wrap.
   const isWsol = opts.mint.toBase58() === "So11111111111111111111111111111111111111112";
@@ -110,9 +118,9 @@ export function createGameSession(opts: {
     bal = await c.readPlayerBalance(isDelegated);
     if (isDelegated) {
       // adopting a live session mid-round: pick up the round's identity so the corpse
-      // guard below keys on it (a still-open round has the only trustworthy deadline)
+      // guard below keys on it (a still-open round is the only trustworthy source)
       const snap = await c.readRound(true).catch(() => null);
-      if (snap && snap.status === 1) curDeadline = snap.deadlineTs;
+      if (snap && snap.status === 1) curKey = roundKey(snap, ownerId());
     }
   }
 
@@ -125,7 +133,7 @@ export function createGameSession(opts: {
         // ER reads have no cross-node read-after-write guarantee: a lever fired right
         // after open can fetch the PREVIOUS round's settled corpse. Only a settle carrying
         // THIS round's identity may end the round (phantom "Settled at ×…" live-hit).
-        if (curDeadline && res.deadlineTs !== curDeadline) { console.warn("[session] ignored stale settle (lever raced a fresh open)"); return; }
+        if (curKey && roundKey(res, ownerId()) !== curKey) { console.warn("[session] ignored stale settle (lever raced a fresh open)"); return; }
         opts.onSettled(res);
       }
     },
@@ -166,7 +174,7 @@ export function createGameSession(opts: {
       isDelegated = false;
       armed = false;
       bal = 0n;
-      curDeadline = 0; // the old account's round identity must not gate the new one's settles
+      curKey = null; pendingOpenKey = null; // the old account's round identity must not gate the new one's settles
       await connectChain();
       await adoptAndRead();
       return bal;
@@ -303,20 +311,41 @@ export function createGameSession(opts: {
 
     async open(asset, dir, lev, stakeBase, durationSecs, liqFp, graceSecs = 0, slFp = 0, tpFp = 0, refundFp = 0) {
       const c = need();
-      // Reconcile a leftover OPEN round before starting a new one. After a page reload,
-      // a log-out→log-in, or a missed auto-settle (crank), a prior round can still be open
-      // on-chain while the client thinks it's idle — `open` would then reject it as
-      // RoundAlreadyOpen ("Couldn't start the round"). Settle the stale round first so a
-      // fresh one can always start. Best-effort: if it can't be read/closed, open() below
-      // still surfaces a genuine block.
+      // Size the crank to THIS round: 1s ticks over the whole duration + settle margin. A fixed
+      // 70-tick schedule let a 90s Heavy-Load round outlive its crank (live-found on devnet).
+      const armCrank = async () => { armed = false; try { await c.scheduleCrank({ iterations: durationSecs + 10 }); armed = true; } catch { armed = false; } };
+      // Reconcile a leftover OPEN round before starting a new one. After a page reload, a
+      // log-out→log-in, or a missed auto-settle (crank), a prior round can still be open on-chain
+      // while the client thinks it's idle — `open` would then reject it as RoundAlreadyOpen. Settle
+      // that STALE round so a fresh one can start. BUT if the leftover round is the one a PRIOR
+      // uncertain attempt of THIS open just opened (pendingOpenKey), ADOPT it — main retries an
+      // open whose confirm merely flaked, and that retry must never settle our own fresh round.
+      // Best-effort otherwise: a read/close failure still lets open() below surface a genuine block.
       try {
         const snap = await c.readRound(true);
         if (snap && snap.status === 1) {
+          if (pendingOpenKey && roundKey(snap, ownerId()) === pendingOpenKey) {
+            curKey = pendingOpenKey;
+            pendingOpenKey = null;
+            await armCrank(); // the uncertain attempt threw before arming — arm the adopted round now
+            return { entryRaw: snap.entryRaw, entryExpo: snap.entryExpo, entryHuman: snap.entryHuman, entryTs: snap.entryTs, deadlineTs: snap.deadlineTs, feed: "" };
+          }
           await c.close();
           bal = await c.readPlayerBalance(true);
         }
       } catch (e) { console.warn("open: stale-round reconcile skipped:", e); }
-      let opened = await c.open(asset, dir, lev, stakeBase, durationSecs, liqFp, graceSecs, slFp, tpFp, refundFp);
+      let opened: OpenedRound;
+      try {
+        opened = await c.open(asset, dir, lev, stakeBase, durationSecs, liqFp, graceSecs, slFp, tpFp, refundFp);
+      } catch (e) {
+        // The open tx may have LANDED even though its confirmation failed (devnet transient).
+        // Capture the just-opened round's identity so main's retry ADOPTS it above rather than the
+        // reconcile settling it. Best-effort: if it isn't visible yet, we fall back to prior behavior.
+        const snap = await c.readRound(true).catch(() => null);
+        if (snap && snap.status === 1) pendingOpenKey = roundKey(snap, ownerId());
+        throw e;
+      }
+      pendingOpenKey = null; // a confirmed open — nothing uncertain is left to adopt
       // Stamp the round's identity from a VERIFIED live read (status 1). open()'s own
       // post-send fetch can itself be the stale corpse — if the verified read disagrees,
       // its entry/deadline win (they come from the round that is actually running).
@@ -326,15 +355,11 @@ export function createGameSession(opts: {
         const snap = await c.readRound(true).catch(() => null);
         if (snap && snap.status === 1) live = snap;
       }
-      curDeadline = live ? live.deadlineTs : opened.deadlineTs;
-      if (live && live.deadlineTs !== opened.deadlineTs) {
-        opened = { entryRaw: live.entryRaw, entryExpo: live.entryExpo, entryHuman: live.entryHuman, deadlineTs: live.deadlineTs, feed: opened.feed };
+      curKey = roundKey(live ?? opened, ownerId());
+      if (live && roundKey(live, ownerId()) !== roundKey(opened, ownerId())) {
+        opened = { entryRaw: live.entryRaw, entryExpo: live.entryExpo, entryHuman: live.entryHuman, entryTs: live.entryTs, deadlineTs: live.deadlineTs, feed: opened.feed };
       }
-      armed = false;
-      // Size the crank to THIS round: 1s ticks for the round's full duration + settle margin.
-      // A fixed 70-tick schedule let a 90s Heavy-Load round outlive its own crank (the 90s
-      // deadline was never observed on-chain and the round hung open) — live-found on devnet.
-      try { await c.scheduleCrank({ iterations: durationSecs + 10 }); armed = true; } catch { armed = false; }
+      await armCrank();
       return opened;
     },
 
@@ -344,7 +369,7 @@ export function createGameSession(opts: {
 
     async flip(dir) {
       const res = await need().flip(dir);
-      if (res.settled && curDeadline && res.deadlineTs !== curDeadline) {
+      if (res.settled && curKey && roundKey(res, ownerId()) !== curKey) {
         // the flip landed but its fetch raced onto the previous round's corpse — re-read
         const fresh = await need().readRound(true).catch(() => null);
         if (fresh && fresh.status === 1) return { settled: false as const, banked: fresh.banked, dir: fresh.dir, lev: fresh.lev, entryHuman: fresh.entryHuman };
@@ -361,7 +386,7 @@ export function createGameSession(opts: {
     async poll() {
       const snap = await need().readRound(true);
       // a settled snap from a PREVIOUS round (stale ER node) must not end THIS round
-      if (snap && snap.status === 2 && curDeadline && snap.deadlineTs !== curDeadline) return null;
+      if (snap && snap.status === 2 && curKey && roundKey(snap, ownerId()) !== curKey) return null;
       return snap;
     },
 

@@ -75,7 +75,7 @@ describe("createGameSession", () => {
       delegationState: vi.fn(async () => "fresh" as const),
       readRound: vi.fn(async () => ({
         status: 2, outcome: 3, outcomeName: "time", payout: 47_139_000n, banked: 0n,
-        dir: 1, lev: 50, entryRaw: 0n, entryExpo: 8, entryHuman: 0, exitRaw: 0n, exitHuman: 0, deadlineTs: 0,
+        dir: 1, lev: 50, entryRaw: 0n, entryExpo: 8, entryHuman: 0, entryTs: 0, exitRaw: 0n, exitHuman: 0, deadlineTs: 0,
       })),
     });
     const s = createGameSession({ mint: MINT, onSettled: vi.fn(), injectChain: chain, injectAddress: "Fake111" });
@@ -502,7 +502,7 @@ describe("round identity — the previous round's settled corpse must not settle
   // leaving the real round to run orphaned until the crank reaped it.
   const snap = (deadlineTs: number, over: Record<string, unknown> = {}) => ({
     status: 1, outcome: 0, outcomeName: "cashout", payout: 0n, banked: 0n, dir: 1, lev: 50,
-    entryRaw: 8_100_000_000n, entryExpo: 8, entryHuman: 81, exitRaw: 0n, exitHuman: 0, deadlineTs, ...over,
+    entryRaw: 8_100_000_000n, entryExpo: 8, entryHuman: 81, entryTs: deadlineTs, exitRaw: 0n, exitHuman: 0, deadlineTs, ...over,
   });
   const corpse = (deadlineTs: number) => snap(deadlineTs, { status: 2, outcome: 3, outcomeName: "time", payout: 47_000_000n });
 
@@ -521,10 +521,12 @@ describe("round identity — the previous round's settled corpse must not settle
   });
 
   it("a lever fetch that raced onto the corpse does NOT fire onSettled; the real settle does", async () => {
-    let leverResult: any = { settled: true, outcome: 3, outcomeName: "time", payout: 47_000_000n, exitRaw: 0n, exitHuman: 0, balance: 1n, deadlineTs: 1000 };
+    // The settled result now carries the round's entry snapshot (entryTs/entryRaw), so the guard
+    // keys on the full identity: the corpse (a DIFFERENT round) is swallowed; THIS round's settle fires.
+    let leverResult: any = { settled: true, outcome: 3, outcomeName: "time", payout: 47_000_000n, exitRaw: 0n, exitHuman: 0, balance: 1n, entryTs: 1000, entryRaw: 8_100_000_000n, deadlineTs: 1000 };
     const chain = fakeChain({
       delegationState: vi.fn(async () => "reuse" as const),
-      open: vi.fn(async () => ({ entryRaw: 8_100_000_000n, entryExpo: 8, entryHuman: 81, deadlineTs: 2000, feed: "F" })),
+      open: vi.fn(async () => ({ entryRaw: 8_100_000_000n, entryExpo: 8, entryHuman: 81, entryTs: 2000, deadlineTs: 2000, feed: "F" })),
       readRound: vi.fn(async () => snap(2000)),
       lever: vi.fn(async () => leverResult),
     });
@@ -535,9 +537,9 @@ describe("round identity — the previous round's settled corpse must not settle
 
     s.noteLeverage(40);
     await tick(); await tick();
-    expect(onSettled).not.toHaveBeenCalled();        // corpse (deadline 1000 ≠ 2000) swallowed
+    expect(onSettled).not.toHaveBeenCalled();        // corpse (round @1000 ≠ round @2000) swallowed
 
-    leverResult = { ...leverResult, deadlineTs: 2000 };
+    leverResult = { ...leverResult, entryTs: 2000, entryRaw: 8_100_000_000n, deadlineTs: 2000 };
     s.noteLeverage(30);
     await tick(); await tick();
     expect(onSettled).toHaveBeenCalledTimes(1);      // genuine settle of THIS round
@@ -557,5 +559,55 @@ describe("round identity — the previous round's settled corpse must not settle
     expect(opened.deadlineTs).toBe(2000);
     expect(opened.entryHuman).toBe(81);
     expect(await s.poll()).toBeNull();               // corpse at the OLD deadline still suppressed
+  });
+});
+
+describe("open() retry after an uncertain confirm must not settle the round it just opened", () => {
+  // A round that OPENED on-chain but whose confirmation flaked makes main retry session.open().
+  // The reconcile at open()'s top must recognize that in-flight round by its identity and ADOPT
+  // it — never CLOSE it as a stale corpse — or the retry instantly settles the player's fresh round.
+  const live = {
+    status: 1, outcome: 0, outcomeName: "cashout", payout: 0n, banked: 0n, dir: 1, lev: 50,
+    entryRaw: 8_100_000_000n, entryExpo: 8, entryHuman: 81, entryTs: 555, exitRaw: 0n, exitHuman: 0, deadlineTs: 5000,
+  };
+  // reads.shift() but keep an explicit null distinct from "array empty" (?? would swallow the null)
+  const reader = (reads: (typeof live | null)[]) => vi.fn(async () => (reads.length ? reads.shift()! : live));
+
+  it("adopts the just-opened round on the retry (no close, no re-open)", async () => {
+    let opens = 0;
+    // attempt-1 reconcile (nothing yet) → attempt-1 post-reject capture → attempt-2 reconcile
+    const chain = fakeChain({
+      open: vi.fn(async () => {
+        opens++;
+        if (opens === 1) throw new Error("confirm timeout"); // landed on-chain but unconfirmed
+        throw new Error("must not re-open — the in-flight round must be adopted");
+      }),
+      readRound: reader([null, live, live]),
+      close: vi.fn(async () => { throw new Error("must NOT settle the fresh round"); }) as any,
+    });
+    const s = createGameSession({ mint: MINT, onSettled: vi.fn(), injectChain: chain, injectAddress: "OwnerA" });
+    await s.init();
+    await expect(s.open("SOL", 1, 50, 1_000_000, 60, 200_000)).rejects.toThrow("confirm timeout"); // attempt-1
+    const opened = await s.open("SOL", 1, 50, 1_000_000, 60, 200_000);                              // attempt-2 → adopt
+    expect(opened.deadlineTs).toBe(5000);
+    expect(opened.entryHuman).toBe(81);
+    expect(chain.close).not.toHaveBeenCalled(); // never settled our own fresh round
+    expect(opens).toBe(1);                       // never re-opened — adopted the in-flight round
+    expect(s.crankArmed()).toBe(true);           // the adopted round got its crank armed
+  });
+
+  it("still settles a genuinely stale PRIOR round (the legitimate reconcile is preserved)", async () => {
+    // No uncertain attempt happened (pendingOpenKey null), so an open round found at entry is a real
+    // leftover corpse from a prior session — it must be closed so a fresh round can start.
+    const stale = { ...live, deadlineTs: 4000, entryTs: 444 };
+    const chain = fakeChain({
+      readRound: reader([stale, live, live]), // reconcile sees the stale round → close, then the new round
+      open: vi.fn(async () => ({ entryRaw: 8_100_000_000n, entryExpo: 8, entryHuman: 81, entryTs: 555, deadlineTs: 5000, feed: "F" })),
+    });
+    const s = createGameSession({ mint: MINT, onSettled: vi.fn(), injectChain: chain, injectAddress: "OwnerA" });
+    await s.init();
+    const opened = await s.open("SOL", 1, 50, 1_000_000, 60, 200_000);
+    expect(chain.close).toHaveBeenCalledTimes(1); // the prior corpse was settled
+    expect(opened.deadlineTs).toBe(5000);
   });
 });

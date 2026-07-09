@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { stepPlay, DEFAULT_PLAY_CAP, isTextEntry, driveKeyOf } from "./controls";
+import { stepPlay, DEFAULT_PLAY_CAP, isTextEntry, driveKeyOf, keyAction, isNativeActivateTarget } from "./controls";
 
 // Duck-typed element stand-ins (no jsdom): isTextEntry only reads tagName / isContentEditable /
 // getAttribute("type"). Cast through unknown so we don't need a full HTMLElement.
@@ -79,5 +79,58 @@ describe("driveKeyOf (layout-independent driving keys — prod WASD-dead-on-Cyri
   it("ignores non-driving keys", () => {
     expect(driveKeyOf(ev("q", "KeyQ"))).toBe(null);
     expect(driveKeyOf(ev("Escape", "Escape"))).toBe(null);
+  });
+});
+
+describe("isNativeActivateTarget (elements whose native Space/Enter must not be hijacked by GO)", () => {
+  const el = (tagName: string, opts: { type?: string | null; role?: string | null; editable?: boolean } = {}) =>
+    ({ tagName, isContentEditable: opts.editable ?? false,
+       getAttribute: (a: string) => (a === "role" ? (opts.role ?? null) : (opts.type ?? null)) } as unknown as HTMLElement);
+
+  it("treats real interactive controls as native-activate targets", () => {
+    expect(isNativeActivateTarget(el("BUTTON"))).toBe(true);        // a focused menu / GO / wallet button
+    expect(isNativeActivateTarget(el("A"))).toBe(true);
+    expect(isNativeActivateTarget(el("SELECT"))).toBe(true);
+    expect(isNativeActivateTarget(el("INPUT", { type: "checkbox" }))).toBe(true); // Space toggles it
+    expect(isNativeActivateTarget(el("INPUT", { type: "text" }))).toBe(true);     // text entry too
+    expect(isNativeActivateTarget(el("DIV", { role: "button" }))).toBe(true);     // ARIA button
+  });
+
+  it("does NOT treat the game surface / plain elements as native-activate targets", () => {
+    expect(isNativeActivateTarget(el("CANVAS"))).toBe(false); // the driving surface — Space should GO
+    expect(isNativeActivateTarget(el("DIV"))).toBe(false);
+    expect(isNativeActivateTarget(null)).toBe(false);         // body / nothing focused
+  });
+});
+
+describe("keyAction (should a keydown drive, launch GO, or be left alone)", () => {
+  it("launches GO from Space/Enter only on the track with no panel and no focused control", () => {
+    expect(keyAction("go", { typing: false, panelOpen: false, onControl: false })).toBe("go");
+  });
+
+  it("never synthesizes a hidden GO behind an open panel/menu (upgrades.isOpen etc.)", () => {
+    expect(keyAction("go", { typing: false, panelOpen: true, onControl: false })).toBe("ignore");
+  });
+
+  it("defers GO to native activation when focus is on a real button (no swallowed click)", () => {
+    expect(keyAction("go", { typing: false, panelOpen: false, onControl: true })).toBe("ignore");
+  });
+
+  it("never launches GO while typing in a text field", () => {
+    expect(keyAction("go", { typing: true, panelOpen: false, onControl: false })).toBe("ignore");
+  });
+
+  it("keeps WASD/arrow driving even with a panel open or a non-text control focused", () => {
+    expect(keyAction("gas", { typing: false, panelOpen: true, onControl: true })).toBe("drive");
+    expect(keyAction("left", { typing: false, panelOpen: true, onControl: false })).toBe("drive");
+    expect(keyAction("brake", { typing: false, panelOpen: false, onControl: true })).toBe("drive");
+  });
+
+  it("only genuine text entry suppresses driving (a focused slider/button must not kill WASD)", () => {
+    expect(keyAction("gas", { typing: true, panelOpen: false, onControl: false })).toBe("ignore");
+  });
+
+  it("ignores a non-mapped key", () => {
+    expect(keyAction(null, { typing: false, panelOpen: false, onControl: false })).toBe("ignore");
   });
 });

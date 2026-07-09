@@ -10,6 +10,11 @@ export interface LeverSync {
  * (= the newest value submitted). Values submitted during an in-flight send collapse to the
  * latest; a value equal to the last one actually sent is a no-op. A rejected send is swallowed
  * (the next submit re-drives), so a transient RPC error never wedges the queue.
+ *
+ * `lastSent` only advances on a RESOLVED send: a rejected send must never count as sent, or
+ * re-submitting the same value dedups to a no-op and the leverage silently never reaches the
+ * chain (and can carry stale into the next round). A failure leaves `lastSent` untouched so the
+ * next submit — even of the same value — re-drives.
  */
 export function createLeverSync(opts: { send: (lev: number) => Promise<void> }): LeverSync {
   let inFlight = false;
@@ -23,8 +28,10 @@ export function createLeverSync(opts: { send: (lev: number) => Promise<void> }):
       while (queued !== null && queued !== lastSent) {
         const target = queued;
         queued = null;          // a submit during the await below re-sets this to the newest
-        lastSent = target;
-        try { await opts.send(target); } catch { /* swallow; next submit re-drives */ }
+        try {
+          await opts.send(target);
+          lastSent = target;    // ONLY a resolved send counts as sent (a reject re-drives)
+        } catch { /* swallow; leave lastSent so the next submit of this value retries */ }
       }
     } finally {
       inFlight = false;

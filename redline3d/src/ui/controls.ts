@@ -17,6 +17,20 @@ export const isTextEntry = (el: HTMLElement | null): boolean => {
   return false;
 };
 
+const NATIVE_ACTIVATE_TAGS = new Set(["BUTTON", "A", "SELECT", "SUMMARY", "OPTION"]);
+/** True when the browser would natively activate/toggle this element on Space/Enter (a button, link,
+ *  select, any input, an ARIA button/link). A GO key must DEFER to such a target — synthesizing GO
+ *  there both starts a hidden wager and (via preventDefault) swallows the control's own activation.
+ *  Distinct from `isTextEntry`: driving keys still fire over a button/slider; only the GO key yields. */
+export const isNativeActivateTarget = (el: HTMLElement | null): boolean => {
+  if (!el) return false;
+  if (isTextEntry(el)) return true;                 // text fields consume Space/Enter as input
+  if (el.tagName === "INPUT") return true;          // checkbox/radio/button/submit → Space toggles/activates
+  if (NATIVE_ACTIVATE_TAGS.has(el.tagName)) return true;
+  const role = el.getAttribute?.("role");
+  return role === "button" || role === "link";
+};
+
 export type DriveKey = "gas" | "brake" | "left" | "right" | "go";
 /** Map a key event to its driving action, PHYSICAL key first (e.code) so WASD works on
  *  every keyboard layout — on Bulgarian/AZERTY/Dvorak the physical W types something
@@ -43,6 +57,23 @@ export const driveKeyOf = (e: KeyboardEvent, ignoreModifiers = false): DriveKey 
   return null;
 };
 
+/** Decide what a keydown does: DRIVE (gas/brake/steer), fire GO, or leave it alone.
+ *  - GO (Space/Enter) fires ONLY on the track with no blocking panel open and no interactive
+ *    control focused — otherwise it would launch a hidden wager behind a menu, or swallow a
+ *    focused button/link's native activation. `panelOpen` mirrors the click path's guards
+ *    (a shop/menu open, or not on a driving surface); `onControl` = focus is on a native-activate
+ *    element. Either → "ignore" (the caller must NOT preventDefault, so native handling proceeds).
+ *  - Driving keys always drive; only genuine text entry (`typing`) yields — a focused slider,
+ *    toggle, or leftover overlay must not kill WASD. */
+export function keyAction(
+  dk: DriveKey | null,
+  ctx: { typing: boolean; panelOpen: boolean; onControl: boolean },
+): "drive" | "go" | "ignore" {
+  if (!dk) return "ignore";
+  if (dk === "go") return ctx.typing || ctx.panelOpen || ctx.onControl ? "ignore" : "go";
+  return ctx.typing ? "ignore" : "drive";
+}
+
 export interface Controls {
   dir(): 1 | -1;
   /** set the LONG/SHORT call externally (e.g. the Clown Car's lane-bet ability) — works live too */
@@ -60,6 +91,10 @@ export interface Controls {
   setBuffer(buf: number): void;
   onLaunch(cb: () => void): void;
   onCashout(cb: () => void): void;
+  /** main supplies "is a keyboard GO disallowed right now" — a blocking panel/menu is open, or the
+   *  player isn't on a driving surface. Mirrors the click path's guards so Space/Enter can't launch
+   *  a hidden wager behind an overlay. Defaults to never-blocked; driving keys are unaffected. */
+  setKeyLaunchBlocked(fn: () => boolean): void;
 }
 
 const seg = "background:var(--panel);border:1px solid var(--line);border-radius:11px;padding:8px 9px";
@@ -94,6 +129,9 @@ export function createControls(ctrlMount: HTMLElement, goMount: HTMLElement, ped
     golabel = q("#golabel"), gofill = q("#gofill"), callbox = q("#callbox");
 
   let laneMode = false;
+  // main wires the panel/mode guard after its overlays exist (see setKeyLaunchBlocked); until then
+  // a keyboard GO is never blocked. Never gates DRIVING keys — only the synthesized GO press.
+  let keyLaunchBlocked = () => false;
   // apply a direction to the UI (used live by the lane-bet); plain clicks stay idle-only
   const applyDir = (nd: 1 | -1) => {
     d = nd;
@@ -124,15 +162,19 @@ export function createControls(ctrlMount: HTMLElement, goMount: HTMLElement, ped
     isTextEntry(e.target as HTMLElement | null) || isTextEntry(document.activeElement as HTMLElement | null);
   // Capture phase on window: the driving keys are seen BEFORE any overlay/focus-trap that
   // might stopPropagation (a wallet modal's leftover DOM was eating them → "WASD stopped").
+  // GO (Space/Enter) is gated so it can't launch a hidden wager behind a panel or steal a focused
+  // control's native activation; driving keys still fire (only genuine text entry suppresses them).
   addEventListener("keydown", (e) => {
-    if (typingElsewhere(e)) return;
     const dk = driveKeyOf(e);
-    if (!dk) return;
+    const onControl = isNativeActivateTarget(e.target as HTMLElement | null)
+      || isNativeActivateTarget(document.activeElement as HTMLElement | null);
+    const action = keyAction(dk, { typing: typingElsewhere(e), panelOpen: keyLaunchBlocked(), onControl });
+    if (action === "ignore") return;                 // leave the event alone — native handling proceeds
+    if (action === "go") { go.click(); e.preventDefault(); return; }
     if (dk === "gas") gasOn = true;
     else if (dk === "brake") brakeOn = true;
     else if (dk === "left") steerL = true;
     else if (dk === "right") steerR = true;
-    else go.click();
     e.preventDefault();
   }, { capture: true });
   addEventListener("keyup", (e) => {
@@ -185,5 +227,6 @@ export function createControls(ctrlMount: HTMLElement, goMount: HTMLElement, ped
     },
     onLaunch: (cb) => (launchCb = cb),
     onCashout: (cb) => (cashCb = cb),
+    setKeyLaunchBlocked: (fn) => (keyLaunchBlocked = fn),
   };
 }
