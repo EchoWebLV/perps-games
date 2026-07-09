@@ -64,6 +64,7 @@ export const ledgerEntries = pgTable(
   },
   (t) => ({
     userIdx: index("ledger_user_idx").on(t.userId),
+    userCreatedIdx: index("ledger_user_created_idx").on(t.userId, t.createdAt),
     // idempotency: a (asset, reason, ref) triple posts at most once (ref optional).
     idemIdx: uniqueIndex("ledger_idem_idx").on(t.asset, t.reason, t.ref).where(sql`${t.ref} is not null`),
     // cash-moving reasons MUST carry a ref (else one on-chain transfer could credit twice).
@@ -259,3 +260,14 @@ export const roundActions = pgTable(
 );
 
 export type RoundAction = typeof roundActions.$inferSelect;
+
+/** Authoritative per-user upgrade levels (Turbo/Tank/Suspension). Client localStorage is a mirror;
+ *  the server wins on sign-in. Levels feed the entitlement envelope, so they MUST be authoritative. */
+export const upgradeLevels = pgTable("upgrade_levels", {
+  userId: uuid("user_id").primaryKey().references(() => users.id),
+  turbo: integer("turbo").notNull().default(0),
+  tank: integer("tank").notNull().default(0),
+  suspension: integer("suspension").notNull().default(0),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+});
+export type UpgradeLevelsRow = typeof upgradeLevels.$inferSelect;
