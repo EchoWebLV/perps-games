@@ -118,8 +118,9 @@ describe("raider — canonical end-to-end loop (L1 <-> ER, real USDC, provable f
     console.log("mint    :", mint.toBase58());
     console.log("PDAs    : player", playerPda.toBase58(), "| house", masterPda.toBase58(), "| till", till.toBase58(), "| round", roundPda.toBase58());
 
-    // ---- init_house ----
-    await program.methods.initHouse().accounts({
+    // ---- init_house (max_slice = 0 => accept the bounded-by-construction default ceiling,
+    // FIX 2; the operator would pass max_payout(their max stake) in production) ----
+    await program.methods.initHouse(new BN(0)).accounts({
       authority: funder.publicKey, mint, house: masterPda, vaultAuthority, vaultToken,
       tokenProgram: TOKEN_PROGRAM_ID, associatedTokenProgram: ASSOCIATED_TOKEN_PROGRAM_ID,
       systemProgram: SystemProgram.programId,
@@ -265,6 +266,43 @@ describe("raider — canonical end-to-end loop (L1 <-> ER, real USDC, provable f
     // Snapshot the ER's final committed values for the L1 cross-check (till, not master).
     const erPlayerFinal = BigInt((await programER.account.playerBalance.fetch(playerPda)).balance.toString());
     const erHouseFinal = await programER.account.houseBalance.fetch(till);
+
+    // --- ASSERT 1a-neg (FIX 1): a NON-OWNER cannot undelegate the still-delegated session ---
+    // The three PDAs are still ER-delegated here. commit_and_undelegate is now OWNER-ONLY:
+    // an attacker who passes the VICTIM's PDAs but signs as themselves has
+    // payer.key() != player.owner, so the require_keys_eq! rejects with NotOwner. Before the
+    // fix this call tore the victim's live session back to L1, wedging their round and the
+    // locked house capital. (Runs in the ER; funded on L1 for the ER fee payer.)
+    const undelegAttacker = Keypair.generate();
+    await baseProvider.sendAndConfirm(
+      new anchor.web3.Transaction().add(
+        SystemProgram.transfer({
+          fromPubkey: funder.publicKey, toPubkey: undelegAttacker.publicKey,
+          lamports: 0.05 * LAMPORTS_PER_SOL,
+        })));
+    const attackerErProvider = new anchor.AnchorProvider(
+      new anchor.web3.Connection(ER_RPC, { wsEndpoint: ER_WS, commitment: "confirmed" }),
+      new anchor.Wallet(undelegAttacker), { commitment: "confirmed" });
+    const programErAttacker = new anchor.Program(idl, attackerErProvider);
+    let udRejected = false, udErr = "";
+    try {
+      await programErAttacker.methods.commitAndUndelegate().accounts({
+        payer: undelegAttacker.publicKey, player: playerPda, house: till, round: roundPda, mint,
+      }).signers([undelegAttacker]).rpc({ skipPreflight: true });
+    } catch (e) {
+      udRejected = true;
+      udErr = (e && e.toString()) || "";
+    }
+    assert.ok(udRejected, "[1a-neg] a non-owner commit_and_undelegate MUST be rejected");
+    assert.ok(/NotOwner|6007/i.test(udErr),
+      "[1a-neg] rejection must be the owner check (NotOwner=6007), got:\n  " + udErr.split("\n").slice(0, 6).join("\n  "));
+    // The attack must NOT have torn down the session — the PDAs are still delegation-owned.
+    for (const [name, pda] of Object.entries(targets)) {
+      const info = await conn.getAccountInfo(pda);
+      assert.equal(info.owner.toBase58(), DELEGATION_PROGRAM.toBase58(),
+        `[1a-neg] ${name} must still be delegated after the rejected undelegate`);
+    }
+    console.log("[1a-neg] non-owner undelegate REJECTED (NotOwner); session still delegated");
 
     // ---- commit_and_undelegate (land final ER state on L1, restore ownership) ----
     await programER.methods.commitAndUndelegate().accounts({

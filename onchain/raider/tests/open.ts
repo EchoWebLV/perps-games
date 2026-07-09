@@ -82,7 +82,7 @@ async function buildScenario({ funder, baseProvider, program, houseFund, buyInAm
     [Buffer.from("round"), session.publicKey.toBuffer()], program.programId);
 
   // init_house (funder pays + is authority).
-  await program.methods.initHouse().accounts({
+  await program.methods.initHouse(new anchor.BN(0)).accounts({
     authority: funder.publicKey, mint, house: housePda, vaultAuthority, vaultToken,
     tokenProgram: TOKEN_PROGRAM_ID, associatedTokenProgram: ASSOCIATED_TOKEN_PROGRAM_ID,
     systemProgram: SystemProgram.programId,

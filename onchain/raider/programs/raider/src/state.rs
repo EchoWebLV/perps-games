@@ -81,10 +81,18 @@ pub struct HouseBalance {
     pub mint: Pubkey,
     pub balance: u64,
     pub locked: u64,
+    // Operator-configured ceiling (base units) on a single `slice_from_pot` carve (FIX 2).
+    // Bounds one session to at most ONE worst-case round's payout so no caller can reserve
+    // the whole shared bankroll and deny it to everyone else. Only meaningful on the master
+    // `[HOUSE_SEED, mint]` pot (set at `init_house`); unused (0) on per-session tills. A
+    // value of 0 on the master is NEVER treated as "unlimited": `slice_from_pot` falls back
+    // to the bounded-by-construction default `max_payout(MAX_STAKE)`.
+    pub max_slice: u64,
     pub bump: u8,
 }
 impl HouseBalance {
-    pub const SIZE: usize = 8 + 32 + 32 + 8 + 8 + 1;
+    // disc(8) + authority(32) + mint(32) + balance(8) + locked(8) + max_slice(8) + bump(1)
+    pub const SIZE: usize = 8 + 32 + 32 + 8 + 8 + 8 + 1;
 }
 
 #[derive(AnchorSerialize, AnchorDeserialize, Clone, Copy, Default)]
@@ -191,6 +199,12 @@ mod size_tests {
     fn feed_registry_size_fits_eight_entries() {
         // disc(8) + authority(32) + bump(1) + 8 * (feed 32 + feed_id 32 + enabled 1 = 65) = 561
         assert_eq!(FeedRegistry::SIZE, 8 + 32 + 1 + 8 * 65);
+    }
+    #[test]
+    fn house_size_includes_max_slice() {
+        // disc(8) + authority(32) + mint(32) + balance(8) + locked(8) + max_slice(8) + bump(1)
+        // = 97 (FIX 2 added the u64 max_slice ceiling).
+        assert_eq!(HouseBalance::SIZE, 97);
     }
     #[test]
     fn refund_clamps_to_ceiling() {

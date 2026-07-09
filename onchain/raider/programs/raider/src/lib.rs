@@ -97,12 +97,23 @@ pub mod raider {
 
     /// Create the shared HouseBalance ledger PDA + the program-owned vault token
     /// account (ATA of the `[b"vault", mint]` authority PDA) that custodies real USDC.
-    pub fn init_house(ctx: Context<InitHouse>) -> Result<()> {
+    pub fn init_house(ctx: Context<InitHouse>, max_slice: u64) -> Result<()> {
         let h = &mut ctx.accounts.house;
         h.authority = ctx.accounts.authority.key();
         h.mint = ctx.accounts.mint.key();
         h.balance = 0;
         h.locked = 0;
+        // FIX 2: the operator sets the per-session slice ceiling here (init is inherently
+        // operator-controlled — the signer becomes `authority`; fund_house is permissionless
+        // so it is NOT a safe place to set a security-critical cap). Passing 0 accepts the
+        // bounded-by-construction default (one worst-case round at MAX_STAKE); a positive
+        // value tightens it for a lower-stakes table. Stored so slice_from_pot can enforce
+        // `slice <= max_slice` and no caller can carve the whole bankroll.
+        h.max_slice = if max_slice == 0 {
+            settle::max_payout(settle::MAX_STAKE)
+        } else {
+            max_slice
+        };
         h.bump = ctx.bumps.house;
         Ok(())
     }
@@ -308,13 +319,26 @@ pub mod raider {
         // would strand the open round's lock. Clean tills (settled or fresh) have locked == 0.
         require!(ctx.accounts.till.locked == 0, RaiderError::RoundAlreadyOpen);
 
+        // FIX 2: bound the carve to the master's operator-configured per-session ceiling so
+        // one caller can never reserve more than a single worst-case round's payout off the
+        // shared bankroll. An unconfigured (or legacy) master stores max_slice == 0, which is
+        // NEVER "unlimited" — it falls back to the bounded-by-construction default
+        // max_payout(MAX_STAKE), so no code path permits an unbounded slice.
+        let cap = if ctx.accounts.master.max_slice == 0 {
+            settle::max_payout(settle::MAX_STAKE)
+        } else {
+            ctx.accounts.master.max_slice
+        };
+
         let (new_master, new_till) = house::reclaim_and_slice(
             ctx.accounts.master.balance,
             ctx.accounts.till.balance,
             slice,
+            cap,
         )
         .map_err(|e| match e {
             house::HouseMathError::Undercapitalized => RaiderError::HouseUndercapitalized,
+            house::HouseMathError::SliceTooLarge => RaiderError::SliceTooLarge,
             house::HouseMathError::Overflow => RaiderError::MathOverflow,
         })?;
 
@@ -328,6 +352,8 @@ pub mod raider {
         till.mint = mint;
         till.balance = new_till;
         till.locked = 0;
+        // Tills never gate their own slice — the ceiling lives on the master. Keep it 0.
+        till.max_slice = 0;
         till.bump = ctx.bumps.till;
         Ok(())
     }
@@ -817,6 +843,18 @@ pub mod raider {
     /// settled balances are durable on devnet base layer and `withdraw` can pull
     /// real USDC against the player's restored on-L1 play balance.
     pub fn commit_and_undelegate(ctx: Context<SessionCommit>) -> Result<()> {
+        // FIX 1: session teardown is OWNER-ONLY. `payer` is an unconstrained Signer and the
+        // SessionCommit context re-derives player/house/round from `player.owner` (the stored
+        // value), NOT from the signer — so without this gate ANY wallet could undelegate a
+        // victim's live (status==1, locked>0) round back to L1, wedging their in-flight
+        // session and stranding the locked house capital. This mirrors `close` (owner-only)
+        // vs `force_close` (the permissionless liveness path); there is deliberately NO
+        // permissionless teardown here (see report note on a possible keeper path).
+        require_keys_eq!(
+            ctx.accounts.payer.key(),
+            ctx.accounts.player.owner,
+            RaiderError::NotOwner
+        );
         let payer = ctx.accounts.payer.to_account_info();
         let magic_context = ctx.accounts.magic_context.to_account_info();
         let magic_program = ctx.accounts.magic_program.to_account_info();
@@ -1427,6 +1465,9 @@ pub enum RaiderError {
     BadDirection,
     /// open/set_feed got an asset index outside the registry, or an unregistered/disabled feed.
     UnknownAsset,
+    /// slice_from_pot got a slice larger than the master's per-session ceiling (max_slice) —
+    /// one caller may reserve at most one worst-case round's payout off the shared bankroll.
+    SliceTooLarge,
 }
 
 /// Emitted on every Round state transition so the entire path is reconstructable

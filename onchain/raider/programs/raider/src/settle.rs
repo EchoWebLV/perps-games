@@ -24,6 +24,14 @@ pub const MIN_LIQ_FP: i128 = 100_000; // 0.10 — Suspension-maxed (lowest/best 
 pub const CAP_FP: i128 = 25_000_000; // 25.0
 pub const RMIN: u32 = 10;
 pub const RMAX: u32 = 3000;
+// Fallback ceiling (base units) for the per-session house slice (FIX 2): the largest
+// per-round stake the bounded-by-construction default assumes. `max_payout(MAX_STAKE)`
+// is exactly one worst-case round's reservation, which `slice_from_pot` uses as the cap
+// when a master pot has no operator-configured `max_slice` (0). It is a conservative
+// fail-safe only — the operator sets the REAL per-mint ceiling at `init_house` (decimals
+// differ across mints), so this never has to be exactly right, only finite. Chosen large
+// enough not to block legitimate play yet small relative to a funded bankroll.
+pub const MAX_STAKE: u64 = 1_000_000_000;
 // Skull "Death's Door" grace cap (seconds). A round's grace window (the time a
 // sub-floor position may ride before the tick liquidates it) is clamped to this at
 // `open`. Grace is house-negative — some liqs survive — so it is bounded here; the
@@ -53,8 +61,18 @@ impl Outcome {
 
 /// Realize the current segment into banked: banked + dir*lev*(price/entry - 1).
 /// Integer port of packages/engine economics.ts `rebank`. Signed (can go negative).
+///
+/// Rounding is house-favorable PER DIRECTION. price_raw and entry_raw are both > 0
+/// (open() enforces entry > 0), so num and den below are > 0. The segment is
+/// dir*lev*(ratio - SCALE): flooring the ratio biases it down, which shrinks a LONG
+/// segment (house-favorable) but GROWS a SHORT segment (-lev*(ratio-SCALE), player-
+/// favorable). So a long floors the ratio (unchanged) and a short CEILs it, pushing the
+/// short segment down instead. Both directions now shed the rounding crumb to the house;
+/// long-side results stay byte-identical to the pre-fix unsigned floor.
 pub fn rebank_fp(banked_fp: i128, dir: i8, lev: u32, entry_raw: i64, price_raw: i64) -> i128 {
-    let ratio = (price_raw as i128) * SCALE / (entry_raw as i128);
+    let num = (price_raw as i128) * SCALE; // > 0
+    let den = entry_raw as i128; // > 0
+    let ratio = if dir >= 0 { num / den } else { (num + den - 1) / den };
     banked_fp + (dir as i128) * (lev as i128) * (ratio - SCALE)
 }
 
@@ -285,17 +303,20 @@ mod tests {
 
     // Mirror packages/engine settle.test.ts "flip" vector with integer math:
     // open long 10x entry 100; flip to short at 110; exit 105.
-    //   banked after flip = 0 + 10*(1_100_000-1e6) = 1_000_000
-    //   exit segment (dir -1, lev 10, entry 110, exit 105):
-    //     ratio = 105*1e6/110 = 954_545; -10*(954_545-1e6) = -10*(-45_455)=454_550
-    //   equity = 1e6 + 1_000_000 + 454_550 = 2_454_550 => cashout.
+    //   banked after flip = 0 + 10*(1_100_000-1e6) = 1_000_000  (long leg: floor, exact)
+    //   exit segment (dir -1, lev 10, entry 110, exit 105): SHORT leg rounds the ratio UP
+    //   (FIX 3, house-favorable per-direction rounding):
+    //     ratio = ceil(105*1e6/110) = 954_546; -10*(954_546-1e6) = -10*(-45_454) = 454_540
+    //   equity = 1e6 + 1_000_000 + 454_540 = 2_454_540 => cashout.
+    // The pre-fix unsigned floor gave ratio 954_545 -> segment 454_550 -> eq 2_454_550;
+    // the new short-side ceil shaves the 10-unit crumb (lev 10 * 1 ratio-unit) to the house.
     #[test]
     fn flip_sequence_matches_engine() {
         let banked = rebank_fp(0, 1, 10, 100, 110);
         let eq = equity_fp(banked, -1, 10, 110, 105);
         let (o, _) = terminal(eq, LIQ_FP, 0);
         assert_eq!(o, Outcome::Cashout);
-        assert_eq!(eq, 2_454_550);
+        assert_eq!(eq, 2_454_540);
     }
 
     // fires(): liq, cap, time(now>=deadline), and the heartbeat no-op (false).
@@ -480,5 +501,50 @@ mod tests {
         assert_eq!(o, Outcome::Liq);
         assert_eq!(p, payout(1_000_000, 100_000));
         assert_eq!(p, 95_000);
+    }
+
+    // --- FIX 3: house-favorable rounding is now PER-DIRECTION. ---
+
+    // Regression for the short-side rounding arbitrage. Before the fix, rebank_fp
+    // floored the UNSIGNED ratio, which biases a SHORT segment (-lev*(ratio-SCALE)) UP
+    // in the player's favor. Reanchoring a short at lev 3000 on a near-flat oscillating
+    // price banked ~+3_000 SCALE-units per 2-reanchor cycle and crossed the 5% edge
+    // (EDGE_FP = 50_000) in ~18 cycles — a repeatable arbitrage. With ceil-for-short
+    // rounding the crumb flips house-favorable, so `banked` only ever loses ground.
+    #[test]
+    fn short_reanchor_no_rounding_arbitrage() {
+        // A 1-unit wobble around a ~60_000 mark (entries alternate 60_000 <-> 60_001, a
+        // ~0.0017% move) whose true round-trip P&L is a negligible drag — any positive
+        // banked would be pure rounding profit. dir stays -1 (short) the whole loop.
+        let lo: i64 = 60_000;
+        let hi: i64 = 60_001;
+        let lev: u32 = 3000;
+        let mut banked: i128 = 0;
+        let mut entry = lo;
+        // 30 full cycles = 60 reanchors, well past the pre-fix ~18-cycle edge crossing.
+        for _ in 0..30 {
+            banked = rebank_fp(banked, -1, lev, entry, hi);
+            entry = hi;
+            // Pre-fix, the DOWN-reanchor below pushed banked to +3_000 here (arbitrage).
+            assert!(banked <= 0, "short banked went positive after up-reanchor: {banked}");
+            banked = rebank_fp(banked, -1, lev, entry, lo);
+            entry = lo;
+            assert!(banked <= 0, "short banked went positive after down-reanchor: {banked}");
+        }
+        // Never crossed the house edge into net player profit (pre-fix reached > +50_000).
+        assert!(banked < EDGE_FP, "banked crossed the house edge: {banked}");
+        // Every cycle sheds the crumb to the house, so banked ends strictly negative.
+        assert!(banked < 0, "expected a net house-favorable drag, got {banked}");
+    }
+
+    // The LONG path is byte-identical to the pre-fix unsigned floor (dir >= 0 => floor).
+    // Same non-exact 60_000<->60_001 input as the short regression, proving only the short
+    // side changed and a long still loses its rounding crumb DOWN to the house.
+    #[test]
+    fn long_reanchor_still_floors() {
+        // up move: ratio floor(60_001*1e6/60_000) = 1_000_016; +3000*16 = +48_000.
+        assert_eq!(rebank_fp(0, 1, 3000, 60_000, 60_001), 48_000);
+        // down move: ratio floor(60_000*1e6/60_001) = 999_983; +3000*(999_983-1e6) = -51_000.
+        assert_eq!(rebank_fp(0, 1, 3000, 60_001, 60_000), -51_000);
     }
 }

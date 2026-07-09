@@ -52,7 +52,7 @@ describe("raider buy_in + withdraw (non-custodial invariant)", function () {
       [Buffer.from("player"), wallet.publicKey.toBuffer(), mint.toBuffer()], program.programId);
 
     // init house (creates the vault ATA) + an owner ATA funded with 10 USDC.
-    await program.methods.initHouse().accounts({
+    await program.methods.initHouse(new anchor.BN(0)).accounts({
       authority: wallet.publicKey, mint, house: housePda, vaultAuthority, vaultToken,
       tokenProgram: TOKEN_PROGRAM_ID, associatedTokenProgram: ASSOCIATED_TOKEN_PROGRAM_ID,
       systemProgram: SystemProgram.programId,

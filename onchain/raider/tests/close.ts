@@ -101,7 +101,7 @@ async function buildAndDelegate({ funder, baseProvider, program, houseFund, buyI
   const [roundPda] = PublicKey.findProgramAddressSync(
     [Buffer.from("round"), session.publicKey.toBuffer()], program.programId);
 
-  await program.methods.initHouse().accounts({
+  await program.methods.initHouse(new anchor.BN(0)).accounts({
     authority: funder.publicKey, mint, house: housePda, vaultAuthority, vaultToken,
     tokenProgram: TOKEN_PROGRAM_ID, associatedTokenProgram: ASSOCIATED_TOKEN_PROGRAM_ID,
     systemProgram: SystemProgram.programId,

@@ -91,7 +91,7 @@ describe("raider — flip mid-round parity (terminal-first rebank, BigInt sequen
     );
 
     await program.methods
-      .initHouse()
+      .initHouse(new anchor.BN(0))
       .accounts({
         authority: funder.publicKey,
         mint,

@@ -74,7 +74,7 @@ describe("raider delegate_session (co-delegate player+house+round)", function ()
       [Buffer.from("round"), session.publicKey.toBuffer()], program.programId);
 
     // House (funder pays) + a session-owner ATA funded with 5 USDC + buy_in.
-    await program.methods.initHouse().accounts({
+    await program.methods.initHouse(new anchor.BN(0)).accounts({
       authority: funder.publicKey, mint, house: housePda, vaultAuthority, vaultToken,
       tokenProgram: TOKEN_PROGRAM_ID, associatedTokenProgram: ASSOCIATED_TOKEN_PROGRAM_ID,
       systemProgram: SystemProgram.programId,
