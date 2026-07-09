@@ -9,7 +9,8 @@
     "./economics": "./src/economics.ts",
     "./leverage": "./src/leverage.ts",
     "./config": "./src/config.ts",
-    "./settle": "./src/settle.ts"
+    "./settle": "./src/settle.ts",
+    "./entitlements": "./src/entitlements.ts"
   },
   "scripts": {
     "build": "tsc --noEmit",
