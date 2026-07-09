@@ -1,6 +1,7 @@
 import * as THREE from "three";
 import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader.js";
 import { tagTexture } from "./stripcars";
+import { buildWheelRig, type WheelRig } from "./wheels";
 
 /**
  * Ambient cruisers — a couple of cars slowly lapping the plaza so the strip never reads
@@ -46,11 +47,13 @@ export function createCruisers(specs: CruiserSpec[]): Cruisers {
   const loader = new GLTFLoader();
   const jobs: Array<(prepare?: (model: THREE.Object3D) => Promise<unknown>) => Promise<void>> = [];
 
-  const anchors: Array<{ node: THREE.Group; theta: number }> = [];
+  const anchors: Array<{ node: THREE.Group; theta: number; rig: WheelRig | null }> = [];
   specs.slice(0, 2).forEach((spec, i) => {
     const anchor = new THREE.Group();
     group.add(anchor);
-    anchors.push({ node: anchor, theta: (i * Math.PI) }); // opposite sides of the lap
+    // rig filled in once the GLB streams in (null until then, and for wheel-less models like the magnet)
+    const entry = { node: anchor, theta: i * Math.PI, rig: null as WheelRig | null };
+    anchors.push(entry); // opposite sides of the lap
 
     // optional floating gamertag — child of the anchor, so it rides the moving car
     let tagSprite: THREE.Sprite | null = null;
@@ -70,7 +73,8 @@ export function createCruisers(specs: CruiserSpec[]): Cruisers {
         const model = gltf.scene;
         const box = new THREE.Box3().setFromObject(model);
         const size = box.getSize(new THREE.Vector3());
-        model.scale.setScalar((TARGET_LEN / (Math.max(size.x, size.z) || 1)) * (spec.scale ?? 1));
+        const scale = (TARGET_LEN / (Math.max(size.x, size.z) || 1)) * (spec.scale ?? 1);
+        model.scale.setScalar(scale);
         model.rotation.y = MODEL_YAW + (spec.yaw ?? 0);
         const box2 = new THREE.Box3().setFromObject(model);
         const c = box2.getCenter(new THREE.Vector3());
@@ -81,6 +85,13 @@ export function createCruisers(specs: CruiserSpec[]): Cruisers {
           anchor.add(model);
           // float the tag clear of THIS cruiser's roofline (magnet is tall, the cart is squat)
           if (tagSprite) tagSprite.position.y = Math.max(6.4, box2.max.y - box2.min.y + 2.2);
+          // wheel roll: build the rig at the anchor's canonical (unyawed) pose so the forward-roll
+          // SIGN is read against the car body (the model noses -Z at rot 0); update() re-yaws next frame.
+          const savedRot = anchor.rotation.y;
+          anchor.rotation.y = 0;
+          anchor.updateMatrixWorld(true);
+          entry.rig = buildWheelRig(model, scale, { probe: false }); // null when the GLB has no rigged wheels
+          anchor.rotation.y = savedRot;
           done();
         });
       }, undefined, (err) => { console.warn("[cruisers] GLB failed:", spec.url, err); done(); });
@@ -103,6 +114,7 @@ export function createCruisers(specs: CruiserSpec[]): Cruisers {
         const p = cruiserPose(a.theta);
         a.node.position.set(p.x, 0, p.z);
         a.node.rotation.y = p.rot;
+        a.rig?.spin(dt, SPEED); // roll the wheels at the lap's linear speed (circle → constant = SPEED)
       }
     },
     cull(x, z, maxDist) {

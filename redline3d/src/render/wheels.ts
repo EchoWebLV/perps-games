@@ -45,7 +45,7 @@ export function spinSign(wheel: THREE.Object3D, axleLocal: THREE.Vector3): -1 | 
   return world.x >= 0 ? -1 : 1;
 }
 
-export function buildWheelRig(model: THREE.Object3D, worldScale: number): WheelRig | null {
+export function buildWheelRig(model: THREE.Object3D, worldScale: number, opts?: { probe?: boolean }): WheelRig | null {
   model.updateMatrixWorld(true);
   const wheels = collectWheels(model);
   if (!wheels.length) return null;
@@ -66,7 +66,7 @@ export function buildWheelRig(model: THREE.Object3D, worldScale: number): WheelR
   });
   let travel = 0;      // accumulated world-units of road under the wheels
   let steerAngle = 0;
-  if (typeof window !== "undefined" && import.meta.env.DEV) (window as any).__wheels = per; // preview probe
+  if (typeof window !== "undefined" && import.meta.env.DEV && opts?.probe !== false) (window as any).__wheels = per; // preview probe (suppressed for cruisers so they don't clobber the player car's)
   const qSteer = new THREE.Quaternion();
   const qSpin = new THREE.Quaternion();
   const apply = () => {
