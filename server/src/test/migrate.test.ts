@@ -1,5 +1,5 @@
 import { describe, it, expect, afterEach } from "vitest";
-import { makeTestDb, type TestCtx } from "./harness.js";
+import { makeTestDb, bindDevWallet, type TestCtx } from "./harness.js";
 
 const H = { "x-dev-user": "alice", "content-type": "application/json" };
 
@@ -9,6 +9,7 @@ describe("POST /v1/migrate (seed-if-empty)", () => {
 
   it("seeds an empty account from the local save", async () => {
     ctx = await makeTestDb({ signupFaucet: false });
+    await bindDevWallet(ctx, "alice");
     const res = await ctx.server.inject({
       method: "POST", url: "/v1/migrate", headers: H,
       payload: { coins: 250, scrap: 30, cars: { orion: 1, clowncar: 2 } },
@@ -25,6 +26,7 @@ describe("POST /v1/migrate (seed-if-empty)", () => {
 
   it("refuses to seed (and never sums) when the account already has state", async () => {
     ctx = await makeTestDb({ signupFaucet: false });
+    await bindDevWallet(ctx, "alice");
     const userId = (await ctx.users.upsertByExternalId("dev:alice")).id;
     await ctx.ledger.credit(userId, "coin", 500, "earn", "pre");
 
@@ -39,6 +41,7 @@ describe("POST /v1/migrate (seed-if-empty)", () => {
 
   it("rejects an oversized per-car count", async () => {
     ctx = await makeTestDb({ signupFaucet: false });
+    await bindDevWallet(ctx, "alice");
     const res = await ctx.server.inject({
       method: "POST", url: "/v1/migrate", headers: H,
       payload: { coins: 0, scrap: 0, cars: { orion: 100000 } },
@@ -48,6 +51,7 @@ describe("POST /v1/migrate (seed-if-empty)", () => {
 
   it("seeds a cars-only save with zero coins and scrap", async () => {
     ctx = await makeTestDb({ signupFaucet: false });
+    await bindDevWallet(ctx, "alice");
     const res = await ctx.server.inject({
       method: "POST", url: "/v1/migrate", headers: H,
       payload: { coins: 0, scrap: 0, cars: { orion: 2 } },

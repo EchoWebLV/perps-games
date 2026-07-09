@@ -22,6 +22,10 @@ const EnvShape = z.object({
     .default("true")
     .transform((v) => v !== "false"),
   REAL_MONEY_ENABLED: z.string().optional().transform((v) => v === "true"),
+  // Deliberate switch that must be turned on for cash (real-money) rounds to boot. Defaults off;
+  // even when on, boot still fails closed until an autonomous settler is wired (see
+  // assertRoundSettlerForStake). No settler exists yet, so cash rounds cannot run.
+  CASH_SETTLER_ENABLED: z.string().optional().transform((v) => v === "true"),
   SOLANA_RPC_URL: z.string().url().optional(),
   SOLANA_RPC_URL_FALLBACK: z.string().url().optional(),
   SOLANA_CLUSTER: z.enum(["mainnet-beta", "devnet"]).default("mainnet-beta"),
@@ -42,6 +46,10 @@ const EnvShape = z.object({
   WITHDRAW_QUORUM_THRESHOLD_CENTS: z.coerce.number().int().nonnegative().default(0),
   TREASURY_SECRET: z.string().min(1).optional(),
   WITHDRAW_POLL_MS: z.coerce.number().int().positive().default(4000),
+  // Shared operator secret guarding the admin withdrawal-approval endpoint (the v1 stand-in for the
+  // quorum/Intents co-signer). Unset => the admin surface is disabled AND withdrawals refuse to
+  // reserve (no approval path => funds would strand). Min length keeps a weak secret from booting.
+  ADMIN_API_SECRET: z.string().min(16).optional(),
 });
 
 const Env = EnvShape.superRefine((e, ctx) => {

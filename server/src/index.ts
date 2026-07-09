@@ -5,6 +5,7 @@ import { makeUsers } from "./services/users.js";
 import { makeLedger } from "./services/ledger.js";
 import { makeInventory } from "./services/inventory.js";
 import { makeRounds } from "./services/rounds.js";
+import { assertRoundSettlerForStake, type RoundSettler } from "./services/round-settler-guard.js";
 import { ensureHouseUserId } from "./services/house.js";
 import { makeHermesFeed } from "./feed/hermes.js";
 import { makeSessionAuth } from "./auth/session.js";
@@ -19,6 +20,15 @@ async function main(): Promise<void> {
   // fail loud: dev seed endpoints must never be enabled in production
   if (env.DEV_ENDPOINTS && env.NODE_ENV === "production")
     throw new Error("refusing to boot: DEV_ENDPOINTS must not be enabled in production");
+
+  // Real money ON => rounds stake + pay out in real USDC-backed `cash`; OFF => soft `coin`.
+  const stakeAsset = env.REAL_MONEY_ENABLED ? ("cash" as const) : ("coin" as const);
+  // No autonomous round settler exists yet, so cash rounds fail closed here (they would otherwise be
+  // free options — the engine settles only at client-submitted marks). Wire the real settler into
+  // `roundSettler` when it lands; until then this stays null and cash cannot boot. See
+  // assertRoundSettlerForStake. Coin rounds are unaffected.
+  const roundSettler: RoundSettler | null = null;
+  assertRoundSettlerForStake({ stakeAsset, cashSettlerEnabled: env.CASH_SETTLER_ENABLED, roundSettler });
 
   const raw = createRuntimeDb({
     databaseUrl: env.DATABASE_URL,
@@ -48,7 +58,7 @@ async function main(): Promise<void> {
     const { makeRpcDepositSource } = await import("./solana/deposit-source.js");
     const { assertUsdcMint } = await import("./solana/mint-assert.js");
     const { makeDeposits } = await import("./services/deposits.js");
-    const { makeDepositConfirmer } = await import("./services/deposit-worker.js");
+    const { makeDepositConfirmer, makeDbDepositCursorStore } = await import("./services/deposit-worker.js");
     const { makeRpcWalletBalanceReader } = await import("./services/wallet-balance.js");
     const { makeRpcSignedTxBroadcaster } = await import("./services/signed-tx-broadcaster.js");
     const source = makeRpcDepositSource(env.SOLANA_RPC_URL!);
@@ -58,7 +68,7 @@ async function main(): Promise<void> {
       minCents: env.DEPOSIT_MIN_CENTS, maxCents: env.DEPOSIT_MAX_CENTS,
     });
     if (env.RUN_CONFIRMER) {
-      depositConfirmer = makeDepositConfirmer({ deposits, source, treasuryAta: env.TREASURY_USDC_ATA!, pollMs: env.DEPOSIT_POLL_MS });
+      depositConfirmer = makeDepositConfirmer({ deposits, source, store: makeDbDepositCursorStore(db), treasuryAta: env.TREASURY_USDC_ATA!, pollMs: env.DEPOSIT_POLL_MS });
       depositConfirmer.start();
     }
     realMoney = { enabled: true, treasuryUsdcAta: env.TREASURY_USDC_ATA! };
@@ -136,8 +146,6 @@ async function main(): Promise<void> {
     staleMs: Number(process.env.FEED_STALE_MS) || undefined,
   });
   feed.start();
-  // Real money ON => rounds stake + pay out in real USDC-backed `cash`; OFF => soft `coin`.
-  const stakeAsset = env.REAL_MONEY_ENABLED ? ("cash" as const) : ("coin" as const);
   const rounds = makeRounds({ db, ledger, feed, stakeAsset, houseUserId });
   const sessionAuth = makeSessionAuth({
     users,
@@ -174,6 +182,7 @@ async function main(): Promise<void> {
     withdrawals: withdrawalsSvc ?? null,
     withdrawProcessor,
     payoutSigner,
+    adminSecret: env.ADMIN_API_SECRET ?? null,
   });
 
   const addr = await server.listen({ port: env.PORT, host: "0.0.0.0" });

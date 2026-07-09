@@ -11,6 +11,11 @@ describe("real-money env gating", () => {
     expect(e.DEPOSIT_MAX_CENTS).toBe(500);
   });
 
+  it("defaults CASH_SETTLER_ENABLED off (cash rounds fail closed) and parses true", () => {
+    expect(parseEnv({ ...base } as any).CASH_SETTLER_ENABLED).toBe(false);
+    expect(parseEnv({ ...base, CASH_SETTLER_ENABLED: "true" } as any).CASH_SETTLER_ENABLED).toBe(true);
+  });
+
   it("THROWS when real money is on but Solana config is missing (fail closed)", () => {
     expect(() => parseEnv({ ...base, REAL_MONEY_ENABLED: "true" } as any)).toThrow(/SOLANA_RPC_URL|USDC_MINT|TREASURY_USDC_ATA/);
   });

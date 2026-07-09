@@ -119,6 +119,18 @@ export const depositSources = pgTable(
 );
 export type DepositSourceRow = typeof depositSources.$inferSelect;
 
+/**
+ * Durable poll cursor for the deposit confirmer, one row per treasury ATA. Stores the newest
+ * signature processed so far so a restart resumes where it left off (an in-memory cursor was lost on
+ * restart and re-scanned only the newest page, permanently skipping older legitimate deposits).
+ */
+export const depositCursors = pgTable("deposit_cursors", {
+  treasuryAta: text("treasury_ata").primaryKey(),
+  lastSig: text("last_sig").notNull(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+});
+export type DepositCursor = typeof depositCursors.$inferSelect;
+
 export const withdrawalStatus = pgEnum("withdrawal_status", [
   "reserved", "awaiting_approval", "signing", "sent", "confirmed", "failed", "reversed", "needs_review",
 ]);

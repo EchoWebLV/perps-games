@@ -43,6 +43,7 @@ interface MakeTestDbOptions {
   withdrawals?: Withdrawals | null;
   withdrawProcessor?: WithdrawProcessor | null;
   payoutSigner?: WithdrawSigner | null;
+  adminSecret?: string | null;
   stakeAsset?: "coin" | "cash";
 }
 
@@ -89,7 +90,17 @@ export async function makeTestDb(opts: MakeTestDbOptions = {}): Promise<TestCtx>
     withdrawals: opts.withdrawals ?? null,
     withdrawProcessor: opts.withdrawProcessor ?? null,
     payoutSigner: opts.payoutSigner ?? null,
+    adminSecret: opts.adminSecret ?? null,
   });
 
   return { raw, db, users, ledger, inventory, rounds, feed, houseUserId, server, close: () => raw.close() };
+}
+
+/**
+ * Bind a unique wallet to a dev-auth user (dev:<name>) so it passes requireWalletBoundUser on the
+ * economy-mutating endpoints. Distinct default wallet per name (the wallet column is unique).
+ */
+export async function bindDevWallet(ctx: TestCtx, name: string, wallet?: string): Promise<void> {
+  const u = await ctx.users.upsertByExternalId(`dev:${name}`);
+  await ctx.users.setWalletPublicKey(u.id, wallet ?? `wallet-${name}`);
 }

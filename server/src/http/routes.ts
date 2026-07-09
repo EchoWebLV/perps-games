@@ -6,7 +6,7 @@ import type { Inventory } from "../services/inventory.js";
 import type { Rounds } from "../services/rounds.js";
 import type { PriceFeed } from "../feed/types.js";
 import { FeedHaltError, RoundNotFoundError, RoundClosedError, OpenRoundExistsError } from "../services/errors.js";
-import { makeRequireUser } from "./auth.js";
+import { makeRequireUser, makeRequireAdmin, makeRequireWalletBoundUser } from "./auth.js";
 
 export interface RouteDeps {
   users: Users;
@@ -31,6 +31,8 @@ export interface RouteDeps {
   withdrawals: import("../services/withdrawals.js").Withdrawals | null;
   withdrawProcessor: import("../services/withdraw-worker.js").WithdrawProcessor | null;
   payoutSigner: import("../services/withdraw-worker.js").WithdrawSigner | null;
+  /** operator secret guarding the admin withdrawal-approval endpoint; null disables that surface. */
+  adminSecret: string | null;
 }
 
 const GrantCoins = z.object({ amount: z.number().int().positive() });
@@ -51,7 +53,7 @@ const MigrateBody = z.object({
   coins: z.number().int().min(0).max(1_000_000_000),
   scrap: z.number().int().min(0).max(1_000_000_000),
   // bound the per-car count AND the number of cars so a tiny payload can't drive unbounded
-  // DB work (this endpoint is reachable with a free anonymous session).
+  // DB work (defense in depth — the endpoint now also requires a wallet-bound session).
   cars: z
     .record(z.string().min(1), z.number().int().positive().max(1000))
     .refine((c) => Object.keys(c).length <= 64, { message: "too_many_cars" }),
@@ -76,6 +78,9 @@ const CloseRound = z.object({ roundId: z.string().uuid(), reason: z.enum(["casho
 
 export function registerRoutes(server: FastifyInstance, deps: RouteDeps): void {
   const requireUser = makeRequireUser({ users: deps.users, devAuth: deps.devAuth, sessionAuth: deps.sessionAuth });
+  // economy-MUTATING endpoints require a wallet-bound (non-anonymous) session — see the preHandler.
+  const requireWalletBoundUser = makeRequireWalletBoundUser({ users: deps.users, devAuth: deps.devAuth, sessionAuth: deps.sessionAuth });
+  const requireAdmin = makeRequireAdmin(deps.adminSecret);
 
   server.post("/v1/session", async () => deps.sessionAuth.issueAnonymous());
 
@@ -83,14 +88,14 @@ export function registerRoutes(server: FastifyInstance, deps: RouteDeps): void {
     return { balance: await deps.ledger.balance(req.userId!, deps.stakeAsset) };
   });
 
-  server.post("/v1/coins/earn", { preHandler: requireUser }, async (req, reply) => {
+  server.post("/v1/coins/earn", { preHandler: requireWalletBoundUser }, async (req, reply) => {
     const p = CoinDelta.safeParse(req.body);
     if (!p.success) return reply.code(400).send({ error: "bad_request" });
     await deps.ledger.credit(req.userId!, "coin", p.data.amount, "earn", `${req.userId!}:${p.data.ref}`);
     return { coins: await deps.ledger.balance(req.userId!, "coin") };
   });
 
-  server.post("/v1/coins/spend", { preHandler: requireUser }, async (req, reply) => {
+  server.post("/v1/coins/spend", { preHandler: requireWalletBoundUser }, async (req, reply) => {
     const p = CoinDelta.safeParse(req.body);
     if (!p.success) return reply.code(400).send({ error: "bad_request" });
     try {
@@ -102,14 +107,14 @@ export function registerRoutes(server: FastifyInstance, deps: RouteDeps): void {
     return { coins: await deps.ledger.balance(req.userId!, "coin") };
   });
 
-  server.post("/v1/scrap/earn", { preHandler: requireUser }, async (req, reply) => {
+  server.post("/v1/scrap/earn", { preHandler: requireWalletBoundUser }, async (req, reply) => {
     const p = CoinDelta.safeParse(req.body);
     if (!p.success) return reply.code(400).send({ error: "bad_request" });
     await deps.ledger.credit(req.userId!, "scrap", p.data.amount, "scrap_earn", `${req.userId!}:${p.data.ref}`);
     return { scrap: await deps.ledger.balance(req.userId!, "scrap") };
   });
 
-  server.post("/v1/scrap/spend", { preHandler: requireUser }, async (req, reply) => {
+  server.post("/v1/scrap/spend", { preHandler: requireWalletBoundUser }, async (req, reply) => {
     const p = CoinDelta.safeParse(req.body);
     if (!p.success) return reply.code(400).send({ error: "bad_request" });
     try {
@@ -139,14 +144,14 @@ export function registerRoutes(server: FastifyInstance, deps: RouteDeps): void {
     return deps.users.redeemAccess(req.userId!, p.data.code);
   });
 
-  server.post("/v1/inventory/grant", { preHandler: requireUser }, async (req, reply) => {
+  server.post("/v1/inventory/grant", { preHandler: requireWalletBoundUser }, async (req, reply) => {
     const p = CarRef.safeParse(req.body);
     if (!p.success) return reply.code(400).send({ error: "bad_request" });
     const r = await deps.inventory.grant(req.userId!, p.data.carId);
     return { carId: p.data.carId, isNew: r.isNew, count: r.count };
   });
 
-  server.post("/v1/inventory/melt", { preHandler: requireUser }, async (req, reply) => {
+  server.post("/v1/inventory/melt", { preHandler: requireWalletBoundUser }, async (req, reply) => {
     const p = CarRef.safeParse(req.body);
     if (!p.success) return reply.code(400).send({ error: "bad_request" });
     const r = await deps.inventory.melt(req.userId!, p.data.carId);
@@ -159,7 +164,7 @@ export function registerRoutes(server: FastifyInstance, deps: RouteDeps): void {
   // Coins/scrap are ref-idempotent (namespaced `migrate:${userId}`); cars are NOT — a concurrent
   // or repeated first-bind on a still-empty account could double-grant cars. Accepted for now:
   // cars are soft, non-withdrawable state.
-  server.post("/v1/migrate", { preHandler: requireUser }, async (req, reply) => {
+  server.post("/v1/migrate", { preHandler: requireWalletBoundUser }, async (req, reply) => {
     const p = MigrateBody.safeParse(req.body);
     if (!p.success) return reply.code(400).send({ error: "bad_request" });
     const userId = req.userId!;
@@ -310,6 +315,10 @@ export function registerRoutes(server: FastifyInstance, deps: RouteDeps): void {
   const WithdrawBody = z.object({ amountCents: z.number().int().positive() });
   server.post("/v1/withdraw", { preHandler: requireUser }, async (req, reply) => {
     if (!deps.withdrawals) return reply.code(404).send({ error: "withdrawals_disabled" });
+    // Fail closed: reserving DEBITS the user, so we must never reserve unless the full processing
+    // path exists — a send worker (withdrawProcessor) AND an approval trigger (adminSecret). Without
+    // both, an approved withdrawal can never be driven reserved→sent and the debited funds strand.
+    if (!deps.withdrawProcessor || !deps.adminSecret) return reply.code(503).send({ error: "withdrawals_unavailable" });
     const body = WithdrawBody.safeParse(req.body);
     if (!body.success) return reply.code(400).send({ error: "bad_request" });
     const r = await deps.withdrawals.reserve(req.userId!, body.data.amountCents);
@@ -317,10 +326,12 @@ export function registerRoutes(server: FastifyInstance, deps: RouteDeps): void {
     return { withdrawalId: r.withdrawalId, state: r.state };
   });
 
-  // admin-gated approval (v1 stand-in for the quorum/Intents co-signer). NEVER exposed in prod
-  // (gated on devEndpoints, which is false in production).
-  server.post("/v1/admin/withdraw/:id/approve", { preHandler: requireUser }, async (req, reply) => {
-    if (!deps.devEndpoints || !deps.withdrawProcessor) return reply.code(404).send({ error: "not_found" });
+  // admin-authorized approval (v1 stand-in for the quorum/Intents co-signer): awaiting_approval →
+  // signing → sent, exactly-once via the idempotency key inside approveAndSend. Guarded by the
+  // shared admin secret (requireAdmin) so an operator can drive withdrawals in PRODUCTION — no
+  // longer gated on devEndpoints (which is false in prod and left withdrawals stranded).
+  server.post("/v1/admin/withdraw/:id/approve", { preHandler: requireAdmin }, async (req, reply) => {
+    if (!deps.withdrawProcessor) return reply.code(404).send({ error: "not_found" });
     const id = (req.params as { id: string }).id;
     const r = await deps.withdrawProcessor.approveAndSend(id);
     if (r.status !== "sent") return reply.code(409).send({ error: r.status });

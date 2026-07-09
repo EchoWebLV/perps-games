@@ -1,5 +1,5 @@
 import { describe, it, expect, afterEach } from "vitest";
-import { makeTestDb, type TestCtx } from "./harness.js";
+import { makeTestDb, bindDevWallet, type TestCtx } from "./harness.js";
 
 const H = { "x-dev-user": "alice", "content-type": "application/json" };
 
@@ -45,6 +45,7 @@ describe("coins earn/spend", () => {
 
   it("earns coins (idempotent on ref) and spends them", async () => {
     ctx = await makeTestDb({ signupFaucet: false });
+    await bindDevWallet(ctx, "alice");
     const earn = await ctx.server.inject({ method: "POST", url: "/v1/coins/earn", headers: H, payload: { amount: 30, ref: "e1" } });
     expect(earn.statusCode).toBe(200);
     expect(earn.json().coins).toBe(30);
@@ -58,6 +59,7 @@ describe("coins earn/spend", () => {
 
   it("402s when spending more coins than the balance", async () => {
     ctx = await makeTestDb({ signupFaucet: false });
+    await bindDevWallet(ctx, "alice");
     const res = await ctx.server.inject({ method: "POST", url: "/v1/coins/spend", headers: H, payload: { amount: 5, ref: "x" } });
     expect(res.statusCode).toBe(402);
     expect(res.json().error).toBe("insufficient_balance");
@@ -65,6 +67,8 @@ describe("coins earn/spend", () => {
 
   it("does not collide refs across different users", async () => {
     ctx = await makeTestDb({ signupFaucet: false });
+    await bindDevWallet(ctx, "userA");
+    await bindDevWallet(ctx, "userB");
     const A = { "x-dev-user": "userA", "content-type": "application/json" };
     const B = { "x-dev-user": "userB", "content-type": "application/json" };
     const ra = await ctx.server.inject({ method: "POST", url: "/v1/coins/earn", headers: A, payload: { amount: 20, ref: "shared" } });
@@ -80,6 +84,7 @@ describe("scrap earn/spend", () => {
 
   it("earns and spends scrap independently of coins", async () => {
     ctx = await makeTestDb({ signupFaucet: false });
+    await bindDevWallet(ctx, "alice");
     const earn = await ctx.server.inject({ method: "POST", url: "/v1/scrap/earn", headers: H, payload: { amount: 5, ref: "se1" } });
     expect(earn.statusCode).toBe(200);
     expect(earn.json().scrap).toBe(5);
@@ -91,6 +96,7 @@ describe("scrap earn/spend", () => {
 
   it("402s when spending more scrap than the balance", async () => {
     ctx = await makeTestDb({ signupFaucet: false });
+    await bindDevWallet(ctx, "alice");
     const res = await ctx.server.inject({ method: "POST", url: "/v1/scrap/spend", headers: H, payload: { amount: 9, ref: "z" } });
     expect(res.statusCode).toBe(402);
     expect(res.json().error).toBe("insufficient_balance");
@@ -98,6 +104,8 @@ describe("scrap earn/spend", () => {
 
   it("does not collide scrap refs across different users", async () => {
     ctx = await makeTestDb({ signupFaucet: false });
+    await bindDevWallet(ctx, "scrapA");
+    await bindDevWallet(ctx, "scrapB");
     const A = { "x-dev-user": "scrapA", "content-type": "application/json" };
     const B = { "x-dev-user": "scrapB", "content-type": "application/json" };
     const ra = await ctx.server.inject({ method: "POST", url: "/v1/scrap/earn", headers: A, payload: { amount: 8, ref: "shared" } });
@@ -113,6 +121,7 @@ describe("inventory grant/melt endpoints", () => {
 
   it("grants (stacking) and melts (keep-last)", async () => {
     ctx = await makeTestDb({ signupFaucet: false });
+    await bindDevWallet(ctx, "alice");
     const g1 = await ctx.server.inject({ method: "POST", url: "/v1/inventory/grant", headers: H, payload: { carId: "orion" } });
     expect(g1.json()).toEqual({ carId: "orion", isNew: true, count: 1 });
     const g2 = await ctx.server.inject({ method: "POST", url: "/v1/inventory/grant", headers: H, payload: { carId: "orion" } });
@@ -126,6 +135,7 @@ describe("inventory grant/melt endpoints", () => {
 
   it("400s on a missing carId", async () => {
     ctx = await makeTestDb({ signupFaucet: false });
+    await bindDevWallet(ctx, "alice");
     const res = await ctx.server.inject({ method: "POST", url: "/v1/inventory/grant", headers: H, payload: {} });
     expect(res.statusCode).toBe(400);
   });
@@ -147,6 +157,7 @@ describe("coherence fixes", () => {
 
   it("rejects an absurdly large earn amount", async () => {
     ctx = await makeTestDb({ signupFaucet: false });
+    await bindDevWallet(ctx, "alice");
     const res = await ctx.server.inject({ method: "POST", url: "/v1/coins/earn", headers: H, payload: { amount: 2_000_000_000, ref: "big" } });
     expect(res.statusCode).toBe(400);
   });

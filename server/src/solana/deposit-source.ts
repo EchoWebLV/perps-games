@@ -3,9 +3,22 @@ import { fetchMint } from "@solana-program/token";
 import type { InboundTransfer } from "../services/deposits.js";
 import type { MintInfo } from "./mint-assert.js";
 
-/** Reads finalized inbound USDC transfers to a treasury ATA, newest-first, stopping at `untilSig`. */
+/**
+ * One page of a treasury ATA's signature history (newest-first). `transfers` are the inbound USDC
+ * transfers found in the page; `newestSig`/`oldestSig` are the RAW signature bounds of the page
+ * (including dust/non-deposit sigs) so the caller can advance its cursor and paginate; `full` is
+ * true when the page hit `limit` (older pages may exist).
+ */
+export interface InboundPage {
+  transfers: InboundTransfer[];
+  newestSig: string | null;
+  oldestSig: string | null;
+  full: boolean;
+}
+
+/** Reads finalized inbound USDC transfers to a treasury ATA, newest-first, within (untilSig, beforeSig). */
 export interface DepositSource {
-  fetchInbound(opts: { treasuryAta: string; untilSig?: string; limit?: number }): Promise<InboundTransfer[]>;
+  fetchInbound(opts: { treasuryAta: string; untilSig?: string; beforeSig?: string; limit?: number }): Promise<InboundPage>;
   fetchTransfer?(opts: { treasuryAta: string; txSig: string }): Promise<InboundTransfer | null>;
   fetchMintInfo(mint: string): Promise<MintInfo>;
   /** Treasury USDC ATA balance in base units (for the withdraw solvency precheck). */
@@ -153,15 +166,16 @@ export function makeRpcDepositSource(rpcUrl: string): DepositSource {
       const res = await rpc.getTokenAccountBalance(address(ata), { commitment: "finalized" } as any).send();
       return BigInt((res as any).value.amount);
     },
-    async fetchInbound({ treasuryAta, untilSig, limit = 100 }) {
+    async fetchInbound({ treasuryAta, untilSig, beforeSig, limit = 100 }) {
       const sigs = await withRpcTimeout(rpc
         .getSignaturesForAddress(address(treasuryAta), {
           ...(untilSig ? { until: signature(untilSig) } : {}),
+          ...(beforeSig ? { before: signature(beforeSig) } : {}),
           limit,
           commitment: "finalized",
         })
         .send());
-      const out: InboundTransfer[] = [];
+      const transfers: InboundTransfer[] = [];
       for (const s of sigs) {
         if (s.err) continue; // landed-but-failed: no tokens moved
         let tx: any;
@@ -179,9 +193,16 @@ export function makeRpcDepositSource(rpcUrl: string): DepositSource {
         }
         if (!tx) continue;
         const inbound = inboundFromTransaction(s.signature, Number(s.slot), tx, treasuryAta);
-        if (inbound) out.push(inbound);
+        if (inbound) transfers.push(inbound);
       }
-      return out;
+      // page bounds are the RAW signature edges (incl. dust) so the caller can advance past dust and
+      // fetch the next older page with `before: oldestSig`. `full` => the page hit `limit` (more exist).
+      return {
+        transfers,
+        newestSig: sigs.length ? sigs[0].signature : null,
+        oldestSig: sigs.length ? sigs[sigs.length - 1].signature : null,
+        full: sigs.length === limit,
+      };
     },
     async fetchTransfer({ treasuryAta, txSig }) {
       let tx: any;
