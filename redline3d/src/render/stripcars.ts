@@ -1,5 +1,6 @@
 import * as THREE from "three";
 import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader.js";
+import { carNormScale } from "./car-scale";
 
 /**
  * Parked hero cars around the strip plaza — the "people meet here" dressing.
@@ -79,11 +80,11 @@ export const STRIP_SLOTS: Array<{ x: number; z: number; rot: number }> = [
   // in — angled toward the square. Clear of the loop road, every door ring, the spawn pad and
   // each other (asserted by stripcars.test.ts). Hugging the entrance keeps them in a narrow
   // portrait frustum on phones.
-  { x: 26, z: 82, rot: -0.5 },  // right of the entrance, angled in
-  { x: -26, z: 82, rot: 0.5 },  // left of the entrance, angled in
-  { x: 54, z: 92, rot: -0.8 },  // outer right of the entrance
-  { x: -54, z: 92, rot: 0.8 },  // outer left of the entrance
-  { x: -80, z: 72, rot: 1.0 },  // west tail of the meet
+  { x: 39, z: 123, rot: -0.5 },  // right of the entrance, angled in
+  { x: -39, z: 123, rot: 0.5 },  // left of the entrance, angled in
+  { x: 81, z: 138, rot: -0.8 },  // outer right of the entrance
+  { x: -81, z: 138, rot: 0.8 },  // outer left of the entrance
+  { x: -120, z: 108, rot: 1.0 },  // west tail of the meet
 ];
 
 /** the floating gamertag pill — shared with the ambient cruisers (cruisers.ts) */
@@ -163,7 +164,7 @@ export function createStripCars(specs: StripCarSpec[]): StripCars {
         const model = gltf.scene;
         const box = new THREE.Box3().setFromObject(model);
         const size = box.getSize(new THREE.Vector3());
-        model.scale.setScalar((TARGET_LEN / (Math.max(size.x, size.z) || 1)) * (spec.scale ?? 1));
+        model.scale.setScalar(carNormScale(size, TARGET_LEN, spec.scale ?? 1));
         model.rotation.y = MODEL_YAW + (spec.yaw ?? 0);
         const box2 = new THREE.Box3().setFromObject(model);
         const c = box2.getCenter(new THREE.Vector3());

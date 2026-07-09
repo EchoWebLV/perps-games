@@ -6,7 +6,7 @@ import { getWallets } from "@wallet-standard/app";
 import type { SolanaWalletPort } from "./solana-wallet";
 
 const RPC_URL =
-  (import.meta.env?.VITE_SOLANA_RPC_URL as string | undefined) ??
+  (import.meta.env.VITE_SOLANA_RPC_URL as string | undefined) ??
   "https://api.mainnet-beta.solana.com";
 
 function supportsSolanaChain(wallet: WalletAdapterCompatibleStandardWallet): boolean {

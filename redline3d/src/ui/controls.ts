@@ -75,15 +75,14 @@ export function createControls(ctrlMount: HTMLElement, goMount: HTMLElement, ped
     <div style="${seg}"><span class="lbl" style="${lab}">play amount</span>
       <div style="display:flex;align-items:center;gap:7px">
         <div id="sdn" class="step">−</div>
-        <div id="sval" class="num" style="flex:1;text-align:center;font-size:16px">0.05 SOL</div>
+        <div id="sval" class="num" style="flex:1;text-align:center;font-size:16px">0.01 SOL</div>
         <div id="sup" class="step">+</div>
       </div></div>`;
-  pedalMount.innerHTML = `
-    <div class="lbl" style="text-align:center;margin-top:8px;line-height:1.45;opacity:.8">hold road to drive<br>drag · pull back = brake</div>`;
+  pedalMount.innerHTML = ""; // driving hint removed for a cleaner in-race UI
   goMount.innerHTML = `<button id="go" class="cta"><span id="gofill"></span><span id="golabel">GO!</span></button>`;
 
   const q = (s: string) => (ctrlMount.querySelector(s) || goMount.querySelector(s) || pedalMount.querySelector(s)) as HTMLElement;
-  let d: 1 | -1 = 1, playAmount = 5, playCap = DEFAULT_PLAY_CAP, live = false; // 0.01-SOL units → 0.05 SOL default
+  let d: 1 | -1 = 1, playAmount = 1, playCap = DEFAULT_PLAY_CAP, live = false; // 0.01-SOL units → 0.01 SOL default
   let gasOn = false, brakeOn = false, steerL = false, steerR = false;
   let launchCb = () => {}, cashCb = () => {};
   // anti-double-tap: when a round goes live the GO button becomes BAIL in place, so a quick second

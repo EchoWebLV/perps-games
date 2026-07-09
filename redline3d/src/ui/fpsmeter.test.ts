@@ -52,6 +52,25 @@ describe("createFpsMeter", () => {
     expect(createFpsMeter(document.createElement("div"), { search: "", envFps: "" }).el).toBeUndefined();
   });
 
+  // The Seeker (touch) must NOT auto-show the chip from the build-time env — on-device perf
+  // tuning is complete. The env branch is gated on !coarse.
+  test("VITE_FPS env is suppressed on a coarse-pointer (touch) device", () => {
+    const parent = document.createElement("div");
+    const meter = createFpsMeter(parent, { envFps: "1", coarse: true });
+    expect(meter.el).toBeUndefined();
+    expect(parent.children.length).toBe(0);
+    feed(meter, 0, 10, FRAME_60); // tick is a no-op when disabled
+    expect(meter.fps()).toBe(0);
+  });
+
+  // ...but an explicit ?fps still forces it on even on a touch device — it must stay recoverable.
+  test("a present ?fps param overrides coarse (enables on a touch device)", () => {
+    const parent = document.createElement("div");
+    const meter = createFpsMeter(parent, { search: "?fps", coarse: true });
+    expect(meter.el).toBeDefined();
+    expect(parent.children.length).toBe(1);
+  });
+
   test("a present ?fps param beats the env (enables even when VITE_FPS is falsy)", () => {
     const parent = document.createElement("div");
     const meter = createFpsMeter(parent, { search: "?fps", envFps: "0" });

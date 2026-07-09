@@ -49,6 +49,6 @@ describe("cruiser lap", () => {
   });
 
   test("the lap ellipse is where the layout thinks it is", () => {
-    expect(LAP).toEqual({ cx: 0, cz: 0, rx: 40, rz: 40 });
+    expect(LAP).toEqual({ cx: 0, cz: 0, rx: 60, rz: 60 });
   });
 });

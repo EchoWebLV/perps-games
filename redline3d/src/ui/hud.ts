@@ -95,9 +95,9 @@ export function createHud(parent: HTMLElement): Hud {
       assetEl.textContent = a;
       for (const t of tabs) {
         const on = t.dataset.asset === a;
-        t.style.borderColor = on ? "var(--cyan)" : "var(--line2)";
-        t.style.color = on ? "var(--cyan)" : "var(--mut)";
-        t.style.background = on ? "rgba(39,231,255,.14)" : "rgba(10,8,22,.55)";
+        t.style.borderColor = on ? "var(--cyan)" : "var(--line)";
+        t.style.color = on ? "var(--cyan)" : "#c3c9e6";
+        t.style.background = on ? "rgba(39,231,255,.14)" : "rgba(22,18,46,.92)";
       }
     },
     setMultiplier(equity, phase) {

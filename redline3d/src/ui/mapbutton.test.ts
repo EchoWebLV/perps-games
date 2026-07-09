@@ -44,6 +44,9 @@ describe("createMapButton", () => {
     const btn = parent.querySelector("button")!;
     expect(btn).toBeTruthy();
     expect(btn.attrs["aria-label"]).toBe("Open garage lobby");
+    // the pill is text-only — just the "LOBBY" wordmark, no icon
+    expect(btn.innerHTML).toContain("LOBBY");
+    expect(btn.innerHTML).not.toContain("<svg");
 
     btn.onclick!();
     expect(onClick).toHaveBeenCalledOnce();
@@ -51,6 +54,6 @@ describe("createMapButton", () => {
     mb.setVisible(false);
     expect((mb.el as unknown as FakeElement).style.display).toBe("none");
     mb.setVisible(true);
-    expect((mb.el as unknown as FakeElement).style.display).toBe("grid");
+    expect((mb.el as unknown as FakeElement).style.display).toBe("inline-flex");
   });
 });

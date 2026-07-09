@@ -18,43 +18,43 @@ const memStorage = (): Storage => {
 
 describe("createInventory — persistent ownership (cars or levels)", () => {
   test("free items are owned; everything else is not", () => {
-    const inv = createInventory(KEY, ["Starter"], memStorage());
-    expect(inv.owns("Starter")).toBe(true);
+    const inv = createInventory(KEY, ["Solana Paper"], memStorage());
+    expect(inv.owns("Solana Paper")).toBe(true);
     expect(inv.owns("Clown Car")).toBe(false);
   });
 
   test("grant returns true for a NEW item, false for a duplicate", () => {
-    const inv = createInventory(KEY, ["Starter"], memStorage());
+    const inv = createInventory(KEY, ["Solana Paper"], memStorage());
     expect(inv.grant("Clown Car")).toBe(true);   // new
     expect(inv.owns("Clown Car")).toBe(true);
     expect(inv.grant("Clown Car")).toBe(false);  // dupe
-    expect(inv.grant("Starter")).toBe(false);    // free item is already owned → dupe
+    expect(inv.grant("Solana Paper")).toBe(false);    // free item is already owned → dupe
   });
 
   test("ownership persists across a reload (same storage + key)", () => {
     const store = memStorage();
-    createInventory(KEY, ["Starter"], store).grant("Orion");
-    const reloaded = createInventory(KEY, ["Starter"], store);
+    createInventory(KEY, ["Solana Paper"], store).grant("Orion");
+    const reloaded = createInventory(KEY, ["Solana Paper"], store);
     expect(reloaded.owns("Orion")).toBe(true);
-    expect(reloaded.all().sort()).toEqual(["Orion", "Starter"]);
+    expect(reloaded.all().sort()).toEqual(["Orion", "Solana Paper"]);
   });
 
   test("free items are owned even if a stale save omits them", () => {
     const store = memStorage();
     store.setItem(KEY, JSON.stringify(["Orion"])); // save predates a new free item
-    const inv = createInventory(KEY, ["Starter"], store);
-    expect(inv.owns("Starter")).toBe(true);
+    const inv = createInventory(KEY, ["Solana Paper"], store);
+    expect(inv.owns("Solana Paper")).toBe(true);
     expect(inv.owns("Orion")).toBe(true);
   });
 
   test("two inventories with different keys don't collide (cars vs levels)", () => {
     const store = memStorage();
-    const cars = createInventory("redline.owned.v1", ["Starter"], store);
+    const cars = createInventory("redline.owned.v1", ["Solana Paper"], store);
     const levels = createInventory("redline.levels.v1", ["synthwave"], store);
     cars.grant("Orion"); levels.grant("neon-city");
     expect(cars.owns("neon-city")).toBe(false);
     expect(levels.owns("Orion")).toBe(false);
-    expect(cars.all().sort()).toEqual(["Orion", "Starter"]);
+    expect(cars.all().sort()).toEqual(["Orion", "Solana Paper"]);
     expect(levels.all().sort()).toEqual(["neon-city", "synthwave"]);
   });
 });
@@ -94,9 +94,9 @@ describe("counted inventory", () => {
   });
 
   test("free items floor at 1 and cannot be melted", () => {
-    const inv = createInventory("k", ["Starter"], memStore());
-    expect(inv.count("Starter")).toBe(1);
-    expect(inv.melt("Starter")).toBe(false);
+    const inv = createInventory("k", ["Solana Paper"], memStore());
+    expect(inv.count("Solana Paper")).toBe(1);
+    expect(inv.melt("Solana Paper")).toBe(false);
   });
 
   test("meltable lists only cars with spares", () => {
@@ -107,10 +107,10 @@ describe("counted inventory", () => {
   });
 
   test("migrates a legacy id-array to counts of 1", () => {
-    const inv = createInventory("k", ["Starter"], memStore(JSON.stringify(["Orion", "Helmet"])));
+    const inv = createInventory("k", ["Solana Paper"], memStore(JSON.stringify(["Orion", "Helmet"])));
     expect(inv.count("Orion")).toBe(1);
     expect(inv.count("Helmet")).toBe(1);
-    expect(inv.owns("Starter")).toBe(true);
+    expect(inv.owns("Solana Paper")).toBe(true);
   });
 
   test("round-trips counts through storage as an object map", () => {
@@ -124,7 +124,7 @@ describe("counted inventory", () => {
   test("fires hooks on grant/melt and snapshots counts", () => {
     const grants: { id: string; isNew: boolean }[] = [];
     const melts: { id: string; melted: boolean }[] = [];
-    const inv = createInventory("k", ["Starter"], memStore(), {
+    const inv = createInventory("k", ["Solana Paper"], memStore(), {
       onGrant: (id, isNew) => grants.push({ id, isNew }),
       onMelt: (id, melted) => melts.push({ id, melted }),
     });
@@ -138,17 +138,17 @@ describe("counted inventory", () => {
     expect(inv.melt("Orion")).toBe(false); // last copy kept → melted:false still reported
     expect(melts[melts.length - 1]).toEqual({ id: "Orion", melted: false });
 
-    expect(inv.snapshot()).toEqual({ Starter: 1, Orion: 1 });
+    expect(inv.snapshot()).toEqual({ "Solana Paper": 1, Orion: 1 });
   });
 
   test("hydrate replaces counts from a server snapshot (free floor re-applied, no hooks)", () => {
     const grants: unknown[] = [];
-    const inv = createInventory("k", ["Starter"], memStore(), { onGrant: () => grants.push(1) });
+    const inv = createInventory("k", ["Solana Paper"], memStore(), { onGrant: () => grants.push(1) });
     inv.grant("Orion");
-    inv.hydrate({ Skull: 2, Helmet: 1 }); // server truth; Starter must survive as free
+    inv.hydrate({ Skull: 2, Helmet: 1 }); // server truth; Solana Paper must survive as free
     expect(inv.owns("Orion")).toBe(false);
     expect(inv.count("Skull")).toBe(2);
-    expect(inv.owns("Starter")).toBe(true);
+    expect(inv.owns("Solana Paper")).toBe(true);
     expect(grants.length).toBe(1); // hydrate fired no onGrant
   });
 });

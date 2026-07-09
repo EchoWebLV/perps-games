@@ -14,7 +14,7 @@ describe("createCarPicker initial selection", () => {
   const cars = (over: Partial<CarOption>[] = []): CarOption[] => {
     const base: CarOption[] = [
       { name: "DeLorean", url: "/models/delorean.glb", ability: "flux", power: { name: "Flux Brake", desc: "freeze", icon: "clock" } },
-      { name: "Starter", url: "/models/starter.glb" },
+      { name: "Solana Paper", url: "/models/trabant.glb" },
     ];
     over.forEach((o, i) => Object.assign(base[i], o));
     return base;
@@ -29,7 +29,7 @@ describe("createCarPicker initial selection", () => {
   test("initial pick skips locked cards", () => {
     const picks: string[] = [];
     createCarPicker(document.createElement("div"), cars([{ locked: true }]), (c) => picks.push(c.name));
-    expect(picks).toEqual(["Starter"]);
+    expect(picks).toEqual(["Solana Paper"]);
   });
 });
 
@@ -88,7 +88,7 @@ describe("world (level skin) picker locking", () => {
 
   const openWorlds = (worlds: ReturnType<typeof worldsWith>) => {
     const parent = document.createElement("div");
-    createCarPicker(parent, [{ name: "Starter", url: "/models/starter.glb" }], () => {},
+    createCarPicker(parent, [{ name: "Solana Paper", url: "/models/trabant.glb" }], () => {},
       undefined, [], undefined, undefined, undefined, worlds);
     (parent.querySelector('[data-go="worlds"]') as HTMLElement).click(); // open the World sub-view
     return parent;
@@ -113,6 +113,22 @@ describe("world (level skin) picker locking", () => {
     const parent = openWorlds(worldsWith(sets));
     (parent.querySelector('[data-world="neon-city"]') as HTMLElement).click();
     expect(sets).toEqual(["neon-city"]);
+  });
+});
+
+describe("garage carries rarity, not crate odds", () => {
+  test("the rarity legend keeps tier names but shows NO percentages or odds", () => {
+    const parent = document.createElement("div");
+    createCarPicker(parent, [{ name: "Solana Paper", url: "/models/trabant.glb" }], () => {});
+    const legend = parent.querySelector(".godds") as HTMLElement;
+    expect(legend).not.toBeNull();
+    // rarity names stay (collection info) …
+    expect(legend.textContent).toContain("Common");
+    expect(legend.textContent).toContain("Legendary");
+    // … but odds/percentages do NOT — those live only at the crate shop
+    expect(legend.textContent).not.toMatch(/%/);
+    expect(legend.textContent?.toLowerCase()).not.toContain("odds");
+    expect(parent.textContent?.toLowerCase()).not.toContain("crate odds");
   });
 });
 

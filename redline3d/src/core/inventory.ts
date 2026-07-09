@@ -21,7 +21,7 @@ export interface Inventory {
   hydrate(counts: Record<string, number>): void;
 }
 
-/** `free` ids are always owned at count >= 1 (Starter / default level). `storage` is injectable for tests. */
+/** `free` ids are always owned at count >= 1 (Solana Paper / default level). `storage` is injectable for tests. */
 export function createInventory(
   key: string,
   free: string[] = [],

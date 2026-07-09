@@ -22,6 +22,20 @@
       "autoPort": true
     },
     {
+      "name": "redline3d-3000",
+      "runtimeExecutable": "bash",
+      "runtimeArgs": ["-c", "PORT=3000 npm run dev -- --host"],
+      "cwd": "redline3d",
+      "port": 3000
+    },
+    {
+      "name": "redline3d-4333",
+      "runtimeExecutable": "bash",
+      "runtimeArgs": ["-c", "VITE_API_BASE=http://localhost:8081 npm run dev -- --port 4333 --strictPort --host"],
+      "cwd": "redline3d",
+      "port": 4333
+    },
+    {
       "name": "redline3d-devwallet",
       "runtimeExecutable": "bash",
       "runtimeArgs": ["-c", "VITE_WALLET=dev npm run dev -- --port 4100 --strictPort --host"],
@@ -29,11 +43,18 @@
       "port": 4100
     },
     {
+      "name": "redline3d-dist",
+      "runtimeExecutable": "bash",
+      "runtimeArgs": ["-c", "npm run preview -- --port 4500 --strictPort"],
+      "cwd": "redline3d",
+      "port": 4500
+    },
+    {
       "name": "perps-server",
       "runtimeExecutable": "bash",
-      "runtimeArgs": ["-c", "LAN_IP=$(ipconfig getifaddr en0 2>/dev/null || true); REAL_MONEY_ENABLED=false CORS_ORIGINS=\"http://localhost:4000,http://127.0.0.1:4000,http://localhost:4100,http://127.0.0.1:4100${LAN_IP:+,http://$LAN_IP:4000,http://$LAN_IP:4100}\" SIGNUP_FAUCET=true DEV_ENDPOINTS=true PORT=8080 NODE_ENV=development npx tsx src/index.ts"],
+      "runtimeArgs": ["-c", "LAN_IP=$(ipconfig getifaddr en0 2>/dev/null || true); REAL_MONEY_ENABLED=false CORS_ORIGINS=\"http://localhost:4000,http://127.0.0.1:4000,http://localhost:4100,http://127.0.0.1:4100,http://localhost:4333,http://127.0.0.1:4333${LAN_IP:+,http://$LAN_IP:4000,http://$LAN_IP:4100,http://$LAN_IP:4333}\" SIGNUP_FAUCET=true DEV_ENDPOINTS=true PORT=8081 NODE_ENV=development npx tsx src/index.ts"],
       "cwd": "server",
-      "port": 8080
+      "port": 8081
     }
   ]
 }

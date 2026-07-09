@@ -3,34 +3,52 @@ export interface MapButton {
   setVisible(visible: boolean): void;
 }
 
-// map-pin glyph, neon line style consistent with the carpicker icons
-const MAP_SVG =
-  `<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">` +
-  `<path d="M12 21s-6-5.3-6-10a6 6 0 0 1 12 0c0 4.7-6 10-6 10z"/><circle cx="12" cy="11" r="2"/></svg>`;
+// bold Chakra Petch wordmark — text-only (no icon), reads as "tap here to leave"
+const LABEL_SPAN =
+  `<span style="font-family:'Chakra Petch',ui-monospace,monospace;font-weight:700;font-size:12px;letter-spacing:.16em;line-height:1;white-space:nowrap">LOBBY</span>`;
 
-/** A map-pin button directly left of the menu button; opens the parking-lot lobby. */
+// soft continuous cyan glow. Injected once (module-guarded) so many mounts share one <style>.
+let injected = false;
+function injectPulse(): void {
+  if (injected) return;
+  if (typeof document === "undefined" || !document.head) return; // headless/test DOM stub — skip
+  const style = document.createElement("style");
+  style.textContent =
+    `@keyframes mapBtnPulse{` +
+    `0%,100%{box-shadow:0 0 0 1px rgba(39,231,255,.35),0 0 12px rgba(39,231,255,.32),inset 0 0 9px rgba(39,231,255,.10)}` +
+    `50%{box-shadow:0 0 0 1px rgba(39,231,255,.65),0 0 22px rgba(39,231,255,.60),inset 0 0 13px rgba(39,231,255,.22)}}`;
+  document.head.appendChild(style);
+  injected = true;
+}
+
+/** A compact glowing text-only "LOBBY" pill in the top-right; opens the parking-lot lobby. */
 export function createMapButton(parent: HTMLElement, onClick: () => void): MapButton {
+  injectPulse();
+
   const btn = document.createElement("button");
   btn.type = "button";
-  btn.className = "pe panel";
+  btn.className = "pe"; // pointer-events:auto under #hud; the pill styles itself inline below
   btn.setAttribute("aria-label", "Open garage lobby");
-  btn.innerHTML = MAP_SVG;
+  btn.innerHTML = LABEL_SPAN;
   btn.style.cssText = [
     "position:absolute",
-    "top:144px", // same row, directly left of the menu button (reuses the old music-button slot)
-    "right:max(62px,calc(env(safe-area-inset-right) + 50px))",
+    "top:144px", // same row as the menu button…
+    "right:max(62px,calc(env(safe-area-inset-right) + 50px))", // …anchored right, grows LEFT so it clears the hamburger
     "z-index:8",
-    "width:42px", "height:42px", "padding:0",
-    "display:grid", "place-items:center",
-    "border-radius:9px", "cursor:pointer",
-    "background:rgba(12,10,26,.74)",
+    "height:30px", "padding:0 12px", // compact pill — icon removed, text only
+    "display:inline-flex", "align-items:center",
+    "white-space:nowrap",
+    "border:1.5px solid var(--cyan)", // bright cyan glowing rim
+    "border-radius:999px", "cursor:pointer",
+    "background:rgba(12,10,26,.9)", // opaque so it pops off the 3D scene
     "color:var(--cyan)",
+    "animation:mapBtnPulse 2.4s ease-in-out infinite",
   ].join(";");
   btn.onclick = onClick;
   parent.appendChild(btn);
 
   return {
     el: btn,
-    setVisible(visible) { btn.style.display = visible ? "grid" : "none"; },
+    setVisible(visible) { btn.style.display = visible ? "inline-flex" : "none"; },
   };
 }

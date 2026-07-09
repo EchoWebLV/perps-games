@@ -14,6 +14,9 @@ export interface AccountSync {
    *  local (first-bind migration). Otherwise the server is authoritative and its snapshot is written
    *  back into the local cache via `applyServer` (never summed). Offline/guest → disabled, cache-only. */
   hydrate(local: AccountSnapshot): Promise<"seeded" | "server" | "offline">;
+  /** the access-code ids this account has redeemed server-side, as of the last hydrate. Empty before
+   *  hydrate and for guests — the account-level access wall reads this to decide whether to show. */
+  accessCodes(): string[];
   /** drop server authority (logout / account switch); forwarders no-op again. */
   disable(): void;
   coinsEarned(n: number): void;
@@ -38,6 +41,7 @@ export interface AccountSyncOpts {
 export function createAccountSync(opts: AccountSyncOpts): AccountSync {
   let on = false;
   let seq = 0;
+  let access: string[] = []; // the account's redeemed access-code ids, refreshed on each hydrate
   const ref = (kind: string) => `${opts.nonce}:${kind}:${seq++}`;
   const swallow = (where: string) => (err: unknown) => opts.onError?.(where, err);
   // Best-effort fire-and-forget: the local cache already updated the UI, so a failed server write
@@ -46,6 +50,7 @@ export function createAccountSync(opts: AccountSyncOpts): AccountSync {
 
   return {
     enabled: () => on,
+    accessCodes: () => access,
     disable: () => { on = false; },
 
     async hydrate(local) {
@@ -59,6 +64,7 @@ export function createAccountSync(opts: AccountSyncOpts): AccountSync {
         on = false;
         return "offline";
       }
+      access = me.access ?? []; // surface the account's redeemed codes for the access wall (default [])
       const serverEmpty = (me.coins ?? 0) === 0 && (me.scrap ?? 0) === 0 && (me.cars?.length ?? 0) === 0;
       const localHasState = local.coins > 0 || local.scrap > 0 || Object.keys(local.cars).length > 0;
       if (serverEmpty && localHasState) {

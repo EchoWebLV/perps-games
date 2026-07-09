@@ -26,10 +26,11 @@ export function createDevKeypairPort(opts?: { secretKey?: Uint8Array; store?: St
   // Devnet-only: VITE_DEV_SECRET (base64) lets `npm run dev` load a KNOWN pre-funded dev
   // wallet so the login → start-game flow works with no per-browser funding step. Ignored
   // in tests / non-Vite contexts (where import.meta.env is absent).
-  // Written as the exact `import.meta.env?.VITE_*` form Vite static-replaces at transform
-  // (a cast around import.meta blocks that replacement). Absent in tests → falls through.
+  // Written as the exact `import.meta.env.VITE_*` form Vite static-replaces at transform
+  // (optional chaining or a cast around import.meta blocks that replacement). Absent in
+  // tests → the try/catch falls through.
   let envSecret: string | undefined;
-  try { envSecret = (import.meta.env?.VITE_DEV_SECRET as string | undefined) || undefined; } catch { /* non-vite */ }
+  try { envSecret = (import.meta.env.VITE_DEV_SECRET as string | undefined) || undefined; } catch { /* non-vite */ }
   let kp: Keypair;
   if (opts?.secretKey) {
     kp = Keypair.fromSecretKey(opts.secretKey);

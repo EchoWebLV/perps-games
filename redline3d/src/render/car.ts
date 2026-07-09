@@ -2,6 +2,7 @@ import * as THREE from "three";
 import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader.js";
 import { buildWheelRig, type WheelRig } from "./wheels";
 import { finishById } from "../core/paint";
+import { carNormScale } from "./car-scale";
 
 export interface Car {
   group: THREE.Group;
@@ -133,7 +134,7 @@ export function createCar(onReady?: () => void): Car {
         // scale to our footprint (× per-model tweak), center horizontally, sit wheels on the ground
         const box = new THREE.Box3().setFromObject(model);
         const size = box.getSize(new THREE.Vector3());
-        model.scale.setScalar((TARGET_LEN / (Math.max(size.x, size.z) || 1)) * scaleMul);
+        model.scale.setScalar(carNormScale(size, TARGET_LEN, scaleMul));
         model.rotation.y = MODEL_YAW + yawAdd; // per-model facing tweak (some GLBs point sideways)
         const box2 = new THREE.Box3().setFromObject(model);
         const c = box2.getCenter(new THREE.Vector3());

@@ -9,7 +9,11 @@ import { TIERS, tierOf, poolable, type Rarity } from "./rarity";
 export interface RandomnessProvider { next(): number; }
 export const clientRandom: RandomnessProvider = { next: () => Math.random() };
 
-export interface CrateCar { rarity?: number; name: string; pool?: boolean; comingSoon?: boolean; locked?: boolean; }
+export interface CrateCar {
+  rarity?: number; name: string; pool?: boolean; comingSoon?: boolean; locked?: boolean;
+  // model descriptor (present on the CAR_DEFS objects the roll returns) — used by the reveal viewer
+  url?: string; scale?: number; yaw?: number;
+}
 
 // A crate tier. `tierWeights` is the per-crate car-rarity distribution — a tier absent from the map
 // can't drop from that crate. `priceUsd` is the real-money option (deferred behind the payment rail).

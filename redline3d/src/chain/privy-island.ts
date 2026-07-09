@@ -10,7 +10,7 @@ import { useWallets, useSignTransaction, useCreateWallet } from "@privy-io/react
 
 type SolanaChain = "solana:mainnet" | "solana:devnet" | "solana:testnet";
 const CLUSTER: SolanaChain =
-  (import.meta.env?.VITE_SOLANA_CLUSTER as string) === "devnet" ? "solana:devnet" : "solana:mainnet";
+  (import.meta.env.VITE_SOLANA_CLUSTER as string) === "devnet" ? "solana:devnet" : "solana:mainnet";
 
 /** The imperative surface the PrivyWalletPort consumes (see privy-wallet-port.ts). */
 export interface PrivyIsland {
@@ -161,7 +161,10 @@ let rootMounted = false;
  *  from the Privy dashboard allowlist would otherwise hang the sign-in gate forever. */
 export function mountPrivyIsland(): Promise<PrivyIsland> {
   if (mountPromise) return mountPromise;
-  const appId = import.meta.env?.VITE_PRIVY_APP_ID as string;
+  // exact member access (no `?.`) — vite only statically replaces the literal
+  // `import.meta.env.VITE_*` form; optional chaining falls back to the injected
+  // bare-env object, which ships EMPTY in some production chunks
+  const appId = import.meta.env.VITE_PRIVY_APP_ID as string;
   if (!appId) return Promise.reject(new Error("VITE_PRIVY_APP_ID not set"));
   mountPromise = new Promise<PrivyIsland>((resolve, reject) => {
     if (live.ready) { resolve(facade); return; } // re-entry after a slow first mount

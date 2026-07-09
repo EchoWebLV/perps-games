@@ -7,7 +7,7 @@ import { PublicKey } from "@solana/web3.js";
 // GO's tx burst (sweep/slice/delegate/buy-in + confirm polls), so point it at a keyed one.
 export const CHAIN = {
   PROGRAM_ID: new PublicKey("FwUNcUaRbYGiWasHa6DA3xQaQJfZWCgH7UhDeBvoJcBv"),
-  BASE_RPC: (import.meta.env?.VITE_BASE_RPC as string | undefined) || "https://api.devnet.solana.com",
+  BASE_RPC: (import.meta.env.VITE_BASE_RPC as string | undefined) || "https://api.devnet.solana.com",
   BASE_WS: "wss://api.devnet.solana.com",
   ER_RPC: "https://devnet.magicblock.app",
   ER_WS: "wss://devnet.magicblock.app",

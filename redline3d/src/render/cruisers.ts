@@ -26,8 +26,8 @@ export interface Cruisers {
 // the lap: cruisers circle the plaza on the loop road — an ellipse at the loop centreline,
 // inside the door rings and clear of the parked meet + spawn mouth (all asserted by
 // cruisers.test.ts). Reads as traffic going round the town-square roundabout.
-export const LAP = { cx: 0, cz: 0, rx: 40, rz: 40 };
-const SPEED = 9;             // world units/sec along the lap (gentle cruise)
+export const LAP = { cx: 0, cz: 0, rx: 60, rz: 60 };
+const SPEED = 12;            // world units/sec along the lap (brisk cruise — 33% quicker than the old 9)
 const TARGET_LEN = 11.23;    // same footprint normalization as every other car
 const MODEL_YAW = Math.PI;
 

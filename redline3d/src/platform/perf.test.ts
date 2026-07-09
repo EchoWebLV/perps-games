@@ -1,5 +1,5 @@
 import { describe, expect, test } from "vitest";
-import { detectQuality, gpuRendererString, isWeakGpu } from "./perf";
+import { detectQuality, gpuRendererString, isWeakGpu, shouldRenderFrame } from "./perf";
 
 // All signals injected — nothing here touches the real navigator/location.
 const strongNav = { deviceMemory: 8, hardwareConcurrency: 8 };
@@ -18,20 +18,27 @@ describe("detectQuality", () => {
     expect(detectQuality({ nav: {} }).tier).toBe("low");
   });
 
-  test("high tier is byte-identical to the original config: full-res bloom, dpr 2, full detail", () => {
+  test("high tier is byte-identical to the original config: full-res bloom, 4× msaa, dpr 2, full detail, no frame cap", () => {
     const q = detectQuality({ nav: strongNav });
     expect(q.bloom).toBe(true);
     expect(q.bloomScale).toBe(1);
+    expect(q.postSamples).toBe(4); // composer MSAA kills desktop-DPR bloom shimmer
     expect(q.pixelRatioCap).toBe(2);
     expect(q.detail).toBe("full");
+    expect(q.frameCapFps).toBeUndefined(); // present every refresh — no cap on high
   });
 
-  test("low tier is actually light: bloom stays ON but at half resolution, tighter dpr, reduced detail", () => {
+  test("low tier keeps the authored look but cheap: bloom ON half-res, msaa off, tighter dpr, 30fps cap", () => {
     const q = detectQuality({ nav: weakNav });
-    expect(q.bloom).toBe(true); // the neon look survives on low — just a cheaper blur chain
+    // bloom:false was tried on-device (Seeker 2026-07-08) and the scene reads "all dark" —
+    // the look is authored through the post chain. Low keeps bloom and cuts its cost instead:
+    // half-res blur + no composer MSAA (the shimmer it fixes doesn't show at phone res).
+    expect(q.bloom).toBe(true);
     expect(q.bloomScale).toBe(0.5);
+    expect(q.postSamples).toBe(0);
     expect(q.pixelRatioCap).toBe(1.25);
     expect(q.detail).toBe("reduced");
+    expect(q.frameCapFps).toBe(30); // steady cadence on a throttling phone
   });
 
   test("weak GPU forces low even on a strong-RAM device (the Seeker case: 8GB/8-core Mali)", () => {
@@ -96,7 +103,9 @@ describe("detectQuality", () => {
     test("no renderer string + Android UA → low, even on strong RAM/cores (the Seeker WebView case)", () => {
       const q = detectQuality({ nav: strongNav, ua: seekerUA });
       expect(q.tier).toBe("low");
-      expect(q.bloomScale).toBe(0.5);
+      expect(q.bloom).toBe(true); // authored look stays; low cheapens bloom, never drops it
+      expect(q.postSamples).toBe(0);
+      expect(q.frameCapFps).toBe(30);
     });
 
     test("a present renderer string still decides — a flagship Adreno keeps high on Android", () => {
@@ -161,5 +170,45 @@ describe("gpuRendererString", () => {
     expect(gpuRendererString(fakeGl({ throws: true }))).toBeUndefined();
     expect(gpuRendererString(null)).toBeUndefined();
     expect(gpuRendererString(undefined)).toBeUndefined();
+  });
+});
+
+describe("shouldRenderFrame (low-tier frame cap)", () => {
+  const F30 = 1000 / 30; // 33.333ms budget at 30fps
+
+  test("renders when the elapsed since the last rendered frame reaches the ~30fps budget", () => {
+    // a 60Hz display steps ~16.67ms: the in-between frame is skipped, the next renders
+    expect(shouldRenderFrame(100, 100 + 1000 / 60, 30)).toBe(false); // ~16.7ms → too soon
+    expect(shouldRenderFrame(100, 100 + F30, 30)).toBe(true); // ~33.3ms → present
+  });
+
+  test("the ~1ms tolerance lets a hair-early frame through (else 60Hz beats to 20fps)", () => {
+    // a frame arriving just under the exact 33.33ms budget still counts as on-cadence
+    expect(shouldRenderFrame(0, F30 - 0.8, 30)).toBe(true); // within the 1ms tolerance
+    expect(shouldRenderFrame(0, F30 - 2, 30)).toBe(false); // clearly early → skip
+  });
+
+  test("a custom tolerance is honored", () => {
+    expect(shouldRenderFrame(0, F30 - 4, 30, 5)).toBe(true); // 5ms slack
+    expect(shouldRenderFrame(0, F30 - 4, 30, 0)).toBe(false); // no slack → early
+  });
+
+  test("no/invalid cap never gates (always render) — the high tier's undefined cap", () => {
+    expect(shouldRenderFrame(100, 100.001, 0)).toBe(true);
+    expect(shouldRenderFrame(100, 100.001, NaN)).toBe(true);
+    expect(shouldRenderFrame(100, 100.001, -30)).toBe(true);
+  });
+
+  test("driving a 60Hz cadence through the cap renders every other frame (~30fps)", () => {
+    let last = 0;
+    let rendered = 0;
+    const total = 60; // one second of 60Hz rAF ticks
+    for (let i = 1; i <= total; i++) {
+      const now = i * (1000 / 60);
+      if (shouldRenderFrame(last, now, 30)) { rendered++; last = now; }
+    }
+    // ~30 presented frames out of 60 offered (every other one)
+    expect(rendered).toBeGreaterThanOrEqual(29);
+    expect(rendered).toBeLessThanOrEqual(31);
   });
 });

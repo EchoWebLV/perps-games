@@ -1,7 +1,7 @@
 import * as THREE from "three";
 import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader.js";
 import { RoomEnvironment } from "three/examples/jsm/environments/RoomEnvironment.js";
-import { TIERS, tierOf, pullChance, type Rarity } from "../core/rarity";
+import { TIERS, tierOf, type Rarity } from "../core/rarity";
 
 /** a car's special ability id; drives in-game effects when that card is selected */
 export type CarAbility = "laneBet" | "nitro" | "rainbow" | "skull" | "pinkRod" | "sixWheeler" | "cartRod" | "flux" | "swerve" | "slots" | "airbag" | "magnet";
@@ -12,7 +12,7 @@ export interface CarOption {
   ability?: CarAbility; power?: CarPower;
   baseLev?: number;         // car's base max leverage (raises the dial ceiling, e.g. Cybertruck 1500)
   rarity?: Rarity;          // collectible tier 1–5 (Common→Legendary); colored gems on the card
-  pool?: boolean;           // false → out of the crate drop pool (free Starter, benched cars)
+  pool?: boolean;           // false → out of the crate drop pool (free Solana Paper, benched cars)
   locked?: boolean;         // not yet owned → shown sealed in the collection
   comingSoon?: boolean;     // ability still in the shop → card shown taped off, can't be picked
 }
@@ -228,7 +228,6 @@ function injectStyles() {
     .gdcard-rar .gem{width:9px;height:9px}
     .gdcard-tier{display:flex;align-items:center;justify-content:space-between;gap:8px;margin:-4px 0 10px 34px;position:relative;z-index:2;
       font:800 11px/1 'Chakra Petch',ui-monospace,monospace;letter-spacing:.15em;text-transform:uppercase;text-shadow:0 0 9px currentColor}
-    .gdcard-pull{font-weight:600;letter-spacing:.06em;color:rgba(216,222,255,.6);text-shadow:none}
     .gdcard-win{position:relative;height:200px;border-radius:10px;overflow:hidden;border:1px solid rgba(255,255,255,.18);z-index:1;
       background:radial-gradient(90% 70% at 50% 16%,rgba(255,60,160,.32),transparent 62%),linear-gradient(180deg,#291a4c,#0b0816 74%)}
     .gdcard-win::before{content:"";position:absolute;inset:0;background:repeating-linear-gradient(90deg,rgba(39,231,255,.10) 0 2px,transparent 2px 28px)}
@@ -414,13 +413,14 @@ export function createCarPicker(parent: HTMLElement, cars: CarOption[], onPick: 
     `<span class="lbl">garage · your collection</span>` +
     `<button class="gicon-btn" data-act="close" aria-label="Close">✕</button>`;
   garagePanel.appendChild(garageHead);
-  // crate odds legend — the drop chance per tier, so players see "what chance there is to get"
-  // (same weights the crate opener rolls against; single source of truth in core/rarity.ts)
-  const odds = document.createElement("div");
-  odds.className = "godds";
-  odds.innerHTML = `<span class="godds-lbl">crate odds</span>` + TIERS.map((t) =>
-    `<span class="godds-t" style="--tc:${t.color}"><i></i>${t.name.charAt(0) + t.name.slice(1).toLowerCase()} ${t.weight}%</span>`).join("");
-  garagePanel.appendChild(odds);
+  // rarity legend — a colour key for the gem tiers on the cards (collection info). Crate DROP ODDS
+  // are deliberately NOT shown here: they belong at the point of purchase (the crate shop), never the
+  // garage/your-collection. Keep the tier names + colours; drop every percentage.
+  const rarityLegend = document.createElement("div");
+  rarityLegend.className = "godds";
+  rarityLegend.innerHTML = `<span class="godds-lbl">rarity</span>` + TIERS.map((t) =>
+    `<span class="godds-t" style="--tc:${t.color}"><i></i>${t.name.charAt(0) + t.name.slice(1).toLowerCase()}</span>`).join("");
+  garagePanel.appendChild(rarityLegend);
   const busyNote = document.createElement("div");
   busyNote.className = "gbusy";
   busyNote.style.display = "none";
@@ -640,8 +640,6 @@ export function createCarPicker(parent: HTMLElement, cars: CarOption[], onPick: 
   const openDetail = (c: CarOption, i: number, gridEl: HTMLElement) => {
     const rarity = c.rarity ?? 1;
     const t = tierOf(rarity);
-    const pull = pullChance(c, cars);
-    const pullTxt = pull > 0 ? `${pull.toFixed(pull < 1 ? 2 : 1)}% crate pull` : "not in crates";
     const p = c.power;
     const ab = p
       ? `<span class="gdcard-ab-ic">${icon(p.icon, 18)}</span><span class="gdcard-ab-tx"><span class="gdcard-ab-nm">${p.name}</span><span class="gdcard-ab-ds">${p.desc}</span></span>`
@@ -652,7 +650,7 @@ export function createCarPicker(parent: HTMLElement, cars: CarOption[], onPick: 
         `<div class="gdcard-glare"></div>` +
         `<button class="gdcard-x" data-dact="close" aria-label="Back">${backIcon(18)}</button>` +
         `<div class="gdcard-head"><span class="gdcard-name">${c.name}</span><span class="gdcard-rar">${gems(rarity)}</span></div>` +
-        `<div class="gdcard-tier" style="color:${t.color}"><span>${t.name}</span><span class="gdcard-pull">${pullTxt}</span></div>` +
+        `<div class="gdcard-tier" style="color:${t.color}"><span>${t.name}</span></div>` +
         `<div class="gdcard-win">${holo}<img class="gdcard-art" alt="${c.name}"></div>` +
         `<div class="gdcard-ab">${ab}</div>` +
         `<button class="gdcard-equip${busy ? " dis" : ""}" data-dact="equip">${busy ? "ROUND LIVE — CASH OUT TO SWITCH" : "EQUIP"}</button>` +

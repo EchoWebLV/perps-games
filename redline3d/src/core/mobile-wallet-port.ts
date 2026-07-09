@@ -10,12 +10,12 @@ import { Connection, VersionedTransaction } from "@solana/web3.js";
 import type { SolanaWalletPort } from "./solana-wallet";
 
 const CLUSTER =
-  (import.meta.env?.VITE_SOLANA_CLUSTER as string | undefined) === "devnet"
+  (import.meta.env.VITE_SOLANA_CLUSTER as string | undefined) === "devnet"
     ? WalletAdapterNetwork.Devnet
     : WalletAdapterNetwork.Mainnet;
 
 const RPC_URL =
-  (import.meta.env?.VITE_SOLANA_RPC_URL as string | undefined) ??
+  (import.meta.env.VITE_SOLANA_RPC_URL as string | undefined) ??
   "https://api.mainnet-beta.solana.com";
 
 export function createMobileWalletPort(): SolanaWalletPort {

@@ -19,18 +19,23 @@ const MAX_DT_MS = 1000; // tab-switch guard: a backgrounded rAF gap must not poi
  * `VITE_FPS=1` (or "true") is the build-time equivalent for the APK, whose WebView loads a
  * fixed https://localhost/ with no address bar to carry `?fps` on-device. A present `?fps`
  * param still enables; an explicit `opts.enabled` boolean wins over both. `envFps` is injectable
- * for tests and defaults to `import.meta.env?.VITE_FPS`.
+ * for tests and defaults to `import.meta.env.VITE_FPS`.
  */
 export function createFpsMeter(
   parent: HTMLElement,
-  opts?: { enabled?: boolean; search?: string; envFps?: string },
+  opts?: { enabled?: boolean; search?: string; envFps?: string; coarse?: boolean },
 ): FpsMeter {
-  const envFps = opts?.envFps ?? (import.meta.env?.VITE_FPS as string | undefined);
+  // exact member access (no `?.`) — vite only statically replaces the literal
+  // `import.meta.env.VITE_FPS` form; optional chaining falls back to the injected
+  // bare-env object, which ships EMPTY in production chunks (bug found on-device 2026-07-08)
+  const envFps = opts?.envFps ?? (import.meta.env.VITE_FPS as string | undefined);
+  // touch/coarse-pointer devices (the Seeker) suppress the AUTO env chip — on-device perf
+  // tuning is done. An explicit `?fps` or `opts.enabled` still forces it on (recoverable).
+  const coarse = opts?.coarse ?? (globalThis.matchMedia?.("(pointer: coarse)")?.matches ?? false);
   const enabled =
     opts?.enabled ??
     (new URLSearchParams(opts?.search ?? globalThis.location?.search ?? "").has("fps") ||
-      envFps === "1" ||
-      envFps === "true");
+      ((envFps === "1" || envFps === "true") && !coarse));
   if (!enabled) return { tick() {}, fps: () => 0 };
 
   const el = document.createElement("div");

@@ -1,6 +1,7 @@
 import * as THREE from "three";
 import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader.js";
 import { RoomEnvironment } from "three/examples/jsm/environments/RoomEnvironment.js";
+import { carNormScale } from "./car-scale";
 
 /** the bits of a CarOption the showroom needs to place a car on the turntable */
 export interface GarageCar {
@@ -271,7 +272,7 @@ export function createGarageRoom(renderer: THREE.WebGLRenderer): GarageRoom {
         const model = gltf.scene;
         const box = new THREE.Box3().setFromObject(model);
         const size = box.getSize(new THREE.Vector3());
-        model.scale.setScalar((CAR_LEN / (Math.max(size.x, size.z) || 1)) * (opt.scale ?? 1));
+        model.scale.setScalar(carNormScale(size, CAR_LEN, opt.scale ?? 1));
         model.rotation.y = MODEL_YAW + (opt.yaw ?? 0);
         const box2 = new THREE.Box3().setFromObject(model);
         const c = box2.getCenter(new THREE.Vector3());

@@ -13,20 +13,39 @@ export interface Minimap {
 
 const MINI_N = 300;
 
-/** Port of the prototype minimap: SOL price line, scaled to history, with entry/liq overlays during a run. */
-export function createMinimap(canvas: HTMLCanvasElement): Minimap {
+/**
+ * Port of the prototype minimap: SOL price line, scaled to history, with entry/liq overlays during a run.
+ * `pixelRatioCap` bounds the backing-store DPR (default 2 = the original web behavior); the perf
+ * tier passes its own cap so the low tier renders the chart at a cheaper resolution.
+ */
+export function createMinimap(canvas: HTMLCanvasElement, pixelRatioCap = 2): Minimap {
   const c = canvas.getContext("2d")!;
-  const DPR = Math.min(2, window.devicePixelRatio || 1);
+  const DPR = Math.min(pixelRatioCap, window.devicePixelRatio || 1);
+  // Change-detection cache: frame() calls draw() every rAF, but the price line only moves when a
+  // new sample lands. `lastSig` is a cheap fingerprint of the actually-drawn inputs + the CSS box;
+  // an unchanged signature skips the whole repaint (clearRect + min/max scan + polyline + text).
+  let lastSig = "";
 
   return {
     draw(s) {
       const w = canvas.clientWidth, h = canvas.clientHeight;
+      // (a) hidden gate: an unlaid-out canvas (0 CSS box — a display:none ancestor, or detached)
+      // bails before touching the 2D context at all. The lobby menus / garage hide the HUD.
       if (!w || !h) return;
+
+      // (b) skip the repaint when nothing that gets drawn has changed since the last paint. The
+      // CSS size (w,h) is in the signature so a resize invalidates; the backing-store DPR derives
+      // from w so it's covered too. hist is append/shift only, so (length, last value) tracks it.
+      const hist = s.hist, n = hist.length;
+      const sig = w + "x" + h + "|" + n + "|" + (n ? hist[n - 1] : 0) + "|" +
+        (s.inRun ? 1 : 0) + "|" + s.equity + "|" + s.entryPx + "|" + s.liqPx + "|" + s.dir;
+      if (sig === lastSig) return;
+      lastSig = sig;
+
       if (canvas.width !== ((w * DPR) | 0) || canvas.height !== ((h * DPR) | 0)) {
         canvas.width = w * DPR; canvas.height = h * DPR; c.setTransform(DPR, 0, 0, DPR, 0, 0);
       }
       c.clearRect(0, 0, w, h);
-      const hist = s.hist, n = hist.length;
       if (n < 2) return;
 
       let lo = Infinity, hi = -Infinity;

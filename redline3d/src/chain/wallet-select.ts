@@ -29,7 +29,12 @@ export function resolveWalletKind(
 
 export function selectChainWalletPort(): SolanaWalletPort {
   const kind = resolveWalletKind(
-    (import.meta.env ?? {}) as { VITE_WALLET?: string; VITE_PRIVY_APP_ID?: string },
+    // exact member accesses — passing `import.meta.env` whole references the injected
+    // bare-env object (EMPTY in some production chunks) instead of vite's static replacement
+    {
+      VITE_WALLET: import.meta.env.VITE_WALLET as string | undefined,
+      VITE_PRIVY_APP_ID: import.meta.env.VITE_PRIVY_APP_ID as string | undefined,
+    },
     globalThis.location?.search ?? "",
   );
   if (kind === "privy") return createLazyPrivyPort();

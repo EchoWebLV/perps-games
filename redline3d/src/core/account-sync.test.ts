@@ -4,7 +4,7 @@ import type { Api } from "./api";
 
 function fakeApi(over: Partial<Api> = {}): Api {
   const base: Partial<Api> = {
-    me: vi.fn(async () => ({ userId: "u", balance: 0, coins: 0, scrap: 0, cars: [], openRoundId: null })),
+    me: vi.fn(async () => ({ userId: "u", balance: 0, coins: 0, scrap: 0, cars: [], openRoundId: null, access: [] })),
     coinsEarn: vi.fn(async () => ({ coins: 0 })),
     coinsSpend: vi.fn(async () => ({ coins: 0 })),
     scrapEarn: vi.fn(async () => ({ scrap: 0 })),
@@ -46,7 +46,7 @@ describe("createAccountSync", () => {
   it("overwrites the local cache from server truth when the account is non-empty", async () => {
     const applyServer = vi.fn();
     const api = fakeApi({
-      me: vi.fn(async () => ({ userId: "u", balance: 0, coins: 500, scrap: 12, cars: [{ carId: "orion", count: 3, acquiredAt: "t" }], openRoundId: null })),
+      me: vi.fn(async () => ({ userId: "u", balance: 0, coins: 500, scrap: 12, cars: [{ carId: "orion", count: 3, acquiredAt: "t" }], openRoundId: null, access: [] })),
     });
     const sync = createAccountSync({ api, nonce: "t", applyServer });
     const outcome = await sync.hydrate({ coins: 250, scrap: 30, cars: { skull: 1 } });
@@ -75,5 +75,20 @@ describe("createAccountSync", () => {
     await sync.hydrate(empty);
     expect(() => sync.coinsEarned(10)).not.toThrow();
     await Promise.resolve();
+  });
+
+  it("surfaces the account's redeemed access codes from hydrate (empty before, empty for guests)", async () => {
+    // access is captured even on the all-zero 'server' path — a 'perpz' account has access but 0 coins.
+    const api = fakeApi({
+      me: vi.fn(async () => ({ userId: "u", balance: 0, coins: 0, scrap: 0, cars: [], openRoundId: null, access: ["magic"] })),
+    });
+    const sync = createAccountSync({ api, nonce: "t", applyServer: () => {} });
+    expect(sync.accessCodes()).toEqual([]);          // empty before hydrate
+    await sync.hydrate(empty);
+    expect(sync.accessCodes()).toEqual(["magic"]);   // reflects me().access after hydrate
+
+    const guest = createAccountSync({ api: null, nonce: "t", applyServer: () => {} });
+    await guest.hydrate(empty);
+    expect(guest.accessCodes()).toEqual([]);         // guests never hydrate → stays empty
   });
 });

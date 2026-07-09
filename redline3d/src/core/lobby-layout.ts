@@ -5,28 +5,28 @@ export interface Building { kind: BuildingKind; x: number; z: number; w: number;
 export interface DoorZone { kind: BuildingKind; x: number; z: number; r: number }
 export interface Point { x: number; z: number }
 
-// the drivable lot: half-extents in world units (240 x 240 — a big open plaza)
-export const LOT_BOUNDS = { x: 120, z: 120 };
+// the drivable lot: half-extents in world units (360 x 360 — a big open plaza)
+export const LOT_BOUNDS = { x: 180, z: 180 };
 
 // TOWN SQUARE: the buildings ring a central plaza and every one faces INWARD, so from anywhere in
 // the square you can read every storefront (the crescent's readability, but as an enclosed place).
 // You enter from the OPEN south side and drive into the plaza; a loop road circles it. The two race
 // venues (TRACK/HIGHWAY) sit at the north, facing you head-on as you come in.
-export const LOBBY_SPAWN = { x: 0, z: 95 };
+export const LOBBY_SPAWN = { x: 0, z: 142.5 };
 
 // the central plaza + its loop road, shared with the renderer so the road art and the layout can't
 // drift apart. The loop sits INSIDE the door rings; you circle it and pull outward into a doorway.
 export const PLAZA = {
   center: { x: 0, z: 0 } as Point,
-  loopRadius: 40, // drivable loop centreline radius
-  loopWidth: 22,
-  entrance: { from: { x: 0, z: 100 }, to: { x: 0, z: 18 } }, // south approach into the plaza
+  loopRadius: 60, // drivable loop centreline radius
+  loopWidth: 33,
+  entrance: { from: { x: 0, z: 150 }, to: { x: 0, z: 27 } }, // south approach into the plaza
 };
 
 // Buildings sit on a ring of radius `RING_R`, placed by compass angle (degrees clockwise from north,
 // north = −Z). The south sector is left empty for the entrance. Each faces the plaza centre: a group
 // rotated by `rot` maps local +Z → (sin rot, cos rot); facing the centre from angle θ means rot = −θ.
-const RING_R = 72;
+const RING_R = 108;
 const RING_SPEC: Array<{ kind: BuildingKind; deg: number; w: number; d: number; color: number; name: string; comingSoon?: boolean }> = [
   // race venues — north, head-on as you enter
   { kind: "track",    deg:  35, w: 28, d: 12, color: 0x14f195, name: "TRACK" },

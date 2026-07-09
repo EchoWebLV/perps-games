@@ -66,7 +66,7 @@ export function buildWheelRig(model: THREE.Object3D, worldScale: number): WheelR
   });
   let travel = 0;      // accumulated world-units of road under the wheels
   let steerAngle = 0;
-  if (typeof window !== "undefined" && import.meta.env?.DEV) (window as any).__wheels = per; // preview probe
+  if (typeof window !== "undefined" && import.meta.env.DEV) (window as any).__wheels = per; // preview probe
   const qSteer = new THREE.Quaternion();
   const qSpin = new THREE.Quaternion();
   const apply = () => {

@@ -7,7 +7,7 @@ import { createWorld } from "./render/world";
 import { THEMES, themeKeys, nextThemeKey } from "./render/world-themes";
 import { createCar } from "./render/car";
 import { createChaseCam, ROAD_SPEED_MAX, roadSpeed } from "./render/camera";
-import { detectQuality, gpuRendererString } from "./platform/perf";
+import { detectQuality, gpuRendererString, shouldRenderFrame } from "./platform/perf";
 import { createPost } from "./render/post";
 import { createHud } from "./ui/hud";
 import { createTach } from "./ui/tach";
@@ -55,6 +55,8 @@ import { createStripCars, lightestSpecs } from "./render/stripcars";
 import { createStripBillboard } from "./render/billboard";
 import { createCruisers } from "./render/cruisers";
 import { clearIdentity, createIdentityGate, loadIdentity, saveIdentity } from "./ui/identity";
+import { createAccessWall } from "./ui/access-wall";
+import { anyRedeemed, redeem, redeemForAccount, type RedeemPorts } from "./core/access-code";
 import { shouldGrantWelcome, welcomeClaimed, markWelcome } from "./core/welcome";
 import { createMapButton } from "./ui/mapbutton";
 import { createLobbyHud } from "./ui/lobbyhud";
@@ -81,9 +83,9 @@ const ctx = createScene(canvas);
 // CPUs (Seeker: 8GB/8-core but Mali-G615); ?perf=low|high overrides for on-device tuning
 const gpu = gpuRendererString(ctx.renderer.getContext());
 const quality = detectQuality({ gpuRenderer: gpu, search: location.search });
-console.log(`redline3d quality: ${quality.tier} · bloom ×${quality.bloomScale} · dpr≤${quality.pixelRatioCap} · ${quality.detail}${gpu ? ` (${gpu})` : ""}`);
+console.log(`redline3d quality: ${quality.tier} · bloom ${quality.bloom ? "×" + quality.bloomScale : "off"} · msaa ${quality.postSamples}× · dpr≤${quality.pixelRatioCap} · ${quality.frameCapFps ? quality.frameCapFps + "fps cap" : "uncapped"} · ${quality.detail}${gpu ? ` (${gpu})` : ""}`);
 ctx.renderer.setPixelRatio(Math.min(quality.pixelRatioCap, window.devicePixelRatio || 1));
-const post = quality.bloom ? createPost(ctx.renderer, ctx.scene, ctx.camera, quality.bloomScale) : null;
+const post = quality.bloom ? createPost(ctx.renderer, ctx.scene, ctx.camera, quality.bloomScale, quality.postSamples) : null;
 addEventListener("resize", () => {
   ctx.resize(window.innerWidth, window.innerHeight);
   post?.setSize(window.innerWidth, window.innerHeight);
@@ -238,7 +240,7 @@ addEventListener("pagehide", () => priceSource.stop());
 const hud = createHud(hudRoot);
 const tach = createTach(hud.tachMount);
 const controls = createControls(hud.ctrlMount, hud.goMount, hud.pedalMount);
-const minimap = createMinimap(hud.miniCanvas);
+const minimap = createMinimap(hud.miniCanvas, quality.pixelRatioCap);
 const fx = createFx();
 const deathsDoor = createDeathsDoor(); // Skull car: near-death sequence at the liq floor
 const worldFlip = createWorldFlipCore(); // Helmet spectacle: the level barrel-rolls on the flip
@@ -396,10 +398,10 @@ async function syncTableCap() {
 setInterval(() => { if (signedIn && !roundActive && !opening) void syncTableCap(); }, 12_000);
 // synthwave radio — streams on the first gesture; its on/off toggle lives in the menu (below)
 const radio = createRadio(hudRoot, AUDIO_DEFAULT_ON);
-const inventory = createInventory("redline.owned.v1", ["Starter"], localStorage, {
+const inventory = createInventory("redline.owned.v1", ["Solana Paper"], localStorage, {
   onGrant: (id) => accountSync.carGranted(id),
   onMelt: (id) => accountSync.carMelted(id),
-}); // Starter is free; other cars pull from crates
+}); // Solana Paper is free; other cars pull from crates
 // level/world skins: the booted theme is owned; the rest unlock from crates (this gates the World picker below)
 const levels = createInventory("redline.levels.v1", [world.currentTheme()]);
 const themeOf = (k: string) => THEMES.find((t) => t.key === k) ?? THEMES[0];
@@ -429,7 +431,7 @@ const CAR_DEFS: CarOption[] = [
   // pulls, comingSoon:true taps it off the pickable rotation. Its GLB, card art, and any already-
   // owned copies stay intact — an owner just sees a COMING SOON card they can't equip.
   { name: "Cook Wagon", url: "/models/breaking_rv.glb", rarity: 1, scale: 1.7, pool: false, comingSoon: true, power: { name: "Cooking", desc: "99.1% pure horsepower", icon: "flame" } },
-  { name: "Trabbi", url: "/models/trabant.glb", rarity: 1, yaw: Math.PI / 2, power: { name: "Two-Stroke", desc: "0–60, eventually", icon: "clock" } },
+  { name: "Solana Paper", url: "/models/trabant.glb", rarity: 1, pool: false, yaw: Math.PI / 2, power: { name: "Two-Stroke", desc: "0–60, eventually", icon: "clock" } },
   { name: "Big Frank", url: "/models/wiener.glb", rarity: 1, yaw: Math.PI / 2, power: { name: "Relish It", desc: "ketchup sold separately", icon: "flame" } },
   { name: "Dragon", url: "/models/dragon.glb", rarity: 1, yaw: Math.PI / 2, power: { name: "Fire Breather", desc: "runs on spicy noodles", icon: "flame" } },
   { name: "Homewrecker", url: "/models/house.glb", rarity: 1, yaw: Math.PI / 2, power: { name: "Full House", desc: "mortgage not included", icon: "weight" } },
@@ -440,11 +442,9 @@ const CAR_DEFS: CarOption[] = [
   { name: "Prickle", url: "/models/cactus.glb", rarity: 2, yaw: Math.PI / 2, power: { name: "Prickly", desc: "do not hug the driver", icon: "flame" } },
   { name: "The Kraken", url: "/models/kraken.glb", rarity: 2, yaw: Math.PI / 2, power: { name: "Deep Six", desc: "smells faintly of low tide", icon: "swerve" } },
   { name: "Noodler", url: "/models/ramen.glb", rarity: 2, yaw: Math.PI / 2, power: { name: "Al Dente", desc: "served scalding, tips poorly", icon: "flame" } },
-  // Starter is deliberately stock — the plain baseline that makes the ability cards feel special.
-  { name: "Starter", rarity: 1, pool: false, url: "/models/starter.glb", yaw: Math.PI / 2 },
 ];
 // Lock every pullable car the player doesn't own yet → the collection becomes "collect the cars".
-// Non-pullable cars (Starter / benched / coming-soon) are never locked; poolable() ignores ownership.
+// Non-pullable cars (Solana Paper / benched / coming-soon) are never locked; poolable() ignores ownership.
 for (const c of CAR_DEFS) c.locked = poolable(c) && !inventory.owns(c.name);
 // the equipped car (shown on the road) — mirrored onto the garage-showroom turntable
 let equippedCar: CarOption = CAR_DEFS[0];
@@ -508,7 +508,8 @@ const crateBox = createCrateBox(hudRoot, {
   addScrap: (n) => upgrades.addScrap(n),
   lockedLevels: () => THEMES.map((t) => t.key).filter((k) => !levels.owns(k)),
   grantLevel: (key) => { levels.grant(key); },
-  levelInfo: (key) => { const t = themeOf(key); return { name: t.name, colors: [t.sky[0], t.sky[1], t.roadEdge] }; },
+  levelInfo: (key) => { const t = themeOf(key); return { name: t.name, sky: [t.sky[0], t.sky[1]], disc: t.celestialColors[0], grid: [t.grid[0], t.grid[1]] }; },
+  lowTier: quality.tier === "low",
   onBuyUsd: () => lobbyHud.toast("Card payment coming soon — use coins for now"),
   onClose: () => { if (mode === "lobby") lobbyHud.show(); },
 });
@@ -545,7 +546,7 @@ lobby.group.add(stripCars.group);
 const stripBoard = createStripBillboard();
 // centred on the far (north) side of the plaza, aimed straight back at the spawn so it reads
 // head-on the moment you enter — a stadium scoreboard facing the crowd at the starting point.
-const stripBoardPos = { x: 0, z: -100 };
+const stripBoardPos = { x: 0, z: -150 };
 stripBoard.group.position.set(stripBoardPos.x, 0, stripBoardPos.z);
 stripBoard.group.rotation.y = Math.atan2(LOBBY_SPAWN.x - stripBoardPos.x, LOBBY_SPAWN.z - stripBoardPos.z); // face the starting point
 lobby.group.add(stripBoard.group);
@@ -558,7 +559,7 @@ const cruisers = createCruisers([
 ]);
 lobby.group.add(cruisers.group);
 // Low tier: dressing beyond this player-distance stops rendering entirely (roots hidden).
-// Derived from the real lot scale (core/lobby-layout LOT_BOUNDS 120-half): 150 keeps the
+// Derived from the real lot scale (core/lobby-layout LOT_BOUNDS 180-half): 225 keeps the
 // whole meet + both cruisers visible from spawn, and drops the entrance meet only once
 // you're across the plaza at the north arc — where it's sub-pixel dressing anyway.
 const DRESSING_CULL_D = LOT_BOUNDS.z * 1.25;
@@ -1157,7 +1158,21 @@ function stepFreedriveBody(tune: DriveTune, dt: number) {
   body = stepBody(body, drive.steer / tune.MAX_STEER_LOW, Math.min(1, Math.abs(drive.speed) / tune.MAX_FWD), accel, tune.ACCEL, dt);
 }
 
+// Timestamp of the last frame we actually rendered — the low tier's 30fps cap measures against
+// it. High tier leaves quality.frameCapFps undefined, so the gate below never fires there.
+let lastRenderMs = 0;
 function frame(now: number) {
+  // Low-tier frame cap: when too little wall-clock has elapsed since the last *rendered* frame,
+  // reschedule and bail BEFORE any work. Placed above fpsMeter.tick (so the chip reports the real
+  // presented rate, not the offered rAF rate) and above getDelta() (so the clock delta accumulates
+  // across the skipped frames — dt then reflects true inter-render time, clamped to 0.05 below).
+  // Safe to skip whole frames because the sim steps on dt everywhere (throttle/lane/world/body all
+  // integrate dt; the recentre is explicitly fps-independent), so 30Hz stepping matches 60Hz.
+  if (!shouldRenderFrame(lastRenderMs, now, quality.frameCapFps)) {
+    requestAnimationFrame(frame);
+    return;
+  }
+  lastRenderMs = now;
   fpsMeter.tick(now); // rAF timestamp — every mode path funnels through here
   const dt = Math.min(0.05, ctx.clock.getDelta()); // clamp so a frame hitch can't teleport the world
 
@@ -1524,6 +1539,48 @@ function maybeWelcomeGift() {
   markWelcome();
   setTimeout(() => crateBox.openGift("wooden"), 0);
 }
+// The access wall's grant seams — HOISTED so both identity paths (and the reconnect block) can wire
+// their own redeem into the same wall. "magic" grants all cars + 1,000 coins through the exact seams
+// a crate pull uses; "perpz" unlocks entry and nothing else. Already-owned cars are skipped (no dup
+// copies); coins go through the earned-coins seam so they persist, refresh the HUD, and sync to the
+// server ledger when signed in.
+const accessPorts: RedeemPorts = {
+  rosterIds: CAR_DEFS.map((c) => c.name),                       // all roster cars — what "magic" unlocks
+  owns: (id) => inventory.owns(id),
+  grantCar: (id) => { inventory.grant(id); garage.grant(id); }, // bank it (+ server sync) AND flip its garage card
+  credit: (n) => upgrades.addCoins(n),
+};
+// The access wall is a HARD gate that now sits AFTER the identity choice, one per CONTEXT:
+//  • GUEST — redeem is LOCAL (a durable per-browser flag). A browser that already redeemed skips it.
+//  • ACCOUNT — redeem is pinned SERVER-SIDE (follows the player across devices). A hydrated account
+//    that already redeemed skips it; a fresh one is walled until it enters a code.
+// Each helper mounts the same wall with its own redeem, then runs `onDone` (welcome gift, etc.) once
+// the wall clears — so the crate reveal is never drawn behind the wall.
+function guestAccessThenEnter(onDone: () => void) {
+  if (anyRedeemed()) { onDone(); return; } // this browser already redeemed → straight through
+  createAccessWall(hudRoot, {
+    onRedeem: (code) => redeem(code, accessPorts), // guest-local, synchronous
+    onUnlocked: onDone,
+  });
+}
+function accountAccessThenEnter(onDone: () => void) {
+  // Skip if the account already redeemed (from hydrate) OR this browser did — the latter covers an
+  // earlier offline redeem whose server record never landed, so we never re-prompt or re-grant.
+  if (accountSync.accessCodes().length > 0 || anyRedeemed()) { onDone(); return; }
+  createAccessWall(hudRoot, {
+    onRedeem: (code) => redeemForAccount(code, {
+      api, rosterIds: accessPorts.rosterIds, owns: accessPorts.owns,
+      grantCar: accessPorts.grantCar, credit: accessPorts.credit,
+    }),
+    onUnlocked: onDone,
+  });
+}
+// The signed-in welcome crate is ONCE PER ACCOUNT (server-side). Extracted so it fires AFTER the
+// access wall clears — otherwise the crate reveal would draw behind the wall.
+async function claimWelcomeAccount() {
+  try { const { granted } = await api.claimWelcome(); if (granted) setTimeout(() => crateBox.openGift("wooden"), 0); }
+  catch { /* offline: skip — the server is the source of truth for accounts, never fall back to a local flag here */ }
+}
 let gateUp = false;
 function showIdentityGate() {
   if (gateUp) return;
@@ -1538,7 +1595,9 @@ function showIdentityGate() {
       saveIdentity(identity);
       syncOnchainBalance(); // renders the "practice" chip
       gateUp = false;
-      maybeWelcomeGift();
+      // GUEST: the access wall (LOCAL) stands between the gate and the world; the welcome gift stays
+      // local and fires only once the wall clears.
+      guestAccessThenEnter(() => { maybeWelcomeGift(); });
     },
     async onSignIn(name) {
       // fresh = the account picker ALWAYS opens (a lingering Privy session is signed out
@@ -1549,19 +1608,46 @@ function showIdentityGate() {
         saveIdentity(identity);
         syncOnchainBalance();
         gateUp = false;
-        maybeWelcomeGift();
+        // ACCOUNT: ensureSignedIn already ran syncAccount → bindAndHydrate → accountSync.hydrate, so
+        // accountSync.accessCodes() is populated — the wall shows only if THIS account hasn't redeemed.
+        // The welcome crate (ONCE PER ACCOUNT, server-side) fires AFTER the wall clears so its reveal
+        // isn't drawn behind the wall.
+        accountAccessThenEnter(() => { void claimWelcomeAccount(); });
       }
       return ok;
     },
   });
 }
-if (!identity) showIdentityGate();
-else if (identity.mode === "guest") syncOnchainBalance(); // returning guest → "practice" chip, NO wallet
+// The normal front door: the identity gate on a fresh boot (no rider), or a returning rider resuming.
+// The access wall now lives INSIDE the identity paths (guest/accountAccessThenEnter), so it appears
+// AFTER the player picks Guest or Sign in — never before the identity choice.
+function bootIdentity() {
+  if (!identity) { showIdentityGate(); return; } // fresh boot → the gate is the front door
+  if (identity.mode === "guest") {
+    syncOnchainBalance(); // returning guest → "practice" chip, NO wallet
+    // returning guests already hold the local flag → the wall is skipped (onDone is a no-op: they're
+    // already in-world). Kept for the odd guest who somehow lacks the flag — they get walled.
+    guestAccessThenEnter(() => {});
+  }
+  // returning PRIVY users: their account access set only arrives with hydrate → walled in the
+  // reconnect block below (NOT here — accountSync.accessCodes() is empty until hydrate lands).
+}
+// Boot ALWAYS resumes the identity flow now; the wall is deferred into whichever path the player picks.
+bootIdentity();
 requestAnimationFrame(frame);
-// Returning SIGNED-IN players see their money at the top immediately: silently restore the
-// persisted wallet session. Guests and fresh visitors get NO wallet — that's the point.
+// Returning SIGNED-IN players see their money at the top immediately: silently restore the persisted
+// wallet session, hydrate the account, THEN wall on the account's access set — a returning account
+// that never redeemed still gets the wall; one that already redeemed skips it. Guests and fresh
+// visitors get NO wallet — that's the point.
 if (identity?.mode === "privy") {
-  void session.reconnect().then((ok) => { if (ok) { signedIn = true; syncOnchainBalance(); void syncTableCap(); void syncAccount(); } }).catch(() => {});
+  void session.reconnect().then(async (ok) => {
+    if (!ok) return;
+    signedIn = true;
+    syncOnchainBalance();
+    void syncTableCap();
+    await syncAccount();                 // hydrate coins/scrap/cars + the account's redeemed-code set
+    accountAccessThenEnter(() => {});    // already-redeemed accounts skip; otherwise the wall shows
+  }).catch(() => {});
 }
 console.log("redline3d render up");
 

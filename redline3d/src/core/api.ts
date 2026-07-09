@@ -4,7 +4,7 @@ import type { AuthProvider } from "./auth";
 export type Asset = "BTC" | "ETH" | "SOL";
 export type Dir = 1 | -1;
 
-export interface MeResult { userId: string; balance: number; coins: number; scrap: number; cars: { carId: string; count: number; acquiredAt?: string }[]; openRoundId: string | null; }
+export interface MeResult { userId: string; balance: number; coins: number; scrap: number; cars: { carId: string; count: number; acquiredAt?: string }[]; openRoundId: string | null; access: string[]; }
 export interface OpenResult { roundId: string; asset: Asset; dir: Dir; lev: number; stake: number; entryRaw: number; entryTsUs: number; }
 export interface CloseResult { outcome: string; payoutCoins: number; pnlCoins: number; equity: number; exitRaw: number; balance: number; }
 /** live read-only mark: the server's CURRENT equity for an open round (what the client displays) */
@@ -39,6 +39,11 @@ export interface Api {
   inventoryGrant(p: { carId: string }): Promise<{ carId: string; isNew: boolean; count: number }>;
   inventoryMelt(p: { carId: string }): Promise<{ carId: string; melted: boolean; count: number }>;
   migrate(p: { coins: number; scrap: number; cars: Record<string, number> }): Promise<{ seeded: boolean; reason?: string }>;
+  /** claim the first-login welcome crate ONCE PER ACCOUNT (server-side). granted=true only the first time. */
+  claimWelcome(): Promise<{ granted: boolean }>;
+  /** redeem an access code for THIS account. Server-authoritative + idempotent per account+code:
+   *  granted=true ONLY the first time this account redeems this code, false once already recorded. */
+  redeemAccess(code: string): Promise<{ granted: boolean }>;
   openRound(p: { asset: Asset; dir: Dir; lev: number; stake: number }): Promise<OpenResult>;
   roundAction(p: { roundId: string; actionId: string; kind: "flip" | "lever"; dir?: Dir; lev?: number }): Promise<void>;
   closeRound(p: { roundId: string; reason: "cashout" | "expire" }): Promise<CloseResult>;
@@ -69,7 +74,7 @@ function isLoopbackHost(hostname: string): boolean {
 }
 
 function resolveBaseUrl(explicitBaseUrl?: string): string {
-  const configured = explicitBaseUrl ?? (import.meta.env?.VITE_API_BASE as string | undefined) ?? "http://localhost:8080";
+  const configured = explicitBaseUrl ?? (import.meta.env.VITE_API_BASE as string | undefined) ?? "http://localhost:8080";
   try {
     const url = new URL(configured);
     const page = globalThis.location;
@@ -141,6 +146,11 @@ export function createApi(opts: ApiOpts = {}): Api {
     inventoryGrant: (p) => call("POST", "/v1/inventory/grant", p),
     inventoryMelt: (p) => call("POST", "/v1/inventory/melt", p),
     migrate: (p) => call("POST", "/v1/migrate", p),
+    // send an empty {} body: `call` always sets content-type:application/json, and Fastify 400s an
+    // empty body under that content-type. The server ignores the body.
+    claimWelcome: () => call("POST", "/v1/welcome/claim", {}),
+    // { code } is a real body → `call` sets content-type:application/json and Fastify accepts it.
+    redeemAccess: (code) => call("POST", "/v1/access/redeem", { code }),
     openRound: (p) => call<OpenResult>("POST", "/v1/round/open", p),
     roundAction: (p) => call<void>("POST", "/v1/round/action", p),
     closeRound: (p) => call<CloseResult>("POST", "/v1/round/close", p),

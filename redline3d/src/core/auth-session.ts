@@ -11,7 +11,7 @@ const USER_KEY = "redline.session:user";
 
 export function createSessionAuth(opts: SessionAuthOpts = {}): AuthProvider {
   const doFetch = opts.fetch ?? globalThis.fetch.bind(globalThis);
-  const baseUrl = (opts.baseUrl ?? (import.meta.env?.VITE_API_BASE as string) ?? "http://localhost:8080").replace(/\/$/, "");
+  const baseUrl = (opts.baseUrl ?? (import.meta.env.VITE_API_BASE as string) ?? "http://localhost:8080").replace(/\/$/, "");
   const storage = opts.storage ?? localStorage;
   let token = storage.getItem(TOKEN_KEY);
   let uid = storage.getItem(USER_KEY) ?? "";
