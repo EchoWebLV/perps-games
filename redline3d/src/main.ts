@@ -63,7 +63,7 @@ import { createLobbyHud } from "./ui/lobbyhud";
 import { step as driveStep, DRIVE, HIGHWAY_DRIVE, type DriveState, type DriveTune } from "./core/freedrive";
 import { stepBody, type BodyState } from "./core/body-language";
 import { laneStep, type LaneState } from "./core/lane-drive";
-import { entranceHit, LOT_BOUNDS, LOBBY_SPAWN, type BuildingKind } from "./core/lobby-layout";
+import { entranceHit, LOT_BOUNDS, LOBBY_SPAWN, BUILDINGS, DOORS, type BuildingKind } from "./core/lobby-layout";
 import { modeSwitchBlocked } from "./core/mode-guard";
 import { createOval } from "./render/oval";
 import { createGarageRoom } from "./render/garage-room";
@@ -648,10 +648,31 @@ function setChrome(state: "cruise" | "race") {
   garage.setMenuTop(state === "cruise"); // strip: hamburger rides the top row (price chip's slot)
 }
 
+// When you drive OUT of a building (Track / Garage) the car should emerge AT that building's doorway
+// facing the plaza — not teleport back to the south entrance. Set when a building is entered, consumed
+// once by the next enterLobby(). null → the plain south spawn (first boot, or no building of origin).
+let exitFrom: BuildingKind | null = null;
+
+/** where enterLobby() drops the car: just outside the origin building's door, nosed into the plaza
+ *  (reads as "drove out", and sits clear of the door ring so it can't instantly re-trigger the entry). */
+function lobbyEntryPose(): DriveState {
+  const kind = exitFrom;
+  exitFrom = null;
+  const spawn: DriveState = { x: LOBBY_SPAWN.x, z: LOBBY_SPAWN.z, heading: 0, speed: 0, steer: 0 };
+  if (!kind) return spawn;
+  const b = BUILDINGS.find((bb) => bb.kind === kind);
+  const d = DOORS.find((dd) => dd.kind === kind);
+  if (!b || !d) return spawn;
+  const fx = Math.sin(b.rot), fz = Math.cos(b.rot); // building front → plaza centre (unit vector)
+  const out = d.r + 18;                             // step well past the door ring, out into the plaza (no re-trigger)
+  // heading convention: forward = (sin h, -cos h); solve for forward === (fx, fz) → h = atan2(fx, -fz)
+  return { x: d.x + fx * out, z: d.z + fz * out, heading: Math.atan2(fx, -fz), speed: 0, steer: 0 };
+}
+
 function enterLobby() {
   if (modeSwitchBlocked({ opening, phase: engine.getPhase() })) return; // no mode switch while a GO is in flight
   mode = "lobby";
-  drive = { x: LOBBY_SPAWN.x, z: LOBBY_SPAWN.z, heading: 0, speed: 0, steer: 0 };
+  drive = lobbyEntryPose(); // at the door of the building you left (Track/Garage), else the south spawn
   doorDwell = 0;
   doorArmed = true;
   body = { roll: 0, pitch: 0 }; prevDriveSpeed = 0;
@@ -753,11 +774,11 @@ function exitGarageToLobby() {
 /** drive-into-a-building action. Economy screens open over the lobby; the Track gate leaves to the race. */
 function triggerBuilding(kind: BuildingKind) {
   switch (kind) {
-    case "garage": enterGarage(); break;                             // drive-in showroom (car + collection)
+    case "garage": exitFrom = "garage"; enterGarage(); break;        // drive-in showroom (car + collection)
     case "upgrades": lobbyHud.hide(); upgrades.open(); break;        // tune your car
     case "crates": lobbyHud.hide(); crateBox.open(); break;           // open a crate → pull a car
     case "scrapyard": lobbyHud.toast("ScrapYard — coming soon"); break; // collect scrap, not built yet
-    case "track": exitLobby(); break;                                // onto the track — full racing HUD, GO lives there
+    case "track": exitFrom = "track"; exitLobby(); break;            // onto the track — full racing HUD, GO lives there
     case "highway": lobbyHud.toast("Highway - coming soon"); break; // closed for now
   }
 }
