@@ -5,6 +5,9 @@ import { makeUsers } from "./services/users.js";
 import { makeLedger } from "./services/ledger.js";
 import { makeInventory } from "./services/inventory.js";
 import { makeRounds } from "./services/rounds.js";
+import { makeUpgrades } from "./services/upgrades.js";
+import { makeEntitlements } from "./services/entitlements.js";
+import { makeEarnLimit } from "./services/earn-limit.js";
 import { assertRoundSettlerForStake, type RoundSettler } from "./services/round-settler-guard.js";
 import { ensureHouseUserId } from "./services/house.js";
 import { makeHermesFeed } from "./feed/hermes.js";
@@ -157,11 +160,15 @@ async function main(): Promise<void> {
   const depositIntents = makeDepositIntents({
     secret: env.SESSION_SECRET ?? "development-session-secret-change-before-production",
   });
+  const inventory = makeInventory(db);
+  const upgrades = makeUpgrades(db, ledger);
+  const entitlements = makeEntitlements({ inventory, upgrades }); // consumed by Phase 2's /authorize; wired now as the seam
+  const earnLimit = makeEarnLimit(db, { ceiling: env.EARN_WINDOW_CEILING, windowMs: env.EARN_WINDOW_MS });
 
   const server = buildServer({
     users,
     ledger,
-    inventory: makeInventory(db),
+    inventory,
     rounds,
     feed,
     stakeAsset,
@@ -183,6 +190,9 @@ async function main(): Promise<void> {
     withdrawProcessor,
     payoutSigner,
     adminSecret: env.ADMIN_API_SECRET ?? null,
+    upgrades,
+    entitlements,
+    earnLimit,
   });
 
   const addr = await server.listen({ port: env.PORT, host: "0.0.0.0" });

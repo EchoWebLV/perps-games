@@ -37,6 +37,11 @@ const EnvShape = z.object({
   DEPOSIT_MIN_CENTS: z.coerce.number().int().positive().default(100),
   DEPOSIT_MAX_CENTS: z.coerce.number().int().positive().default(500),
   DEPOSIT_POLL_MS: z.coerce.number().int().positive().default(8000),
+  // Coarse anti-abuse ceiling on client-reported earns (coins or scrap independently) per rolling
+  // window. Deliberately generous — it must sit ABOVE the fastest legitimate play session and only
+  // refuse implausible mint bursts; tune from real gameplay telemetry, never tighter than observed play.
+  EARN_WINDOW_CEILING: z.coerce.number().int().positive().default(5000),
+  EARN_WINDOW_MS: z.coerce.number().int().positive().default(60000),
   RUN_CONFIRMER: z.string().optional().default("true").transform((v) => v !== "false"),
   WITHDRAW_MIN_CENTS: z.coerce.number().int().positive().default(100),
   WITHDRAW_MAX_CENTS: z.coerce.number().int().positive().default(500),

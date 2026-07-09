@@ -33,6 +33,10 @@ export interface RouteDeps {
   payoutSigner: import("../services/withdraw-worker.js").WithdrawSigner | null;
   /** operator secret guarding the admin withdrawal-approval endpoint; null disables that surface. */
   adminSecret: string | null;
+  upgrades: import("../services/upgrades.js").Upgrades;
+  /** not consumed by any Phase 1 route — the seam Phase 2's /authorize validates against */
+  entitlements: import("../services/entitlements.js").Entitlements;
+  earnLimit: import("../services/earn-limit.js").EarnLimit;
 }
 
 const GrantCoins = z.object({ amount: z.number().int().positive() });
@@ -57,6 +61,14 @@ const MigrateBody = z.object({
   cars: z
     .record(z.string().min(1), z.number().int().positive().max(1000))
     .refine((c) => Object.keys(c).length <= 64, { message: "too_many_cars" }),
+  levels: z
+    .object({
+      turbo: z.number().int().min(0).max(10),
+      tank: z.number().int().min(0).max(10),
+      suspension: z.number().int().min(0).max(10),
+    })
+    .partial()
+    .optional(),
 });
 
 const OpenRound = z.object({
@@ -91,6 +103,8 @@ export function registerRoutes(server: FastifyInstance, deps: RouteDeps): void {
   server.post("/v1/coins/earn", { preHandler: requireWalletBoundUser }, async (req, reply) => {
     const p = CoinDelta.safeParse(req.body);
     if (!p.success) return reply.code(400).send({ error: "bad_request" });
+    if (!(await deps.earnLimit.check(req.userId!, "earn", p.data.amount)))
+      return reply.code(429).send({ error: "earn_rate_exceeded" });
     await deps.ledger.credit(req.userId!, "coin", p.data.amount, "earn", `${req.userId!}:${p.data.ref}`);
     return { coins: await deps.ledger.balance(req.userId!, "coin") };
   });
@@ -110,6 +124,8 @@ export function registerRoutes(server: FastifyInstance, deps: RouteDeps): void {
   server.post("/v1/scrap/earn", { preHandler: requireWalletBoundUser }, async (req, reply) => {
     const p = CoinDelta.safeParse(req.body);
     if (!p.success) return reply.code(400).send({ error: "bad_request" });
+    if (!(await deps.earnLimit.check(req.userId!, "scrap_earn", p.data.amount)))
+      return reply.code(429).send({ error: "earn_rate_exceeded" });
     await deps.ledger.credit(req.userId!, "scrap", p.data.amount, "scrap_earn", `${req.userId!}:${p.data.ref}`);
     return { scrap: await deps.ledger.balance(req.userId!, "scrap") };
   });
@@ -124,6 +140,22 @@ export function registerRoutes(server: FastifyInstance, deps: RouteDeps): void {
       throw e;
     }
     return { scrap: await deps.ledger.balance(req.userId!, "scrap") };
+  });
+
+  const BuyBody = z.object({ track: z.enum(["turbo", "tank", "suspension"]) });
+  // Authoritative upgrade purchase: the server debits the escalating cost and increments the level
+  // in one transaction — a client can neither fake a level nor get one free.
+  server.post("/v1/upgrades/buy", { preHandler: requireWalletBoundUser }, async (req, reply) => {
+    const p = BuyBody.safeParse(req.body);
+    if (!p.success) return reply.code(400).send({ error: "bad_request" });
+    try {
+      return await deps.upgrades.buy(req.userId!, p.data.track);
+    } catch (e: any) {
+      if (e?.message === "insufficient balance") return reply.code(402).send({ error: "insufficient_balance" });
+      if (e?.message === "max_level") return reply.code(409).send({ error: "max_level" });
+      if (e?.message === "debit_replay") return reply.code(409).send({ error: "debit_replay" });
+      throw e;
+    }
   });
 
   server.get("/v1/inventory", { preHandler: requireUser }, async (req) => {
@@ -168,12 +200,15 @@ export function registerRoutes(server: FastifyInstance, deps: RouteDeps): void {
     const p = MigrateBody.safeParse(req.body);
     if (!p.success) return reply.code(400).send({ error: "bad_request" });
     const userId = req.userId!;
-    const [coins, scrap, cars] = await Promise.all([
+    const [coins, scrap, cars, levels] = await Promise.all([
       deps.ledger.balance(userId, "coin"),
       deps.ledger.balance(userId, "scrap"),
       deps.inventory.list(userId),
+      deps.upgrades.get(userId),
     ]);
-    if (coins > 0 || scrap > 0 || cars.length > 0) {
+    // Levels count as state: an account with upgrades is not brand-new, and seeding over it could
+    // LOWER a level (silently losing an upgrade the player already bought).
+    if (coins > 0 || scrap > 0 || cars.length > 0 || levels.turbo > 0 || levels.tank > 0 || levels.suspension > 0) {
       return { seeded: false, reason: "account_not_empty" };
     }
     if (p.data.coins > 0) await deps.ledger.credit(userId, "coin", p.data.coins, "migrate_seed", `migrate:${userId}`);
@@ -181,6 +216,7 @@ export function registerRoutes(server: FastifyInstance, deps: RouteDeps): void {
     for (const [carId, n] of Object.entries(p.data.cars)) {
       await deps.inventory.grant(userId, carId, n); // one counted write per car, not n writes
     }
+    if (p.data.levels) await deps.upgrades.seed(userId, p.data.levels);
     return { seeded: true };
   });
 
@@ -190,13 +226,14 @@ export function registerRoutes(server: FastifyInstance, deps: RouteDeps): void {
     if (deps.signupFaucet) {
       await deps.ledger.credit(userId, "coin", deps.startBalance, "signup_faucet", userId);
     }
-    const [balance, coins, scrap, rows, openRoundId, access] = await Promise.all([
+    const [balance, coins, scrap, rows, openRoundId, access, levels] = await Promise.all([
       deps.ledger.balance(userId, deps.stakeAsset),
       deps.ledger.balance(userId, "coin"),
       deps.ledger.balance(userId, "scrap"),
       deps.inventory.list(userId),
       deps.rounds.getOpenRoundId(userId),
       deps.users.accessCodes(userId),
+      deps.upgrades.get(userId),
     ]);
     return {
       userId,
@@ -206,6 +243,7 @@ export function registerRoutes(server: FastifyInstance, deps: RouteDeps): void {
       cars: rows.map((r) => ({ carId: r.carId, count: r.count, acquiredAt: r.acquiredAt })),
       openRoundId,
       access,
+      levels,
     };
   });
 

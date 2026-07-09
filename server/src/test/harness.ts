@@ -3,6 +3,9 @@ import { makeUsers, type Users } from "../services/users.js";
 import { makeLedger, type Ledger } from "../services/ledger.js";
 import { makeInventory, type Inventory } from "../services/inventory.js";
 import { makeRounds, type Rounds } from "../services/rounds.js";
+import { makeUpgrades, type Upgrades } from "../services/upgrades.js";
+import { makeEntitlements, type Entitlements } from "../services/entitlements.js";
+import { makeEarnLimit, type EarnLimit } from "../services/earn-limit.js";
 import { ensureHouseUserId } from "../services/house.js";
 import { makeStubFeed, type StubFeed } from "../feed/stub.js";
 import { buildServer } from "../http/server.js";
@@ -22,6 +25,9 @@ export interface TestCtx {
   rounds: Rounds;
   feed: StubFeed;
   houseUserId: string;
+  upgrades: Upgrades;
+  entitlements: Entitlements;
+  earnLimit: EarnLimit;
   server: ReturnType<typeof buildServer>;
   close(): Promise<void>;
 }
@@ -45,6 +51,7 @@ interface MakeTestDbOptions {
   payoutSigner?: WithdrawSigner | null;
   adminSecret?: string | null;
   stakeAsset?: "coin" | "cash";
+  earnLimit?: { ceiling: number; windowMs: number };
 }
 
 /** fresh in-memory pglite DB with migrations applied + services wired (stub feed) */
@@ -60,9 +67,14 @@ export async function makeTestDb(opts: MakeTestDbOptions = {}): Promise<TestCtx>
   const stakeAsset = opts.stakeAsset ?? "coin";
   const houseUserId = await ensureHouseUserId(users);
   const rounds = makeRounds({ db, ledger, feed, stakeAsset, houseUserId });
+  const upgrades = makeUpgrades(db, ledger);
+  const entitlements = makeEntitlements({ inventory, upgrades });
+  // deliberately huge default ceiling so unrelated suites never trip the cap; cap tests override it.
+  const earnLimit = makeEarnLimit(db, opts.earnLimit ?? { ceiling: 1_000_000, windowMs: 60_000 });
 
   const server = buildServer({
     users, ledger, inventory, rounds, feed,
+    upgrades, entitlements, earnLimit,
     stakeAsset,
     devEndpoints: true,
     signupFaucet: opts.signupFaucet ?? false,
@@ -93,7 +105,7 @@ export async function makeTestDb(opts: MakeTestDbOptions = {}): Promise<TestCtx>
     adminSecret: opts.adminSecret ?? null,
   });
 
-  return { raw, db, users, ledger, inventory, rounds, feed, houseUserId, server, close: () => raw.close() };
+  return { raw, db, users, ledger, inventory, rounds, feed, houseUserId, upgrades, entitlements, earnLimit, server, close: () => raw.close() };
 }
 
 /**
