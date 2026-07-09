@@ -1,4 +1,4 @@
-import { eq, and, isNull, ne } from "drizzle-orm";
+import { eq, and, isNull, ne, sql } from "drizzle-orm";
 import { users, type User } from "../db/schema.js";
 
 function isUniqueViolation(error: unknown): boolean {
@@ -66,6 +66,46 @@ export function makeUsers(db: any) {
         console.warn(`[wallet_rebind_attempt] user=${id} existing=${cur.walletPublicKey} attempted=${address}`);
       }
       return cur as User;
+    },
+    /**
+     * Claim the first-login welcome crate — SET-ONCE per account. Atomic conditional UPDATE:
+     * flips welcome_claimed false→true and RETURNs only when it actually moved the row, so exactly
+     * one caller (the first) ever sees granted=true. Every later call, and any concurrent racer,
+     * gets granted=false. Race-safe by construction (single-statement compare-and-set).
+     */
+    async claimWelcome(id: string): Promise<{ granted: boolean }> {
+      const rows = await db
+        .update(users)
+        .set({ welcomeClaimed: true })
+        .where(and(eq(users.id, id), eq(users.welcomeClaimed, false)))
+        .returning();
+      return { granted: rows.length > 0 };
+    },
+    /**
+     * Redeem an access code — grants its reward ONCE PER (account, code). The code is normalized
+     * (trimmed + lowercased) first. Atomic conditional UPDATE: appends the code to access_codes
+     * only when it's absent and RETURNs only when it actually moved the row, so exactly one caller
+     * (the first) ever sees granted=true. Every later call for that same (account, code), and any
+     * concurrent racer, gets granted=false. Race-safe by construction (single-statement
+     * compare-and-set, same shape as claimWelcome).
+     */
+    async redeemAccess(id: string, code: string): Promise<{ granted: boolean }> {
+      const norm = code.trim().toLowerCase();
+      const rows = await db
+        .update(users)
+        .set({ accessCodes: sql`array_append(${users.accessCodes}, ${norm})` })
+        .where(and(eq(users.id, id), sql`not (${norm} = any(${users.accessCodes}))`))
+        .returning({ id: users.id });
+      return { granted: rows.length > 0 };
+    },
+    /** the account's redeemed access-code ids (normalized), or [] for a fresh account. */
+    async accessCodes(id: string): Promise<string[]> {
+      const rows = await db
+        .select({ accessCodes: users.accessCodes })
+        .from(users)
+        .where(eq(users.id, id))
+        .limit(1);
+      return rows[0]?.accessCodes ?? [];
     },
   };
 }

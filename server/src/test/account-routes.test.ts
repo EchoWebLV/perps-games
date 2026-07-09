@@ -22,6 +22,21 @@ describe("GET /v1/me account state", () => {
     expect(body.scrap).toBe(7);
     expect(body.cars).toEqual([{ carId: "orion", count: 2, acquiredAt: expect.anything() }]);
   });
+
+  it("returns access: [] for a fresh account", async () => {
+    ctx = await makeTestDb({ signupFaucet: false });
+    const res = await ctx.server.inject({ method: "GET", url: "/v1/me", headers: H });
+    expect(res.statusCode).toBe(200);
+    expect(res.json().access).toEqual([]);
+  });
+
+  it("includes redeemed access codes (lowercased)", async () => {
+    ctx = await makeTestDb({ signupFaucet: false });
+    await ctx.server.inject({ method: "POST", url: "/v1/access/redeem", headers: H, payload: { code: "GOLD" } });
+    const res = await ctx.server.inject({ method: "GET", url: "/v1/me", headers: H });
+    expect(res.statusCode).toBe(200);
+    expect(res.json().access).toEqual(["gold"]);
+  });
 });
 
 describe("coins earn/spend", () => {
@@ -134,5 +149,79 @@ describe("coherence fixes", () => {
     ctx = await makeTestDb({ signupFaucet: false });
     const res = await ctx.server.inject({ method: "POST", url: "/v1/coins/earn", headers: H, payload: { amount: 2_000_000_000, ref: "big" } });
     expect(res.statusCode).toBe(400);
+  });
+});
+
+describe("POST /v1/welcome/claim (once per account)", () => {
+  let ctx: TestCtx;
+  afterEach(async () => { await ctx?.close(); });
+
+  // NOTE: the real client (core/api.ts `call`) always sends content-type:application/json, so it
+  // MUST send a body ({}) — an empty body with that content-type is a Fastify 400. These tests
+  // mirror that by posting `payload: {}`; the handler ignores the body.
+  it("grants the welcome crate on the first call and never again for the same account", async () => {
+    ctx = await makeTestDb({ signupFaucet: false });
+    const first = await ctx.server.inject({ method: "POST", url: "/v1/welcome/claim", headers: H, payload: {} });
+    expect(first.statusCode).toBe(200);
+    expect(first.json()).toEqual({ granted: true });
+
+    const second = await ctx.server.inject({ method: "POST", url: "/v1/welcome/claim", headers: H, payload: {} });
+    expect(second.statusCode).toBe(200);
+    expect(second.json()).toEqual({ granted: false });
+  });
+
+  it("grants each distinct account once, independently", async () => {
+    ctx = await makeTestDb({ signupFaucet: false });
+    const A = { "x-dev-user": "welcomeA", "content-type": "application/json" };
+    const B = { "x-dev-user": "welcomeB", "content-type": "application/json" };
+    expect((await ctx.server.inject({ method: "POST", url: "/v1/welcome/claim", headers: A, payload: {} })).json()).toEqual({ granted: true });
+    expect((await ctx.server.inject({ method: "POST", url: "/v1/welcome/claim", headers: B, payload: {} })).json()).toEqual({ granted: true });
+    // each already claimed → both now false
+    expect((await ctx.server.inject({ method: "POST", url: "/v1/welcome/claim", headers: A, payload: {} })).json()).toEqual({ granted: false });
+    expect((await ctx.server.inject({ method: "POST", url: "/v1/welcome/claim", headers: B, payload: {} })).json()).toEqual({ granted: false });
+  });
+
+  it("401s without an auth identity", async () => {
+    ctx = await makeTestDb({ signupFaucet: false });
+    const res = await ctx.server.inject({ method: "POST", url: "/v1/welcome/claim", headers: { "content-type": "application/json" }, payload: {} });
+    expect(res.statusCode).toBe(401);
+  });
+});
+
+describe("POST /v1/access/redeem (once per account + code)", () => {
+  let ctx: TestCtx;
+  afterEach(async () => { await ctx?.close(); });
+
+  it("grants a code on the first call and never again for the same account", async () => {
+    ctx = await makeTestDb({ signupFaucet: false });
+    const first = await ctx.server.inject({ method: "POST", url: "/v1/access/redeem", headers: H, payload: { code: "GOLD" } });
+    expect(first.statusCode).toBe(200);
+    expect(first.json()).toEqual({ granted: true });
+
+    const second = await ctx.server.inject({ method: "POST", url: "/v1/access/redeem", headers: H, payload: { code: "GOLD" } });
+    expect(second.statusCode).toBe(200);
+    expect(second.json()).toEqual({ granted: false });
+  });
+
+  it("grants distinct codes on the same account independently", async () => {
+    ctx = await makeTestDb({ signupFaucet: false });
+    const alpha = await ctx.server.inject({ method: "POST", url: "/v1/access/redeem", headers: H, payload: { code: "alpha" } });
+    const beta = await ctx.server.inject({ method: "POST", url: "/v1/access/redeem", headers: H, payload: { code: "beta" } });
+    expect(alpha.json()).toEqual({ granted: true });
+    expect(beta.json()).toEqual({ granted: true });
+    // re-redeeming the first is now false
+    expect((await ctx.server.inject({ method: "POST", url: "/v1/access/redeem", headers: H, payload: { code: "alpha" } })).json()).toEqual({ granted: false });
+  });
+
+  it("400s on a missing/empty code", async () => {
+    ctx = await makeTestDb({ signupFaucet: false });
+    const res = await ctx.server.inject({ method: "POST", url: "/v1/access/redeem", headers: H, payload: {} });
+    expect(res.statusCode).toBe(400);
+  });
+
+  it("401s without an auth identity", async () => {
+    ctx = await makeTestDb({ signupFaucet: false });
+    const res = await ctx.server.inject({ method: "POST", url: "/v1/access/redeem", headers: { "content-type": "application/json" }, payload: { code: "gold" } });
+    expect(res.statusCode).toBe(401);
   });
 });

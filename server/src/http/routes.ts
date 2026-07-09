@@ -37,6 +37,7 @@ const GrantCoins = z.object({ amount: z.number().int().positive() });
 const CoinDelta = z.object({ amount: z.number().int().positive().max(1_000_000_000), ref: z.string().min(1).max(200) });
 const GrantCar = z.object({ carId: z.string().min(1) });
 const CarRef = z.object({ carId: z.string().min(1) });
+const RedeemAccess = z.object({ code: z.string().trim().min(1).max(24) });
 const WalletBindChallengeBody = z.object({ wallet: z.string().min(32).max(44) });
 const WalletBindBody = z.object({
   challenge: z.string().min(1),
@@ -125,6 +126,19 @@ export function registerRoutes(server: FastifyInstance, deps: RouteDeps): void {
     return { cars: rows.map((r) => ({ carId: r.carId, count: r.count, acquiredAt: r.acquiredAt })) };
   });
 
+  // First-login welcome crate — granted ONCE PER ACCOUNT (server-side, atomic + idempotent).
+  // Returns { granted: true } only on the first-ever call for this user; every later call → false.
+  server.post("/v1/welcome/claim", { preHandler: requireUser }, async (req) => deps.users.claimWelcome(req.userId!));
+
+  // Redeem an access code — reward granted ONCE PER (account, code) (server-side, atomic + idempotent).
+  // Returns { granted: true } only the first time this account redeems this specific code; every
+  // later call (same account+code), and any concurrent racer, → false.
+  server.post("/v1/access/redeem", { preHandler: requireUser }, async (req, reply) => {
+    const p = RedeemAccess.safeParse(req.body);
+    if (!p.success) return reply.code(400).send({ error: "bad_request" });
+    return deps.users.redeemAccess(req.userId!, p.data.code);
+  });
+
   server.post("/v1/inventory/grant", { preHandler: requireUser }, async (req, reply) => {
     const p = CarRef.safeParse(req.body);
     if (!p.success) return reply.code(400).send({ error: "bad_request" });
@@ -171,12 +185,13 @@ export function registerRoutes(server: FastifyInstance, deps: RouteDeps): void {
     if (deps.signupFaucet) {
       await deps.ledger.credit(userId, "coin", deps.startBalance, "signup_faucet", userId);
     }
-    const [balance, coins, scrap, rows, openRoundId] = await Promise.all([
+    const [balance, coins, scrap, rows, openRoundId, access] = await Promise.all([
       deps.ledger.balance(userId, deps.stakeAsset),
       deps.ledger.balance(userId, "coin"),
       deps.ledger.balance(userId, "scrap"),
       deps.inventory.list(userId),
       deps.rounds.getOpenRoundId(userId),
+      deps.users.accessCodes(userId),
     ]);
     return {
       userId,
@@ -185,6 +200,7 @@ export function registerRoutes(server: FastifyInstance, deps: RouteDeps): void {
       scrap,
       cars: rows.map((r) => ({ carId: r.carId, count: r.count, acquiredAt: r.acquiredAt })),
       openRoundId,
+      access,
     };
   });
 

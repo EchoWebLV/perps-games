@@ -24,4 +24,59 @@ describe("users service", () => {
     const got = await ctx.users.get(a.id);
     expect(got?.id).toBe(a.id);
   });
+
+  it("claimWelcome grants exactly once per account, then never again", async () => {
+    const a = await ctx.users.upsertByExternalId("dev:alice");
+    expect(await ctx.users.claimWelcome(a.id)).toEqual({ granted: true });
+    expect(await ctx.users.claimWelcome(a.id)).toEqual({ granted: false });
+    expect(await ctx.users.claimWelcome(a.id)).toEqual({ granted: false });
+  });
+
+  it("claimWelcome grants each distinct user once, independently", async () => {
+    const a = await ctx.users.upsertByExternalId("dev:alice");
+    const b = await ctx.users.upsertByExternalId("dev:bob");
+    expect(await ctx.users.claimWelcome(a.id)).toEqual({ granted: true });
+    expect(await ctx.users.claimWelcome(b.id)).toEqual({ granted: true });
+    // each already claimed → both now false
+    expect(await ctx.users.claimWelcome(a.id)).toEqual({ granted: false });
+    expect(await ctx.users.claimWelcome(b.id)).toEqual({ granted: false });
+  });
+
+  it("redeemAccess grants a code exactly once per account, then never again", async () => {
+    const a = await ctx.users.upsertByExternalId("dev:alice");
+    expect(await ctx.users.redeemAccess(a.id, "gold")).toEqual({ granted: true });
+    expect(await ctx.users.redeemAccess(a.id, "gold")).toEqual({ granted: false });
+    expect(await ctx.users.redeemAccess(a.id, "gold")).toEqual({ granted: false });
+  });
+
+  it("redeemAccess normalizes (trim + lowercase) so casing/whitespace variants redeem once", async () => {
+    const a = await ctx.users.upsertByExternalId("dev:alice");
+    expect(await ctx.users.redeemAccess(a.id, "  GoLd ")).toEqual({ granted: true });
+    // same code, different casing/whitespace → already redeemed
+    expect(await ctx.users.redeemAccess(a.id, "gold")).toEqual({ granted: false });
+    expect(await ctx.users.accessCodes(a.id)).toEqual(["gold"]);
+  });
+
+  it("redeemAccess treats distinct codes on one account independently", async () => {
+    const a = await ctx.users.upsertByExternalId("dev:alice");
+    expect(await ctx.users.redeemAccess(a.id, "alpha")).toEqual({ granted: true });
+    expect(await ctx.users.redeemAccess(a.id, "beta")).toEqual({ granted: true });
+    expect(await ctx.users.redeemAccess(a.id, "alpha")).toEqual({ granted: false });
+    expect((await ctx.users.accessCodes(a.id)).sort()).toEqual(["alpha", "beta"]);
+  });
+
+  it("redeemAccess is independent across distinct accounts", async () => {
+    const a = await ctx.users.upsertByExternalId("dev:alice");
+    const b = await ctx.users.upsertByExternalId("dev:bob");
+    expect(await ctx.users.redeemAccess(a.id, "gold")).toEqual({ granted: true });
+    expect(await ctx.users.redeemAccess(b.id, "gold")).toEqual({ granted: true });
+    // a already redeemed gold → false; b's redemption unaffected
+    expect(await ctx.users.redeemAccess(a.id, "gold")).toEqual({ granted: false });
+    expect(await ctx.users.accessCodes(b.id)).toEqual(["gold"]);
+  });
+
+  it("accessCodes is [] for a fresh account", async () => {
+    const a = await ctx.users.upsertByExternalId("dev:fresh");
+    expect(await ctx.users.accessCodes(a.id)).toEqual([]);
+  });
 });

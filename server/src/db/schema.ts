@@ -10,6 +10,7 @@ import {
   doublePrecision,
   pgEnum,
   check,
+  boolean,
 } from "drizzle-orm/pg-core";
 import { sql } from "drizzle-orm";
 
@@ -24,6 +25,10 @@ export const users = pgTable(
     externalId: text("external_id").notNull(),
     /** Verified Solana address synced from Bearer auth (null for dev/guest). */
     walletPublicKey: text("wallet_public_key"),
+    /** first-login welcome crate claimed — SET-ONCE per account (see users.claimWelcome). */
+    welcomeClaimed: boolean("welcome_claimed").notNull().default(false),
+    /** redeemed access-code ids (trimmed+lowercased) — each grants its reward ONCE per account (see users.redeemAccess). */
+    accessCodes: text("access_codes").array().notNull().default(sql`'{}'::text[]`),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => ({

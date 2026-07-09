@@ -1,0 +1,1 @@
+ALTER TABLE "users" ADD COLUMN "welcome_claimed" boolean DEFAULT false NOT NULL;

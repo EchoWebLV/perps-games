@@ -1,0 +1,1 @@
+ALTER TABLE "users" ADD COLUMN "access_codes" text[] DEFAULT '{}'::text[] NOT NULL;
