@@ -26,6 +26,16 @@ export interface Hud {
 
 const top = "top:max(10px,env(safe-area-inset-top))";
 
+// One-shot <style> for the countdown's final-10s pulse (guarded so many HUD mounts share it).
+let timerPulseInjected = false;
+function injectTimerPulse(): void {
+  if (timerPulseInjected || typeof document === "undefined" || !document.head) return;
+  const style = document.createElement("style");
+  style.textContent = "@keyframes hudTimerPulse{0%,100%{transform:scale(1)}50%{transform:scale(1.13)}}";
+  document.head.appendChild(style);
+  timerPulseInjected = true;
+}
+
 export function createHud(parent: HTMLElement): Hud {
   parent.innerHTML = `
     <div id="balchip" class="pe panel chip" style="position:absolute;${top};left:14px;cursor:pointer" aria-label="Open wallet">
@@ -75,6 +85,7 @@ export function createHud(parent: HTMLElement): Hud {
   // Most frames the strings are unchanged (idle price, 1s timer granularity) — skipping the
   // identical DOM/style writes keeps text/CSSOM churn out of the WebView's frame budget.
   let lastPx = "", lastFeed = "", lastMulti = "", lastMultiCol = "", lastTimer = "", lastTimerCol = "";
+  let lastTimerUrgent = false; // final-10s red-pulse state (toggled only on the transition, not per-frame)
 
   return {
     root: parent,
@@ -110,9 +121,17 @@ export function createHud(parent: HTMLElement): Hud {
       const s = Math.max(0, Math.ceil(secLeft));
       const t = Math.floor(s / 60) + ":" + String(s % 60).padStart(2, "0");
       if (t !== lastTimer) { lastTimer = t; timer.textContent = t; }
-      // dim when idle; colour-coded by urgency once a round is live
-      const col = !live ? "var(--mut)" : secLeft > 20 ? "#aef0d0" : secLeft > 8 ? "#ffd166" : "#ff5067";
+      // dim when idle; colour-coded by urgency once a round is live. The final 10s go RED + a soft pulse.
+      const urgent = live && s > 0 && s <= 10;
+      const col = !live ? "var(--mut)" : s > 20 ? "#aef0d0" : s > 10 ? "#ffd166" : "#ff5067";
       if (col !== lastTimerCol) { lastTimerCol = col; timer.style.color = col; }
+      if (urgent !== lastTimerUrgent) { // toggle the pulse only on the boundary, not every frame
+        lastTimerUrgent = urgent;
+        if (urgent) injectTimerPulse();
+        timer.style.display = urgent ? "inline-block" : ""; // inline-block so the scale transform applies
+        timer.style.animation = urgent ? "hudTimerPulse 1s ease-in-out infinite" : "";
+        timer.style.textShadow = urgent ? "0 0 13px #ff506799" : "";
+      }
     },
     setStatus(t) { status.textContent = t; },
     setTryMode(on) {
