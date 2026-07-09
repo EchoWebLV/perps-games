@@ -229,7 +229,7 @@ async function syncAccount(): Promise<void> {
     };
     await bindAndHydrate({
       api, auth, port, accountSync,
-      localSnapshot: { coins: upgrades.coins(), scrap: upgrades.scrap(), cars: inventory.snapshot() },
+      localSnapshot: { coins: upgrades.coins(), scrap: upgrades.scrap(), cars: inventory.snapshot(), levels: upgrades.levels() },
     });
   } catch (e) {
     console.error("account sync failed", e); // cache-only until next sign-in
@@ -326,7 +326,7 @@ const accountSync = createAccountSync({
   api,
   nonce: String(Date.now()), // stable per page load; namespaces this session's delta refs
   applyServer: (snap) => {
-    upgrades.hydrate({ coins: snap.coins, scrap: snap.scrap });
+    upgrades.hydrate({ coins: snap.coins, scrap: snap.scrap, levels: snap.levels });
     inventory.hydrate(snap.cars);
   },
 });
@@ -343,6 +343,7 @@ const upgrades = createUpgrades(hudRoot, {
     else if (ev.kind === "coinsSpend") accountSync.coinsSpent(ev.amount);
     else if (ev.kind === "scrapEarn") accountSync.scrapEarned(ev.amount);
     else if (ev.kind === "scrapSpend") accountSync.scrapSpent(ev.amount);
+    else if (ev.kind === "levelBought") accountSync.levelBought(ev.track); // the server buy debits itself — no coinsSpent
   },
 });
 coins.set(upgrades.coins(), false); // no pulse on the persisted balance at load

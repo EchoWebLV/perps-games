@@ -5,6 +5,9 @@ export interface AccountSnapshot {
   coins: number;
   scrap: number;
   cars: Record<string, number>; // carId -> count owned
+  /** garage upgrade levels. OPTIONAL on the read path: a deployed server predating the
+   *  upgrades feature omits it, and server-wins must not zero a player's local tree. */
+  levels?: { turbo: number; tank: number; suspension: number };
 }
 
 export interface AccountSync {
@@ -25,6 +28,9 @@ export interface AccountSync {
   scrapSpent(n: number): void;
   carGranted(carId: string): void;
   carMelted(carId: string): void;
+  /** forward an upgrade purchase to the authoritative /v1/upgrades/buy (which debits coins
+   *  server-side itself — never paired with a coinsSpent for the same purchase). */
+  levelBought(track: "turbo" | "tank" | "suspension"): void;
 }
 
 export interface AccountSyncOpts {
@@ -65,11 +71,15 @@ export function createAccountSync(opts: AccountSyncOpts): AccountSync {
         return "offline";
       }
       access = me.access ?? []; // surface the account's redeemed codes for the access wall (default [])
-      const serverEmpty = (me.coins ?? 0) === 0 && (me.scrap ?? 0) === 0 && (me.cars?.length ?? 0) === 0;
-      const localHasState = local.coins > 0 || local.scrap > 0 || Object.keys(local.cars).length > 0;
+      // Mirrors the server's /v1/migrate emptiness semantics: any non-zero level blocks seeding
+      // (missing levels — an old server — counts as all-zero).
+      const serverEmpty = (me.coins ?? 0) === 0 && (me.scrap ?? 0) === 0 && (me.cars?.length ?? 0) === 0
+        && (me.levels?.turbo ?? 0) === 0 && (me.levels?.tank ?? 0) === 0 && (me.levels?.suspension ?? 0) === 0;
+      const localHasState = local.coins > 0 || local.scrap > 0 || Object.keys(local.cars).length > 0
+        || (!!local.levels && (local.levels.turbo > 0 || local.levels.tank > 0 || local.levels.suspension > 0));
       if (serverEmpty && localHasState) {
         try {
-          await api.migrate({ coins: local.coins, scrap: local.scrap, cars: local.cars });
+          await api.migrate({ coins: local.coins, scrap: local.scrap, cars: local.cars, levels: local.levels });
           on = true;
           return "seeded";
         } catch (e) {
@@ -83,6 +93,7 @@ export function createAccountSync(opts: AccountSyncOpts): AccountSync {
         coins: me.coins ?? 0,
         scrap: me.scrap ?? 0,
         cars: Object.fromEntries((me.cars ?? []).map((c) => [c.carId, c.count ?? 1])),
+        levels: me.levels, // pass through as-is: undefined (old server) → the cache keeps its local tree
       });
       on = true;
       return "server";
@@ -94,5 +105,6 @@ export function createAccountSync(opts: AccountSyncOpts): AccountSync {
     scrapSpent(n) { if (on && opts.api && n > 0) fire("scrapSpend", opts.api.scrapSpend({ amount: Math.floor(n), ref: ref("scrapSpend") })); },
     carGranted(carId) { if (on && opts.api) fire("inventoryGrant", opts.api.inventoryGrant({ carId })); },
     carMelted(carId) { if (on && opts.api) fire("inventoryMelt", opts.api.inventoryMelt({ carId })); },
+    levelBought(track) { if (on && opts.api) fire("upgradesBuy", opts.api.upgradesBuy({ track })); },
   };
 }

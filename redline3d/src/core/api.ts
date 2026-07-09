@@ -4,7 +4,7 @@ import type { AuthProvider } from "./auth";
 export type Asset = "BTC" | "ETH" | "SOL";
 export type Dir = 1 | -1;
 
-export interface MeResult { userId: string; balance: number; coins: number; scrap: number; cars: { carId: string; count: number; acquiredAt?: string }[]; openRoundId: string | null; access: string[]; }
+export interface MeResult { userId: string; balance: number; coins: number; scrap: number; cars: { carId: string; count: number; acquiredAt?: string }[]; openRoundId: string | null; access: string[]; levels?: { turbo: number; tank: number; suspension: number }; }
 export interface OpenResult { roundId: string; asset: Asset; dir: Dir; lev: number; stake: number; entryRaw: number; entryTsUs: number; }
 export interface CloseResult { outcome: string; payoutCoins: number; pnlCoins: number; equity: number; exitRaw: number; balance: number; }
 /** live read-only mark: the server's CURRENT equity for an open round (what the client displays) */
@@ -38,7 +38,10 @@ export interface Api {
   scrapSpend(p: { amount: number; ref: string }): Promise<{ scrap: number }>;
   inventoryGrant(p: { carId: string }): Promise<{ carId: string; isNew: boolean; count: number }>;
   inventoryMelt(p: { carId: string }): Promise<{ carId: string; melted: boolean; count: number }>;
-  migrate(p: { coins: number; scrap: number; cars: Record<string, number> }): Promise<{ seeded: boolean; reason?: string }>;
+  migrate(p: { coins: number; scrap: number; cars: Record<string, number>; levels?: { turbo: number; tank: number; suspension: number } }): Promise<{ seeded: boolean; reason?: string }>;
+  /** authoritative upgrade purchase — the server debits the coins ITSELF and returns the new level.
+   *  The client must never also post a coinsSpend for the same purchase (double debit). */
+  upgradesBuy(p: { track: "turbo" | "tank" | "suspension" }): Promise<{ track: string; level: number; coins: number }>;
   /** claim the first-login welcome crate ONCE PER ACCOUNT (server-side). granted=true only the first time. */
   claimWelcome(): Promise<{ granted: boolean }>;
   /** redeem an access code for THIS account. Server-authoritative + idempotent per account+code:
@@ -146,6 +149,7 @@ export function createApi(opts: ApiOpts = {}): Api {
     inventoryGrant: (p) => call("POST", "/v1/inventory/grant", p),
     inventoryMelt: (p) => call("POST", "/v1/inventory/melt", p),
     migrate: (p) => call("POST", "/v1/migrate", p),
+    upgradesBuy: (p) => call("POST", "/v1/upgrades/buy", p),
     // send an empty {} body: `call` always sets content-type:application/json, and Fastify 400s an
     // empty body under that content-type. The server ignores the body.
     claimWelcome: () => call("POST", "/v1/welcome/claim", {}),

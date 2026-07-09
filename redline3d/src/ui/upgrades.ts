@@ -80,8 +80,12 @@ export interface Upgrades {
   isOpen(): boolean;
   /** hide the button + close the panel during a live round */
   setBusy(busy: boolean): void;
-  /** overwrite the cached balances from server truth (no onMutate fired) + refresh the HUD */
-  hydrate(s: { coins: number; scrap: number }): void;
+  /** overwrite the cached balances (+ upgrade levels when the server sends them) from server
+   *  truth (no onMutate fired) + refresh the HUD. Missing `levels` = an old server → the local
+   *  tree is preserved, never zeroed. */
+  hydrate(s: { coins: number; scrap: number; levels?: { turbo: number; tank: number; suspension: number } }): void;
+  /** the current upgrade levels (a copy) — the local snapshot handed to accountSync.hydrate */
+  levels(): { turbo: number; tank: number; suspension: number };
 }
 
 let stylesInjected = false;
@@ -122,7 +126,7 @@ function injectStyles() {
 
 export function createUpgrades(
   parent: HTMLElement,
-  opts: { onCoins?: (n: number) => void; onScrap?: (n: number) => void; onApply?: () => void; economicEffects?: boolean; onClose?: () => void; onMutate?: (ev: { kind: "coinsEarn" | "coinsSpend" | "scrapEarn" | "scrapSpend"; amount: number }) => void } = {},
+  opts: { onCoins?: (n: number) => void; onScrap?: (n: number) => void; onApply?: () => void; economicEffects?: boolean; onClose?: () => void; onMutate?: (ev: { kind: "coinsEarn" | "coinsSpend" | "scrapEarn" | "scrapSpend"; amount: number } | { kind: "levelBought"; track: Track; cost: number }) => void } = {},
 ): Upgrades {
   injectStyles();
   const saved = loadSaved();
@@ -195,7 +199,10 @@ export function createUpgrades(
     saved.levels[key] = lvl + 1;
     apply(); persist(); render();
     opts.onCoins?.(saved.coins);
-    opts.onMutate?.({ kind: "coinsSpend", amount: cost });
+    // The authoritative buy (/v1/upgrades/buy) debits the coins SERVER-SIDE itself — also posting
+    // a generic coinsSpend would double-debit. The local debit above is optimistic; if the server
+    // buy fails, the next hydrate reconciles (server wins).
+    opts.onMutate?.({ kind: "levelBought", track: key, cost });
   };
   panel.querySelectorAll("[data-buy]").forEach((b) =>
     b.addEventListener("click", () => buy((b as HTMLElement).dataset.buy as Track)));
@@ -224,6 +231,16 @@ export function createUpgrades(
     open: () => setOpen(true),
     isOpen: () => overlay.style.display !== "none",
     setBusy(b) { if (b) setOpen(false); }, // reachable only via the garage menu, which is itself gated
-    hydrate(s) { saved.coins = Math.max(0, Math.floor(s.coins)); saved.scrap = Math.max(0, Math.floor(s.scrap)); persist(); opts.onCoins?.(saved.coins); opts.onScrap?.(saved.scrap); if (overlay.style.display !== "none") render(); },
+    hydrate(s) {
+      saved.coins = Math.max(0, Math.floor(s.coins)); saved.scrap = Math.max(0, Math.floor(s.scrap));
+      if (s.levels) { // server wins, up OR down; absent (old server) → keep the local tree
+        saved.levels.turbo = clampLevel(s.levels.turbo);
+        saved.levels.tank = clampLevel(s.levels.tank);
+        saved.levels.suspension = clampLevel(s.levels.suspension);
+        apply(); // CONFIG reflects the authoritative levels + onApply rebuilds the tach gauge
+      }
+      persist(); opts.onCoins?.(saved.coins); opts.onScrap?.(saved.scrap); if (overlay.style.display !== "none") render();
+    },
+    levels: () => ({ turbo: saved.levels.turbo, tank: saved.levels.tank, suspension: saved.levels.suspension }),
   };
 }
