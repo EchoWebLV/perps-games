@@ -21,3 +21,10 @@ export interface Snapshot {
   lev: number;
   reason?: SettleReason;
 }
+
+/** A car's special power. The perk-relevant abilities (nitro/skull/pinkRod/sixWheeler/airbag)
+ *  drive the entitlement envelope; the rest are cosmetic/economy-only. Single source of truth —
+ *  redline3d re-exports this instead of defining its own. */
+export type CarAbility =
+  | "laneBet" | "nitro" | "rainbow" | "skull" | "pinkRod" | "sixWheeler"
+  | "cartRod" | "flux" | "swerve" | "slots" | "airbag" | "magnet";
