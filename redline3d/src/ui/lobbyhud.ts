@@ -16,7 +16,7 @@ export interface LobbyHud {
 const OFFERS: Record<BuildingKind, { name: string; desc: string; css: string }> = {
   garage: { name: "GARAGE", desc: "Your cars — pick your ride", css: "#27e7ff" },
   upgrades: { name: "UPGRADES", desc: "Tune your car — spend coins", css: "#ffd166" },
-  crates: { name: "CRATES", desc: "Loot crates — coming soon", css: "#ff39c0" },
+  crates: { name: "CRATES", desc: "Loot crates — win new cars", css: "#ff39c0" },
   scrapyard: { name: "SCRAPYARD", desc: "Collect scrap — coming soon", css: "#d94a2b" },
   track: { name: "TRACK", desc: "The main event — race the live price", css: "#14f195" },
   highway: { name: "HIGHWAY", desc: "Free cruise - coming soon", css: "#ff6a3d" },

@@ -124,8 +124,6 @@ function injectStyles() {
     .gmenu-item.locked{cursor:not-allowed;filter:grayscale(.72) brightness(.66);border-color:rgba(132,150,224,.16)}
     .gmenu-item.locked:hover{border-color:rgba(132,150,224,.16);background:rgba(18,14,40,.72);transform:none}
     .gmenu-item.locked .gmenu-arr{color:rgba(220,225,255,.82)}
-    .ghelp{font:500 12px/1.7 'Chakra Petch',ui-monospace,monospace;color:rgba(216,222,255,.8)}
-    .ghelp b{color:var(--cyan)}
     .gbusy{display:flex;align-items:center;gap:7px;margin:0 6px;padding:7px 10px;border-radius:8px;
       background:rgba(255,77,109,.12);border:1px solid rgba(255,77,109,.42);color:#ff9aa6;
       font:700 9px/1 'Chakra Petch',ui-monospace,monospace;letter-spacing:.1em;text-transform:uppercase}
@@ -293,7 +291,7 @@ export function createCarPicker(parent: HTMLElement, cars: CarOption[], onPick: 
   let showroom = false;
   const applyShowroom = () => { overlay.classList.toggle("gover-showroom", showroom); };
 
-  type View = "menu" | "garage" | "help" | "worlds";
+  type View = "menu" | "garage" | "worlds";
   let view: View = "menu";
 
   const menuPanel = document.createElement("div");
@@ -303,7 +301,7 @@ export function createCarPicker(parent: HTMLElement, cars: CarOption[], onPick: 
     `<div class="gmenu">
       <button class="gmenu-item" data-go="garage"><span class="gmenu-ic">${icon("car", 20)}</span><span class="gmenu-tx"><b>Garage</b><small>your card collection</small></span><span class="gmenu-arr">${icon("chevron", 16)}</span></button>
       <button class="gmenu-item" data-act="upgrades"><span class="gmenu-ic">${icon("level", 20)}</span><span class="gmenu-tx"><b>Upgrades</b><small>tune your car</small></span><span class="gmenu-arr">${icon("chevron", 16)}</span></button>
-      <button class="gmenu-item" data-go="help"><span class="gmenu-ic">${icon("help", 20)}</span><span class="gmenu-tx"><b>How to play</b><small>controls &amp; the bet</small></span><span class="gmenu-arr">${icon("chevron", 16)}</span></button>
+      <button class="gmenu-item" data-act="howto"><span class="gmenu-ic">${icon("help", 20)}</span><span class="gmenu-tx"><b>How to play</b><small>controls &amp; the bet</small></span><span class="gmenu-arr">${icon("chevron", 16)}</span></button>
     </div>`;
 
   // audio on/off toggles (Music / SFX) appended at the bottom of the menu list
@@ -372,13 +370,6 @@ export function createCarPicker(parent: HTMLElement, cars: CarOption[], onPick: 
       sw.style.boxShadow = on ? "inset 0 0 10px rgba(39,231,255,.35)" : "none";
     });
   };
-
-  const helpPanel = document.createElement("div");
-  helpPanel.className = "panel gpanel";
-  helpPanel.style.display = "none";
-  helpPanel.innerHTML =
-    `<div class="ghead"><button class="gicon-btn" data-act="back" aria-label="Back">${backIcon(18)}</button><span class="lbl">how to play</span><button class="gicon-btn" data-act="close" aria-label="Close">✕</button></div>` +
-    `<div class="ghelp"><b>Hold the road</b> to drive · <b>drag</b> to steer · <b>pull back</b> to brake.<br>Tap <b>GO</b> to open your bet — <b>rev</b> for leverage, <b>cash out</b> before you liquidate.<br>Pick a car in the <b>Garage</b>; each has its own power.</div>`;
 
   // ---- world (race-level skin) picker sub-view ----
   const worldsPanel = document.createElement("div");
@@ -688,7 +679,6 @@ export function createCarPicker(parent: HTMLElement, cars: CarOption[], onPick: 
     view = v;
     menuPanel.style.display = v === "menu" ? "flex" : "none";
     garagePanel.style.display = v === "garage" ? "flex" : "none";
-    helpPanel.style.display = v === "help" ? "flex" : "none";
     worldsPanel.style.display = v === "worlds" ? "flex" : "none";
     if (v === "garage") { renderArt(); updateBusyUI(); }
     if (v === "worlds") renderWorlds(); // reflect the active skin + highlight it
@@ -727,12 +717,12 @@ export function createCarPicker(parent: HTMLElement, cars: CarOption[], onPick: 
     else if (t.dataset.act === "back") setView("menu");
     else if (t.dataset.act === "upgrades") { close("chain"); onUpgrades?.(); }
     else if (t.dataset.act === "logout") { close("chain"); onLogout?.(); }
+    else if (t.dataset.act === "howto") { close(); parent.dispatchEvent(new CustomEvent("raider:howto")); }
     else if (t.dataset.go) setView(t.dataset.go as View);
   });
 
   overlay.appendChild(menuPanel);
   overlay.appendChild(garagePanel);
-  overlay.appendChild(helpPanel);
   overlay.appendChild(worldsPanel);
   overlay.appendChild(detailScrim);
   wrap.appendChild(menuButton);
