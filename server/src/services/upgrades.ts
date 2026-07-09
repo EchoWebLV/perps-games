@@ -28,7 +28,8 @@ export function makeUpgrades(db: any, ledger: Ledger) {
         const cur = rows[0][track] as number;
         if (cur >= MAX_UPGRADE_LEVEL) throw new Error("max_level");
         const cost = upgradeCost(cur);
-        await ledger.debitOn(tx, userId, "coin", cost, "upgrade_buy", `upgrade:${userId}:${track}:${cur}`); // throws "insufficient balance"
+        const posted = await ledger.debitOn(tx, userId, "coin", cost, "upgrade_buy", `upgrade:${userId}:${track}:${cur}`); // throws "insufficient balance"
+        if (!posted) throw new Error("debit_replay"); // a fresh buy must never idempotently replay; refuse rather than grant a free level
         await tx.update(upgradeLevels).set({ [track]: cur + 1, updatedAt: new Date() }).where(eq(upgradeLevels.userId, userId));
         const coins = await ledger.balanceOn(tx, userId, "coin");
         return { track, level: cur + 1, coins };

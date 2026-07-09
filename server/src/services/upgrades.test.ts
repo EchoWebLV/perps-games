@@ -45,4 +45,15 @@ describe("makeUpgrades (authoritative upgrade levels)", () => {
     expect(await upgrades.seed(userId, levels)).toEqual(levels);
     expect(await upgrades.get(userId)).toEqual(levels);
   });
+
+  it("refuses an idempotent debit replay instead of granting a free level", async () => {
+    // buy once: the ledger now holds a debit at ref `upgrade:<userId>:turbo:0`
+    expect(await upgrades.buy(userId, "turbo")).toEqual({ track: "turbo", level: 1, coins: 980 });
+    // reset the LEVEL, but the ledger still holds that (asset,reason,ref) triple
+    await upgrades.seed(userId, { turbo: 0 });
+    // re-buying at level 0 would replay the same ref → must refuse, never silently grant a free level
+    await expect(upgrades.buy(userId, "turbo")).rejects.toThrow("debit_replay");
+    expect((await upgrades.get(userId)).turbo).toBe(0); // rolled back — no free level
+    expect(await ctx.ledger.balance(userId, "coin")).toBe(980); // no second debit
+  });
 });
