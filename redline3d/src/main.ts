@@ -86,10 +86,23 @@ const quality = detectQuality({ gpuRenderer: gpu, search: location.search });
 console.log(`redline3d quality: ${quality.tier} · bloom ${quality.bloom ? "×" + quality.bloomScale : "off"} · msaa ${quality.postSamples}× · dpr≤${quality.pixelRatioCap} · ${quality.frameCapFps ? quality.frameCapFps + "fps cap" : "uncapped"} · ${quality.detail}${gpu ? ` (${gpu})` : ""}`);
 ctx.renderer.setPixelRatio(Math.min(quality.pixelRatioCap, window.devicePixelRatio || 1));
 const post = quality.bloom ? createPost(ctx.renderer, ctx.scene, ctx.camera, quality.bloomScale, quality.postSamples) : null;
-addEventListener("resize", () => {
-  ctx.resize(window.innerWidth, window.innerHeight);
-  post?.setSize(window.innerWidth, window.innerHeight);
-});
+// Keep the renderer + bloom composer matched to the live viewport. Relying on the window
+// "resize" event ALONE is fragile on a cold start: on a first visit (uncached) or in the app
+// WebView the viewport can settle to its final size AFTER this module runs without ever firing
+// "resize", leaving the scene rendered at the boot-time size — a plausible cause of the "bloom/
+// lights look wrong on first load" reports. A ResizeObserver on the canvas also catches that
+// initial settle. setSize(…, false) never touches the CSS box, so this can't feedback-loop.
+function applyViewportSize() {
+  const w = window.innerWidth, h = window.innerHeight;
+  if (w === 0 || h === 0) return; // a 0×0 viewport (cold start / hidden tab / pre-layout WebView)
+  // would size the buffers to nothing and give the camera a NaN aspect — skip; a later fire corrects.
+  ctx.resize(w, h);
+  post?.setSize(w, h);
+}
+addEventListener("resize", applyViewportSize);
+// ResizeObserver also fires on the initial 0→real settle that a window "resize" event misses —
+// so a scene first built at a 0×0/stale viewport gets re-sized the moment the canvas lays out.
+if (typeof ResizeObserver !== "undefined") new ResizeObserver(applyViewportSize).observe(canvas);
 
 // world + car
 const world = createWorld(quality.detail);
