@@ -14,6 +14,8 @@ import { createTach } from "./ui/tach";
 import { createControls, DEFAULT_PLAY_CAP } from "./ui/controls";
 import { connectFeed } from "./core/feed";
 import { createPriceSource } from "./core/price-source";
+import { CALM_MARKET_PULSE, createMarketPulse, type MarketPulseFrame } from "./core/market-pulse";
+import { terrainBias } from "./core/market-road";
 import { RoundEngine } from "./core/round";
 import type { Snapshot } from "./core/types";
 import { sol3 } from "./core/money";
@@ -810,6 +812,9 @@ const game = { lev: niceLev(tToLev(throttle)), equity: 1 };
 let lastLivePrice = 0;
 let solSmooth = 0; // eased display price → a flowing minimap curve (raw price drives economics)
 let solEMA = 0;    // slow average; price vs this drives the terrain elevation
+const marketPulse = createMarketPulse();
+let marketFrame: MarketPulseFrame = { ...CALM_MARKET_PULSE };
+let debugMomentum: number | null = null;
 
 // price history (minimap), lateral steering, and the active round's entry
 const priceHist: number[] = [];
@@ -837,6 +842,9 @@ hud.onAsset((a) => {
   solSmooth = 0;
   solEMA = 0;
   priceHist.length = 0;
+  marketPulse.reset();
+  marketFrame = { ...CALM_MARKET_PULSE };
+  debugMomentum = null;
   hud.setActiveAsset(a);
 });
 hud.setActiveAsset(asset);
@@ -1441,6 +1449,7 @@ function frame(now: number) {
 
   const roundPrice = samplePrice();
   const drivable = engine.getPhase() === "live"; // you can only drive while a round is live
+  let liveBuffer = 1;
 
   // accelerator with momentum — only while playing; the showroom car stays parked
   const gasOn = drivable && (controls.gas() || touchGas);
@@ -1470,6 +1479,7 @@ function frame(now: number) {
       if (simRound) finalizePractice(snap);
     } else {
       game.equity = snap.equity;
+      liveBuffer = snap.buffer;
       hud.setMultiplier(Math.max(0, snap.equity), "live");
       controls.setBuffer(Math.max(0, Math.min(1, snap.buffer)));
       // Skull "Death's Door": arm as equity nears the liq floor, disarm once clearly recovered.
@@ -1512,8 +1522,20 @@ function frame(now: number) {
   }
 
   const live2 = drivable;
-  // price-driven terrain bias: road climbs when SOL is above its average, dips when below
-  const hill = Math.max(-7, Math.min(7, (solEMA ? solSmooth / solEMA - 1 : 0) * 2600));
+  // Market Pulse adds sustained direction to the existing price-displacement terrain:
+  // a trend climbs/descends even before the slow average has moved far, without touching P&L.
+  marketFrame = marketPulse.update({
+    price: roundPrice,
+    live: priceSource.live(),
+    roundLive: drivable,
+    buffer: liveBuffer,
+    dt,
+  });
+  const hill = terrainBias({
+    smoothPrice: solSmooth,
+    emaPrice: solEMA,
+    momentum: debugMomentum ?? marketFrame.momentum,
+  });
   const speed = roadSpeed(throttle / 100, game.equity, live2) * boost; // Nitro: road rips by 2× faster
   // lane-drive physics (7H): PD-with-momentum chases the target; the accel budget scales
   // with road speed (flat-out darts, idle is lazy). Parked pins speedFrac to 0 — the road
@@ -1749,6 +1771,16 @@ if (import.meta.env.DEV) {
   // on-chain probe (GO-path fault injection for browser verification) — e.g. wrap
   // session.open with a one-shot 6005 throw to prove the same-press table rebuild
   (window as any).__chain = { session };
+  // Market Pulse probe: force the first visible slice (momentum terrain) without waiting
+  // for a live trend. Call momentum() with no value to hand control back to the feed.
+  (window as any).__marketPulse = {
+    state: () => ({ ...marketFrame, momentumOverride: debugMomentum }),
+    momentum: (value?: number) => {
+      debugMomentum = value === undefined
+        ? null
+        : Math.max(-1, Math.min(1, Number(value) || 0));
+    },
+  };
   // racer lane-drive telemetry (7H browser verification) — reads the live physics state;
   // setTarget writes the same INPUT variable the pointer drag does (nothing below it)
   (window as any).__race = {
