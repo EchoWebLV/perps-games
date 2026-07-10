@@ -1041,7 +1041,7 @@ async function closeRound(reason: "cashout" | "expire") {
   }
   settling = true;
   releaseHold();
-  controls.setLive(true, "Settling…");
+  controls.setBusy("BAILING…"); // the big button shows the bail is in flight
   try {
     const res = await session.close();
     finalizeSettled(res);
@@ -1051,6 +1051,7 @@ async function closeRound(reason: "cashout" | "expire") {
     void reason;
   } finally {
     settling = false;
+    controls.setBusy(null); // settle → finalizeSettled already set GO!; failure → repaint CASH OUT (round still live)
   }
 }
 
@@ -1082,6 +1083,7 @@ controls.onLaunch(async () => {
   // — not price() > 0. Guests keep racing the sim above; only this signed-in path is gated.
   if (!priceSource.live()) { hud.setStatus("Waiting for the live price feed…"); return; }
   opening = true;
+  controls.setBusy("LAUNCHING…"); // the big button reads the launch state (a status line is invisible on the phone)
   // The round opens on whatever asset the BTC/ETH/SOL tabs have selected; the registry binds the
   // round to that asset's feed and `hud.onAsset` blocks switching once live, so the local engine's ×
   // (driven off priceSource for `asset`) reads the same feed the chain settles against.
@@ -1241,6 +1243,7 @@ controls.onLaunch(async () => {
     hud.setStatus(session.crankArmed() ? "" : "⚠ Auto cash-out is off this round — tap CASH OUT before the timer ends.");
   } finally {
     opening = false;
+    controls.setBusy(null); // round live → repaint BAIL; an early-return failure → repaint GO! (the error status stays)
   }
 });
 

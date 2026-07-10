@@ -89,6 +89,10 @@ export interface Controls {
   setLive(live: boolean, label: string, warn?: boolean): void;
   /** drain the live button's liquidation gauge: 1 = full margin, 0 = at liquidation */
   setBuffer(buf: number): void;
+  /** overlay a transient "working" state on the GO/BAIL button (e.g. "LAUNCHING…", "BAILING…").
+   *  Non-null shows the label (uppercased by the CSS) with a pulse and BLOCKS taps + the keyboard
+   *  GO until cleared; null drops the overlay and restores the normal GO!/BAIL rendering. */
+  setBusy(label: string | null): void;
   onLaunch(cb: () => void): void;
   onCashout(cb: () => void): void;
   /** main supplies "is a keyboard GO disallowed right now" — a blocking panel/menu is open, or the
@@ -99,6 +103,21 @@ export interface Controls {
 
 const seg = "background:var(--panel);border:1px solid var(--line);border-radius:11px;padding:8px 9px";
 const lab = "display:block;margin-bottom:6px";
+
+// One-shot <style> for the GO/BAIL button's "working" state (launch/bail in flight). A muted
+// steel wash + a soft opacity pulse reads as "processing"; the gauge fill is hidden while busy.
+let busyPulseInjected = false;
+function injectBusyPulse(): void {
+  if (busyPulseInjected || typeof document === "undefined" || !document.head) return;
+  busyPulseInjected = true;
+  const style = document.createElement("style");
+  style.textContent =
+    ".cta.busy{background:linear-gradient(180deg,#9fb8cc,#6a8497);color:#0a1016;cursor:progress;" +
+    "filter:drop-shadow(0 10px 22px rgba(140,170,190,.34));animation:ctaBusyPulse 1s ease-in-out infinite}" +
+    ".cta.busy #gofill{display:none}" +
+    "@keyframes ctaBusyPulse{0%,100%{opacity:.66}50%{opacity:1}}";
+  document.head.appendChild(style);
+}
 
 export function createControls(ctrlMount: HTMLElement, goMount: HTMLElement, pedalMount: HTMLElement): Controls {
   ctrlMount.innerHTML = `
@@ -115,6 +134,7 @@ export function createControls(ctrlMount: HTMLElement, goMount: HTMLElement, ped
       </div></div>`;
   pedalMount.innerHTML = ""; // driving hint removed for a cleaner in-race UI
   goMount.innerHTML = `<button id="go" class="cta"><span id="gofill"></span><span id="golabel">GO!</span></button>`;
+  injectBusyPulse();
 
   const q = (s: string) => (ctrlMount.querySelector(s) || goMount.querySelector(s) || pedalMount.querySelector(s)) as HTMLElement;
   let d: 1 | -1 = 1, playAmount = 1, playCap = DEFAULT_PLAY_CAP, live = false; // 0.01-SOL units → 0.01 SOL default
@@ -125,6 +145,10 @@ export function createControls(ctrlMount: HTMLElement, goMount: HTMLElement, ped
   const BAIL_LOCK_MS = 1500;
   let cashLockUntil = 0;
   let lastBuffer = ""; // last --b written by setBuffer (per-frame caller — skip identical writes)
+  // busy overlay: non-null → a launch/bail is in flight, the button shows a working label and
+  // swallows taps. lastLabel/lastWarn hold the underlying GO!/BAIL state so clearing busy restores it.
+  let busyLabel: string | null = null;
+  let lastLabel = "GO!", lastWarn = false;
   const long = q("#long"), short = q("#short"), sval = q("#sval"), go = q("#go"),
     golabel = q("#golabel"), gofill = q("#gofill"), callbox = q("#callbox");
 
@@ -147,9 +171,31 @@ export function createControls(ctrlMount: HTMLElement, goMount: HTMLElement, ped
     callbox.style.opacity = !live || laneMode ? "1" : "0";
     callbox.style.pointerEvents = live ? "none" : "auto";
   };
+  // Paint the GO/BAIL button from the current state. A non-null busyLabel OVERRIDES the live/idle
+  // look (so a per-frame setLive can't paint over "LAUNCHING…"); clearing it repaints GO!/BAIL.
+  const paintButton = () => {
+    if (busyLabel !== null) {
+      if (golabel.textContent !== busyLabel) golabel.textContent = busyLabel;
+      go.classList.add("busy");
+      go.classList.remove("gauge", "warn");
+      go.style.opacity = "";        // the .busy keyframe owns the opacity pulse
+      go.style.cursor = "progress";
+      go.setAttribute("aria-busy", "true");
+      return;
+    }
+    go.classList.remove("busy");
+    go.removeAttribute("aria-busy");
+    if (golabel.textContent !== lastLabel) golabel.textContent = lastLabel;
+    go.classList.toggle("gauge", live);          // LIVE button becomes the liquidation gauge
+    go.classList.toggle("warn", !!(live && lastWarn)); // red glow when losing / near liq
+    const locked = live && performance.now() < cashLockUntil; // brief post-launch anti-double-tap
+    go.style.opacity = locked ? "0.5" : "";
+    go.style.cursor = locked ? "not-allowed" : "";
+  };
   q("#sup").onclick = () => { if (!live) { playAmount = stepPlay(playAmount, 1, playCap); sval.textContent = sol(playAmount); } };  // +0.01 up to the car's cap
   q("#sdn").onclick = () => { if (!live) { playAmount = stepPlay(playAmount, -1, playCap); sval.textContent = sol(playAmount); } }; // -0.01 → 0.01 SOL floor
   go.onclick = () => {
+    if (busyLabel !== null) return; // a launch/bail is in flight — swallow the tap (and the keyboard GO, which routes here)
     if (live) { if (performance.now() < cashLockUntil) return; cashCb(); } // bail is locked for BAIL_LOCK_MS after launch
     else launchCb();
   };
@@ -206,20 +252,16 @@ export function createControls(ctrlMount: HTMLElement, goMount: HTMLElement, ped
     setLive(l, label, warn) {
       if (l && !live) cashLockUntil = performance.now() + BAIL_LOCK_MS; // just went live → lock bail for a beat
       live = l;
-      // per-frame caller (live payout label): skip the text write when unchanged. The rest of
-      // the body must still run every call — `locked` un-dims on a TIMER, not on an arg change.
-      if (golabel.textContent !== label) golabel.textContent = label;
-      // the LIVE button becomes the liquidation gauge; idle is the green GO!
-      go.classList.toggle("gauge", l);
-      go.classList.toggle("warn", !!(l && warn)); // red glow when losing / near liq
-      // dim + un-press the bail button during the brief post-launch lock (anti double-tap feedback)
-      const locked = l && performance.now() < cashLockUntil;
-      go.style.opacity = locked ? "0.5" : "";
-      go.style.cursor = locked ? "not-allowed" : "";
+      // stash the live/idle rendering (per-frame caller passes the live payout label). paintButton
+      // skips identical text writes and, if a busy overlay is up, defers to it until setBusy(null).
+      lastLabel = label;
+      lastWarn = !!warn;
       if (!l) { gofill.style.setProperty("--b", "100%"); lastBuffer = "100%"; } // reset the fill for next round (keep the cache honest)
+      paintButton();
       // long/short fades out for the live round (kept as a live readout in lane mode)
       refreshCall();
     },
+    setBusy(label) { busyLabel = label; paintButton(); },
     setBuffer(buf) {
       const b = Math.max(0, Math.min(1, buf));
       const v = (b * 100).toFixed(1) + "%";

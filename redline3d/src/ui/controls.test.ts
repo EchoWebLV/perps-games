@@ -1,5 +1,6 @@
+// @vitest-environment jsdom
 import { describe, expect, it } from "vitest";
-import { stepPlay, DEFAULT_PLAY_CAP, isTextEntry, driveKeyOf, keyAction, isNativeActivateTarget } from "./controls";
+import { stepPlay, DEFAULT_PLAY_CAP, isTextEntry, driveKeyOf, keyAction, isNativeActivateTarget, createControls } from "./controls";
 
 // Duck-typed element stand-ins (no jsdom): isTextEntry only reads tagName / isContentEditable /
 // getAttribute("type"). Cast through unknown so we don't need a full HTMLElement.
@@ -132,5 +133,60 @@ describe("keyAction (should a keydown drive, launch GO, or be left alone)", () =
 
   it("ignores a non-mapped key", () => {
     expect(keyAction(null, { typing: false, panelOpen: false, onControl: false })).toBe("ignore");
+  });
+});
+
+describe("createControls setBusy (launch/bail state on the GO button)", () => {
+  const mk = () => {
+    const ctrl = document.createElement("div");
+    const goMount = document.createElement("div");
+    const pedal = document.createElement("div");
+    const controls = createControls(ctrl, goMount, pedal);
+    const go = goMount.querySelector("#go") as HTMLButtonElement;
+    const golabel = goMount.querySelector("#golabel") as HTMLElement;
+    return { controls, go, golabel };
+  };
+
+  it("shows the busy label, marks the button busy, and drops the gauge look", () => {
+    const { controls, go, golabel } = mk();
+    controls.setBusy("LAUNCHING…");
+    expect(golabel.textContent).toBe("LAUNCHING…");
+    expect(go.classList.contains("busy")).toBe(true);
+    expect(go.getAttribute("aria-busy")).toBe("true");
+  });
+
+  it("blocks the launch callback while busy, then re-enables it (and the label) when cleared", () => {
+    const { controls, go, golabel } = mk();
+    let launches = 0;
+    controls.onLaunch(() => { launches++; });
+    controls.setBusy("LAUNCHING…");
+    go.click();
+    expect(launches).toBe(0); // busy swallows the tap — and the keyboard GO, which routes through go.click()
+    controls.setBusy(null);
+    expect(go.classList.contains("busy")).toBe(false);
+    expect(go.hasAttribute("aria-busy")).toBe(false);
+    expect(golabel.textContent).toBe("GO!"); // restored to the idle label
+    go.click();
+    expect(launches).toBe(1);
+  });
+
+  it("restores the live BAIL rendering when a bail overlay clears", () => {
+    const { controls, go, golabel } = mk();
+    controls.setLive(true, "CASH OUT");
+    controls.setBusy("BAILING…");
+    expect(golabel.textContent).toBe("BAILING…");
+    expect(go.classList.contains("gauge")).toBe(false); // busy hides the gauge look
+    controls.setBusy(null);
+    expect(golabel.textContent).toBe("CASH OUT"); // back to the live label
+    expect(go.classList.contains("gauge")).toBe(true); // and the gauge look
+  });
+
+  it("busy overrides a per-frame setLive until it is cleared", () => {
+    const { controls, golabel } = mk();
+    controls.setBusy("LAUNCHING…");
+    controls.setLive(true, "CASH OUT $0.10"); // the render loop keeps painting the live payout label
+    expect(golabel.textContent).toBe("LAUNCHING…"); // busy still wins
+    controls.setBusy(null);
+    expect(golabel.textContent).toBe("CASH OUT $0.10");
   });
 });
