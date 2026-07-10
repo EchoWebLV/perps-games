@@ -6,6 +6,7 @@ import { makeRounds, type Rounds } from "../services/rounds.js";
 import { makeUpgrades, type Upgrades } from "../services/upgrades.js";
 import { makeEntitlements, type Entitlements } from "../services/entitlements.js";
 import { makeEarnLimit, type EarnLimit } from "../services/earn-limit.js";
+import { makeTradeHistory, type TradeHistory } from "../services/trade-history.js";
 import { ensureHouseUserId } from "../services/house.js";
 import { makeStubFeed, type StubFeed } from "../feed/stub.js";
 import { buildServer } from "../http/server.js";
@@ -23,6 +24,7 @@ export interface TestCtx {
   ledger: Ledger;
   inventory: Inventory;
   rounds: Rounds;
+  tradeHistory: TradeHistory;
   feed: StubFeed;
   houseUserId: string;
   upgrades: Upgrades;
@@ -61,6 +63,7 @@ export async function makeTestDb(opts: MakeTestDbOptions = {}): Promise<TestCtx>
   const db = raw.db;
 
   const users = makeUsers(db);
+  const tradeHistory = makeTradeHistory({ db, users });
   const ledger = makeLedger(db);
   const inventory = makeInventory(db);
   const feed = makeStubFeed();
@@ -73,7 +76,7 @@ export async function makeTestDb(opts: MakeTestDbOptions = {}): Promise<TestCtx>
   const earnLimit = makeEarnLimit(db, opts.earnLimit ?? { ceiling: 1_000_000, windowMs: 60_000 });
 
   const server = buildServer({
-    users, ledger, inventory, rounds, feed,
+    users, ledger, inventory, rounds, tradeHistory, feed,
     upgrades, entitlements, earnLimit,
     stakeAsset,
     devEndpoints: true,
@@ -105,7 +108,22 @@ export async function makeTestDb(opts: MakeTestDbOptions = {}): Promise<TestCtx>
     adminSecret: opts.adminSecret ?? null,
   });
 
-  return { raw, db, users, ledger, inventory, rounds, feed, houseUserId, upgrades, entitlements, earnLimit, server, close: () => raw.close() };
+  return {
+    raw,
+    db,
+    users,
+    ledger,
+    inventory,
+    rounds,
+    tradeHistory,
+    feed,
+    houseUserId,
+    upgrades,
+    entitlements,
+    earnLimit,
+    server,
+    close: () => raw.close(),
+  };
 }
 
 /**

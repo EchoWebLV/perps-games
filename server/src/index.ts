@@ -8,6 +8,7 @@ import { makeRounds } from "./services/rounds.js";
 import { makeUpgrades } from "./services/upgrades.js";
 import { makeEntitlements } from "./services/entitlements.js";
 import { makeEarnLimit } from "./services/earn-limit.js";
+import { makeTradeHistory } from "./services/trade-history.js";
 import { assertRoundSettlerForStake, type RoundSettler } from "./services/round-settler-guard.js";
 import { ensureHouseUserId } from "./services/house.js";
 import { makeHermesFeed } from "./feed/hermes.js";
@@ -46,6 +47,7 @@ async function main(): Promise<void> {
 
   const ledger = makeLedger(db);
   const users = makeUsers(db);
+  const tradeHistory = makeTradeHistory({ db, users });
   // the house counterparty round P&L flows to/from (provisioned once, idempotent).
   const houseUserId = await ensureHouseUserId(users);
 
@@ -170,6 +172,7 @@ async function main(): Promise<void> {
     ledger,
     inventory,
     rounds,
+    tradeHistory,
     feed,
     stakeAsset,
     devEndpoints: env.DEV_ENDPOINTS && env.NODE_ENV !== "production",

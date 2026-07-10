@@ -4,6 +4,7 @@ import type { Users } from "../services/users.js";
 import type { Ledger } from "../services/ledger.js";
 import type { Inventory } from "../services/inventory.js";
 import type { Rounds } from "../services/rounds.js";
+import type { TradeHistory } from "../services/trade-history.js";
 import type { PriceFeed } from "../feed/types.js";
 import { FeedHaltError, RoundNotFoundError, RoundClosedError, OpenRoundExistsError } from "../services/errors.js";
 import { makeRequireUser, makeRequireAdmin, makeRequireWalletBoundUser } from "./auth.js";
@@ -13,6 +14,7 @@ export interface RouteDeps {
   ledger: Ledger;
   inventory: Inventory;
   rounds: Rounds;
+  tradeHistory: TradeHistory;
   feed: PriceFeed;
   stakeAsset: "coin" | "cash"; // asset the wagering balance + rounds use ("cash" when real money is on)
   devEndpoints: boolean;
@@ -69,6 +71,24 @@ const MigrateBody = z.object({
     })
     .partial()
     .optional(),
+});
+
+const TradeBody = z.object({
+  id: z.string().uuid(),
+  asset: z.enum(["BTC", "ETH", "SOL"]),
+  dir: z.union([z.literal(1), z.literal(-1)]),
+  lev: z.number().int().min(1).max(3000),
+  stakeBase: z.number().int().positive().safe(),
+  entryPrice: z.number().positive().finite(),
+  exitPrice: z.number().positive().finite(),
+  openedAt: z.string().datetime(),
+  outcome: z.enum(["cashout", "cap", "liq", "time"]),
+  payoutBase: z.number().int().min(0).safe(),
+});
+
+const TradeQuery = z.object({
+  cursor: z.string().min(1).max(500).optional(),
+  limit: z.coerce.number().int().min(1).max(100).default(25),
 });
 
 const OpenRound = z.object({
@@ -374,6 +394,35 @@ export function registerRoutes(server: FastifyInstance, deps: RouteDeps): void {
     const r = await deps.withdrawProcessor.approveAndSend(id);
     if (r.status !== "sent") return reply.code(409).send({ error: r.status });
     return { status: "sent" };
+  });
+
+  server.post("/v1/trades", { preHandler: requireWalletBoundUser }, async (req, reply) => {
+    const parsed = TradeBody.safeParse(req.body);
+    if (!parsed.success) return reply.code(400).send({ error: "bad_request" });
+    try {
+      return await deps.tradeHistory.record(req.userId!, {
+        ...parsed.data,
+        openedAt: new Date(parsed.data.openedAt),
+      });
+    } catch (error) {
+      if ((error as Error).message === "trade_id_conflict") {
+        return reply.code(409).send({ error: "trade_id_conflict" });
+      }
+      throw error;
+    }
+  });
+
+  server.get("/v1/trades", { preHandler: requireWalletBoundUser }, async (req, reply) => {
+    const parsed = TradeQuery.safeParse(req.query);
+    if (!parsed.success) return reply.code(400).send({ error: "bad_request" });
+    try {
+      return await deps.tradeHistory.list(req.userId!, parsed.data.cursor, parsed.data.limit);
+    } catch (error) {
+      if ((error as Error).message === "bad_cursor") {
+        return reply.code(400).send({ error: "bad_cursor" });
+      }
+      throw error;
+    }
   });
 
   server.post("/v1/round/open", { preHandler: requireUser }, async (req, reply) => {
