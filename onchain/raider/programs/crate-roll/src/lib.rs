@@ -21,7 +21,7 @@ use ephemeral_vrf_sdk::instructions::{
 };
 use ephemeral_vrf_sdk::types::SerializableAccountMeta;
 
-declare_id!("CRoLLxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"); // replaced by `anchor keys sync` in Task 2
+declare_id!("9MLzyBc2Nz4sqcnPnCsejMRGGnKMi9nepU3fSE1ZJUgG"); // replaced by `anchor keys sync` in Task 2
 
 pub const ROLL_SEED: &[u8] = b"roll";
 

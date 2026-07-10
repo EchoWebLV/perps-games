@@ -1,0 +1,197 @@
+{
+  "address": "9MLzyBc2Nz4sqcnPnCsejMRGGnKMi9nepU3fSE1ZJUgG",
+  "metadata": {
+    "name": "crate_roll",
+    "version": "0.1.0",
+    "spec": "0.1.0",
+    "description": "MagicBlock VRF consumer for crate pulls: request + identity-verified callback storing 32 random bytes on a per-player nonce'd PDA. No funds, no roster, no odds."
+  },
+  "instructions": [
+    {
+      "name": "callback_fulfill_roll",
+      "docs": [
+        "VRF-program-only callback: store the verified randomness. The `address =`",
+        "constraint (scoped per-program identity) on the required signer means no wallet or",
+        "other program can fake it."
+      ],
+      "discriminator": [
+        74,
+        52,
+        144,
+        65,
+        211,
+        142,
+        152,
+        166
+      ],
+      "accounts": [
+        {
+          "name": "vrf_program_identity",
+          "docs": [
+            "The SCOPED per-program VRF identity MUST sign — only MagicBlock's verified oracle path,",
+            "issuing for THIS program, can fulfill. (sdk 0.4.1 default; supersedes the deprecated",
+            "global `VRF_PROGRAM_IDENTITY`. This is the SDK's documented `scoped_vrf_identity` pattern.)"
+          ],
+          "signer": true
+        },
+        {
+          "name": "roll_slot",
+          "writable": true
+        }
+      ],
+      "args": [
+        {
+          "name": "randomness",
+          "type": {
+            "array": [
+              "u8",
+              32
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "request_roll",
+      "docs": [
+        "Player requests randomness for one crate pull. Bumps the nonce (supersedes any",
+        "stale in-flight request) and clears `fulfilled`; the caller_seed binds the VRF",
+        "request to (player, nonce) so every pull's randomness is unique and attributable."
+      ],
+      "discriminator": [
+        98,
+        118,
+        98,
+        29,
+        96,
+        208,
+        255,
+        97
+      ],
+      "accounts": [
+        {
+          "name": "payer",
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "roll_slot",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  114,
+                  111,
+                  108,
+                  108
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "payer"
+              }
+            ]
+          }
+        },
+        {
+          "name": "oracle_queue",
+          "writable": true,
+          "address": "Cuj97ggrhhidhbu39TijNVqE74xvKJ69gDervRUXAxGh"
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
+        },
+        {
+          "name": "program_identity",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  105,
+                  100,
+                  101,
+                  110,
+                  116,
+                  105,
+                  116,
+                  121
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "vrf_program",
+          "address": "Vrf1RNUjXmQGjmQrQLvJHs9SNkvDJEsRVFPkfSQUwGz"
+        },
+        {
+          "name": "slot_hashes",
+          "address": "SysvarS1otHashes111111111111111111111111111"
+        }
+      ],
+      "args": []
+    }
+  ],
+  "accounts": [
+    {
+      "name": "RollSlot",
+      "discriminator": [
+        172,
+        62,
+        122,
+        25,
+        74,
+        160,
+        120,
+        80
+      ]
+    }
+  ],
+  "types": [
+    {
+      "name": "RollSlot",
+      "docs": [
+        "One in-flight roll per player. A re-request supersedes (higher nonce, fulfilled=false);",
+        "the client only accepts randomness where `fulfilled && nonce == the one it requested`."
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "player",
+            "type": "pubkey"
+          },
+          {
+            "name": "nonce",
+            "type": "u64"
+          },
+          {
+            "name": "fulfilled",
+            "type": "bool"
+          },
+          {
+            "name": "randomness",
+            "type": {
+              "array": [
+                "u8",
+                32
+              ]
+            }
+          },
+          {
+            "name": "slot",
+            "type": "u64"
+          },
+          {
+            "name": "bump",
+            "type": "u8"
+          }
+        ]
+      }
+    }
+  ]
+}

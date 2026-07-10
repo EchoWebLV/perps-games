@@ -7,6 +7,8 @@ import { PublicKey } from "@solana/web3.js";
 // GO's tx burst (sweep/slice/delegate/buy-in + confirm polls), so point it at a keyed one.
 export const CHAIN = {
   PROGRAM_ID: new PublicKey("FwUNcUaRbYGiWasHa6DA3xQaQJfZWCgH7UhDeBvoJcBv"),
+  // MagicBlock-VRF crate-pull consumer program (standalone; see docs/superpowers/specs/2026-07-10-vrf-crates-design.md)
+  CRATE_ROLL_PROGRAM_ID: new PublicKey("9MLzyBc2Nz4sqcnPnCsejMRGGnKMi9nepU3fSE1ZJUgG"),
   BASE_RPC: (import.meta.env.VITE_BASE_RPC as string | undefined) || "https://api.devnet.solana.com",
   BASE_WS: "wss://api.devnet.solana.com",
   ER_RPC: "https://devnet.magicblock.app",
