@@ -7,6 +7,17 @@ if [[ -z "$RAW_DIR" ]]; then
   exit 2
 fi
 
+MISSING_TOOLS=()
+for TOOL in ffmpeg ffprobe cwebp; do
+  if ! command -v "$TOOL" >/dev/null 2>&1; then
+    MISSING_TOOLS+=("$TOOL")
+  fi
+done
+if (( ${#MISSING_TOOLS[@]} > 0 )); then
+  printf 'missing required tool: %s\n' "${MISSING_TOOLS[@]}" >&2
+  exit 5
+fi
+
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 OUT="$ROOT/public/tutorial"
 mkdir -p "$OUT"
@@ -27,11 +38,16 @@ for NAME in "${NAMES[@]}"; do
     exit 4
   fi
 
-  ffmpeg -y -i "$INPUT" -t 8 -an -vf "$FILTER" \
+  OUTPUT_DURATION=8
+  if [[ "$NAME" == "cash-out" ]]; then
+    OUTPUT_DURATION=5.16
+  fi
+
+  ffmpeg -y -i "$INPUT" -t "$OUTPUT_DURATION" -an -vf "$FILTER" \
     -c:v libvpx-vp9 -b:v 240k -maxrate 320k -bufsize 640k \
     -deadline good -cpu-used 2 -row-mt 1 "$OUT/$NAME.webm"
 
-  ffmpeg -y -i "$INPUT" -t 8 -an -vf "$FILTER" \
+  ffmpeg -y -i "$INPUT" -t "$OUTPUT_DURATION" -an -vf "$FILTER" \
     -c:v libx264 -profile:v high -level 4.0 -b:v 640k -maxrate 700k -bufsize 1400k \
     -movflags +faststart "$OUT/$NAME.mp4"
 
