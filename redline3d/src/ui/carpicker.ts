@@ -310,6 +310,7 @@ export function createCarPicker(
 
   const wrap = document.createElement("div");
   wrap.className = "pe";
+  wrap.id = "menuwrap";
   // top rides the same base as hud.ts: base+134 sits 10px under the graph at any inset (144 on desktop)
   wrap.style.cssText = "position:absolute;top:calc(max(10px,env(safe-area-inset-top)) + 134px);right:max(12px,env(safe-area-inset-right));z-index:8;display:block";
 

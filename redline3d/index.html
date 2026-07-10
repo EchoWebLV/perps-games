@@ -95,20 +95,36 @@
 
       /* ---- PHONE LANDSCAPE ONLY (wide + short). Desktop & portrait are untouched
              because they never match max-height:500px. Splits the bottom dock into
-             the thumb corners so the scene isn't crammed into the centre. ---- */
+             the thumb corners so the scene isn't crammed into the centre. Every top
+             offset rides env(safe-area-inset-*) — hard px here regress on notched
+             phones (the Seeker reports inset-top 37px in landscape). ---- */
       @media (orientation:landscape) and (max-height:500px){
         #hud{max-width:none}
         #balchip{top:max(8px,env(safe-area-inset-top))!important;left:max(10px,env(safe-area-inset-left))!important}
         #pxchip{top:max(8px,env(safe-area-inset-top))!important;right:max(10px,env(safe-area-inset-right))!important}
-        #tmrchip{top:max(8px,env(safe-area-inset-top))!important}
-        #minipanel{top:44px!important;width:min(300px,34%)!important;height:46px!important}
+        /* the timer sits BESIDE the graph (directly left of it), sharing the top band:
+           right = 50% + half the graph width + gap; +9px optically centres the 27px
+           chip against the 46px panel */
+        #tmrchip{top:calc(max(8px,env(safe-area-inset-top)) + 9px)!important;left:auto!important;right:calc(50% + min(150px,17%) + 10px)!important;transform:none!important}
+        #minipanel{top:max(8px,env(safe-area-inset-top))!important;width:min(300px,34%)!important;height:46px!important}
         #ctr{top:29%!important}
+        /* side stacks tuck into the corners just under the top chips (portrait keeps
+           its own below-graph offsets; 50px pitch = 42px chip + 8px gap) */
+        [aria-label="Coins collected"]{top:calc(max(8px,env(safe-area-inset-top)) + 58px)!important}
+        [aria-label="Scrap collected"]{top:calc(max(8px,env(safe-area-inset-top)) + 108px)!important}
+        [aria-label="Frames per second"]{top:calc(max(8px,env(safe-area-inset-top)) + 158px)!important}
+        [aria-label="Open garage lobby"]{top:calc(max(8px,env(safe-area-inset-top)) + 58px)!important}
+        #menuwrap{top:calc(max(8px,env(safe-area-inset-top)) + 58px)!important}
         /* neutralise the centred dock; its pieces are pinned to the corners below */
         #dock{position:static!important;transform:none!important}
         #status{position:fixed!important;left:50%!important;transform:translateX(-50%)!important;bottom:max(6px,env(safe-area-inset-bottom))!important;width:auto!important;max-width:34%!important;text-align:center!important}
         #driveCol{position:fixed!important;left:max(12px,env(safe-area-inset-left))!important;bottom:max(12px,env(safe-area-inset-bottom))!important;width:148px!important}
-        #ctrlMount{position:fixed!important;right:max(12px,env(safe-area-inset-right))!important;bottom:74px!important;width:244px!important}
+        /* the control stack anchors ABOVE the GO button — a hard bottom collided with
+           it whenever the label wrapped; GO is forced single-line so its height is
+           constant, and both ride the bottom inset */
+        #ctrlMount{position:fixed!important;right:max(12px,env(safe-area-inset-right))!important;bottom:calc(max(14px,env(safe-area-inset-bottom)) + 62px)!important;width:244px!important}
         #goMount{position:fixed!important;right:max(12px,env(safe-area-inset-right))!important;bottom:max(14px,env(safe-area-inset-bottom))!important;width:244px!important}
+        #goMount .cta{font-size:15px;padding:13px 10px;white-space:nowrap}
       }
 
       /* end-of-round FX: a brief screen shake on liquidation */
