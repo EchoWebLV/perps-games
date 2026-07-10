@@ -53,6 +53,106 @@ const completion = {
 };
 
 describe("trade history recorder", () => {
+  it("records and uploads with RFC 4122 v4 IDs when randomUUID is unavailable", async () => {
+    let seed = 0;
+    const getRandomValues = vi.fn((bytes: Uint8Array) => {
+      seed += 1;
+      bytes.forEach((_, index) => { bytes[index] = seed * 16 + index; });
+      return bytes;
+    });
+    vi.stubGlobal("crypto", { getRandomValues });
+
+    try {
+      vi.resetModules();
+      const recorderModule = await import("./trade-history-recorder");
+      const store = memoryStore();
+      const recordTrade = vi.fn().mockResolvedValue({});
+      const recorder = recorderModule.createTradeHistoryRecorder({
+        api: { recordTrade } as any,
+        wallet: () => "AliceWallet",
+        store,
+      });
+
+      recorder.begin(draft);
+      const record = recorder.complete(completion)!;
+      const queued = JSON.parse(store.getItem(
+        `redline.trade-history.outbox.v1:AliceWallet:${record.id}`,
+      )!);
+      const realmId = queued.queueOrder.split(":")[1] as string;
+
+      expect(getRandomValues).toHaveBeenCalledTimes(2);
+      expect(new Set([realmId, record.id]).size).toBe(2);
+      for (const id of [realmId, record.id]) {
+        expect(id).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/);
+        const bytes = id.replace(/-/g, "").match(/../g)!.map((part) => Number.parseInt(part, 16));
+        expect(bytes[6] & 0xf0).toBe(0x40);
+        expect(bytes[8] & 0xc0).toBe(0x80);
+      }
+      expect(recorder.pending()).toBe(1);
+
+      await expect(recorder.flush()).resolves.toBeUndefined();
+
+      expect(recordTrade).toHaveBeenCalledWith(record, "AliceWallet");
+      expect(recorder.pending()).toBe(0);
+    } finally {
+      vi.unstubAllGlobals();
+      vi.resetModules();
+    }
+  });
+
+  it("prefers native randomUUID when it is available", async () => {
+    const ids = [
+      "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+      "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+    ];
+    const randomUUID = vi.fn(() => ids.shift()!);
+    const getRandomValues = vi.fn();
+    vi.stubGlobal("crypto", { randomUUID, getRandomValues });
+
+    try {
+      vi.resetModules();
+      const recorderModule = await import("./trade-history-recorder");
+      const store = memoryStore();
+      const recorder = recorderModule.createTradeHistoryRecorder({
+        api: { recordTrade: vi.fn() } as any,
+        wallet: () => "AliceWallet",
+        store,
+      });
+
+      recorder.begin(draft);
+      const record = recorder.complete(completion)!;
+      const queued = JSON.parse(store.getItem(
+        `redline.trade-history.outbox.v1:AliceWallet:${record.id}`,
+      )!);
+
+      expect(randomUUID).toHaveBeenCalledTimes(2);
+      expect(getRandomValues).not.toHaveBeenCalled();
+      expect(queued.queueOrder.split(":")[1]).toBe("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa");
+      expect(record.id).toBe("bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb");
+    } finally {
+      vi.unstubAllGlobals();
+      vi.resetModules();
+    }
+  });
+
+  it("fails explicitly when Web Crypto has no cryptographic ID generator", async () => {
+    vi.stubGlobal("crypto", {});
+
+    try {
+      vi.resetModules();
+      const recorderModule = await import("./trade-history-recorder");
+
+      expect(() => recorderModule.createTradeHistoryRecorder({
+        api: { recordTrade: vi.fn() } as any,
+        wallet: () => "AliceWallet",
+        store: memoryStore(),
+      })).toThrowError("trade_history_secure_uuid_unavailable");
+    } finally {
+      vi.unstubAllGlobals();
+      vi.resetModules();
+    }
+  });
+
   it("keeps a failed upload and removes it after a retry", async () => {
     const recordTrade = vi.fn()
       .mockRejectedValueOnce(new Error("offline"))
