@@ -155,4 +155,24 @@ describe("how-to gameplay cards", () => {
     expect(video?.hidden).toBe(true);
     expect(panel.querySelector('[data-ht="next"]')).not.toBeNull();
   });
+
+  test("keeps terminal fallback hidden after pending playback rejects", async () => {
+    let rejectPlay!: (reason?: unknown) => void;
+    vi.spyOn(HTMLMediaElement.prototype, "play").mockImplementation(() =>
+      new Promise<void>((_, reject) => { rejectPlay = reject; })
+    );
+    const { panel } = openHowTo({ reducedMotion: () => false });
+    const frame = panel.querySelector<HTMLElement>(".ht-media");
+    const video = panel.querySelector<HTMLVideoElement>(".ht-video");
+    const playButton = panel.querySelector<HTMLButtonElement>(".ht-play");
+
+    video?.dispatchEvent(new Event("error"));
+    rejectPlay(new DOMException("playback failed", "NotSupportedError"));
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(frame?.classList.contains("is-fallback")).toBe(true);
+    expect(video?.hidden).toBe(true);
+    expect(playButton?.hidden).toBe(true);
+  });
 });

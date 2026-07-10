@@ -174,6 +174,8 @@ export function createHowTo(parent: HTMLElement, options: HowToOptions = {}): Ho
       frame.classList.add("is-fallback");
       video.hidden = true;
       playButton.hidden = true;
+      activeVideo = null;
+      activePlay = null;
     }, { once: true });
     playActive();
   };
