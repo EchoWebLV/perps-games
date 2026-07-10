@@ -15,12 +15,28 @@ const input = (id: string) => ({
   payoutBase: 11_000_000,
 });
 
+const cursorOf = (value: unknown) => Buffer.from(JSON.stringify(value)).toString("base64url");
+
+const validCursorPayload = {
+  settledAt: "2026-07-10T10:01:00.000Z",
+  id: "11111111-1111-4111-8111-111111111111",
+};
+
 describe("trade history service", () => {
   let ctx: TestCtx;
 
   afterEach(async () => {
     await ctx?.close();
   });
+
+  async function listSubject(externalId: string) {
+    ctx = await makeTestDb();
+    const user = await ctx.users.upsertByExternalId(externalId);
+    return {
+      history: makeTradeHistory({ db: ctx.db, users: ctx.users }),
+      userId: user.id,
+    };
+  }
 
   it("derives the bound wallet and inserts a UUID idempotently", async () => {
     ctx = await makeTestDb();
@@ -60,6 +76,64 @@ describe("trade history service", () => {
 
     const page1 = await history.list(alice.id, undefined, 2);
     const page2 = await history.list(alice.id, page1.nextCursor ?? undefined, 2);
+    expect(page1.items.map((row) => row.id)).toEqual([
+      "33333333-3333-4333-8333-333333333333",
+      "22222222-2222-4222-8222-222222222222",
+    ]);
+    expect(page2.items.map((row) => row.id)).toEqual(["11111111-1111-4111-8111-111111111111"]);
+    expect(page2.nextCursor).toBeNull();
+  });
+
+  it("normalizes malformed base64 cursor failures", async () => {
+    const { history, userId } = await listSubject("wallet:bad-base64-cursor");
+    const malformed = `%${cursorOf(validCursorPayload)}`;
+
+    await expect(history.list(userId, malformed, 25)).rejects.toThrowError(new Error("bad_cursor"));
+  });
+
+  it("normalizes malformed JSON cursor failures", async () => {
+    const { history, userId } = await listSubject("wallet:bad-json-cursor");
+    const malformed = Buffer.from("{").toString("base64url");
+
+    await expect(history.list(userId, malformed, 25)).rejects.toThrowError(new Error("bad_cursor"));
+  });
+
+  it("rejects a non-string cursor settledAt", async () => {
+    const { history, userId } = await listSubject("wallet:non-string-cursor-date");
+    const malformed = cursorOf({ ...validCursorPayload, settledAt: 123 });
+
+    await expect(history.list(userId, malformed, 25)).rejects.toThrowError(new Error("bad_cursor"));
+  });
+
+  it("rejects an invalid cursor settledAt", async () => {
+    const { history, userId } = await listSubject("wallet:invalid-cursor-date");
+    const malformed = cursorOf({ ...validCursorPayload, settledAt: "not-a-date" });
+
+    await expect(history.list(userId, malformed, 25)).rejects.toThrowError(new Error("bad_cursor"));
+  });
+
+  it("rejects a non-UUID cursor id before querying", async () => {
+    const { history, userId } = await listSubject("wallet:invalid-cursor-id");
+    const malformed = cursorOf({ ...validCursorPayload, id: "not-a-uuid" });
+
+    await expect(history.list(userId, malformed, 25)).rejects.toThrowError(new Error("bad_cursor"));
+  });
+
+  it("uses UUID descending order to paginate equal settledAt rows", async () => {
+    ctx = await makeTestDb();
+    const user = await ctx.users.upsertByExternalId("wallet:equal-settled-at");
+    await ctx.users.setWalletPublicKey(user.id, "EqualSettledAtWallet");
+    const history = makeTradeHistory({
+      db: ctx.db,
+      users: ctx.users,
+      now: () => new Date("2026-07-10T10:01:00.000Z"),
+    });
+    await history.record(user.id, input("11111111-1111-4111-8111-111111111111"));
+    await history.record(user.id, input("33333333-3333-4333-8333-333333333333"));
+    await history.record(user.id, input("22222222-2222-4222-8222-222222222222"));
+
+    const page1 = await history.list(user.id, undefined, 2);
+    const page2 = await history.list(user.id, page1.nextCursor ?? undefined, 2);
     expect(page1.items.map((row) => row.id)).toEqual([
       "33333333-3333-4333-8333-333333333333",
       "22222222-2222-4222-8222-222222222222",

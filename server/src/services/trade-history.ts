@@ -41,15 +41,32 @@ export interface TradeHistoryPage {
 
 type Cursor = { settledAt: string; id: string };
 
+const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
 const encodeCursor = (row: { settledAt: Date; id: string }) =>
   Buffer.from(JSON.stringify({ settledAt: row.settledAt.toISOString(), id: row.id })).toString("base64url");
 
 function decodeCursor(value: string): Cursor {
-  const parsed = JSON.parse(Buffer.from(value, "base64url").toString("utf8"));
-  if (!parsed || typeof parsed.id !== "string" || Number.isNaN(Date.parse(parsed.settledAt))) {
+  try {
+    const decoded = Buffer.from(value, "base64url");
+    if (decoded.toString("base64url") !== value) throw new Error("bad_cursor");
+    const parsed: unknown = JSON.parse(decoded.toString("utf8"));
+    if (
+      typeof parsed !== "object" ||
+      parsed === null ||
+      !("id" in parsed) ||
+      typeof parsed.id !== "string" ||
+      !UUID_PATTERN.test(parsed.id) ||
+      !("settledAt" in parsed) ||
+      typeof parsed.settledAt !== "string" ||
+      Number.isNaN(Date.parse(parsed.settledAt))
+    ) {
+      throw new Error("bad_cursor");
+    }
+    return { id: parsed.id, settledAt: parsed.settledAt };
+  } catch {
     throw new Error("bad_cursor");
   }
-  return parsed;
 }
 
 const itemOf = (row: TradeHistoryRow): TradeHistoryItem => ({
