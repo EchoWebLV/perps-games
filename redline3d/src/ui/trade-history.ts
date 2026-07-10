@@ -304,6 +304,7 @@ export function createTradeHistory(
   ): Promise<void> {
     if (!isCurrent(run) || loading) return;
 
+    if (focusAfter) closeButton.focus();
     const focusIndex = append ? items.length : 0;
     loading = true;
     if (append) renderList({ loadingMore: true });
@@ -334,6 +335,21 @@ export function createTradeHistory(
     }
   }
 
+  const canRestoreFocus = (target: HTMLElement | null): target is HTMLElement => {
+    if (!target?.isConnected
+      || target.matches(":disabled")
+      || target.getAttribute("aria-disabled") === "true"
+      || target.closest("[hidden], [inert], [aria-hidden='true']")) return false;
+
+    for (let element: HTMLElement | null = target; element; element = element.parentElement) {
+      const style = doc.defaultView?.getComputedStyle(element);
+      if (style?.display === "none" || style?.visibility === "hidden" || style?.visibility === "collapse") {
+        return false;
+      }
+    }
+    return true;
+  };
+
   const close = (): void => {
     if (overlay.hidden) return;
 
@@ -345,7 +361,11 @@ export function createTradeHistory(
 
     const target = returnFocus;
     returnFocus = null;
-    if (target?.isConnected) target.focus();
+    if (canRestoreFocus(target)) target.focus();
+    if (doc.activeElement !== target) {
+      const active = doc.activeElement as HTMLElement | null;
+      if (active && dialog.contains(active)) active.blur();
+    }
   };
 
   closeButton.addEventListener("click", close);
@@ -388,6 +408,16 @@ export function createTradeHistory(
     const first = focusable[0];
     const last = focusable[focusable.length - 1];
     const active = doc.activeElement;
+    if (active && dialog.contains(active) && !focusable.includes(active as HTMLElement)) {
+      const descendants = Array.from(dialog.querySelectorAll<HTMLElement>("*"));
+      const activeIndex = descendants.indexOf(active as HTMLElement);
+      const target = event.shiftKey
+        ? [...focusable].reverse().find((element) => descendants.indexOf(element) < activeIndex) ?? last
+        : focusable.find((element) => descendants.indexOf(element) > activeIndex) ?? first;
+      event.preventDefault();
+      target.focus();
+      return;
+    }
     if (event.shiftKey && (active === first || !dialog.contains(active))) {
       event.preventDefault();
       last.focus();

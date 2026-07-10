@@ -148,6 +148,28 @@ describe("trade history states", () => {
     expect(load).toHaveBeenCalledTimes(2);
     expect(document.activeElement).toBe(document.querySelector('[data-history="close"]'));
   });
+
+  it("keeps focus inside while a retried request is pending", async () => {
+    const retryPage = deferred<TradeHistoryPage>();
+    const load = vi.fn()
+      .mockRejectedValueOnce(new Error("offline"))
+      .mockImplementationOnce(() => retryPage.promise);
+    const { panel } = mount({ load });
+    await panel.open();
+
+    const retry = document.querySelector<HTMLButtonElement>('[data-history="retry"]');
+    const close = document.querySelector<HTMLButtonElement>('[data-history="close"]');
+    const dialog = document.querySelector<HTMLElement>('[role="dialog"]');
+    retry?.focus();
+    retry?.click();
+
+    expect(load).toHaveBeenCalledTimes(2);
+    expect(document.activeElement).toBe(close);
+    expect(dialog?.contains(document.activeElement)).toBe(true);
+
+    retryPage.resolve({ items: [], nextCursor: null });
+    await vi.waitFor(() => expect(historyBody()?.textContent).toContain("No settled trades yet"));
+  });
 });
 
 describe("trade history pagination", () => {
@@ -199,6 +221,28 @@ describe("trade history pagination", () => {
     await vi.waitFor(() => expect(tradeRows()).toHaveLength(2));
   });
 
+  it("keeps focus inside while an appended page is pending", async () => {
+    const nextPage = deferred<TradeHistoryPage>();
+    const load = vi.fn()
+      .mockResolvedValueOnce({ items: [firstTrade], nextCursor: "next" })
+      .mockImplementationOnce(() => nextPage.promise);
+    const { panel } = mount({ load });
+    await panel.open();
+
+    const more = document.querySelector<HTMLButtonElement>('[data-history="more"]');
+    const close = document.querySelector<HTMLButtonElement>('[data-history="close"]');
+    const dialog = document.querySelector<HTMLElement>('[role="dialog"]');
+    more?.focus();
+    more?.click();
+
+    expect(load).toHaveBeenCalledTimes(2);
+    expect(document.activeElement).toBe(close);
+    expect(dialog?.contains(document.activeElement)).toBe(true);
+
+    nextPage.resolve({ items: [secondTrade], nextCursor: null });
+    await vi.waitFor(() => expect(tradeRows()).toHaveLength(2));
+  });
+
   it("keeps prior rows and retries an append with the original cursor", async () => {
     const load = vi.fn()
       .mockResolvedValueOnce({ items: [firstTrade], nextCursor: "next" })
@@ -239,6 +283,29 @@ describe("trade history pagination", () => {
 
     expect(panel.isOpen()).toBe(false);
     expect(tradeRows()).toHaveLength(0);
+  });
+
+  it("ignores a rejected stale append after close and reopen", async () => {
+    const staleAppend = deferred<TradeHistoryPage>();
+    const load = vi.fn()
+      .mockResolvedValueOnce({ items: [firstTrade], nextCursor: "next" })
+      .mockImplementationOnce(() => staleAppend.promise)
+      .mockResolvedValueOnce({ items: [secondTrade], nextCursor: null });
+    const { panel } = mount({ load });
+    await panel.open();
+
+    document.querySelector<HTMLButtonElement>('[data-history="more"]')?.click();
+    await vi.waitFor(() => expect(load).toHaveBeenCalledTimes(2));
+    panel.close();
+    await panel.open();
+    staleAppend.reject(new Error("stale offline response"));
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(panel.isOpen()).toBe(true);
+    expect(load).toHaveBeenCalledTimes(3);
+    expect(tradeRows().map((row) => row.dataset.tradeId)).toEqual([secondTrade.id]);
+    expect(historyBody()?.textContent).not.toContain("Could not load history");
   });
 });
 
@@ -306,6 +373,43 @@ describe("trade history modal behavior", () => {
     expect(document.activeElement).not.toBe(after);
   });
 
+  it("contains both Tab directions from a programmatically focused terminal row", async () => {
+    const outside = document.createElement("button");
+    document.body.appendChild(outside);
+    const load = vi.fn()
+      .mockResolvedValueOnce({ items: [firstTrade], nextCursor: "next" })
+      .mockResolvedValueOnce({ items: [secondTrade], nextCursor: null });
+    const { panel } = mount({ load });
+    await panel.open();
+
+    document.querySelector<HTMLButtonElement>('[data-history="more"]')?.click();
+    await vi.waitFor(() => expect(document.activeElement).toBe(tradeRows()[1]));
+    const terminalRow = tradeRows()[1];
+    const close = document.querySelector<HTMLButtonElement>('[data-history="close"]');
+
+    const forwards = new KeyboardEvent("keydown", {
+      key: "Tab",
+      bubbles: true,
+      cancelable: true,
+    });
+    document.dispatchEvent(forwards);
+    expect(forwards.defaultPrevented).toBe(true);
+    expect(document.activeElement).toBe(close);
+    expect(document.activeElement).not.toBe(outside);
+
+    terminalRow.focus();
+    const backwards = new KeyboardEvent("keydown", {
+      key: "Tab",
+      shiftKey: true,
+      bubbles: true,
+      cancelable: true,
+    });
+    document.dispatchEvent(backwards);
+    expect(backwards.defaultPrevented).toBe(true);
+    expect(document.activeElement).toBe(close);
+    expect(document.activeElement).not.toBe(outside);
+  });
+
   it("focuses the dialog when no enabled modal control remains", async () => {
     const outside = document.createElement("button");
     document.body.appendChild(outside);
@@ -338,6 +442,33 @@ describe("trade history modal behavior", () => {
 
     expect(panel.isOpen()).toBe(false);
     expect(document.activeElement).toBe(opener);
+  });
+
+  it.each([
+    ["hidden", (opener: HTMLButtonElement) => { opener.hidden = true; }],
+    ["disabled", (opener: HTMLButtonElement) => { opener.disabled = true; }],
+  ])("does not restore focus to a %s opener", async (_state, makeUnavailable) => {
+    const opener = document.createElement("button");
+    document.body.appendChild(opener);
+    opener.focus();
+    const { panel } = mount({ signedIn: false });
+    await panel.open();
+    makeUnavailable(opener);
+
+    panel.close();
+
+    expect(document.activeElement).toBe(document.body);
+    expect(document.activeElement).not.toBe(opener);
+  });
+
+  it("does not leave focus in the hidden dialog when no control opened it", async () => {
+    expect(document.activeElement).toBe(document.body);
+    const { panel } = mount({ signedIn: false });
+    await panel.open();
+
+    panel.close();
+
+    expect(document.activeElement).toBe(document.body);
   });
 
   it("closes from a backdrop click", async () => {
