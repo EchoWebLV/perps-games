@@ -1,4 +1,4 @@
-# Market Weather Gameplay Feedback
+# Market Pulse Gameplay Feedback
 
 **Date:** 2026-07-10
 **Status:** approved design
@@ -10,7 +10,7 @@ Make live market movement legible through the road and atmosphere so the race wo
 
 Four signals drive four effects:
 
-1. Volatility visually narrows the road and intensifies traffic.
+1. Volatility tightens and energizes the road presentation.
 2. Momentum bends the road uphill or downhill.
 3. Sudden price movement sends a visible shockwave through the world.
 4. Approaching liquidation progressively deteriorates the environment.
@@ -23,7 +23,7 @@ The effects provide feedback and tension. They never change settlement, leverage
 - **Percent movement is asset-neutral.** BTC, ETH, and SOL use percentage returns, not absolute price changes.
 - **Sustained movement beats noisy ticks.** Momentum and volatility are smoothed before reaching the world.
 - **A stale feed calms the world.** Visual signals ease toward zero when the feed is not live.
-- **No surprise punishment.** Traffic has no colliders and road narrowing does not change the steering clamp.
+- **No surprise punishment.** Road pressure does not change the steering clamp, collisions, or financial control.
 - **Mobile performance is a feature.** Every effect has a reduced-detail form and bounded object count.
 - **Car identity remains intact.** Skull's Death's Door stays the strongest final-stage liquidation effect.
 
@@ -33,22 +33,22 @@ The effects provide feedback and tension. They never change settlement, leverage
 
 Each effect could be calculated and applied in the frame loop. This is fastest initially, but signal definitions, smoothing, thresholds, and visual state would spread across the largest file in the game. It would be difficult to test or tune without loading the whole application.
 
-### Unified Market Weather module
+### Unified Market Pulse module
 
 A pure stateful module converts price observations and liquidation buffer into normalized signals. Rendering modules consume those signals. This keeps settlement isolated and makes each threshold deterministic in tests.
 
 This is the selected approach.
 
-### Shader-only weather
+### Shader-only response
 
-All effects could be packed into the road and post-processing shaders. This gives the most visual freedom, but makes traffic, shock events, quality tiers, and test control harder. It also increases mobile GPU risk.
+All effects could be packed into the road and post-processing shaders. This gives the most visual freedom, but makes shock events, quality tiers, and test control harder. It also increases mobile GPU risk.
 
-## Market Weather signals
+## Market Pulse signals
 
-Add `redline3d/src/core/market-weather.ts`.
+Add `redline3d/src/core/market-pulse.ts`.
 
 ```ts
-interface MarketWeatherFrame {
+interface MarketPulseFrame {
   volatility: number; // 0..1
   momentum: number;   // -1..1, negative down and positive up
   shock: number;      // 0..1 decaying pulse
@@ -98,32 +98,7 @@ Danger is active only during a live Round.
 - Values between use a smoothstep curve.
 - Leaving the live Round eases danger rapidly back to zero.
 
-## Effect 1: volatility road squeeze and traffic
-
-### Road squeeze
-
-Extend the race World's road shader with a normalized weather uniform.
-
-- At calm, road width is unchanged.
-- At maximum volatility, illuminated shoulders and edge markings move inward by roughly `18%`.
-- The underlying geometry, player steering clamp, pickups, and collision behavior remain unchanged.
-- The transition eases over about one second so the road never snaps between widths.
-
-The effect communicates reduced breathing room without changing financial control.
-
-### Traffic
-
-Add `redline3d/src/render/market-traffic.ts`.
-
-- Traffic consists of pooled low-poly silhouettes and light streaks moving along the far road corridor.
-- Traffic never collides with the player and never blocks the cash-out control.
-- Calm traffic is sparse.
-- Volatility increases active traffic count, relative speed, headlight intensity, and lane-change frequency.
-- Full detail uses at most `14` active traffic objects.
-- Reduced detail uses at most `6` active traffic objects and omits any dynamic lights.
-- No object is created inside the frame loop.
-
-## Effect 2: momentum terrain
+## Effect 1: momentum terrain
 
 The current terrain bias uses the smoothed price's displacement from a slow average. Preserve that response, but blend it with the new directional momentum signal.
 
@@ -134,9 +109,9 @@ The current terrain bias uses the smoothed price's displacement from a slow aver
 - Negative momentum produces a sustained descent.
 - Momentum easing prevents isolated ticks from jerking the camera or car pitch.
 
-The terrain remains decorative. The Round engine continues to read only the market price.
+This is the first visible experiment because it deepens an effect the road already uses. The terrain remains decorative. The Round engine continues to read only the market price.
 
-## Effect 3: sudden-move shockwave
+## Effect 2: sudden-move shockwave and shake
 
 Add `redline3d/src/render/market-shock.ts`.
 
@@ -144,11 +119,26 @@ Each new `shockId` triggers one event:
 
 - A luminous ring expands from the horizon toward the player.
 - Road grid emission and roadside lamps pulse once.
-- The camera receives a small impulse through the existing chase-camera shake mechanism.
+- The camera receives a clear but short impulse through the existing chase-camera shake mechanism.
 - The effect color follows direction: green-cyan for an upward move and red-magenta for a downward move.
 - The direction is derived from the signed return that triggered the shock.
 
-The shock has no collision and no gameplay consequence. Reduced detail uses the ring and color pulse but skips extra particles.
+The shock has no collision and no financial consequence. Reduced detail uses the ring, shake, and color pulse but skips extra particles. Reduced-motion browser preference disables the camera impulse.
+
+## Effect 3: volatility road pressure
+
+### Road squeeze
+
+Extend the race World's road shader with normalized Market Pulse uniforms.
+
+- At calm, road width is unchanged.
+- At maximum volatility, illuminated shoulders and edge markings move inward by roughly `18%`.
+- The underlying geometry, player steering clamp, pickups, and collision behavior remain unchanged.
+- The transition eases over about one second so the road never snaps between widths.
+- Road-grid speed, edge brightness, and wave activity rise with volatility so the surface feels increasingly alive.
+- The response is capped to avoid high-frequency flicker and motion sickness.
+
+The effect communicates reduced breathing room without changing financial control.
 
 ## Effect 4: progressive liquidation deterioration
 
@@ -175,10 +165,9 @@ The danger overlay avoids setting a competing CSS filter on `#gl`, so it cannot 
 PriceSource + Round snapshot
           |
           v
-Market Weather module
+Market Pulse module
           |
-          +--> World weather uniforms
-          +--> Market traffic pool
+          +--> World pulse uniforms
           +--> Market shock event
           +--> Market danger overlay
 ```
@@ -192,14 +181,14 @@ The market observation runs from the shared race price sample. World consumers u
 - Invalid or non-positive prices are ignored.
 - Asset changes reset price history, momentum, volatility, and shock cooldown.
 - A stale feed eases volatility and momentum to zero and suppresses new shocks.
-- Leaving race mode hides traffic, shock, and danger state.
+- Leaving race mode hides shock and danger state and eases road response to calm.
 - Ending a Round immediately begins danger recovery.
 - Reduced-motion browser preference disables camera impulse and shortens large luminance pulses.
 - All overlays remain non-interactive.
 
 ## Development controls
 
-In development only, expose a small weather probe through the existing diagnostic surface. It can force `volatility`, `momentum`, `shock`, and `danger` values without altering Round state.
+In development only, expose a small Market Pulse probe through the existing diagnostic surface. It can force `volatility`, `momentum`, `shock`, and `danger` values without altering Round state.
 
 This probe exists for browser verification and is stripped from production builds.
 
@@ -207,7 +196,7 @@ This probe exists for browser verification and is stripped from production build
 
 ### Unit tests
 
-`market-weather.test.ts` covers:
+`market-pulse.test.ts` covers:
 
 - Flat price remains calm.
 - Sustained positive movement creates positive momentum.
@@ -216,12 +205,12 @@ This probe exists for browser verification and is stripped from production build
 - Percentage-based signals behave the same at different asset prices.
 - A qualifying sudden move triggers exactly one shock.
 - Shock cooldown suppresses immediate repeats.
-- A stale feed decays weather and suppresses shocks.
+- A stale feed decays the pulse and suppresses shocks.
 - Danger begins below `0.35` buffer and reaches `1` at liquidation.
 - Idle Round state clears danger.
 - Reset clears asset-specific observation state.
 
-Pure visual-mapping tests cover road squeeze, traffic count caps, hill-bias clamping, and danger intensity.
+Pure visual-mapping tests cover road pressure, hill-bias clamping, shock intensity, and danger intensity.
 
 ### Browser verification
 
@@ -231,33 +220,44 @@ For each effect:
 - Verify the effect in full and reduced detail.
 - Verify the cash-out control stays visible and clickable at maximum danger.
 - Verify Skull's Death's Door still layers correctly.
-- Verify changing asset clears old weather.
+- Verify changing asset clears the old pulse state.
 - Verify no console errors.
-- Check active traffic counts remain within their quality-tier caps.
 
 The complete slice is also exercised against the live feed in practice mode before using a real Round.
+
+## Incremental review loop
+
+The effects are experiments, not an all-or-nothing package.
+
+1. Implement and commit one effect.
+2. Run automated and browser verification.
+3. Let the user play and judge that effect before starting the next one.
+4. If the user dislikes it, revert or revise only that effect's commit.
+5. Continue down the list only after the current effect is accepted.
+
+No later effect may depend on a rejected visual effect. All effects depend only on the shared Market Pulse signals.
 
 ## Commit sequence
 
 Every slice includes its tests and verification before commit.
 
-1. `feat(client): add market weather signal model`
-2. `feat(client): make volatility squeeze the road and intensify traffic`
-3. `feat(client): drive terrain pitch from market momentum`
-4. `feat(client): add sudden-move market shockwave`
+1. `feat(client): add market pulse signal model`
+2. `feat(client): drive terrain pitch from market momentum`
+3. `feat(client): add sudden-move market shock and shake`
+4. `feat(client): make volatility energize and tighten the road`
 5. `feat(client): deteriorate the world near liquidation`
-6. `test(client): verify integrated market weather feedback`
+6. `test(client): verify integrated market pulse feedback`
 
 The design document and implementation plan are committed separately before code begins.
 
 ## Non-goals
 
 - No change to settlement, leverage, liquidation thresholds, or on-chain instructions.
-- No traffic collisions.
+- No race traffic.
 - No dynamic steering clamp or forced lane movement.
 - No new server data.
 - No audio redesign beyond a restrained danger heartbeat if the existing audio module can supply it without a new asset.
-- No weather in the Strip, Garage, or Highway modes.
+- No Market Pulse effects in the Strip, Garage, or Highway modes.
 - No WebGL post-processing pass added solely for this feature.
 
 ## Success criteria
@@ -265,5 +265,5 @@ The design document and implementation plan are committed separately before code
 - A player can infer calm, volatile, trending, shocked, and near-liquidation states from the world without reading the HUD.
 - Visual feedback remains deterministic for a given signal frame.
 - The player retains full control of steering and cash-out.
-- Settlement output is identical with Market Weather enabled or disabled.
-- Reduced-detail mode stays within the declared traffic caps and uses no additional dynamic lights.
+- Settlement output is identical with Market Pulse enabled or disabled.
+- Reduced-detail mode uses no additional dynamic lights for these effects.
