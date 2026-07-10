@@ -1,10 +1,11 @@
 import * as THREE from "three";
 import { type WorldTheme, type LampStyle, getTheme, loadThemeKey, saveThemeKey } from "./world-themes";
+import { ROAD_GRADE_ANCHOR_Z, roadGradeOffset, roadGradeSlope } from "../core/market-road";
 
 export interface World {
   group: THREE.Group;
-  /** speed = world units/sec; bias = price-driven elevation (the road climbs on a pump, dips on a dump) */
-  update(dt: number, speed: number, bias: number): void;
+  /** speed = world units/sec; grade = price-driven road angle in degrees */
+  update(dt: number, speed: number, grade: number): void;
   /** surface height at a given world z — objects ride this so they sit on the road */
   surfaceY(worldZ: number): number;
   /** Clown Car ability: split the road green (left=LONG) / red (right=SHORT) */
@@ -18,6 +19,8 @@ export interface World {
 const FREQ = 0.02;        // rolling-hill frequency (matches the shader literal)
 const AMP = 3.2;          // rolling-hill amplitude
 const PLANE_Z = -900;     // grid/road plane center in z
+const GRADE_ANCHOR_LOCAL_Y = PLANE_Z - ROAD_GRADE_ANCHOR_Z;
+const GRADE_TAU = 0.22;
 
 type Junk = Array<{ dispose(): void }>;
 const _WHITE = new THREE.Color(0xffffff);
@@ -353,13 +356,14 @@ function buildMesa(theme: WorldTheme, junk: Junk): THREE.Group {
   return g;
 }
 
-// shared vertex displacement: a rolling wave (sin) plus a price-driven bias, scrolling toward the camera
+// shared vertex displacement: rolling hills plus a car-anchored market grade. Anchoring the
+// grade at the car makes the road ahead genuinely climb/drop instead of lifting the whole world.
 const VERT = `
-  varying vec2 vUv; uniform float uScroll; uniform float uAmp; uniform float uBias;
+  varying vec2 vUv; uniform float uScroll; uniform float uAmp; uniform float uGrade; uniform float uGradeAnchor;
   void main(){
     vUv = uv;
     vec3 p = position;
-    p.z += sin((position.y + uScroll) * ${FREQ}) * uAmp + uBias;
+    p.z += sin((position.y + uScroll) * ${FREQ}) * uAmp + (position.y - uGradeAnchor) * uGrade;
     gl_Position = projectionMatrix * modelViewMatrix * vec4(p,1.0);
   }`;
 
@@ -546,7 +550,7 @@ export function createWorld(detail: "full" | "reduced" = "full"): World {
   // neon grid floor (displaced by the shared wave) — persistent, recoloured on setTheme()
   const gridMat = new THREE.ShaderMaterial({
     transparent: true,
-    uniforms: { uOffset: { value: 0 }, uScroll: { value: 0 }, uAmp: { value: AMP }, uBias: { value: 0 }, uColor: { value: new THREE.Color("#ff39c0") }, uColor2: { value: new THREE.Color("#27e7ff") } },
+    uniforms: { uOffset: { value: 0 }, uScroll: { value: 0 }, uAmp: { value: AMP }, uGrade: { value: 0 }, uGradeAnchor: { value: GRADE_ANCHOR_LOCAL_Y }, uColor: { value: new THREE.Color("#ff39c0") }, uColor2: { value: new THREE.Color("#27e7ff") } },
     vertexShader: VERT.replace("varying vec2 vUv;", "varying vec2 vUv; uniform float uOffset;"),
     fragmentShader: `
       varying vec2 vUv; uniform float uOffset; uniform vec3 uColor; uniform vec3 uColor2;
@@ -571,7 +575,7 @@ export function createWorld(detail: "full" | "reduced" = "full"): World {
   // road strip (same wave)
   const roadMat = new THREE.ShaderMaterial({
     transparent: true,
-    uniforms: { uOffset: { value: 0 }, uScroll: { value: 0 }, uAmp: { value: AMP }, uBias: { value: 0 }, uEdge: { value: new THREE.Color("#ff39c0") }, uLane: { value: 0 } },
+    uniforms: { uOffset: { value: 0 }, uScroll: { value: 0 }, uAmp: { value: AMP }, uGrade: { value: 0 }, uGradeAnchor: { value: GRADE_ANCHOR_LOCAL_Y }, uEdge: { value: new THREE.Color("#ff39c0") }, uLane: { value: 0 } },
     vertexShader: VERT.replace("varying vec2 vUv;", "varying vec2 vUv; uniform float uOffset;"),
     fragmentShader: `
       varying vec2 vUv; uniform float uOffset; uniform vec3 uEdge; uniform float uLane;
@@ -696,13 +700,13 @@ export function createWorld(detail: "full" | "reduced" = "full"): World {
   }
   setTheme(loadThemeKey()); // build the initial environment + colours from the persisted skin
 
-  let scroll = 0, biasCur = 0, time = 0, laneTarget = 0;
+  let scroll = 0, gradeSlopeCur = 0, time = 0, laneTarget = 0;
   // the plane is rotated -90° about X and sits at z=PLANE_Z, so a world z maps to
   // local y = PLANE_Z - worldZ. sampling the wave here MUST match the vertex shader,
   // or objects float off the road (the "flying car" bug).
   const surfaceY = (worldZ: number) => {
     const localY = PLANE_Z - worldZ;
-    return Math.sin((localY + scroll) * FREQ) * AMP + biasCur;
+    return Math.sin((localY + scroll) * FREQ) * AMP + roadGradeOffset(worldZ, gradeSlopeCur);
   };
 
   // update()'s helpers, hoisted so the hot rAF path allocates no closures per frame
@@ -734,16 +738,17 @@ export function createWorld(detail: "full" | "reduced" = "full"): World {
     setLaneBet(on: boolean) { laneTarget = on ? 1 : 0; },
     setTheme,
     currentTheme: () => curKey,
-    update(dt, speed, bias) {
+    update(dt, speed, grade) {
       const flow = speed * dt;
       scroll += flow;
       time += dt;
       if (envAnim) envAnim(time); // aurora drift, etc.
-      biasCur += (bias - biasCur) * 0.06;
+      const gradeTarget = roadGradeSlope(grade);
+      gradeSlopeCur += (gradeTarget - gradeSlopeCur) * (1 - Math.exp(-dt / GRADE_TAU));
       for (const mat of scrollMats) {
         mat.uniforms.uOffset.value += flow * 0.06;
         mat.uniforms.uScroll.value = scroll;
-        mat.uniforms.uBias.value = biasCur;
+        mat.uniforms.uGrade.value = gradeSlopeCur;
       }
       // ease the lane-bet road tint in/out when the Clown Car is selected/deselected
       roadMat.uniforms.uLane.value += (laneTarget - roadMat.uniforms.uLane.value) * 0.1;

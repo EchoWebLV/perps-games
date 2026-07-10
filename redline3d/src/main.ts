@@ -15,7 +15,7 @@ import { createControls, DEFAULT_PLAY_CAP } from "./ui/controls";
 import { connectFeed } from "./core/feed";
 import { createPriceSource } from "./core/price-source";
 import { CALM_MARKET_PULSE, createMarketPulse, type MarketPulseFrame } from "./core/market-pulse";
-import { terrainBias } from "./core/market-road";
+import { terrainGrade } from "./core/market-road";
 import { RoundEngine } from "./core/round";
 import type { Snapshot } from "./core/types";
 import { sol3 } from "./core/money";
@@ -1531,7 +1531,7 @@ function frame(now: number) {
     buffer: liveBuffer,
     dt,
   });
-  const hill = terrainBias({
+  const grade = terrainGrade({
     smoothPrice: solSmooth,
     emaPrice: solEMA,
     momentum: debugMomentum ?? marketFrame.momentum,
@@ -1542,7 +1542,7 @@ function frame(now: number) {
   // still scrolls in the showroom, so raw speed never reads 0 — and AUTH_MIN recentres.
   const speedFrac = drivable ? Math.min(1, speed / ROAD_SPEED_MAX) : 0;
   lane = laneStep(lane, carXTarget, speedFrac, dt);
-  world.update(dt, speed, hill);
+  world.update(dt, speed, grade);
 
   // car hugs the road: ride the surface height + pitch to the local slope, lean into turns
   const carY = world.surfaceY(CAR_Z);
