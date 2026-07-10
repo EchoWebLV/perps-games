@@ -68,6 +68,7 @@ import { clearIdentity, createIdentityGate, loadIdentity, saveIdentity } from ".
 import { createAccessWall } from "./ui/access-wall";
 import { anyRedeemed, redeem, redeemForAccount, type RedeemPorts } from "./core/access-code";
 import { shouldGrantWelcome, welcomeClaimed, markWelcome } from "./core/welcome";
+import { restoreSave, stashSave, wipeSave } from "./core/save-vault";
 import { createMapButton } from "./ui/mapbutton";
 import { createLobbyHud } from "./ui/lobbyhud";
 import { step as driveStep, DRIVE, HIGHWAY_DRIVE, type DriveState, type DriveTune } from "./core/freedrive";
@@ -518,18 +519,20 @@ const garage = createCarPicker(hudRoot, CAR_DEFS, (c) => { car.setModel(c.url, c
   // identity gate — the gate IS the login screen.
   if (roundActive || engine.getPhase() === "live") { hud.setStatus("Finish this run before signing out."); return; }
   if (identity?.mode === "privy" || signedIn) {
-    // signed-in → a real log-out: sign the wallet out, forget the rider, fresh gate (no ✕)
+    // signed-in → a real log-out: sign the wallet out, forget the rider, fresh gate (no ✕).
+    // Identity-scoped saves: this account's offline progress is STASHED under its wallet
+    // address (captured now — the teardown drops the port), the live keys are wiped, and the
+    // reload boots a clean slate to the gate — the next guest starts from zero by design.
+    const stashNs = session.address() || "account";
     void session.logout().then(() => {
       signedIn = false;
       identity = null;
       accountSync.disable();
-      void auth.logout?.();
+      void auth.logout?.(); // clears its keys synchronously — done before the reload below
       clearIdentity();
-      walletSolUnits = 0; // the chip must not show the signed-out wallet's money
-      hud.setTryMode(false);
-      syncOnchainBalance();
-      hud.setStatus("");
-      showIdentityGate();
+      stashSave(stashNs);
+      wipeSave();
+      location.reload(); // boots to the identity gate; replaces the in-place gate redraw
     });
   } else {
     // guest → "Sign in / switch driver": keep who they are until they COMMIT to a new
@@ -1805,10 +1808,23 @@ function showIdentityGate() {
     async onSignIn(name) {
       // fresh = the account picker ALWAYS opens (a lingering Privy session is signed out
       // first). Resuming belongs to boot reconnect — the gate is where accounts SWITCH.
+      const wasGuest = !identity || identity.mode === "guest"; // the PRIOR rider, read before overwrite
       const ok = await ensureSignedIn(true);
       if (ok) {
         identity = { name: name ?? "raider_" + session.address().slice(-4).toLowerCase(), mode: "privy" as const };
         saveIdentity(identity);
+        if (wasGuest) {
+          // Identity-scoped saves (guest → account ONLY — never on a boot reconnect, which
+          // would wipe the account's own live state every boot): guest progress is disposable
+          // by design — wipe it, restore this account's stash from its last logout, reload.
+          // The reload IS the rehydration: nothing may run in between, or an in-memory
+          // persist() would clobber the restored keys. After the boot, the reconnect path
+          // re-applies server-wins hydrate + the access wall + how-to + the welcome claim.
+          wipeSave();
+          restoreSave(session.address() || "account");
+          location.reload();
+          return true;
+        }
         syncOnchainBalance();
         gateUp = false;
         // ACCOUNT: ensureSignedIn already ran syncAccount → bindAndHydrate → accountSync.hydrate, so
@@ -1849,7 +1865,10 @@ if (identity?.mode === "privy") {
     syncOnchainBalance();
     void syncTableCap();
     await syncAccount();                 // hydrate coins/scrap/cars + the account's redeemed-code set
-    accountAccessThenEnter(() => {});    // already-redeemed accounts skip; otherwise the wall shows
+    // The gate's sign-in now RELOADS before its own post-wall flow can run (identity-scoped save
+    // swap), so the boot reconnect completes it: wall → how-to (device flag: no-op if ever seen)
+    // → the once-per-account welcome claim (server-side idempotent — granted only once, ever).
+    accountAccessThenEnter(() => { maybeShowHowTo(() => { void claimWelcomeAccount(); }); });
   }).catch(() => {});
 }
 console.log("redline3d render up");
