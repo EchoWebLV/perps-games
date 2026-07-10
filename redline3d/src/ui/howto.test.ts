@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { beforeEach, describe, expect, test } from "vitest";
+import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import { createHowTo, howToSeen, markHowToSeen, type HowToOptions } from "./howto";
 import type { KvStore } from "../core/identity";
 
@@ -10,6 +10,10 @@ const memStore = (): KvStore => {
 
 beforeEach(() => {
   document.body.innerHTML = "";
+});
+
+afterEach(() => {
+  vi.restoreAllMocks();
 });
 
 function openHowTo(options?: HowToOptions) {
@@ -58,6 +62,7 @@ describe("how-to gameplay cards", () => {
   });
 
   test("uses one real-media contract per card", () => {
+    vi.spyOn(HTMLMediaElement.prototype, "play").mockResolvedValue();
     const { panel } = openHowTo({ reducedMotion: () => false });
     const video = panel.querySelector<HTMLVideoElement>(".ht-video");
     const sources = Array.from(video?.querySelectorAll("source") ?? []).map((source) => ({
@@ -104,5 +109,50 @@ describe("how-to gameplay cards", () => {
 
     expect(closes).toBe(1);
     expect(howto.isOpen()).toBe(false);
+  });
+
+  test("plays only the active clip and pauses it before paging", () => {
+    const play = vi.spyOn(HTMLMediaElement.prototype, "play").mockResolvedValue();
+    const pause = vi.spyOn(HTMLMediaElement.prototype, "pause").mockImplementation(() => undefined);
+    const { panel } = openHowTo({ reducedMotion: () => false });
+
+    expect(play).toHaveBeenCalledTimes(1);
+    expect(panel.querySelector(".ht-preload source")?.getAttribute("src"))
+      .toBe("/tutorial/lobby.webm");
+    panel.querySelector<HTMLButtonElement>('[data-ht="next"]')?.click();
+    expect(pause).toHaveBeenCalledTimes(1);
+    expect(play).toHaveBeenCalledTimes(2);
+  });
+
+  test("uses posters only when reduced motion is requested", () => {
+    const play = vi.spyOn(HTMLMediaElement.prototype, "play").mockResolvedValue();
+    const { panel } = openHowTo({ reducedMotion: () => true });
+
+    expect(panel.querySelector(".ht-poster")).not.toBeNull();
+    expect(panel.querySelector(".ht-video")).toBeNull();
+    expect(panel.querySelector(".ht-preload")).toBeNull();
+    expect(play).not.toHaveBeenCalled();
+  });
+
+  test("shows a play control when autoplay is rejected", async () => {
+    vi.spyOn(HTMLMediaElement.prototype, "play")
+      .mockRejectedValue(new DOMException("autoplay blocked", "NotAllowedError"));
+    const { panel } = openHowTo({ reducedMotion: () => false });
+
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(panel.querySelector<HTMLButtonElement>(".ht-play")?.hidden).toBe(false);
+  });
+
+  test("falls back to the poster when every source fails", () => {
+    vi.spyOn(HTMLMediaElement.prototype, "play").mockResolvedValue();
+    vi.spyOn(HTMLMediaElement.prototype, "pause").mockImplementation(() => undefined);
+    const { panel } = openHowTo({ reducedMotion: () => false });
+    const video = panel.querySelector<HTMLVideoElement>(".ht-video");
+
+    video?.dispatchEvent(new Event("error"));
+    expect(panel.querySelector(".ht-media")?.classList.contains("is-fallback")).toBe(true);
+    expect(video?.hidden).toBe(true);
+    expect(panel.querySelector('[data-ht="next"]')).not.toBeNull();
   });
 });

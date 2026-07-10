@@ -140,7 +140,46 @@ export function createHowTo(parent: HTMLElement, options: HowToOptions = {}): Ho
   const reducedMotion = options.reducedMotion?.() ??
     (typeof matchMedia === "function" && matchMedia("(prefers-reduced-motion: reduce)").matches);
 
+  let activeVideo: HTMLVideoElement | null = null;
+  let activePlay: HTMLButtonElement | null = null;
+
+  const pauseActive = () => {
+    activeVideo?.pause();
+    activeVideo = null;
+    activePlay = null;
+  };
+
+  const playActive = () => {
+    const video = activeVideo;
+    const playButton = activePlay;
+    if (!video || !playButton) return;
+    const attempt = video.play();
+    void attempt.then(() => {
+      if (video === activeVideo) playButton.hidden = true;
+    }).catch(() => {
+      if (video === activeVideo) playButton.hidden = false;
+    });
+  };
+
+  const activateMedia = () => {
+    const frame = panel.querySelector<HTMLElement>(".ht-media");
+    activeVideo = panel.querySelector<HTMLVideoElement>(".ht-video");
+    activePlay = panel.querySelector<HTMLButtonElement>(".ht-play");
+    if (!frame || !activeVideo || !activePlay) return;
+
+    const video = activeVideo;
+    const playButton = activePlay;
+    video.addEventListener("error", () => {
+      if (video !== activeVideo) return;
+      frame.classList.add("is-fallback");
+      video.hidden = true;
+      playButton.hidden = true;
+    }, { once: true });
+    playActive();
+  };
+
   const render = () => {
+    pauseActive();
     const card = CARDS[i];
     const last = i === CARDS.length - 1;
     panel.innerHTML =
@@ -156,15 +195,23 @@ export function createHowTo(parent: HTMLElement, options: HowToOptions = {}): Ho
         `<button class="ht-prev" data-ht="prev"${i === 0 ? " disabled" : ""}>‹</button>` +
         `<button class="ht-next" data-ht="next">${last ? "LET'S GO" : "NEXT ›"}</button>` +
       `</div>`;
+    activateMedia();
   };
-  const close = () => { overlay.style.display = "none"; const cb = closer; closer = undefined; cb?.(); };
+  const close = () => {
+    pauseActive();
+    overlay.style.display = "none";
+    const cb = closer;
+    closer = undefined;
+    cb?.();
+  };
   const go = (d: number) => { i = Math.max(0, Math.min(CARDS.length - 1, i + d)); render(); };
 
   panel.addEventListener("click", (e) => {
     const el = (e.target as HTMLElement).closest("[data-ht]") as HTMLElement | null;
     if (!el) return;
     const k = el.dataset.ht;
-    if (k === "skip") close();
+    if (k === "play") playActive();
+    else if (k === "skip") close();
     else if (k === "prev") go(-1);
     else if (k === "next") { if (i === CARDS.length - 1) close(); else go(1); }
   });
