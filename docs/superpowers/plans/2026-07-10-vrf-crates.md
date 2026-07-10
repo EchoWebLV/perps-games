@@ -376,7 +376,9 @@ export function bytesToDraws(bytes: Uint8Array, n: number): number[] {
   if (n * 8 > bytes.length) throw new Error(`need ${n * 8} bytes, have ${bytes.length}`);
   const dv = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
   const out: number[] = [];
-  for (let i = 0; i < n; i++) out.push(Number(dv.getBigUint64(i * 8, false)) / 2 ** 64);
+  // top-53-bit reduction: Number(u64)/2**64 would round 2^64-1 UP to exactly 1.0 (doubles have a
+  // 53-bit mantissa), violating the [0,1) contract; >>11 keeps the mapping exact and strictly <1.
+  for (let i = 0; i < n; i++) out.push(Number(dv.getBigUint64(i * 8, false) >> 11n) / 2 ** 53);
   return out;
 }
 ```
@@ -476,7 +478,7 @@ const slot = (nonce: number, fulfilled: boolean, fill = 0x80) =>
 
 describe("createCrateRollDraws", () => {
   it("requests, polls until the matching nonce fulfills, returns derived draws", async () => {
-    const states = [slot(2, false), slot(2, false), slot(2, true)];
+    const states = [slot(1, false), slot(2, false), slot(2, true)]; // pre-state nonce 1 → expect 2
     const io = {
       fetchSlot: vi.fn(async () => states.shift() ?? slot(2, true)),
       request: vi.fn(async () => {}),
