@@ -65,6 +65,12 @@ export interface Upgrades {
   addCoins(n: number): void;
   /** debit coins for a purchase (e.g. a crate); returns false + no-op if the balance can't cover it */
   spend(n: number): boolean;
+  /** Quiet escrow debit for an async purchase (VRF crate): debits + persists + updates the HUD but
+   *  fires NO onMutate — the server forward is deferred to settleHold. false if it can't cover n. */
+  holdCoins(n: number): boolean;
+  /** Settle a prior hold: commit=true forwards the spend to the server (one coinsSpend); commit=false
+   *  restores the coins quietly (no events — a coinsEarn refund would be eaten by the earn cap). */
+  settleHold(n: number, commit: boolean): void;
   /** scrap earned by driving (every 3rd–5th pickup); banked to the garage save and
    *  spent later at the Scrap Yard — never on the leverage upgrades below */
   scrap(): number;
@@ -223,6 +229,19 @@ export function createUpgrades(
     coins: () => saved.coins,
     addCoins(n) { saved.coins = addCoinsRaw(saved.coins, n); persist(); opts.onCoins?.(saved.coins); opts.onMutate?.({ kind: "coinsEarn", amount: Math.floor(n) }); },
     spend(n) { if (saved.coins < n) return false; const amt = Math.floor(n); saved.coins = Math.max(0, saved.coins - amt); persist(); opts.onCoins?.(saved.coins); opts.onMutate?.({ kind: "coinsSpend", amount: amt }); return true; },
+    holdCoins(n) {
+      const amt = Math.floor(n);
+      if (saved.coins < amt) return false;
+      saved.coins -= amt;
+      persist(); opts.onCoins?.(saved.coins);
+      return true;
+    },
+    settleHold(n, commit) {
+      const amt = Math.floor(n);
+      if (commit) { opts.onMutate?.({ kind: "coinsSpend", amount: amt }); return; }
+      saved.coins += amt;
+      persist(); opts.onCoins?.(saved.coins);
+    },
     scrap: () => saved.scrap,
     addScrap(n) { saved.scrap = addCoinsRaw(saved.scrap, n); persist(); opts.onScrap?.(saved.scrap); opts.onMutate?.({ kind: "scrapEarn", amount: Math.floor(n) }); },
     spendScrap(n) { if (saved.scrap < n) return false; const amt = Math.floor(n); saved.scrap = Math.max(0, saved.scrap - amt); persist(); opts.onScrap?.(saved.scrap); opts.onMutate?.({ kind: "scrapSpend", amount: amt }); return true; },

@@ -135,3 +135,49 @@ describe("upgrade levels sync (server-authoritative buys)", () => {
     expect(up.coins()).toBe(500);
   });
 });
+
+describe("async coin escrow (VRF crate holds)", () => {
+  beforeEach(() => localStorage.clear());
+
+  it("holdCoins debits quietly (no onMutate) and settleHold(commit) fires exactly one coinsSpend", () => {
+    const root = document.createElement("div");
+    const events: { kind: string; amount?: number }[] = [];
+    const up = createUpgrades(root, { onMutate: (e) => events.push(e) });
+    up.addCoins(1000);
+    const startingCoins = up.coins();
+    events.length = 0; // drop the earn event
+
+    expect(up.holdCoins(250)).toBe(true);
+    expect(up.coins()).toBe(startingCoins - 250);
+    expect(events).toEqual([]); // hold is silent
+    up.settleHold(250, true);
+    expect(events).toEqual([{ kind: "coinsSpend", amount: 250 }]);
+  });
+
+  it("settleHold(release) restores quietly — no events at all", () => {
+    const root = document.createElement("div");
+    const events: { kind: string; amount?: number }[] = [];
+    const up = createUpgrades(root, { onMutate: (e) => events.push(e) });
+    up.addCoins(1000);
+    const startingCoins = up.coins();
+    events.length = 0;
+
+    up.holdCoins(250);
+    up.settleHold(250, false);
+    expect(up.coins()).toBe(startingCoins);
+    expect(events).toEqual([]);
+  });
+
+  it("holdCoins refuses over-balance and stays silent", () => {
+    const root = document.createElement("div");
+    const events: { kind: string; amount?: number }[] = [];
+    const up = createUpgrades(root, { onMutate: (e) => events.push(e) });
+    up.addCoins(1000);
+    const startingCoins = up.coins();
+    events.length = 0;
+
+    expect(up.holdCoins(startingCoins + 1)).toBe(false);
+    expect(up.coins()).toBe(startingCoins);
+    expect(events).toEqual([]);
+  });
+});
