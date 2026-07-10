@@ -91,6 +91,58 @@ describe("coin magnet (Magnet: vacuum every coin)", () => {
   });
 });
 
+describe("pickup collision follows the rendered car body", () => {
+  const flat = () => 0;
+  const isolate = (p: ReturnType<typeof createPickups>, target: { x: number; z: number }) => {
+    p.group.children.forEach((c, i) => {
+      c.visible = true;
+      c.position.set(i === 0 ? target.x : 0, 1.7, i === 0 ? target.z : -9000);
+    });
+  };
+
+  test("collects a coin swept across the yawed front corner during a hard turn", () => {
+    const p = createPickups();
+    isolate(p, { x: 4, z: -18 });
+
+    const hit = p.update(0.05, 60, 0, flat, true, {
+      previousX: 0,
+      yaw: -0.4,
+      z: -12,
+    });
+
+    expect(hit.count).toBe(1);
+    expect(p.group.children[0].visible).toBe(false);
+  });
+
+  test("collects a centered coin that crosses the whole car in one fast frame", () => {
+    const p = createPickups();
+    isolate(p, { x: 0, z: -20 });
+
+    const hit = p.update(0.05, 300, 0, flat, true, {
+      previousX: 0,
+      yaw: 0,
+      z: -12,
+    });
+
+    expect(hit.count).toBe(1);
+    expect(p.group.children[0].visible).toBe(false);
+  });
+
+  test("does not collect a coin beyond the yawed car footprint", () => {
+    const p = createPickups();
+    isolate(p, { x: 8, z: -18 });
+
+    const hit = p.update(0.05, 60, 0, flat, true, {
+      previousX: 0,
+      yaw: -0.4,
+      z: -12,
+    });
+
+    expect(hit.count).toBe(0);
+    expect(p.group.children[0].visible).toBe(true);
+  });
+});
+
 describe("scrap pickups (every 3rd–5th pickup comes up scrap instead of a coin)", () => {
   const flat = () => 0;
 

@@ -1593,6 +1593,7 @@ function frame(now: number) {
   // with road speed (flat-out darts, idle is lazy). Parked pins speedFrac to 0 — the road
   // still scrolls in the showroom, so raw speed never reads 0 — and AUTH_MIN recentres.
   const speedFrac = drivable ? Math.min(1, speed / ROAD_SPEED_MAX) : 0;
+  const previousLaneX = lane.x;
   lane = laneStep(lane, carXTarget, speedFrac, dt);
   world.update(dt, speed, grade);
 
@@ -1630,7 +1631,11 @@ function frame(now: number) {
 
   // collectible coins: cosmetic only — they must NOT affect P&L, or every
   // round becomes a guaranteed win and the long/short bet stops mattering
-  const hit = pickups.update(dt, speed, lane.x, world.surfaceY, drivable);
+  const hit = pickups.update(dt, speed, lane.x, world.surfaceY, drivable, {
+    previousX: previousLaneX,
+    yaw: car.group.rotation.y,
+    z: CAR_Z,
+  });
   if (hit.count > 0) {
     upgrades.addCoins(hit.value); // value carries Vaporwave's ×2/×3/×5; refreshes the counter
     audio.coin(hit.count);

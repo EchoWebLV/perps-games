@@ -1,5 +1,6 @@
 import * as THREE from "three";
 import { mergeGeometries } from "three/examples/jsm/utils/BufferGeometryUtils.js";
+import { REF_LEN } from "./car-scale";
 
 /** result of a frame's collection: physical coins caught, total coin VALUE (with Vaporwave
  * multipliers), the >1 multipliers caught (for the floating ×N pops), and SCRAP POINTS caught
@@ -8,10 +9,19 @@ import { mergeGeometries } from "three/examples/jsm/utils/BufferGeometryUtils.js
  * fields immediately, never store the object across frames. */
 export interface CoinHit { count: number; value: number; pops: number[]; scrap: number; }
 
+export interface PickupCarPose {
+  /** car center before this frame's lane step */
+  previousX: number;
+  /** actual rendered rotation around Y */
+  yaw: number;
+  /** fixed world Z of the car center */
+  z: number;
+}
+
 export interface Pickups {
   group: THREE.Group;
   /** advance pickups; collect=false (idle/showroom) → coins drift by but can't be caught */
-  update(dt: number, speed: number, carX: number, surfaceY: (z: number) => number, collect?: boolean): CoinHit;
+  update(dt: number, speed: number, carX: number, surfaceY: (z: number) => number, collect?: boolean, carPose?: PickupCarPose): CoinHit;
   /** Vaporwave ability: coins turn rainbow and roll a hidden value multiplier on pickup */
   setRainbow(on: boolean): void;
   /** Cart Rod ability: coins recycle over a shorter span → `rate`× more coins on the road (1 = stock) */
@@ -39,11 +49,15 @@ const TOTAL = N * SP;
  * so coin density (coins passed per unit driven) scales by exactly `rate` */
 export const recycleSpan = (rate: number) => TOTAL / rate;
 const RECYCLE = 22;      // z past the camera → wrap to the far end
-const CATCH_Z0 = -14, CATCH_Z1 = -9;  // z window around the car where a coin can be caught
-const CATCH_X = 3.2;     // lateral catch radius
+const DEFAULT_CAR_Z = -12;
+const PICKUP_RADIUS = 0.95;
+const CATCH_X = 3.2;                     // car half-width expanded by the pickup radius
+const CATCH_Z = REF_LEN / 2 + PICKUP_RADIUS; // full visible car length, expanded for the pickup
 // Magnet "Coin Magnet": coins bend toward the car's lane over their whole approach so
 // they funnel into the catch window — the car vacuums up every coin regardless of lane.
 const MAG_REACH = -80;   // z ahead of the car where the magnetic pull kicks in
+const MAG_PULL_END = -9; // stop pulling once the pickup has passed the car
+const MAG_BACKSTOP_START = -14; // keep the wide catch near the car so pull-in stays visible
 const MAG_PULL = 7;      // ease strength (1/s) dragging a coin's x toward the car's lane
 const MAG_CATCH_X = 6.5; // widened lateral catch while magnetized (backstop for a fast coin)
 const GOLD_C = "#3a2a00", GOLD_E = "#ffd166";
@@ -71,6 +85,42 @@ export function scrapGradeIdx(r: number): number {
   let x = r * SCRAP_WEIGHT;
   for (let i = 0; i < SCRAP_GRADES.length; i++) { if ((x -= SCRAP_GRADES[i].weight) < 0) return i; }
   return SCRAP_GRADES.length - 1;
+}
+
+/** Segment against a centered axis-aligned box, using a slab test with no frame allocations. */
+function segmentHitsBox(x0: number, z0: number, x1: number, z1: number, halfX: number, halfZ: number): boolean {
+  const dx = x1 - x0, dz = z1 - z0;
+  let enter = 0, exit = 1;
+
+  if (Math.abs(dx) < 1e-9) {
+    if (x0 < -halfX || x0 > halfX) return false;
+  } else {
+    let a = (-halfX - x0) / dx, b = (halfX - x0) / dx;
+    if (a > b) { const swap = a; a = b; b = swap; }
+    enter = Math.max(enter, a); exit = Math.min(exit, b);
+    if (enter > exit) return false;
+  }
+
+  if (Math.abs(dz) < 1e-9) return z0 >= -halfZ && z0 <= halfZ;
+  let a = (-halfZ - z0) / dz, b = (halfZ - z0) / dz;
+  if (a > b) { const swap = a; a = b; b = swap; }
+  enter = Math.max(enter, a); exit = Math.min(exit, b);
+  return enter <= exit;
+}
+
+/** Sweep a pickup and the car's lateral movement through the rendered, yawed car footprint. */
+function pickupHitsCar(
+  pickupX0: number, pickupZ0: number, pickupX1: number, pickupZ1: number,
+  carX0: number, carX1: number, carZ: number, yaw: number, halfX: number,
+): boolean {
+  const cos = Math.cos(yaw), sin = Math.sin(yaw);
+  const dx0 = pickupX0 - carX0, dz0 = pickupZ0 - carZ;
+  const dx1 = pickupX1 - carX1, dz1 = pickupZ1 - carZ;
+  const localX0 = cos * dx0 - sin * dz0;
+  const localZ0 = sin * dx0 + cos * dz0;
+  const localX1 = cos * dx1 - sin * dz1;
+  const localZ1 = sin * dx1 + cos * dz1;
+  return segmentHitsBox(localX0, localZ0, localX1, localZ1, halfX, CATCH_Z);
 }
 
 /** a toothed cog — a flat disc ringed with little box teeth (the hero shape of any scrap pile). */
@@ -204,11 +254,12 @@ export function createPickups(): Pickups {
     setMagnet(on) {
       magnet = on; // pull kicks in immediately for coins already inside MAG_REACH
     },
-    update(dt, speed, carX, surfaceY, collect = true) {
+    update(dt, speed, carX, surfaceY, collect = true, carPose) {
       time += dt;
       hit.count = 0; hit.value = 0; hit.scrap = 0; hit.pops.length = 0;
       for (let i = 0; i < coins.length; i++) {
         const m = coins[i];
+        const previousPickupX = m.position.x, previousPickupZ = m.position.z;
         m.position.z += speed * dt;
         m.position.y = 1.8 + surfaceY(m.position.z);
         m.rotation.y += dt * 3.2;
@@ -218,11 +269,14 @@ export function createPickups(): Pickups {
           matOf(m).color.setHSL(hue, 0.8, 0.18);
         }
         // Magnet: bend an approaching coin into the car's lane so it can't slip past
-        if (magnet && collect && m.visible && m.position.z > MAG_REACH && m.position.z < CATCH_Z1) {
+        if (magnet && collect && m.visible && m.position.z > MAG_REACH && m.position.z < MAG_PULL_END) {
           m.position.x += (carX - m.position.x) * (1 - Math.exp(-MAG_PULL * dt));
         }
-        const catchX = magnet ? MAG_CATCH_X : CATCH_X;
-        if (collect && m.visible && m.position.z > CATCH_Z0 && m.position.z < CATCH_Z1 && Math.abs(m.position.x - carX) < catchX) {
+        const catchX = magnet && m.position.z > MAG_BACKSTOP_START ? MAG_CATCH_X : CATCH_X;
+        if (collect && m.visible && pickupHitsCar(
+          previousPickupX, previousPickupZ, m.position.x, m.position.z,
+          carPose?.previousX ?? carX, carX, carPose?.z ?? DEFAULT_CAR_Z, carPose?.yaw ?? 0, catchX,
+        )) {
           m.visible = false;
           if (m.userData.scrap) {
             hit.scrap += m.userData.scrapPts; // grade points (1/3/5) → banked to the garage save for the Scrap Yard
