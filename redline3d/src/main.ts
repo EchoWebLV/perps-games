@@ -32,9 +32,13 @@ import { createFireTrail } from "./render/firetrail";
 import { createCarPicker, type CarAbility, type CarOption } from "./ui/carpicker";
 import { createCrateBox } from "./ui/cratebox";
 import { createHowTo, howToSeen, markHowToSeen } from "./ui/howto";
+import { createTradeHistory } from "./ui/trade-history";
 import { createInventory } from "./core/inventory";
 import { createSessionAuth } from "./core/auth-session";
 import { createApi } from "./core/api";
+import { showLocalEconomyMenu } from "./core/menu-visibility";
+import { createTradeHistoryRecorder } from "./core/trade-history-recorder";
+import { createTradeHistoryBridge } from "./core/trade-history-live";
 import { createAccountSync } from "./core/account-sync";
 import { bindAndHydrate } from "./core/sign-in-sync";
 import { poolable } from "./core/rarity";
@@ -162,8 +166,6 @@ const BASE_PER_UNIT = 10 ** (CHAIN.STAKE_DECIMALS - 2); // 9-decimal SOL, 0.01-S
 const unitsToBase = (units: number) => units * BASE_PER_UNIT;
 const baseToUnits = (base: bigint) => Number(base / BigInt(BASE_PER_UNIT));
 const BUY_IN_BASE = 100_000_000; // 0.1 SOL auto buy-in float on the first GO (covers one max-stake round)
-let lastStakeUnits = 0;
-void lastStakeUnits; // recorded at open for the upcoming wager-history slice; not read on the hot path yet
 let roundActive = false; // a round is open locally (de-dupes finalizeSettled across crank/poll/close)
 let simRound = false;    // guest practice round: engine-only, no wallet, no chain — free to try
 let settling = false;    // a close tx is in flight
@@ -243,6 +245,7 @@ async function syncAccount(): Promise<void> {
       api, auth, port, accountSync,
       localSnapshot: { coins: upgrades.coins(), scrap: upgrades.scrap(), cars: inventory.snapshot(), levels: upgrades.levels() },
     });
+    void tradeHistoryBridge.flush();
   } catch (e) {
     console.error("account sync failed", e); // cache-only until next sign-in
   }
@@ -334,6 +337,24 @@ const effMaxSec = () => Math.round(CONFIG.MAXSEC * (ability === "sixWheeler" ? H
 // on sign-in and forwards best-effort deltas. Guests never enable it (all forwarders no-op).
 const auth = createSessionAuth();
 const api = createApi({ auth });
+const tradeRecorder = createTradeHistoryRecorder({
+  api,
+  wallet: () => session.address(),
+});
+const tradeHistoryBridge = createTradeHistoryBridge(tradeRecorder);
+const tradeHistory = createTradeHistory(hudRoot, {
+  signedIn: () => identity?.mode === "privy" && signedIn,
+  flush: () => tradeHistoryBridge.flush(),
+  load: (cursor) => api.listTrades(cursor),
+});
+const capacitorNative = (globalThis as {
+  Capacitor?: { isNativePlatform?: () => boolean };
+}).Capacitor?.isNativePlatform?.() === true;
+const showGarageAndUpgrades = showLocalEconomyMenu({
+  dev: import.meta.env.DEV,
+  hostname: globalThis.location?.hostname ?? "",
+  native: capacitorNative,
+});
 const accountSync = createAccountSync({
   api,
   nonce: String(Date.now()), // stable per page load; namespaces this session's delta refs
@@ -528,6 +549,9 @@ const garage = createCarPicker(hudRoot, CAR_DEFS, (c) => { car.setModel(c.url, c
   list: () => THEMES.map((t) => ({ key: t.key, name: t.name, colors: [t.sky[0], t.sky[1], t.roadEdge], locked: !levels.owns(t.key) })),
   current: () => world.currentTheme(),
   set: (key: string) => { setWorldTheme(key); },
+}, {
+  showGarageAndUpgrades,
+  onHistory: () => { void tradeHistory.open(); },
 });
 
 // Crate Shop (lobby Crates building): buy a crate → roll a car by rarity odds → reveal. A NEW car
@@ -916,9 +940,10 @@ addEventListener("pointermove", (e) => {
 // Single sink for every ending — manual cash out, terminal-first flip/lever, and the crank poll.
 // Freezes the local visual, sets the HUD outcome from the on-chain settled payload, fires FX, and
 // refreshes the on-chain balance. Idempotent per round via `roundActive`.
-function finalizeSettled(info: { outcome: number; outcomeName: string; payout: bigint }) {
+function finalizeSettled(info: { outcome: number; outcomeName: string; payout: bigint; exitHuman: number }) {
   if (!roundActive) return;
   roundActive = false;
+  tradeHistoryBridge.settle(info);
   const price = priceSource.price(), now = Date.now();
   if (engine.getPhase() === "live") engine.cashout(price, now); // freeze the visual at the live value
   const finalEq = engine.snapshot(price, now).equity;
@@ -1038,7 +1063,7 @@ const FRIENDLY_CODES = new Set(["delegate_busy", "bankroll_full", "wallet_unfund
 // panels' isOpen() here is the check main.ts was previously missing entirely.
 controls.setKeyLaunchBlocked(() =>
   mode === "lobby" || mode === "garage" ||
-  upgrades.isOpen() || garage.isOpen() || crateBox.isOpen() || howto.isOpen(),
+  upgrades.isOpen() || garage.isOpen() || crateBox.isOpen() || howto.isOpen() || tradeHistory.isOpen(),
 );
 
 controls.onLaunch(async () => {
@@ -1188,9 +1213,16 @@ controls.onLaunch(async () => {
         return;
       }
     }
+    tradeHistoryBridge.begin({
+      asset,
+      dir,
+      lev,
+      stakeBase: unitsToBase(playAmount),
+      entryPrice: opened.entryHuman,
+      entryTs: opened.entryTs,
+    });
     round.entryPx = opened.entryHuman; // human entry price (NOT the raw mantissa)
     round.dir = dir;
-    lastStakeUnits = playAmount;
     roundStartMs = Date.now();
     engine.launch({ dir, lev, stake: playAmount, entryRaw: opened.entryHuman, startMs: roundStartMs, maxSec: roundMaxSec });
     roundActive = true;

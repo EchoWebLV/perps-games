@@ -6,7 +6,7 @@ import { createChainRound, maxPayoutBase, roundKey, WalletUnfundedError, Bankrol
 import { createLeverSync } from "./lever-sync";
 
 /** The settled shape main.ts needs to finalize a round in the HUD. */
-export type SettledInfo = { outcome: number; outcomeName: string; payout: bigint };
+export type SettledInfo = Pick<SettledRound, "outcome" | "outcomeName" | "payout" | "exitHuman">;
 
 /** Per-session till size, as a multiple of ONE round's worst-case payout. The till is a
  *  session bankroll (many rounds run off it); a multiple gives buffer so ordinary P&L

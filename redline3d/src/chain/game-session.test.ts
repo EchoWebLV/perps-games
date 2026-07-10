@@ -1,6 +1,6 @@
 import { describe, it, expect, vi } from "vitest";
 import { PublicKey } from "@solana/web3.js";
-import { createGameSession, SESSION_TILL_ROUNDS } from "./game-session";
+import { createGameSession, SESSION_TILL_ROUNDS, type SettledInfo } from "./game-session";
 import { maxPayoutBase, type ChainRound } from "./chain-round";
 
 const tick = () => new Promise<void>((r) => setTimeout(r, 0));
@@ -175,16 +175,18 @@ describe("createGameSession", () => {
   });
 
   it("a terminal-first background lever fires onSettled", async () => {
-    const onSettled = vi.fn();
+    let observedExit = 0;
+    const onSettled = vi.fn((info: SettledInfo) => { observedExit = info.exitHuman; });
     const chain = fakeChain({
-      lever: vi.fn(async () => ({ settled: true as const, outcome: 2, outcomeName: "liq", payout: 0n, exitRaw: 0n, exitHuman: 0, balance: 4_000_000n, deadlineTs: 0 })),
+      lever: vi.fn(async () => ({ settled: true as const, outcome: 2, outcomeName: "liq", payout: 0n, exitRaw: 0n, exitHuman: 60000, balance: 4_000_000n, deadlineTs: 0 })),
     });
     const s = createGameSession({ mint: MINT, onSettled, injectChain: chain, injectAddress: "Fake111" });
     await s.init();
     await s.ensureSession(2_000_000, 1_000_000);
     s.noteLeverage(2000);
     await tick(); await tick();
-    expect(onSettled).toHaveBeenCalledWith(expect.objectContaining({ outcome: 2, outcomeName: "liq", payout: 0n }));
+    expect(observedExit).toBe(60000);
+    expect(onSettled).toHaveBeenCalledWith(expect.objectContaining({ outcome: 2, outcomeName: "liq", payout: 0n, exitHuman: 60000 }));
   });
 
   it("close caches the settled balance", async () => {
