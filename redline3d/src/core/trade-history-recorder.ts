@@ -45,17 +45,18 @@ function queueOrderEpoch(queueOrder: string): number | null {
 }
 
 function nextQueueOrder(realmId: string, now: () => number, maxPendingEpoch: number): string {
-  let state = realmOrderStates.get(realmId);
-  if (!state) {
-    state = { counter: 0, lastEpoch: 0 };
-    realmOrderStates.set(realmId, state);
-  }
+  const state = realmOrderStates.get(realmId) ?? { counter: 0, lastEpoch: 0 };
   const observedEpoch = now();
   const safeEpoch = Number.isFinite(observedEpoch) && observedEpoch >= 0 ? observedEpoch : Date.now();
   const enqueueEpoch = Math.max(state.lastEpoch, Math.floor(safeEpoch), maxPendingEpoch + 1);
+  if (enqueueEpoch >= Number.MAX_SAFE_INTEGER) {
+    throw new Error("trade_history_queue_order_exhausted");
+  }
   const queueOrder = `${orderPart(enqueueEpoch)}:${realmId}:${orderPart(state.counter)}`;
-  state.lastEpoch = enqueueEpoch;
-  state.counter += 1;
+  realmOrderStates.set(realmId, {
+    lastEpoch: enqueueEpoch,
+    counter: state.counter + 1,
+  });
   return queueOrder;
 }
 
@@ -157,7 +158,12 @@ export function createTradeHistoryRecorder(deps: {
       if (typeof queueOrder === "string" && queueOrderEpoch(queueOrder) !== null) {
         return { queueOrder: queueOrder.toLowerCase(), record };
       }
-      if (typeof queueOrder === "number" && Number.isSafeInteger(queueOrder) && queueOrder >= 0) {
+      if (
+        typeof queueOrder === "number" &&
+        Number.isSafeInteger(queueOrder) &&
+        queueOrder >= 0 &&
+        queueOrder < Number.MAX_SAFE_INTEGER
+      ) {
         return { queueOrder: legacyQueueOrder(queueOrder, record.id), record };
       }
       return null;
@@ -274,7 +280,6 @@ export function createTradeHistoryRecorder(deps: {
       if (!active) return null;
       const { outboxKey, ...draft } = active;
       const record = { ...draft, ...result };
-      active = null;
       const items = readAt(outboxKey);
       if (!items.some((item) => item.record.id === record.id)) {
         const maxPendingEpoch = items.reduce(
@@ -286,6 +291,7 @@ export function createTradeHistoryRecorder(deps: {
           record,
         });
       }
+      active = null;
       return record;
     },
     flush() {

@@ -715,6 +715,181 @@ describe("trade history recorder", () => {
     expect(recorder.pending()).toBe(0);
   });
 
+  it("skips saturated numeric legacy orders before allocating the next order", async () => {
+    const store = memoryStore();
+    const saturatedId = "cccccccc-cccc-4ccc-8ccc-cccccccccccc";
+    const validId = "22222222-2222-4222-8222-222222222222";
+    const realmId = "dddddddd-dddd-4ddd-8ddd-dddddddddddd";
+    const enqueueEpoch = 1_750_000_000_001;
+    store.setItem(
+      `redline.trade-history.outbox.v1:AliceWallet:${saturatedId}`,
+      JSON.stringify({
+        queueOrder: Number.MAX_SAFE_INTEGER,
+        record: { id: saturatedId, ...draft, ...completion },
+      }),
+    );
+    const recordTrade = vi.fn().mockResolvedValue({});
+    const recorder = createTradeHistoryRecorder({
+      api: { recordTrade } as any,
+      wallet: () => "AliceWallet",
+      store,
+      newId: () => validId,
+      now: () => enqueueEpoch,
+      realmId,
+    });
+
+    expect(recorder.pending()).toBe(0);
+    recorder.begin(draft);
+    const validRecord = recorder.complete(completion)!;
+    const storedValid = JSON.parse(
+      store.getItem(`redline.trade-history.outbox.v1:AliceWallet:${validId}`)!,
+    );
+
+    await recorder.flush();
+
+    expect(storedValid.queueOrder).toBe(
+      `${String(enqueueEpoch).padStart(16, "0")}:${realmId}:0000000000000000`,
+    );
+    expect(recordTrade.mock.calls.map(([record]) => record)).toEqual([validRecord]);
+    expect(recorder.pending()).toBe(0);
+  });
+
+  it("keeps completion retryable when a pending order exhausts epoch headroom", async () => {
+    const store = memoryStore();
+    const boundaryId = "eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee";
+    const validId = "33333333-3333-4333-8333-333333333333";
+    const realmId = "ffffffff-ffff-4fff-8fff-ffffffffffff";
+    const enqueueEpoch = 1_750_000_000_002;
+    const boundaryRecord = { id: boundaryId, ...draft, ...completion };
+    store.setItem(
+      `redline.trade-history.outbox.v1:AliceWallet:${boundaryId}`,
+      JSON.stringify({
+        queueOrder: `${String(Number.MAX_SAFE_INTEGER - 1).padStart(16, "0")}:aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa:0000000000000000`,
+        record: boundaryRecord,
+      }),
+    );
+    const recordTrade = vi.fn().mockResolvedValue({});
+    const recorder = createTradeHistoryRecorder({
+      api: { recordTrade } as any,
+      wallet: () => "AliceWallet",
+      store,
+      newId: () => validId,
+      now: () => enqueueEpoch,
+      realmId,
+    });
+    recorder.begin(draft);
+
+    expect(() => recorder.complete(completion)).toThrowError(
+      "trade_history_queue_order_exhausted",
+    );
+    expect(store.getItem(`redline.trade-history.outbox.v1:AliceWallet:${validId}`)).toBeNull();
+    expect(recorder.pending()).toBe(1);
+
+    await recorder.flush();
+    const validRecord = recorder.complete(completion)!;
+    const storedValid = JSON.parse(
+      store.getItem(`redline.trade-history.outbox.v1:AliceWallet:${validId}`)!,
+    );
+
+    expect(storedValid.queueOrder).toBe(
+      `${String(enqueueEpoch).padStart(16, "0")}:${realmId}:0000000000000000`,
+    );
+    expect(recorder.pending()).toBe(1);
+    await recorder.flush();
+    expect(recordTrade.mock.calls.map(([record]) => record)).toEqual([
+      boundaryRecord,
+      validRecord,
+    ]);
+    expect(recorder.pending()).toBe(0);
+  });
+
+  it("keeps completion retryable when injected time exhausts epoch headroom", async () => {
+    const store = memoryStore();
+    const validId = "44444444-4444-4444-8444-444444444444";
+    const realmId = "12121212-1212-4212-8212-121212121212";
+    const safeEpoch = 1_750_000_000_003;
+    let enqueueEpoch = Number.MAX_SAFE_INTEGER;
+    const recordTrade = vi.fn().mockResolvedValue({});
+    const recorder = createTradeHistoryRecorder({
+      api: { recordTrade } as any,
+      wallet: () => "AliceWallet",
+      store,
+      newId: () => validId,
+      now: () => enqueueEpoch,
+      realmId,
+    });
+    recorder.begin(draft);
+
+    expect(() => recorder.complete(completion)).toThrowError(
+      "trade_history_queue_order_exhausted",
+    );
+    expect(store.getItem(`redline.trade-history.outbox.v1:AliceWallet:${validId}`)).toBeNull();
+    expect(recorder.pending()).toBe(0);
+
+    enqueueEpoch = safeEpoch;
+    const validRecord = recorder.complete(completion)!;
+    const storedValid = JSON.parse(
+      store.getItem(`redline.trade-history.outbox.v1:AliceWallet:${validId}`)!,
+    );
+
+    expect(storedValid.queueOrder).toBe(
+      `${String(safeEpoch).padStart(16, "0")}:${realmId}:0000000000000000`,
+    );
+    expect(recorder.pending()).toBe(1);
+    await recorder.flush();
+    expect(recordTrade.mock.calls.map(([record]) => record)).toEqual([validRecord]);
+    expect(recorder.pending()).toBe(0);
+  });
+
+  it("persists and reloads the final allocatable epoch below saturation", async () => {
+    const store = memoryStore({ enumerate: (keys) => keys.reverse() });
+    const earlierId = "55555555-5555-4555-8555-555555555555";
+    const finalId = "66666666-6666-4666-8666-666666666666";
+    const realmId = "34343434-3434-4343-8343-343434343434";
+    const earlierEpoch = Number.MAX_SAFE_INTEGER - 2;
+    const earlierRecord = { id: earlierId, ...draft, ...completion };
+    store.setItem(
+      `redline.trade-history.outbox.v1:AliceWallet:${earlierId}`,
+      JSON.stringify({
+        queueOrder: `${String(earlierEpoch).padStart(16, "0")}:23232323-2323-4232-8232-232323232323:0000000000000000`,
+        record: earlierRecord,
+      }),
+    );
+    const recorder = createTradeHistoryRecorder({
+      api: { recordTrade: vi.fn() } as any,
+      wallet: () => "AliceWallet",
+      store,
+      newId: () => finalId,
+      now: () => 0,
+      realmId,
+    });
+    recorder.begin(draft);
+    const finalRecord = recorder.complete({ ...completion, exitPrice: 152 })!;
+    const storedFinal = JSON.parse(
+      store.getItem(`redline.trade-history.outbox.v1:AliceWallet:${finalId}`)!,
+    );
+
+    vi.resetModules();
+    const observerModule = await import("./trade-history-recorder");
+    const recordTrade = vi.fn().mockResolvedValue({});
+    const observer = observerModule.createTradeHistoryRecorder({
+      api: { recordTrade } as any,
+      wallet: () => "AliceWallet",
+      store,
+    });
+
+    expect(storedFinal.queueOrder).toBe(
+      `${String(Number.MAX_SAFE_INTEGER - 1).padStart(16, "0")}:${realmId}:0000000000000000`,
+    );
+    expect(observer.pending()).toBe(2);
+    await observer.flush();
+    expect(recordTrade.mock.calls.map(([record]) => record)).toEqual([
+      earlierRecord,
+      finalRecord,
+    ]);
+    expect(observer.pending()).toBe(0);
+  });
+
   it("shares one in-flight flush across concurrent callers", async () => {
     let resolveUpload!: () => void;
     const upload = new Promise<void>((resolve) => { resolveUpload = resolve; });
