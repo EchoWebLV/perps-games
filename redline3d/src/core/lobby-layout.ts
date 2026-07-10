@@ -65,3 +65,15 @@ export function entranceHit(x: number, z: number): BuildingKind | null {
   }
   return null;
 }
+
+/** Pose for a car that just drove OUT of `kind`'s building: just outside the door ring,
+ *  nose pointed back at the building (you see where you came from).
+ *  Motion convention: forward = (sin heading, -cos heading). */
+export function doorExitPose(kind: BuildingKind): { x: number; z: number; heading: number } | null {
+  const b = BUILDINGS.find((bb) => bb.kind === kind);
+  const d = DOORS.find((dd) => dd.kind === kind);
+  if (!b || !d) return null;
+  const fx = Math.sin(b.rot), fz = Math.cos(b.rot); // building front → plaza centre
+  const out = d.r + 18; // clear of the door ring — driving off can't instantly re-trigger the entry
+  return { x: d.x + fx * out, z: d.z + fz * out, heading: Math.atan2(-fx, fz) }; // forward = −front → faces the building
+}

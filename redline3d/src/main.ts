@@ -74,7 +74,7 @@ import { createLobbyHud } from "./ui/lobbyhud";
 import { step as driveStep, DRIVE, HIGHWAY_DRIVE, type DriveState, type DriveTune } from "./core/freedrive";
 import { stepBody, type BodyState } from "./core/body-language";
 import { laneStep, type LaneState } from "./core/lane-drive";
-import { entranceHit, LOT_BOUNDS, LOBBY_SPAWN, BUILDINGS, DOORS, type BuildingKind } from "./core/lobby-layout";
+import { entranceHit, LOT_BOUNDS, LOBBY_SPAWN, doorExitPose, type BuildingKind } from "./core/lobby-layout";
 import { modeSwitchBlocked } from "./core/mode-guard";
 import { createOval } from "./render/oval";
 import { createGarageRoom } from "./render/garage-room";
@@ -728,24 +728,21 @@ function setChrome(state: "cruise" | "race") {
 }
 
 // When you drive OUT of a building (Track / Garage) the car should emerge AT that building's doorway
-// facing the plaza — not teleport back to the south entrance. Set when a building is entered, consumed
-// once by the next enterLobby(). null → the plain south spawn (first boot, or no building of origin).
+// nosed BACK at the building it just left — you instantly see where you came from, not teleported to
+// the south entrance. Set when a building is entered, consumed once by the next enterLobby(). null →
+// the plain south spawn (first boot, or no building of origin).
 let exitFrom: BuildingKind | null = null;
 
-/** where enterLobby() drops the car: just outside the origin building's door, nosed into the plaza
- *  (reads as "drove out", and sits clear of the door ring so it can't instantly re-trigger the entry). */
+/** where enterLobby() drops the car: just outside the origin building's door, nose pointed back at the
+ *  building you left (clear of the door ring so driving off can't instantly re-trigger the entry). */
 function lobbyEntryPose(): DriveState {
   const kind = exitFrom;
   exitFrom = null;
   const spawn: DriveState = { x: LOBBY_SPAWN.x, z: LOBBY_SPAWN.z, heading: 0, speed: 0, steer: 0 };
   if (!kind) return spawn;
-  const b = BUILDINGS.find((bb) => bb.kind === kind);
-  const d = DOORS.find((dd) => dd.kind === kind);
-  if (!b || !d) return spawn;
-  const fx = Math.sin(b.rot), fz = Math.cos(b.rot); // building front → plaza centre (unit vector)
-  const out = d.r + 18;                             // step well past the door ring, out into the plaza (no re-trigger)
-  // heading convention: forward = (sin h, -cos h); solve for forward === (fx, fz) → h = atan2(fx, -fz)
-  return { x: d.x + fx * out, z: d.z + fz * out, heading: Math.atan2(fx, -fz), speed: 0, steer: 0 };
+  const pose = doorExitPose(kind); // outside the door ring, facing the building it left
+  if (!pose) return spawn;
+  return { ...pose, speed: 0, steer: 0 };
 }
 
 function enterLobby() {

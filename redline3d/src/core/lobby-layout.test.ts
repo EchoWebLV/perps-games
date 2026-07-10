@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { BUILDINGS, DOORS, LOT_BOUNDS, LOBBY_SPAWN, PLAZA, entranceHit, type BuildingKind } from "./lobby-layout";
+import { BUILDINGS, DOORS, LOT_BOUNDS, LOBBY_SPAWN, PLAZA, doorExitPose, entranceHit, type BuildingKind } from "./lobby-layout";
 
 const KINDS: BuildingKind[] = ["garage", "upgrades", "crates", "track", "highway", "scrapyard"];
 const find = (k: BuildingKind) => BUILDINGS.find((b) => b.kind === k)!;
@@ -84,5 +84,32 @@ describe("lobby-layout", () => {
     expect(PLAZA.center).toEqual({ x: 0, z: 0 });
     expect(PLAZA.loopRadius).toBeGreaterThan(0);
     expect(PLAZA.loopWidth).toBeGreaterThan(0);
+  });
+});
+
+describe("doorExitPose", () => {
+  const door = (k: BuildingKind) => DOORS.find((d) => d.kind === k)!;
+
+  // exiting Garage/Track should drop the car just outside that door, nosed BACK at the
+  // building it left (you instantly see where you came from), not aimed at the plaza.
+  for (const kind of ["garage", "track"] as const) {
+    it(`emerges outside the ${kind} door ring, nose pointed back at the building`, () => {
+      const pose = doorExitPose(kind)!;
+      const d = door(kind);
+      const b = find(kind);
+
+      // (a) clear of the door ring — driving off can't instantly re-trigger the entry
+      expect(Math.hypot(pose.x - d.x, pose.z - d.z)).toBeGreaterThan(d.r);
+
+      // (b) forward = (sin heading, -cos heading) points at the building it just left
+      const fwd = { x: Math.sin(pose.heading), z: -Math.cos(pose.heading) };
+      const len = Math.hypot(b.x - pose.x, b.z - pose.z);
+      const toB = { x: (b.x - pose.x) / len, z: (b.z - pose.z) / len };
+      expect(fwd.x * toB.x + fwd.z * toB.z).toBeGreaterThan(0.99);
+    });
+  }
+
+  it("returns null for an unknown kind", () => {
+    expect(doorExitPose("nope" as unknown as BuildingKind)).toBeNull();
   });
 });
