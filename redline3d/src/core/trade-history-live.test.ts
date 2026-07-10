@@ -1,14 +1,40 @@
 import { describe, expect, it, vi } from "vitest";
-import type { TradeHistoryRecorder } from "./trade-history-recorder";
+import type { TradeHistoryItem, TradeRecordInput } from "./api";
+import { createTradeHistoryRecorder, type TradeHistoryRecorder } from "./trade-history-recorder";
 import { createTradeHistoryBridge } from "./trade-history-live";
+
+const completedTrade: TradeRecordInput = {
+  id: "11111111-1111-4111-8111-111111111111",
+  asset: "SOL",
+  dir: 1,
+  lev: 250,
+  stakeBase: 10_000_000,
+  entryPrice: 150,
+  exitPrice: 151,
+  openedAt: "2025-07-10T10:40:00.000Z",
+  outcome: "cashout",
+  payoutBase: 11_000_000,
+};
 
 function fakeRecorder(overrides: Partial<TradeHistoryRecorder> = {}): TradeHistoryRecorder {
   return {
     begin: vi.fn(),
-    complete: vi.fn(() => null),
+    complete: vi.fn(() => completedTrade),
     flush: vi.fn(async () => undefined),
     pending: vi.fn(() => 0),
     ...overrides,
+  };
+}
+
+function memoryStore(): Storage {
+  const values = new Map<string, string>();
+  return {
+    getItem: (key) => values.get(key) ?? null,
+    setItem: (key, value) => { values.set(key, value); },
+    removeItem: (key) => { values.delete(key); },
+    clear: () => { values.clear(); },
+    key: (index) => [...values.keys()][index] ?? null,
+    get length() { return values.size; },
   };
 }
 
@@ -110,6 +136,26 @@ describe("live trade history bridge", () => {
     expect(warn).toHaveBeenCalledWith("[trade-history] skipped invalid settlement");
   });
 
+  it.each([
+    Symbol("bad-payout"),
+    null,
+    1.5,
+    "2000000",
+    { valueOf: () => 2_000_000 },
+  ])("contains malformed runtime payout %s and still flushes older records", (payout) => {
+    const recorder = fakeRecorder();
+    const warn = vi.fn();
+    const bridge = createTradeHistoryBridge(recorder, { warn });
+    bridge.begin(opened);
+
+    const malformed = { ...settled, payout } as unknown as Parameters<typeof bridge.settle>[0];
+    expect(() => bridge.settle(malformed)).not.toThrow();
+
+    expect(recorder.complete).not.toHaveBeenCalled();
+    expect(recorder.flush).toHaveBeenCalledTimes(1);
+    expect(warn).toHaveBeenCalledWith("[trade-history] skipped invalid settlement");
+  });
+
   it("completes an active draft at most once", async () => {
     const recorder = fakeRecorder();
     const bridge = createTradeHistoryBridge(recorder);
@@ -156,7 +202,7 @@ describe("live trade history bridge", () => {
       complete: vi.fn(() => {
         events.push(`complete:${++attempts}`);
         if (attempts === 1) throw new Error("queue_order_exhausted");
-        return null;
+        return completedTrade;
       }),
       flush: vi.fn(async () => { events.push("flush"); }),
     });
@@ -175,7 +221,7 @@ describe("live trade history bridge", () => {
       complete: vi.fn(() => {
         attempts += 1;
         if (attempts < 3) throw new Error("storage_busy");
-        return null;
+        return completedTrade;
       }),
     });
     const bridge = createTradeHistoryBridge(recorder, { warn: vi.fn() });
@@ -220,5 +266,30 @@ describe("live trade history bridge", () => {
     await expect(asyncBridge.flush()).resolves.toBeUndefined();
     expect(warn).toHaveBeenCalledWith("[trade-history] flush failed", syncFailure);
     expect(warn).toHaveBeenCalledWith("[trade-history] flush failed", asyncFailure);
+  });
+
+  it("queues and uploads a completed trade through the real recorder", async () => {
+    const recordTrade = vi.fn(async (input: TradeRecordInput): Promise<TradeHistoryItem> => ({
+      ...input,
+      walletPublicKey: "AliceWallet",
+      pnlBase: input.payoutBase - input.stakeBase,
+      settledAt: "2025-07-10T10:41:00.000Z",
+    }));
+    const recorder = createTradeHistoryRecorder({
+      api: { recordTrade },
+      wallet: () => "AliceWallet",
+      store: memoryStore(),
+      newId: () => completedTrade.id,
+      now: () => 1_752_144_060_000,
+      realmId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+    });
+    const bridge = createTradeHistoryBridge(recorder);
+
+    bridge.begin(opened);
+    bridge.settle(settled);
+    await bridge.flush();
+
+    expect(recordTrade).toHaveBeenCalledWith(completedTrade, "AliceWallet");
+    expect(recorder.pending()).toBe(0);
   });
 });

@@ -135,8 +135,10 @@ export function createTradeHistoryBridge(
 
       if (shouldComplete) {
         const outcome = settlementOutcome(result.outcome, result.outcomeName);
-        const payoutIsValid = result.payout >= 0n
-          && result.payout <= BigInt(Number.MAX_SAFE_INTEGER);
+        const payout = result.payout;
+        const payoutIsValid = typeof payout === "bigint"
+          && payout >= 0n
+          && payout <= BigInt(Number.MAX_SAFE_INTEGER);
         if (!outcome
           || !payoutIsValid
           || !Number.isFinite(result.exitHuman)
@@ -146,7 +148,7 @@ export function createTradeHistoryBridge(
         } else {
           pendingCompletion = {
             outcome,
-            payoutBase: Number(result.payout),
+            payoutBase: Number(payout),
             exitPrice: result.exitHuman,
           };
           retryCompletion();
