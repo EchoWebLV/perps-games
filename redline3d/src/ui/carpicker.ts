@@ -2,6 +2,7 @@ import * as THREE from "three";
 import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader.js";
 import { RoomEnvironment } from "three/examples/jsm/environments/RoomEnvironment.js";
 import { TIERS, tierOf, type Rarity } from "../core/rarity";
+import { onTap } from "./tap";
 
 /** a car's special ability id; drives in-game effects when that card is selected */
 export type CarAbility = "laneBet" | "nitro" | "rainbow" | "skull" | "pinkRod" | "sixWheeler" | "cartRod" | "flux" | "swerve" | "slots" | "airbag" | "magnet";
@@ -751,7 +752,7 @@ export function createCarPicker(
     onClose?.(reason);
   };
 
-  menuButton.onclick = open;
+  onTap(menuButton, open); // any-finger tap (the ☰ opener); every other carpicker onclick is an overlay control, left as-is
   overlay.onclick = (e) => { if (e.target === overlay) close(); };
   addEventListener("keydown", (e) => {
     if (e.key !== "Escape" || overlay.style.display === "none") return;

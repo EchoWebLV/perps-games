@@ -923,21 +923,28 @@ hud.setActiveAsset(asset);
 
 // hold anywhere on the open scene to DRIVE: press & hold = gas, drag left/right =
 // steer, pull back (drag down) = brake, release = coast. HUD buttons capture their
-// own taps, so this only fires on the road/scene behind the dock.
+// own taps (onTap), so this only fires on the road/scene behind the dock. The hold is
+// bound to the finger that STARTED it (drivePointerId), so a second finger can tap HUD
+// buttons mid-drive and its lift/move never drops the gas or yanks the steer anchor.
 let holding = false, touchGas = false, touchBrake = false;
+let drivePointerId: number | null = null;
 let anchorX = 0, anchorY = 0, anchorCarX = 0;
 canvas.addEventListener("pointerdown", (e) => {
-  audio.resume(); radio.resume(); // unlock audio + start the radio on the first touch
+  audio.resume(); radio.resume(); // unlock audio + start the radio on the first touch (any finger)
+  if (drivePointerId !== null) return; // already driving with another finger — a second touch must not re-anchor
   if ((mode === "race" && engine.getPhase() !== "live") || mode === "garage") return; // no driving in the showroom / pre-live race
-  holding = true; touchGas = true; touchBrake = false;
+  drivePointerId = e.pointerId; holding = true; touchGas = true; touchBrake = false;
   anchorX = e.clientX; anchorY = e.clientY; anchorCarX = carXTarget;
   joystick.show(e.clientX, e.clientY); // white ring at the thumb
 });
-const releaseHold = () => { holding = false; touchGas = false; touchBrake = false; steerNorm = 0; joystick.hide(); };
+// dropDrive fully lets go of the wheel (also used by the round-end resets below); releaseHold
+// only lets the DRIVING finger do so — a button-tap finger lifting anywhere must not drop the gas.
+const dropDrive = () => { drivePointerId = null; holding = false; touchGas = false; touchBrake = false; steerNorm = 0; joystick.hide(); };
+const releaseHold = (e: PointerEvent) => { if (e.pointerId !== drivePointerId) return; dropDrive(); };
 addEventListener("pointerup", releaseHold);
 addEventListener("pointercancel", releaseHold);
 addEventListener("pointermove", (e) => {
-  if (!holding) return;
+  if (e.pointerId !== drivePointerId) return; // only the driving finger steers; a second finger's move is ignored
   const dx = e.clientX - anchorX, dy = e.clientY - anchorY;
   joystick.move(dx, dy); // knob follows the drag
   // steer relative to where the thumb first landed (~32% of the width = full lock)
@@ -969,7 +976,7 @@ function finalizeSettled(info: { outcome: number; outcomeName: string; payout: b
   if (liq) deathsDoor.kill(); else deathsDoor.clear(); // Skull: shatter on liq, stand down otherwise (no-op off-Skull)
   autoExit.setLive(false); // Pink Rod panel: unlock for the next round
   // reset UI
-  releaseHold();
+  dropDrive();
   throttle = 34; game.equity = 1; chase.setDriving(false);
   garage.setBusy(false); mapBtn.setVisible(true); upgrades.setBusy(false); walletUI.setBusy(false);
   hud.setTimer(effMaxSec(), false);
@@ -1031,7 +1038,7 @@ function finalizePractice(snap: Snapshot) {
   nearDeath = false;
   if (liq) deathsDoor.kill(); else deathsDoor.clear();
   autoExit.setLive(false);
-  releaseHold();
+  dropDrive();
   throttle = 34; game.equity = 1; chase.setDriving(false);
   garage.setBusy(false); mapBtn.setVisible(true); upgrades.setBusy(false);
   hud.setTimer(effMaxSec(), false);
@@ -1056,7 +1063,7 @@ async function closeRound(reason: "cashout" | "expire") {
     return;
   }
   settling = true;
-  releaseHold();
+  dropDrive();
   controls.setBusy("BAILING…"); // the big button shows the bail is in flight
   try {
     const res = await session.close();

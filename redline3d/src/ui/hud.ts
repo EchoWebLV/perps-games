@@ -1,4 +1,5 @@
 import { sol3 } from "../core/money";
+import { onTap } from "./tap";
 
 export interface Hud {
   root: HTMLElement;
@@ -101,7 +102,9 @@ export function createHud(parent: HTMLElement): Hud {
       if (f !== lastFeed) { lastFeed = f; feed.textContent = f; feed.style.color = live ? "var(--grn)" : "var(--amb)"; }
     },
     setBalance(b) { bal.textContent = sol3(b); }, // centi-SOL units → "0.917 SOL"
-    onAsset(cb) { for (const t of tabs) t.onclick = () => cb(t.dataset.asset!); },
+    // wired once (main.ts calls onAsset a single time) — onTap uses addEventListener, which would
+    // STACK on repeat calls, unlike the old idempotent onclick assignment. Single-caller by design.
+    onAsset(cb) { for (const t of tabs) onTap(t, () => cb(t.dataset.asset!)); },
     setActiveAsset(a) {
       assetEl.textContent = a;
       for (const t of tabs) {

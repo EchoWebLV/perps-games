@@ -1,4 +1,5 @@
 import { sol } from "../core/money";
+import { onTap } from "./tap";
 
 /** play-amount ceiling in 0.01-SOL units (0.10 SOL); Six Wheeler's Heavy Load raises it */
 export const DEFAULT_PLAY_CAP = 10;
@@ -163,8 +164,8 @@ export function createControls(ctrlMount: HTMLElement, goMount: HTMLElement, ped
     short.classList.toggle("on", nd === -1);
   };
   const setDir = (nd: 1 | -1) => { if (live) return; applyDir(nd); };
-  long.onclick = () => setDir(1);
-  short.onclick = () => setDir(-1);
+  onTap(long, () => setDir(1));
+  onTap(short, () => setDir(-1));
   // the call box hides during a live round — except in lane mode, where it stays
   // visible (but non-interactive) as a live LONG/SHORT readout the lane drives
   const refreshCall = () => {
@@ -192,13 +193,13 @@ export function createControls(ctrlMount: HTMLElement, goMount: HTMLElement, ped
     go.style.opacity = locked ? "0.5" : "";
     go.style.cursor = locked ? "not-allowed" : "";
   };
-  q("#sup").onclick = () => { if (!live) { playAmount = stepPlay(playAmount, 1, playCap); sval.textContent = sol(playAmount); } };  // +0.01 up to the car's cap
-  q("#sdn").onclick = () => { if (!live) { playAmount = stepPlay(playAmount, -1, playCap); sval.textContent = sol(playAmount); } }; // -0.01 → 0.01 SOL floor
-  go.onclick = () => {
+  onTap(q("#sup"), () => { if (!live) { playAmount = stepPlay(playAmount, 1, playCap); sval.textContent = sol(playAmount); } });  // +0.01 up to the car's cap
+  onTap(q("#sdn"), () => { if (!live) { playAmount = stepPlay(playAmount, -1, playCap); sval.textContent = sol(playAmount); } }); // -0.01 → 0.01 SOL floor
+  onTap(go, () => {
     if (busyLabel !== null) return; // a launch/bail is in flight — swallow the tap (and the keyboard GO, which routes here)
     if (live) { if (performance.now() < cashLockUntil) return; cashCb(); } // bail is locked for BAIL_LOCK_MS after launch
     else launchCb();
-  };
+  });
 
   // keyboard driving (desktop): W/↑ gas, S/↓ brake, A/D or ←/→ steer, space/enter = go.
   // Touch driving (hold-anywhere) lives on the canvas in main.ts.

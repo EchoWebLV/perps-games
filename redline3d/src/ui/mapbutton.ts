@@ -1,3 +1,5 @@
+import { onTap } from "./tap";
+
 export interface MapButton {
   el: HTMLButtonElement;
   setVisible(visible: boolean): void;
@@ -47,7 +49,7 @@ export function createMapButton(parent: HTMLElement, onClick: () => void): MapBu
     "color:var(--cyan)",
     "animation:mapBtnPulse 2.4s ease-in-out infinite",
   ].join(";");
-  btn.onclick = onClick;
+  onTap(btn, onClick);
   parent.appendChild(btn);
 
   return {

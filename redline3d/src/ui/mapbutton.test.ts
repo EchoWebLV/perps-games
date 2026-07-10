@@ -2,7 +2,8 @@ import { afterEach, describe, expect, test, vi } from "vitest";
 import { createMapButton } from "./mapbutton";
 
 // The repo has no jsdom; UI is tested against a minimal hand-rolled DOM stub
-// (same approach as coins.test.ts). Handlers are invoked directly via `.onclick`.
+// (same approach as coins.test.ts). onTap wires the handler via addEventListener, so we
+// fire it through `.click()` — the keyboard/mouse fallback path onTap still honors.
 class FakeElement {
   tag: string;
   type = "";
@@ -14,9 +15,13 @@ class FakeElement {
   attrs: Record<string, string> = {};
   children: FakeElement[] = [];
   onclick: (() => void) | null = null;
+  listeners: Record<string, Array<(e: unknown) => void>> = {};
   constructor(tag = "div") { this.tag = tag; }
   setAttribute(k: string, v: string) { this.attrs[k] = v; }
   appendChild(c: FakeElement) { this.children.push(c); return c; }
+  addEventListener(type: string, fn: (e: unknown) => void) { (this.listeners[type] ??= []).push(fn); }
+  // real-DOM click(): fire the registered "click" listeners AND the onclick property
+  click() { for (const fn of this.listeners["click"] ?? []) fn({ type: "click" }); this.onclick?.(); }
   querySelector(sel: string): FakeElement | null {
     const match = (e: FakeElement) =>
       sel.startsWith("[") ? e.dataset[sel.slice(1, -1).replace(/^data-/, "")] !== undefined : e.tag === sel;
@@ -48,7 +53,7 @@ describe("createMapButton", () => {
     expect(btn.innerHTML).toContain("<svg");
     expect(btn.innerHTML).not.toContain("LOBBY");
 
-    btn.onclick!();
+    btn.click();
     expect(onClick).toHaveBeenCalledOnce();
 
     mb.setVisible(false);

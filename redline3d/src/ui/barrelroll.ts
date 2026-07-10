@@ -1,3 +1,5 @@
+import { onTap } from "./tap";
+
 export interface BarrelRoll {
   /** show the button only for the car that has the ability */
   setEnabled(on: boolean): void;
@@ -80,7 +82,7 @@ export function createBarrelRoll(parent: HTMLElement, onFire?: () => void): Barr
     }
   };
 
-  btn.onclick = () => { if (core.fire()) onFire?.(); render(); };
+  onTap(btn, () => { if (core.fire()) onFire?.(); render(); });
 
   return {
     setEnabled(on) { core.setEnabled(on); render(); },

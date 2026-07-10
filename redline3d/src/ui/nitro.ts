@@ -1,3 +1,5 @@
+import { onTap } from "./tap";
+
 export interface Nitro {
   /** show the button only for the car that has the ability */
   setEnabled(on: boolean): void;
@@ -101,7 +103,7 @@ export function createNitro(parent: HTMLElement, onFire?: () => void): Nitro {
     }
   };
 
-  btn.onclick = () => { if (core.fire()) onFire?.(); render(); };
+  onTap(btn, () => { if (core.fire()) onFire?.(); render(); });
 
   return {
     setEnabled(on) { core.setEnabled(on); render(); },
