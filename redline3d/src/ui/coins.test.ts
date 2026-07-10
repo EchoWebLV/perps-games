@@ -67,4 +67,16 @@ describe("createCoinCounter", () => {
     expect(parent.children[0].style.cssText).toContain("align-items:center");
     expect(parent.children[0].style.cssText).toContain("text-align:center");
   });
+
+  test("rides the safe-area inset so the graph can't cover it on a phone", () => {
+    installFakeDocument();
+    const parent = new FakeElement();
+
+    createCoinCounter(parent as unknown as HTMLElement);
+
+    // top = base+134 (base = max(10px,inset)); resolves to 144px on desktop, shifts down on a phone
+    const css = parent.children[0].style.cssText;
+    expect(css).toContain("env(safe-area-inset-top)");
+    expect(css).toContain("134px");
+  });
 });

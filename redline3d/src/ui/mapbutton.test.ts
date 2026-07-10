@@ -56,4 +56,16 @@ describe("createMapButton", () => {
     mb.setVisible(true);
     expect((mb.el as unknown as FakeElement).style.display).toBe("grid");
   });
+
+  test("rides the safe-area inset (same below-graph row as the coin chip)", () => {
+    installFakeDocument();
+    const parent = new FakeElement();
+
+    const mb = createMapButton(parent as unknown as HTMLElement, vi.fn());
+
+    // top = base+134 (base = max(10px,inset)); 144px on desktop, shifts down under a real status bar
+    const css = (mb.el as unknown as FakeElement).style.cssText;
+    expect(css).toContain("env(safe-area-inset-top)");
+    expect(css).toContain("134px");
+  });
 });

@@ -309,7 +309,8 @@ export function createCarPicker(
 
   const wrap = document.createElement("div");
   wrap.className = "pe";
-  wrap.style.cssText = "position:absolute;top:144px;right:max(12px,env(safe-area-inset-right));z-index:8;display:block";
+  // top rides the same base as hud.ts: base+134 sits 10px under the graph at any inset (144 on desktop)
+  wrap.style.cssText = "position:absolute;top:calc(max(10px,env(safe-area-inset-top)) + 134px);right:max(12px,env(safe-area-inset-right));z-index:8;display:block";
 
   const overlay = document.createElement("div");
   overlay.style.cssText = [
@@ -790,7 +791,8 @@ export function createCarPicker(
       rendered = false; renderArt(); // re-render owned card art (the newly-unlocked one now included)
     },
     isOpen: () => overlay.style.display !== "none",
-    setMenuTop(on: boolean) { wrap.style.top = on ? "max(10px,env(safe-area-inset-top))" : "144px"; },
+    // on: the hamburger takes the price chip's top-row slot; off: the below-graph row (base+134 = 144 on desktop)
+    setMenuTop(on: boolean) { wrap.style.top = on ? "max(10px,env(safe-area-inset-top))" : "calc(max(10px,env(safe-area-inset-top)) + 134px)"; },
     setShowroom(on: boolean) { showroom = on; applyShowroom(); },
   };
 }

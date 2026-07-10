@@ -37,7 +37,9 @@ export function createScrapCounter(parent: HTMLElement): ScrapCounter {
   wrap.setAttribute("aria-label", "Scrap collected");
   wrap.style.cssText = [
     "position:absolute",
-    "top:194px", // stacked directly under the coin chip (coins: top 144 + 42h + 8 gap)
+    // stacked directly under the coin chip: base+134 + 42h + 8 gap = base+184 (194 on desktop).
+    // The 50px column pitch (42px chip + 8px gap) must stay constant so the chips never overlap.
+    "top:calc(max(10px,env(safe-area-inset-top)) + 184px)",
     "left:max(12px,env(safe-area-inset-left))",
     "z-index:8",
     "min-width:74px",

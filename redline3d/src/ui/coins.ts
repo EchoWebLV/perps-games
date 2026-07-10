@@ -35,7 +35,9 @@ export function createCoinCounter(parent: HTMLElement): CoinCounter {
   wrap.setAttribute("aria-label", "Coins collected");
   wrap.style.cssText = [
     "position:absolute",
-    "top:144px",
+    // top of the left column: same base as hud.ts. Graph bottom = base+124, so base+134
+    // keeps a constant 10px clearance under the graph at ANY inset (10+134 = 144 on desktop).
+    "top:calc(max(10px,env(safe-area-inset-top)) + 134px)",
     "left:max(12px,env(safe-area-inset-left))",
     "z-index:8",
     "min-width:74px",

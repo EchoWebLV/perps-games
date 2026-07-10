@@ -43,7 +43,9 @@ export function createFpsMeter(
   el.setAttribute("aria-label", "Frames per second");
   el.style.cssText = [
     "position:absolute",
-    "top:244px", // stacked under the scrap chip (scrap: top 194 + 42h + 8 gap)
+    // stacked under the scrap chip: base+184 + 42h + 8 gap = base+234 (244 on desktop),
+    // holding the same 50px column pitch (42px chip + 8px gap) as coins→scrap.
+    "top:calc(max(10px,env(safe-area-inset-top)) + 234px)",
     "left:max(12px,env(safe-area-inset-left))",
     "z-index:8",
     "min-width:74px",

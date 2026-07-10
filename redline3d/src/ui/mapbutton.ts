@@ -34,7 +34,9 @@ export function createMapButton(parent: HTMLElement, onClick: () => void): MapBu
   btn.innerHTML = HOME_SVG;
   btn.style.cssText = [
     "position:absolute",
-    "top:144px", // same row, directly left of the menu button (the original slot)
+    // same row as the coin chip, directly left of the menu button: base+134 rides the
+    // inset in lockstep with the graph above it (10+134 = 144 on desktop).
+    "top:calc(max(10px,env(safe-area-inset-top)) + 134px)",
     "right:max(62px,calc(env(safe-area-inset-right) + 50px))",
     "z-index:8",
     "width:42px", "height:42px", "padding:0", // the original 42×42 icon square
