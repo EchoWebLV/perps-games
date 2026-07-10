@@ -1,14 +1,21 @@
 import { describe, expect, it, vi } from "vitest";
 import { createTradeHistoryRecorder } from "./trade-history-recorder";
 
-function memoryStore(onRemove?: (key: string) => void): Storage {
+function memoryStore(options: {
+  enumerate?: (keys: string[]) => string[];
+  failSet?: () => boolean;
+  onRemove?: (key: string) => void;
+} = {}): Storage {
   const values = new Map<string, string>();
   return {
     getItem: (key) => values.get(key) ?? null,
-    setItem: (key, value) => { values.set(key, value); },
-    removeItem: (key) => { values.delete(key); onRemove?.(key); },
+    setItem: (key, value) => {
+      if (options.failSet?.()) throw new Error("set_failed");
+      values.set(key, value);
+    },
+    removeItem: (key) => { values.delete(key); options.onRemove?.(key); },
     clear: () => values.clear(),
-    key: (index) => [...values.keys()][index] ?? null,
+    key: (index) => (options.enumerate?.([...values.keys()]) ?? [...values.keys()])[index] ?? null,
     get length() { return values.size; },
   };
 }
@@ -211,14 +218,16 @@ describe("trade history recorder", () => {
     let recorder!: ReturnType<typeof createTradeHistoryRecorder>;
     let racedFlush: Promise<void> | undefined;
     let scheduleRace = true;
-    const store = memoryStore(() => {
-      if (!scheduleRace) return;
-      scheduleRace = false;
-      queueMicrotask(() => {
-        recorder.begin(draft);
-        recorder.complete({ ...completion, exitPrice: 152 });
-        racedFlush = recorder.flush();
-      });
+    const store = memoryStore({
+      onRemove: () => {
+        if (!scheduleRace) return;
+        scheduleRace = false;
+        queueMicrotask(() => {
+          recorder.begin(draft);
+          recorder.complete({ ...completion, exitPrice: 152 });
+          racedFlush = recorder.flush();
+        });
+      },
     });
     const recordTrade = vi.fn().mockResolvedValue({});
     recorder = createTradeHistoryRecorder({
@@ -326,6 +335,36 @@ describe("trade history recorder", () => {
     expect(recreated.pending()).toBe(0);
   });
 
+  it("skips a malformed stored entry without hiding a valid record", async () => {
+    const store = memoryStore();
+    const recorder = createTradeHistoryRecorder({
+      api: { recordTrade: vi.fn() } as any,
+      wallet: () => "AliceWallet",
+      store,
+      newId: () => "11111111-1111-4111-8111-111111111111",
+    });
+    recorder.begin(draft);
+    const validRecord = recorder.complete(completion)!;
+    store.setItem(
+      "redline.trade-history.outbox.v1:AliceWallet:malformed",
+      "{not-json",
+    );
+
+    vi.resetModules();
+    const recreatedModule = await import("./trade-history-recorder");
+    const recordTrade = vi.fn().mockResolvedValue({});
+    const recreated = recreatedModule.createTradeHistoryRecorder({
+      api: { recordTrade } as any,
+      wallet: () => "AliceWallet",
+      store,
+    });
+
+    expect(recreated.pending()).toBe(1);
+    await recreated.flush();
+    expect(recordTrade).toHaveBeenCalledWith(validRecord, "AliceWallet");
+    expect(recreated.pending()).toBe(0);
+  });
+
   it("keeps a same-session fallback when storage get, set, and remove throw", async () => {
     const store = throwingStore();
     const first = createTradeHistoryRecorder({
@@ -358,6 +397,36 @@ describe("trade history recorder", () => {
     await expect(recreated.flush()).resolves.toBeUndefined();
     expect(recordTrade).toHaveBeenCalledTimes(2);
     expect(recreated.pending()).toBe(0);
+  });
+
+  it("persists volatile records after storage recovers while upload remains offline", async () => {
+    let failWrites = true;
+    const store = memoryStore({ failSet: () => failWrites });
+    const recordTrade = vi.fn().mockRejectedValue(new Error("offline"));
+    const recorder = createTradeHistoryRecorder({
+      api: { recordTrade } as any,
+      wallet: () => "AliceWallet",
+      store,
+      newId: () => "11111111-1111-4111-8111-111111111111",
+    });
+    recorder.begin(draft);
+    recorder.complete(completion);
+    expect(recorder.pending()).toBe(1);
+
+    failWrites = false;
+    await recorder.flush();
+    expect(recordTrade).toHaveBeenCalledTimes(1);
+    expect(recorder.pending()).toBe(1);
+
+    vi.resetModules();
+    const recreatedModule = await import("./trade-history-recorder");
+    const recreated = recreatedModule.createTradeHistoryRecorder({
+      api: { recordTrade: vi.fn().mockRejectedValue(new Error("offline")) } as any,
+      wallet: () => "AliceWallet",
+      store,
+    });
+
+    expect(recreated.pending()).toBe(1);
   });
 
   it("removes only successful records and retries the remaining queue in order", async () => {
@@ -397,6 +466,48 @@ describe("trade history recorder", () => {
       "33333333-3333-4333-8333-333333333333",
     ]);
     expect(recorder.pending()).toBe(0);
+  });
+
+  it("preserves enqueue order across retries when storage enumerates in reverse", async () => {
+    const ids = [
+      "33333333-3333-4333-8333-333333333333",
+      "11111111-1111-4111-8111-111111111111",
+      "22222222-2222-4222-8222-222222222222",
+    ];
+    const remainingIds = [...ids];
+    const recordTrade = vi.fn()
+      .mockResolvedValueOnce({})
+      .mockRejectedValueOnce(new Error("offline"))
+      .mockResolvedValue({});
+    const store = memoryStore({ enumerate: (keys) => keys.reverse() });
+    const recorder = createTradeHistoryRecorder({
+      api: { recordTrade: vi.fn() } as any,
+      wallet: () => "AliceWallet",
+      store,
+      newId: () => remainingIds.shift()!,
+    });
+    const records = ids.map((_, index) => {
+      recorder.begin(draft);
+      return recorder.complete({ ...completion, exitPrice: 151 + index })!;
+    });
+
+    vi.resetModules();
+    const recreatedModule = await import("./trade-history-recorder");
+    const recreated = recreatedModule.createTradeHistoryRecorder({
+      api: { recordTrade } as any,
+      wallet: () => "AliceWallet",
+      store,
+    });
+    await recreated.flush();
+    await recreated.flush();
+
+    expect(recordTrade.mock.calls.map(([record]) => record)).toEqual([
+      records[0],
+      records[1],
+      records[1],
+      records[2],
+    ]);
+    expect(recreated.pending()).toBe(0);
   });
 
   it("shares one in-flight flush across concurrent callers", async () => {

@@ -13,9 +13,14 @@ export interface TradeHistoryRecorder {
 const PREFIX = "redline.trade-history.outbox.v1:";
 
 interface OutboxState {
-  known: Map<string, TradeRecordInput>;
-  volatile: Map<string, TradeRecordInput>;
+  known: Map<string, QueuedTrade>;
+  volatile: Map<string, QueuedTrade>;
   removed: Set<string>;
+}
+
+interface QueuedTrade {
+  queueOrder: number;
+  record: TradeRecordInput;
 }
 
 const sessionOutboxes = new WeakMap<Storage, Map<string, OutboxState>>();
@@ -51,43 +56,85 @@ export function createTradeHistoryRecorder(deps: {
     }
     return state;
   };
-  const readDurable = (outboxKey: string): Map<string, TradeRecordInput> | null => {
+  const recordForId = (value: unknown, id: string): TradeRecordInput | null =>
+    typeof value === "object" && value !== null && "id" in value && value.id === id
+      ? value as TradeRecordInput
+      : null;
+  const openedAtOrder = (record: TradeRecordInput): number => {
+    const openedAt = Date.parse(record.openedAt);
+    return Number.isFinite(openedAt) ? openedAt : 0;
+  };
+  const decodeQueued = (raw: string, id: string): QueuedTrade | null => {
+    let value: unknown;
     try {
-      const records = new Map<string, TradeRecordInput>();
+      value = JSON.parse(raw);
+    } catch {
+      return null;
+    }
+    if (typeof value === "object" && value !== null && "queueOrder" in value && "record" in value) {
+      const queueOrder = value.queueOrder;
+      const record = recordForId(value.record, id);
+      if (typeof queueOrder === "number" && Number.isSafeInteger(queueOrder) && queueOrder >= 0 && record) {
+        return { queueOrder, record };
+      }
+      return null;
+    }
+    const record = recordForId(value, id);
+    return record ? { queueOrder: openedAtOrder(record), record } : null;
+  };
+  const encodeQueued = (queued: QueuedTrade): string => JSON.stringify(queued);
+  const readDurable = (outboxKey: string): Map<string, QueuedTrade> | null => {
+    try {
+      const records = new Map<string, QueuedTrade>();
       const prefix = recordPrefix(outboxKey);
       const length = store.length;
       for (let index = 0; index < length; index++) {
         const storageKey = store.key(index);
         if (!storageKey?.startsWith(prefix)) continue;
         const id = storageKey.slice(prefix.length);
-        const value: unknown = JSON.parse(store.getItem(storageKey) ?? "null");
-        if (typeof value === "object" && value !== null && "id" in value && value.id === id) {
-          records.set(id, value as TradeRecordInput);
-        }
+        const raw = store.getItem(storageKey);
+        if (raw === null) continue;
+        const queued = decodeQueued(raw, id);
+        if (queued) records.set(id, queued);
       }
       return records;
     } catch {
       return null;
     }
   };
-  const readAt = (outboxKey: string): TradeRecordInput[] => {
+  const persistVolatile = (outboxKey: string, state: OutboxState) => {
+    for (const [id, queued] of [...state.volatile]) {
+      try {
+        store.setItem(recordKey(outboxKey, id), encodeQueued(queued));
+        state.volatile.delete(id);
+      } catch {
+        // Retain this record in memory and retry persistence on the next read.
+      }
+    }
+  };
+  const readAt = (outboxKey: string): QueuedTrade[] => {
     const state = stateAt(outboxKey);
+    persistVolatile(outboxKey, state);
     const durable = readDurable(outboxKey);
     const records = durable === null ? new Map(state.known) : durable;
-    for (const [id, record] of state.volatile) records.set(id, record);
+    for (const [id, queued] of state.volatile) records.set(id, queued);
     for (const id of state.removed) records.delete(id);
     state.known = new Map(records);
-    return [...records.values()];
+    return [...records.values()].sort((left, right) =>
+      left.queueOrder - right.queueOrder ||
+      left.record.openedAt.localeCompare(right.record.openedAt) ||
+      left.record.id.localeCompare(right.record.id));
   };
-  const addAt = (outboxKey: string, record: TradeRecordInput) => {
+  const addAt = (outboxKey: string, queued: QueuedTrade) => {
     const state = stateAt(outboxKey);
-    state.known.set(record.id, record);
-    state.removed.delete(record.id);
+    const id = queued.record.id;
+    state.known.set(id, queued);
+    state.removed.delete(id);
     try {
-      store.setItem(recordKey(outboxKey, record.id), JSON.stringify(record));
-      state.volatile.delete(record.id);
+      store.setItem(recordKey(outboxKey, id), encodeQueued(queued));
+      state.volatile.delete(id);
     } catch {
-      state.volatile.set(record.id, record);
+      state.volatile.set(id, queued);
     }
   };
   const removeAt = (outboxKey: string, id: string) => {
@@ -114,12 +161,12 @@ export function createTradeHistoryRecorder(deps: {
           break;
         }
         try {
-          await deps.api.recordTrade(item, wallet);
+          await deps.api.recordTrade(item.record, wallet);
         } catch {
           break;
         }
         if (deps.wallet() !== wallet) break;
-        removeAt(outboxKey, item.id);
+        removeAt(outboxKey, item.record.id);
       }
     };
     let task!: Promise<void>;
@@ -145,7 +192,13 @@ export function createTradeHistoryRecorder(deps: {
       const record = { ...draft, ...result };
       active = null;
       const items = readAt(outboxKey);
-      if (!items.some((item) => item.id === record.id)) addAt(outboxKey, record);
+      if (!items.some((item) => item.record.id === record.id)) {
+        const lastOrder = items.reduce((highest, item) => Math.max(highest, item.queueOrder), -1);
+        addAt(outboxKey, {
+          queueOrder: Math.max(openedAtOrder(record), lastOrder + 1),
+          record,
+        });
+      }
       return record;
     },
     flush() {
