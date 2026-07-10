@@ -41,6 +41,30 @@ export const users = pgTable(
 
 export type User = typeof users.$inferSelect;
 
+export const tradeHistory = pgTable(
+  "trade_history",
+  {
+    id: uuid("id").primaryKey(),
+    userId: uuid("user_id").notNull().references(() => users.id),
+    walletPublicKey: text("wallet_public_key").notNull(),
+    asset: text("asset").notNull(),
+    dir: integer("dir").notNull(),
+    lev: integer("lev").notNull(),
+    stakeBase: bigint("stake_base", { mode: "number" }).notNull(),
+    entryPrice: doublePrecision("entry_price").notNull(),
+    exitPrice: doublePrecision("exit_price").notNull(),
+    openedAt: timestamp("opened_at", { withTimezone: true }).notNull(),
+    outcome: text("outcome").notNull(),
+    payoutBase: bigint("payout_base", { mode: "number" }).notNull(),
+    settledAt: timestamp("settled_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => ({
+    userSettledIdx: index("trade_history_user_settled_idx").on(t.userId, t.settledAt, t.id),
+  }),
+);
+
+export type TradeHistoryRow = typeof tradeHistory.$inferSelect;
+
 /** ledger asset: soft play-money (faucet, never withdrawable) vs USDC-backed real money */
 export const ledgerAsset = pgEnum("ledger_asset", ["coin", "cash", "scrap"]);
 
