@@ -37,7 +37,11 @@ function queueOrderEpoch(queueOrder: string): number | null {
   if (!QUEUE_ORDER_PATTERN.test(queueOrder)) return null;
   const epoch = Number(queueOrder.slice(0, ORDER_PART_WIDTH));
   const counter = Number(queueOrder.slice(-ORDER_PART_WIDTH));
-  return Number.isSafeInteger(epoch) && Number.isSafeInteger(counter) ? epoch : null;
+  return Number.isSafeInteger(epoch) &&
+    epoch < Number.MAX_SAFE_INTEGER &&
+    Number.isSafeInteger(counter)
+    ? epoch
+    : null;
 }
 
 function nextQueueOrder(realmId: string, now: () => number, maxPendingEpoch: number): string {
