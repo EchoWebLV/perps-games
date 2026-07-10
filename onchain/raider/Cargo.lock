@@ -663,6 +663,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "crate-roll"
+version = "0.1.0"
+dependencies = [
+ "anchor-lang",
+ "ephemeral-vrf-sdk",
+ "solana-keccak-hasher 2.2.1",
+]
+
+[[package]]
 name = "crunchy"
 version = "0.2.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
