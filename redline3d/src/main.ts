@@ -77,6 +77,7 @@ import { PublicKey } from "@solana/web3.js";
 import { CHAIN } from "./chain/config";
 import { createGameSession } from "./chain/game-session";
 import { selectChainWalletPort } from "./chain/wallet-select";
+import { createCrateRollDraws, makeCrateRollIo } from "./chain/crate-roll";
 
 const canvas = document.getElementById("gl") as HTMLCanvasElement;
 const hudRoot = document.getElementById("hud") as HTMLElement;
@@ -534,6 +535,17 @@ const crateBox = createCrateBox(hudRoot, {
   levelInfo: (key) => { const t = themeOf(key); return { name: t.name, sky: [t.sky[0], t.sky[1]], disc: t.celestialColors[0], grid: [t.grid[0], t.grid[1]] }; },
   lowTier: quality.tier === "low",
   onBuyUsd: () => lobbyHud.toast("Card payment coming soon — use coins for now"),
+  // MagicBlock VRF (signed-in only): one randomness request per pull, signed by the same
+  // session wallet as rounds. Guests fall through to client RNG (practice parity).
+  vrfDraws: () => {
+    if (!identity || identity.mode !== "privy") return null;
+    const w = session.anchorWallet();
+    if (!w) return null;
+    return createCrateRollDraws(makeCrateRollIo(w));
+  },
+  holdCoins: (n) => upgrades.holdCoins(n),
+  settleHold: (n, commit) => upgrades.settleHold(n, commit),
+  onVrfFail: (msg) => lobbyHud.toast(msg),
   onClose: () => { if (mode === "lobby") lobbyHud.show(); },
 });
 

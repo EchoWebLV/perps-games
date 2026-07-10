@@ -1,7 +1,7 @@
 import { PublicKey } from "@solana/web3.js";
 import type { SolanaWalletPort } from "../core/solana-wallet";
 import { createDevKeypairPort } from "./dev-keypair-port";
-import { portToAnchorWallet } from "./anchor-wallet";
+import { portToAnchorWallet, type AnchorWalletLike } from "./anchor-wallet";
 import { createChainRound, maxPayoutBase, roundKey, WalletUnfundedError, BankrollFullError, type ChainRound, type OpenedRound, type SettledRound, type ActionResult, type RoundSnap, type AssetSym } from "./chain-round";
 import { createLeverSync } from "./lever-sync";
 
@@ -22,6 +22,9 @@ export const SESSION_BUFFER_BETS = 5;
 
 export interface GameSession {
   address(): string;
+  /** the connected session wallet as an anchor wallet, or null before connect — lets other
+   *  chain clients (crate_roll VRF) sign with the SAME wallet the round loop uses. */
+  anchorWallet(): AnchorWalletLike | null;
   /** sign a message with the connected wallet (server nonce-challenge binding). Throws if no wallet. */
   signMessage(message: Uint8Array): Promise<Uint8Array>;
   delegated(): boolean;
@@ -149,6 +152,7 @@ export function createGameSession(opts: {
 
   return {
     address: () => opts.injectAddress ?? port?.currentAddress() ?? "",
+    anchorWallet: () => { try { return port?.currentAddress() ? portToAnchorWallet(port) : null; } catch { return null; } },
     signMessage: (message) => {
       if (!port) throw new Error("no_wallet");
       return port.signMessage(message);
