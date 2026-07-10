@@ -1,8 +1,11 @@
+export type MarketDirection = -1 | 0 | 1;
+
 export interface MarketPulseFrame {
   volatility: number;
   momentum: number;
   shock: number;
   shockId: number;
+  shockDirection: MarketDirection;
   danger: number;
 }
 
@@ -24,6 +27,7 @@ export const CALM_MARKET_PULSE: Readonly<MarketPulseFrame> = Object.freeze({
   momentum: 0,
   shock: 0,
   shockId: 0,
+  shockDirection: 0,
   danger: 0,
 });
 
@@ -54,6 +58,7 @@ export function createMarketPulse(): MarketPulse {
   let momentumEwma = 0;
   let shock = 0;
   let shockId = 0;
+  let shockDirection: MarketDirection = 0;
   let shockCooldown = 0;
   let danger = 0;
 
@@ -64,6 +69,7 @@ export function createMarketPulse(): MarketPulse {
     momentumEwma = 0;
     shock = 0;
     shockId = 0;
+    shockDirection = 0;
     shockCooldown = 0;
     danger = 0;
   };
@@ -91,6 +97,7 @@ export function createMarketPulse(): MarketPulse {
           if (magnitude >= shockThreshold && shockCooldown === 0) {
             shockId += 1;
             shock = clamp(0.4 + (magnitude - shockThreshold) / 0.0026, 0.4, 1);
+            shockDirection = change < 0 ? -1 : 1;
             shockCooldown = SHOCK_COOLDOWN;
           }
         }
@@ -108,6 +115,7 @@ export function createMarketPulse(): MarketPulse {
         momentum: clamp(momentumEwma / MOMENTUM_FULL, -1, 1),
         shock,
         shockId,
+        shockDirection,
         danger,
       };
     },

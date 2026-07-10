@@ -70,6 +70,16 @@ describe("Market Pulse", () => {
     expect(repeated.shockId).toBe(1);
   });
 
+  it("records the signed direction of each accepted shock", () => {
+    const up = createMarketPulse();
+    up.update(input(100));
+    expect(up.update(input(100.2)).shockDirection).toBe(1);
+
+    const down = createMarketPulse();
+    down.update(input(100));
+    expect(down.update(input(99.8)).shockDirection).toBe(-1);
+  });
+
   it("decays market movement when the feed is stale", () => {
     const pulse = createMarketPulse();
     let price = 100;
@@ -109,6 +119,6 @@ describe("Market Pulse", () => {
     pulse.update(input(100.2));
     pulse.reset();
     const frame = pulse.update(input(50_000));
-    expect(frame).toEqual({ volatility: 0, momentum: 0, shock: 0, shockId: 0, danger: 0 });
+    expect(frame).toEqual({ volatility: 0, momentum: 0, shock: 0, shockId: 0, shockDirection: 0, danger: 0 });
   });
 });

@@ -14,8 +14,9 @@ import { createTach } from "./ui/tach";
 import { createControls, DEFAULT_PLAY_CAP } from "./ui/controls";
 import { connectFeed } from "./core/feed";
 import { createPriceSource } from "./core/price-source";
-import { CALM_MARKET_PULSE, createMarketPulse, type MarketPulseFrame } from "./core/market-pulse";
+import { CALM_MARKET_PULSE, createMarketPulse, type MarketDirection, type MarketPulseFrame } from "./core/market-pulse";
 import { terrainGrade } from "./core/market-road";
+import { createMarketShock } from "./render/market-shock";
 import { RoundEngine } from "./core/round";
 import type { Snapshot } from "./core/types";
 import { sol3 } from "./core/money";
@@ -137,6 +138,14 @@ car.group.position.set(0, 0, -12);
 car.group.rotation.order = "YXZ";
 ctx.scene.add(car.group);
 const chase = createChaseCam();
+const marketShock = createMarketShock({
+  detail: quality.detail,
+  reducedMotion: globalThis.matchMedia?.("(prefers-reduced-motion: reduce)")?.matches ?? false,
+  surfaceY: world.surfaceY,
+  onWorldPulse: (amount, direction) => world.setMarketShock(amount, direction),
+  onCameraShake: (amount) => chase.shake(amount),
+});
+ctx.scene.add(marketShock.group);
 const pickups = createPickups();
 ctx.scene.add(pickups.group);
 const fireTrail = createFireTrail(); // DeLorean flux: burning tire traces while the freeze is on
@@ -630,9 +639,9 @@ garageRoom.setCar(equippedCar);
 // flags, compile, restore — nothing renders in between, so the player never sees the flip.
 function precompileModes(): void {
   const showroom = garageRoom?.group;
-  const groups = [world.group, pickups.group, fireTrail.group, lobby.group, oval.group, ...(showroom ? [showroom] : [])];
+  const groups = [world.group, marketShock.group, pickups.group, fireTrail.group, lobby.group, oval.group, ...(showroom ? [showroom] : [])];
   const configs = [
-    [world.group, pickups.group, fireTrail.group], // race road
+    [world.group, marketShock.group, pickups.group, fireTrail.group], // race road
     [lobby.group],                                 // the strip
     [oval.group],                                  // highway
     showroom ? [showroom] : [],                    // garage showroom
@@ -709,6 +718,7 @@ function enterLobby() {
   car.group.visible = true; // restore the drivable car (the garage showroom may have hidden it)
   lobbyCam.reset();
   world.group.visible = false;
+  marketShock.reset(visualShockId);
   pickups.group.visible = false;
   fireTrail.group.visible = false;
   lobby.show();
@@ -726,6 +736,7 @@ function exitLobby() {
   lobbyHud.hide();
   lobbyHud.setPrompt(null);
   world.group.visible = true;
+  marketShock.group.visible = false; // the renderer reveals it only for a fresh shock
   pickups.group.visible = true;
   fireTrail.group.visible = true;
   mapBtn.setVisible(true);
@@ -827,6 +838,10 @@ let solEMA = 0;    // slow average; price vs this drives the terrain elevation
 const marketPulse = createMarketPulse();
 let marketFrame: MarketPulseFrame = { ...CALM_MARKET_PULSE };
 let debugMomentum: number | null = null;
+let seenMarketShockId = 0;
+let visualShockId = 0;
+let debugShock: { strength: number; direction: MarketDirection } | null = null;
+let debugShockPreview = 0;
 
 // price history (minimap), lateral steering, and the active round's entry
 const priceHist: number[] = [];
@@ -857,6 +872,11 @@ hud.onAsset((a) => {
   marketPulse.reset();
   marketFrame = { ...CALM_MARKET_PULSE };
   debugMomentum = null;
+  seenMarketShockId = 0;
+  visualShockId = 0;
+  debugShock = null;
+  debugShockPreview = 0;
+  marketShock.reset();
   hud.setActiveAsset(a);
 });
 hud.setActiveAsset(asset);
@@ -1543,6 +1563,26 @@ function frame(now: number) {
     buffer: liveBuffer,
     dt,
   });
+  let shockStrength = marketFrame.shock;
+  let shockDirection = marketFrame.shockDirection;
+  if (marketFrame.shockId > seenMarketShockId) {
+    seenMarketShockId = marketFrame.shockId;
+    visualShockId += 1;
+  }
+  if (debugShock) {
+    shockStrength = debugShock.strength;
+    shockDirection = debugShock.direction;
+    visualShockId += 1;
+    debugShockPreview = 0.8;
+    debugShock = null;
+  }
+  marketShock.update({
+    active: drivable || debugShockPreview > 0,
+    shockId: visualShockId,
+    strength: shockStrength,
+    direction: shockDirection,
+  }, dt);
+  debugShockPreview = Math.max(0, debugShockPreview - dt);
   const grade = terrainGrade({
     smoothPrice: solSmooth,
     emaPrice: solEMA,
@@ -1783,14 +1823,20 @@ if (import.meta.env.DEV) {
   // on-chain probe (GO-path fault injection for browser verification) — e.g. wrap
   // session.open with a one-shot 6005 throw to prove the same-press table rebuild
   (window as any).__chain = { session };
-  // Market Pulse probe: force the first visible slice (momentum terrain) without waiting
-  // for a live trend. Call momentum() with no value to hand control back to the feed.
+  // Market Pulse probe: force visual slices without altering Round or settlement state.
+  // Call momentum() with no value to hand terrain control back to the feed.
   (window as any).__marketPulse = {
-    state: () => ({ ...marketFrame, momentumOverride: debugMomentum }),
+    state: () => ({ ...marketFrame, momentumOverride: debugMomentum, shockOverride: debugShock }),
     momentum: (value?: number) => {
       debugMomentum = value === undefined
         ? null
         : Math.max(-1, Math.min(1, Number(value) || 0));
+    },
+    shock: (direction = 1, strength = 1) => {
+      debugShock = {
+        direction: Number(direction) < 0 ? -1 : 1,
+        strength: Math.max(0, Math.min(1, Number(strength) || 0)),
+      };
     },
   };
   // racer lane-drive telemetry (7H browser verification) — reads the live physics state;

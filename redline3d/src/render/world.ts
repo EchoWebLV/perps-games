@@ -1,6 +1,8 @@
 import * as THREE from "three";
 import { type WorldTheme, type LampStyle, getTheme, loadThemeKey, saveThemeKey } from "./world-themes";
 import { ROAD_GRADE_ANCHOR_Z, roadGradeOffset, roadGradeSlope } from "../core/market-road";
+import type { MarketDirection } from "../core/market-pulse";
+import { marketShockLightBoost } from "./market-shock";
 
 export interface World {
   group: THREE.Group;
@@ -10,6 +12,8 @@ export interface World {
   surfaceY(worldZ: number): number;
   /** Clown Car ability: split the road green (left=LONG) / red (right=SHORT) */
   setLaneBet(on: boolean): void;
+  /** sudden-move pulse for road emission and the existing roadside lights */
+  setMarketShock(amount: number, direction: MarketDirection): void;
   /** swap the level skin (sky, celestial, scenery, grid/road, lights) — see world-themes.ts */
   setTheme(key: string): void;
   /** the active skin key */
@@ -529,6 +533,8 @@ function lampDeco(junk: Junk): MakeLamp {
 export function createWorld(detail: "full" | "reduced" = "full"): World {
   const group = new THREE.Group();
   const reduced = detail === "reduced";
+  let shockAmount = 0;
+  const shockColor = new THREE.Color("#2effc5");
 
   // ---- swappable environment (sky, celestial, stars, scenery) — rebuilt on setTheme() ----
   let envGroup: THREE.Group | null = null;
@@ -550,10 +556,10 @@ export function createWorld(detail: "full" | "reduced" = "full"): World {
   // neon grid floor (displaced by the shared wave) — persistent, recoloured on setTheme()
   const gridMat = new THREE.ShaderMaterial({
     transparent: true,
-    uniforms: { uOffset: { value: 0 }, uScroll: { value: 0 }, uAmp: { value: AMP }, uGrade: { value: 0 }, uGradeAnchor: { value: GRADE_ANCHOR_LOCAL_Y }, uColor: { value: new THREE.Color("#ff39c0") }, uColor2: { value: new THREE.Color("#27e7ff") } },
+    uniforms: { uOffset: { value: 0 }, uScroll: { value: 0 }, uAmp: { value: AMP }, uGrade: { value: 0 }, uGradeAnchor: { value: GRADE_ANCHOR_LOCAL_Y }, uColor: { value: new THREE.Color("#ff39c0") }, uColor2: { value: new THREE.Color("#27e7ff") }, uShock: { value: 0 }, uShockColor: { value: shockColor.clone() } },
     vertexShader: VERT.replace("varying vec2 vUv;", "varying vec2 vUv; uniform float uOffset;"),
     fragmentShader: `
-      varying vec2 vUv; uniform float uOffset; uniform vec3 uColor; uniform vec3 uColor2;
+      varying vec2 vUv; uniform float uOffset; uniform vec3 uColor; uniform vec3 uColor2; uniform float uShock; uniform vec3 uShockColor;
       float line(float x){ float g = abs(fract(x)-0.5); return smoothstep(0.46,0.5,1.0-g*2.0); }
       void main(){
         float gx = line(vUv.x*40.0);
@@ -562,9 +568,9 @@ export function createWorld(detail: "full" | "reduced" = "full"): World {
         // hide grid lines under the road strip (grid-x ±13 -> vUv.x 0.484..0.516)
         // so they don't bleed through as extra lines in the distance
         g *= 1.0 - step(0.484, vUv.x) * step(vUv.x, 0.516);
-        vec3 c = mix(uColor2, uColor, vUv.x);
+        vec3 c = mix(mix(uColor2, uColor, vUv.x), uShockColor, uShock * 0.72);
         float fade = smoothstep(0.0, 0.35, vUv.y);
-        gl_FragColor = vec4(c, g * fade);
+        gl_FragColor = vec4(c, min(1.0, g * fade * (1.0 + uShock * 0.65)));
       }`,
   });
   const floor = new THREE.Mesh(new THREE.PlaneGeometry(800, 2000, 1, 160), gridMat);
@@ -575,10 +581,10 @@ export function createWorld(detail: "full" | "reduced" = "full"): World {
   // road strip (same wave)
   const roadMat = new THREE.ShaderMaterial({
     transparent: true,
-    uniforms: { uOffset: { value: 0 }, uScroll: { value: 0 }, uAmp: { value: AMP }, uGrade: { value: 0 }, uGradeAnchor: { value: GRADE_ANCHOR_LOCAL_Y }, uEdge: { value: new THREE.Color("#ff39c0") }, uLane: { value: 0 } },
+    uniforms: { uOffset: { value: 0 }, uScroll: { value: 0 }, uAmp: { value: AMP }, uGrade: { value: 0 }, uGradeAnchor: { value: GRADE_ANCHOR_LOCAL_Y }, uEdge: { value: new THREE.Color("#ff39c0") }, uLane: { value: 0 }, uShock: { value: 0 }, uShockColor: { value: shockColor.clone() } },
     vertexShader: VERT.replace("varying vec2 vUv;", "varying vec2 vUv; uniform float uOffset;"),
     fragmentShader: `
-      varying vec2 vUv; uniform float uOffset; uniform vec3 uEdge; uniform float uLane;
+      varying vec2 vUv; uniform float uOffset; uniform vec3 uEdge; uniform float uLane; uniform float uShock; uniform vec3 uShockColor;
       void main(){
         float edge = smoothstep(0.0,0.06,vUv.x) * smoothstep(1.0,0.94,vUv.x);
         float edges = 1.0 - edge;
@@ -588,6 +594,7 @@ export function createWorld(detail: "full" | "reduced" = "full"): World {
         vec3 lane = mix(vec3(0.06,0.62,0.30), vec3(0.74,0.09,0.17), step(0.5, vUv.x));
         road = mix(road, lane, uLane);
         vec3 col = mix(road, uEdge, edges*0.9) + dash*vec3(0.9);
+        col += uShockColor * uShock * (0.35 + edges * 0.75);
         // bright divider down the centre line while the ability is on
         col += uLane * smoothstep(0.014, 0.0, abs(vUv.x - 0.5)) * vec3(1.0);
         float fade = smoothstep(0.0,0.3,vUv.y);
@@ -716,10 +723,10 @@ export function createWorld(detail: "full" | "reduced" = "full"): World {
     if (l) {
       const inward = l.side < 0 ? 1 : -1;
       pl.position.set(l.o.position.x + inward * 3.05, l.o.position.y + 12, l.o.position.z);
-      pl.color.copy(l.side < 0 ? colA : colB);
+      pl.color.copy(l.side < 0 ? colA : colB).lerp(shockColor, shockAmount * 0.72);
       const lit = l.mode === 2 ? l.lights[1].visible : true; // respect flicker
       const t = Math.max(0, 1 - Math.abs(l.o.position.z - CAR_Z) / 64);
-      target = lit ? t * t * REAL_I : 0;
+      target = lit ? t * t * REAL_I * marketShockLightBoost(shockAmount) : 0;
     }
     // when a light HOPS to a different lamp, snap to that lamp's brightness instead
     // of carrying the old value across the teleport (that carry-over was the flicker).
@@ -736,6 +743,10 @@ export function createWorld(detail: "full" | "reduced" = "full"): World {
     group,
     surfaceY,
     setLaneBet(on: boolean) { laneTarget = on ? 1 : 0; },
+    setMarketShock(amount, direction) {
+      shockAmount = Math.max(0, Math.min(1, Number.isFinite(amount) ? amount : 0));
+      shockColor.set(direction < 0 ? "#ff326f" : "#2effc5");
+    },
     setTheme,
     currentTheme: () => curKey,
     update(dt, speed, grade) {
@@ -749,6 +760,8 @@ export function createWorld(detail: "full" | "reduced" = "full"): World {
         mat.uniforms.uOffset.value += flow * 0.06;
         mat.uniforms.uScroll.value = scroll;
         mat.uniforms.uGrade.value = gradeSlopeCur;
+        mat.uniforms.uShock.value = shockAmount;
+        mat.uniforms.uShockColor.value.copy(shockColor);
       }
       // ease the lane-bet road tint in/out when the Clown Car is selected/deselected
       roadMat.uniforms.uLane.value += (laneTarget - roadMat.uniforms.uLane.value) * 0.1;
