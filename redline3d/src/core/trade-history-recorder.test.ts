@@ -266,6 +266,7 @@ describe("trade history recorder", () => {
       wallet: () => "AliceWallet",
       store,
       newId: () => aliceId,
+      now: () => 1_750_000_000_002,
     });
     expect(tabA.pending()).toBe(0);
 
@@ -276,6 +277,7 @@ describe("trade history recorder", () => {
       wallet: () => "AliceWallet",
       store,
       newId: () => bobId,
+      now: () => 1_750_000_000_001,
     });
     tabB.begin(draft);
     tabB.complete({ ...completion, exitPrice: 152 });
@@ -363,6 +365,34 @@ describe("trade history recorder", () => {
     await recreated.flush();
     expect(recordTrade).toHaveBeenCalledWith(validRecord, "AliceWallet");
     expect(recreated.pending()).toBe(0);
+  });
+
+  it("skips a parseable incomplete record without breaking pending, complete, or flush", async () => {
+    const store = memoryStore();
+    const incompleteId = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
+    store.setItem(
+      `redline.trade-history.outbox.v1:AliceWallet:${incompleteId}`,
+      JSON.stringify({ queueOrder: 0, record: { id: incompleteId } }),
+    );
+    const recordTrade = vi.fn().mockResolvedValue({});
+    const recorder = createTradeHistoryRecorder({
+      api: { recordTrade } as any,
+      wallet: () => "AliceWallet",
+      store,
+      newId: () => "11111111-1111-4111-8111-111111111111",
+    });
+    let pendingBefore = -1;
+    expect(() => { pendingBefore = recorder.pending(); }).not.toThrow();
+
+    recorder.begin(draft);
+    let validRecord: ReturnType<typeof recorder.complete> = null;
+    expect(() => { validRecord = recorder.complete(completion); }).not.toThrow();
+    await expect(recorder.flush()).resolves.toBeUndefined();
+
+    expect(pendingBefore).toBe(0);
+    expect(recordTrade).toHaveBeenCalledTimes(1);
+    expect(recordTrade).toHaveBeenCalledWith(validRecord, "AliceWallet");
+    expect(recorder.pending()).toBe(0);
   });
 
   it("keeps a same-session fallback when storage get, set, and remove throw", async () => {
@@ -508,6 +538,60 @@ describe("trade history recorder", () => {
       records[2],
     ]);
     expect(recreated.pending()).toBe(0);
+  });
+
+  it("persists unique deterministic orders for simultaneous cross-realm enqueues", async () => {
+    const store = memoryStore({ enumerate: (keys) => keys.reverse() });
+    const enqueueEpoch = 1_750_000_000_000;
+    const realmA = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
+    const realmB = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb";
+    const recordAId = "33333333-3333-4333-8333-333333333333";
+    const recordBId = "11111111-1111-4111-8111-111111111111";
+
+    vi.resetModules();
+    const tabAModule = await import("./trade-history-recorder");
+    const tabA = tabAModule.createTradeHistoryRecorder({
+      api: { recordTrade: vi.fn() } as any,
+      wallet: () => "AliceWallet",
+      store,
+      newId: () => recordAId,
+      now: () => enqueueEpoch,
+      realmId: realmA,
+    });
+    tabA.begin(draft);
+    const recordA = tabA.complete(completion)!;
+
+    vi.resetModules();
+    const tabBModule = await import("./trade-history-recorder");
+    const tabB = tabBModule.createTradeHistoryRecorder({
+      api: { recordTrade: vi.fn() } as any,
+      wallet: () => "AliceWallet",
+      store,
+      newId: () => recordBId,
+      now: () => enqueueEpoch,
+      realmId: realmB,
+    });
+    tabB.begin(draft);
+    const recordB = tabB.complete({ ...completion, exitPrice: 152 })!;
+
+    const storedA = JSON.parse(store.getItem(`redline.trade-history.outbox.v1:AliceWallet:${recordAId}`)!);
+    const storedB = JSON.parse(store.getItem(`redline.trade-history.outbox.v1:AliceWallet:${recordBId}`)!);
+    const epochPrefix = String(enqueueEpoch).padStart(16, "0");
+
+    vi.resetModules();
+    const observerModule = await import("./trade-history-recorder");
+    const recordTrade = vi.fn().mockResolvedValue({});
+    const observer = observerModule.createTradeHistoryRecorder({
+      api: { recordTrade } as any,
+      wallet: () => "AliceWallet",
+      store,
+    });
+    await observer.flush();
+
+    expect(storedA.queueOrder).toBe(`${epochPrefix}:${realmA}:0000000000000000`);
+    expect(storedB.queueOrder).toBe(`${epochPrefix}:${realmB}:0000000000000000`);
+    expect(storedA.queueOrder).not.toBe(storedB.queueOrder);
+    expect(recordTrade.mock.calls.map(([record]) => record)).toEqual([recordA, recordB]);
   });
 
   it("shares one in-flight flush across concurrent callers", async () => {

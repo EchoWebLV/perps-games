@@ -11,6 +11,72 @@ export interface TradeHistoryRecorder {
 }
 
 const PREFIX = "redline.trade-history.outbox.v1:";
+const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+const QUEUE_ORDER_PATTERN = /^\d{16}:[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}:\d{16}$/i;
+const ORDER_PART_WIDTH = 16;
+
+interface RealmOrderState {
+  counter: number;
+  lastEpoch: number;
+}
+
+const realmOrderStates = new Map<string, RealmOrderState>();
+let generatedRealmId: string | null = null;
+
+function moduleRealmId(): string {
+  generatedRealmId ??= crypto.randomUUID();
+  return generatedRealmId;
+}
+
+function orderPart(value: number): string {
+  return String(Math.min(Number.MAX_SAFE_INTEGER, Math.max(0, Math.floor(value)))).padStart(ORDER_PART_WIDTH, "0");
+}
+
+function nextQueueOrder(realmId: string, now: () => number): string {
+  let state = realmOrderStates.get(realmId);
+  if (!state) {
+    state = { counter: 0, lastEpoch: 0 };
+    realmOrderStates.set(realmId, state);
+  }
+  const observedEpoch = now();
+  const safeEpoch = Number.isFinite(observedEpoch) && observedEpoch >= 0 ? observedEpoch : Date.now();
+  const enqueueEpoch = Math.max(state.lastEpoch, Math.floor(safeEpoch));
+  const queueOrder = `${orderPart(enqueueEpoch)}:${realmId}:${orderPart(state.counter)}`;
+  state.lastEpoch = enqueueEpoch;
+  state.counter += 1;
+  return queueOrder;
+}
+
+function legacyQueueOrder(value: number, recordId: string): string {
+  return `${orderPart(value)}:${recordId.toLowerCase()}:${orderPart(0)}`;
+}
+
+function recordForId(value: unknown, id: string): TradeRecordInput | null {
+  if (typeof value !== "object" || value === null) return null;
+  const record = value as Record<string, unknown>;
+  if (record.id !== id || !UUID_PATTERN.test(id)) return null;
+  if (record.asset !== "BTC" && record.asset !== "ETH" && record.asset !== "SOL") return null;
+  if (record.dir !== 1 && record.dir !== -1) return null;
+  if (typeof record.lev !== "number" || !Number.isInteger(record.lev) || record.lev < 1 || record.lev > 3000) return null;
+  if (typeof record.stakeBase !== "number" || !Number.isSafeInteger(record.stakeBase) || record.stakeBase <= 0) return null;
+  if (typeof record.entryPrice !== "number" || !Number.isFinite(record.entryPrice) || record.entryPrice <= 0) return null;
+  if (typeof record.exitPrice !== "number" || !Number.isFinite(record.exitPrice) || record.exitPrice <= 0) return null;
+  if (typeof record.openedAt !== "string" || Number.isNaN(Date.parse(record.openedAt))) return null;
+  if (record.outcome !== "cashout" && record.outcome !== "cap" && record.outcome !== "liq" && record.outcome !== "time") return null;
+  if (typeof record.payoutBase !== "number" || !Number.isSafeInteger(record.payoutBase) || record.payoutBase < 0) return null;
+  return {
+    id,
+    asset: record.asset,
+    dir: record.dir,
+    lev: record.lev,
+    stakeBase: record.stakeBase,
+    entryPrice: record.entryPrice,
+    exitPrice: record.exitPrice,
+    openedAt: record.openedAt,
+    outcome: record.outcome,
+    payoutBase: record.payoutBase,
+  };
+}
 
 interface OutboxState {
   known: Map<string, QueuedTrade>;
@@ -19,7 +85,7 @@ interface OutboxState {
 }
 
 interface QueuedTrade {
-  queueOrder: number;
+  queueOrder: string;
   record: TradeRecordInput;
 }
 
@@ -39,9 +105,14 @@ export function createTradeHistoryRecorder(deps: {
   wallet: () => string;
   store?: Storage;
   newId?: () => string;
+  now?: () => number;
+  realmId?: string;
 }): TradeHistoryRecorder {
   const store = deps.store ?? localStorage;
   const newId = deps.newId ?? (() => crypto.randomUUID());
+  const now = deps.now ?? Date.now;
+  const realmId = (deps.realmId ?? moduleRealmId()).toLowerCase();
+  if (!UUID_PATTERN.test(realmId)) throw new Error("invalid_trade_history_realm_id");
   const outboxes = outboxesFor(store);
   let active: (ActiveTradeDraft & { id: string; outboxKey: string }) | null = null;
   const flushing = new Map<string, Promise<void>>();
@@ -56,10 +127,6 @@ export function createTradeHistoryRecorder(deps: {
     }
     return state;
   };
-  const recordForId = (value: unknown, id: string): TradeRecordInput | null =>
-    typeof value === "object" && value !== null && "id" in value && value.id === id
-      ? value as TradeRecordInput
-      : null;
   const openedAtOrder = (record: TradeRecordInput): number => {
     const openedAt = Date.parse(record.openedAt);
     return Number.isFinite(openedAt) ? openedAt : 0;
@@ -74,13 +141,17 @@ export function createTradeHistoryRecorder(deps: {
     if (typeof value === "object" && value !== null && "queueOrder" in value && "record" in value) {
       const queueOrder = value.queueOrder;
       const record = recordForId(value.record, id);
-      if (typeof queueOrder === "number" && Number.isSafeInteger(queueOrder) && queueOrder >= 0 && record) {
-        return { queueOrder, record };
+      if (!record) return null;
+      if (typeof queueOrder === "string" && QUEUE_ORDER_PATTERN.test(queueOrder)) {
+        return { queueOrder: queueOrder.toLowerCase(), record };
+      }
+      if (typeof queueOrder === "number" && Number.isSafeInteger(queueOrder) && queueOrder >= 0) {
+        return { queueOrder: legacyQueueOrder(queueOrder, record.id), record };
       }
       return null;
     }
     const record = recordForId(value, id);
-    return record ? { queueOrder: openedAtOrder(record), record } : null;
+    return record ? { queueOrder: legacyQueueOrder(openedAtOrder(record), record.id), record } : null;
   };
   const encodeQueued = (queued: QueuedTrade): string => JSON.stringify(queued);
   const readDurable = (outboxKey: string): Map<string, QueuedTrade> | null => {
@@ -120,10 +191,11 @@ export function createTradeHistoryRecorder(deps: {
     for (const [id, queued] of state.volatile) records.set(id, queued);
     for (const id of state.removed) records.delete(id);
     state.known = new Map(records);
-    return [...records.values()].sort((left, right) =>
-      left.queueOrder - right.queueOrder ||
-      left.record.openedAt.localeCompare(right.record.openedAt) ||
-      left.record.id.localeCompare(right.record.id));
+    return [...records.values()].sort((left, right) => {
+      if (left.queueOrder < right.queueOrder) return -1;
+      if (left.queueOrder > right.queueOrder) return 1;
+      return left.record.id < right.record.id ? -1 : left.record.id > right.record.id ? 1 : 0;
+    });
   };
   const addAt = (outboxKey: string, queued: QueuedTrade) => {
     const state = stateAt(outboxKey);
@@ -193,9 +265,8 @@ export function createTradeHistoryRecorder(deps: {
       active = null;
       const items = readAt(outboxKey);
       if (!items.some((item) => item.record.id === record.id)) {
-        const lastOrder = items.reduce((highest, item) => Math.max(highest, item.queueOrder), -1);
         addAt(outboxKey, {
-          queueOrder: Math.max(openedAtOrder(record), lastOrder + 1),
+          queueOrder: nextQueueOrder(realmId, now),
           record,
         });
       }
