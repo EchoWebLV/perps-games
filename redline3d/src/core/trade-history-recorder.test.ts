@@ -395,6 +395,47 @@ describe("trade history recorder", () => {
     expect(recorder.pending()).toBe(0);
   });
 
+  it("skips non-UTC persisted timestamps without blocking a valid record", async () => {
+    const store = memoryStore();
+    const invalidRecords = [
+      {
+        id: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+        openedAt: "2026-07-10",
+      },
+      {
+        id: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+        openedAt: "July 10, 2026 10:00:00 UTC",
+      },
+    ];
+    invalidRecords.forEach(({ id, openedAt }, queueOrder) => {
+      store.setItem(
+        `redline.trade-history.outbox.v1:AliceWallet:${id}`,
+        JSON.stringify({ queueOrder, record: { id, ...draft, ...completion, openedAt } }),
+      );
+    });
+    const validId = "11111111-1111-4111-8111-111111111111";
+    const recordTrade = vi.fn(async (record: { id: string }) => {
+      if (record.id !== validId) throw new Error("invalid_opened_at");
+      return {};
+    });
+    const recorder = createTradeHistoryRecorder({
+      api: { recordTrade } as any,
+      wallet: () => "AliceWallet",
+      store,
+      newId: () => validId,
+    });
+    recorder.begin(draft);
+    const validRecord = recorder.complete(completion)!;
+    let pendingBefore = -1;
+    expect(() => { pendingBefore = recorder.pending(); }).not.toThrow();
+
+    await expect(recorder.flush()).resolves.toBeUndefined();
+
+    expect(pendingBefore).toBe(1);
+    expect(recordTrade.mock.calls.map(([record]) => record)).toEqual([validRecord]);
+    expect(recorder.pending()).toBe(0);
+  });
+
   it("keeps a same-session fallback when storage get, set, and remove throw", async () => {
     const store = throwingStore();
     const first = createTradeHistoryRecorder({
@@ -577,6 +618,7 @@ describe("trade history recorder", () => {
     const storedA = JSON.parse(store.getItem(`redline.trade-history.outbox.v1:AliceWallet:${recordAId}`)!);
     const storedB = JSON.parse(store.getItem(`redline.trade-history.outbox.v1:AliceWallet:${recordBId}`)!);
     const epochPrefix = String(enqueueEpoch).padStart(16, "0");
+    const nextEpochPrefix = String(enqueueEpoch + 1).padStart(16, "0");
 
     vi.resetModules();
     const observerModule = await import("./trade-history-recorder");
@@ -589,9 +631,49 @@ describe("trade history recorder", () => {
     await observer.flush();
 
     expect(storedA.queueOrder).toBe(`${epochPrefix}:${realmA}:0000000000000000`);
-    expect(storedB.queueOrder).toBe(`${epochPrefix}:${realmB}:0000000000000000`);
+    expect(storedB.queueOrder).toBe(`${nextEpochPrefix}:${realmB}:0000000000000000`);
     expect(storedA.queueOrder).not.toBe(storedB.queueOrder);
     expect(recordTrade.mock.calls.map(([record]) => record)).toEqual([recordA, recordB]);
+  });
+
+  it("keeps pending FIFO after a fresh realm observes a rolled-back clock", async () => {
+    const store = memoryStore({ enumerate: (keys) => keys.reverse() });
+    const oldEpoch = 1_750_000_000_100;
+    const oldId = "33333333-3333-4333-8333-333333333333";
+    const newId = "11111111-1111-4111-8111-111111111111";
+
+    vi.resetModules();
+    const oldModule = await import("./trade-history-recorder");
+    const oldRecorder = oldModule.createTradeHistoryRecorder({
+      api: { recordTrade: vi.fn() } as any,
+      wallet: () => "AliceWallet",
+      store,
+      newId: () => oldId,
+      now: () => oldEpoch,
+      realmId: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+    });
+    oldRecorder.begin(draft);
+    const oldRecord = oldRecorder.complete(completion)!;
+
+    vi.resetModules();
+    const freshModule = await import("./trade-history-recorder");
+    const recordTrade = vi.fn().mockResolvedValue({});
+    const freshRecorder = freshModule.createTradeHistoryRecorder({
+      api: { recordTrade } as any,
+      wallet: () => "AliceWallet",
+      store,
+      newId: () => newId,
+      now: () => oldEpoch - 100,
+      realmId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+    });
+    freshRecorder.begin(draft);
+    const newRecord = freshRecorder.complete({ ...completion, exitPrice: 152 })!;
+    const storedNew = JSON.parse(store.getItem(`redline.trade-history.outbox.v1:AliceWallet:${newId}`)!);
+
+    await freshRecorder.flush();
+
+    expect(storedNew.queueOrder.slice(0, 16)).toBe(String(oldEpoch + 1).padStart(16, "0"));
+    expect(recordTrade.mock.calls.map(([record]) => record)).toEqual([oldRecord, newRecord]);
   });
 
   it("shares one in-flight flush across concurrent callers", async () => {

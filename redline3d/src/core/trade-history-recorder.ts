@@ -13,6 +13,7 @@ export interface TradeHistoryRecorder {
 const PREFIX = "redline.trade-history.outbox.v1:";
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const QUEUE_ORDER_PATTERN = /^\d{16}:[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}:\d{16}$/i;
+const UTC_DATETIME_PATTERN = /^((\d\d[2468][048]|\d\d[13579][26]|\d\d0[48]|[02468][048]00|[13579][26]00)-02-29|\d{4}-((0[13578]|1[02])-(0[1-9]|[12]\d|3[01])|(0[469]|11)-(0[1-9]|[12]\d|30)|(02)-(0[1-9]|1\d|2[0-8])))T([01]\d|2[0-3]):[0-5]\d(:[0-5]\d(\.\d+)?)?Z$/;
 const ORDER_PART_WIDTH = 16;
 
 interface RealmOrderState {
@@ -32,7 +33,14 @@ function orderPart(value: number): string {
   return String(Math.min(Number.MAX_SAFE_INTEGER, Math.max(0, Math.floor(value)))).padStart(ORDER_PART_WIDTH, "0");
 }
 
-function nextQueueOrder(realmId: string, now: () => number): string {
+function queueOrderEpoch(queueOrder: string): number | null {
+  if (!QUEUE_ORDER_PATTERN.test(queueOrder)) return null;
+  const epoch = Number(queueOrder.slice(0, ORDER_PART_WIDTH));
+  const counter = Number(queueOrder.slice(-ORDER_PART_WIDTH));
+  return Number.isSafeInteger(epoch) && Number.isSafeInteger(counter) ? epoch : null;
+}
+
+function nextQueueOrder(realmId: string, now: () => number, maxPendingEpoch: number): string {
   let state = realmOrderStates.get(realmId);
   if (!state) {
     state = { counter: 0, lastEpoch: 0 };
@@ -40,7 +48,7 @@ function nextQueueOrder(realmId: string, now: () => number): string {
   }
   const observedEpoch = now();
   const safeEpoch = Number.isFinite(observedEpoch) && observedEpoch >= 0 ? observedEpoch : Date.now();
-  const enqueueEpoch = Math.max(state.lastEpoch, Math.floor(safeEpoch));
+  const enqueueEpoch = Math.max(state.lastEpoch, Math.floor(safeEpoch), maxPendingEpoch + 1);
   const queueOrder = `${orderPart(enqueueEpoch)}:${realmId}:${orderPart(state.counter)}`;
   state.lastEpoch = enqueueEpoch;
   state.counter += 1;
@@ -61,7 +69,7 @@ function recordForId(value: unknown, id: string): TradeRecordInput | null {
   if (typeof record.stakeBase !== "number" || !Number.isSafeInteger(record.stakeBase) || record.stakeBase <= 0) return null;
   if (typeof record.entryPrice !== "number" || !Number.isFinite(record.entryPrice) || record.entryPrice <= 0) return null;
   if (typeof record.exitPrice !== "number" || !Number.isFinite(record.exitPrice) || record.exitPrice <= 0) return null;
-  if (typeof record.openedAt !== "string" || Number.isNaN(Date.parse(record.openedAt))) return null;
+  if (typeof record.openedAt !== "string" || !UTC_DATETIME_PATTERN.test(record.openedAt)) return null;
   if (record.outcome !== "cashout" && record.outcome !== "cap" && record.outcome !== "liq" && record.outcome !== "time") return null;
   if (typeof record.payoutBase !== "number" || !Number.isSafeInteger(record.payoutBase) || record.payoutBase < 0) return null;
   return {
@@ -142,7 +150,7 @@ export function createTradeHistoryRecorder(deps: {
       const queueOrder = value.queueOrder;
       const record = recordForId(value.record, id);
       if (!record) return null;
-      if (typeof queueOrder === "string" && QUEUE_ORDER_PATTERN.test(queueOrder)) {
+      if (typeof queueOrder === "string" && queueOrderEpoch(queueOrder) !== null) {
         return { queueOrder: queueOrder.toLowerCase(), record };
       }
       if (typeof queueOrder === "number" && Number.isSafeInteger(queueOrder) && queueOrder >= 0) {
@@ -265,8 +273,12 @@ export function createTradeHistoryRecorder(deps: {
       active = null;
       const items = readAt(outboxKey);
       if (!items.some((item) => item.record.id === record.id)) {
+        const maxPendingEpoch = items.reduce(
+          (highest, item) => Math.max(highest, queueOrderEpoch(item.queueOrder) ?? -1),
+          -1,
+        );
         addAt(outboxKey, {
-          queueOrder: nextQueueOrder(realmId, now),
+          queueOrder: nextQueueOrder(realmId, now, maxPendingEpoch),
           record,
         });
       }
