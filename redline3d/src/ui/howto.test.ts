@@ -41,6 +41,16 @@ describe("how-to seen flag — durable once-ever", () => {
 });
 
 describe("how-to gameplay cards", () => {
+  test("captures pointer input above the canvas joystick", () => {
+    const { host, panel } = openHowTo({ reducedMotion: () => true });
+    host.style.pointerEvents = "none";
+    const overlay = panel.parentElement as HTMLElement;
+
+    expect(overlay.style.position).toBe("fixed");
+    expect(overlay.style.pointerEvents).toBe("auto");
+    expect(overlay.style.zIndex).toBe("12");
+  });
+
   test("shows the five approved cards in order", () => {
     const { panel } = openHowTo({ reducedMotion: () => true });
     const expected = [

@@ -129,7 +129,7 @@ function injectStyles() {
 export function createHowTo(parent: HTMLElement, options: HowToOptions = {}): HowTo {
   injectStyles();
   const overlay = document.createElement("div");
-  overlay.style.cssText = ["position:fixed","inset:0","z-index:12","display:none","align-items:center","justify-content:center","padding:20px","background:rgba(0,0,0,.84)","backdrop-filter:blur(3px)"].join(";");
+  overlay.style.cssText = ["position:fixed","inset:0","z-index:12","display:none","align-items:center","justify-content:center","padding:20px","background:rgba(0,0,0,.84)","backdrop-filter:blur(3px)","pointer-events:auto"].join(";");
   const panel = document.createElement("div");
   panel.className = "ht-panel";
   overlay.appendChild(panel);
