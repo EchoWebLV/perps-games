@@ -52,7 +52,7 @@ export function createHud(parent: HTMLElement): Hud {
     <div id="tmrchip" class="panel chip" style="position:absolute;top:max(12px,env(safe-area-inset-top));left:50%;transform:translateX(-50%);padding:5px 13px">
       <span id="timer" class="num" style="font-size:15px;letter-spacing:.1em;color:var(--mut)">1:00</span></div>
 
-    <div id="minipanel" class="panel" style="position:absolute;left:50%;transform:translateX(-50%);top:64px;width:min(420px,92%);height:70px;overflow:hidden;padding:0">
+    <div id="minipanel" class="panel" style="position:absolute;left:50%;transform:translateX(-50%);top:calc(max(10px,env(safe-area-inset-top)) + 54px);width:min(420px,92%);height:70px;overflow:hidden;padding:0">
       <canvas id="mini" style="width:100%;height:100%;display:block"></canvas>
       <div class="pe" style="position:absolute;top:6px;left:7px;display:flex;gap:5px">
         <div class="atab" data-asset="BTC">BTC</div>
