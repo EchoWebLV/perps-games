@@ -270,7 +270,23 @@ export interface WorldPicker {
   set: (key: string) => void;
 }
 
-export function createCarPicker(parent: HTMLElement, cars: CarOption[], onPick: (c: CarOption) => void, onUpgrades?: () => void, toggles: MenuToggle[] = [], onLogout?: () => void, onClose?: (reason?: "dismiss" | "chain") => void, accountInfo?: () => { label: string; sub: string }, worlds?: WorldPicker): Garage {
+export interface MenuFeatures {
+  showGarageAndUpgrades?: boolean;
+  onHistory?: () => void;
+}
+
+export function createCarPicker(
+  parent: HTMLElement,
+  cars: CarOption[],
+  onPick: (c: CarOption) => void,
+  onUpgrades?: () => void,
+  toggles: MenuToggle[] = [],
+  onLogout?: () => void,
+  onClose?: (reason?: "dismiss" | "chain") => void,
+  accountInfo?: () => { label: string; sub: string },
+  worlds?: WorldPicker,
+  menuFeatures: MenuFeatures = {},
+): Garage {
   injectStyles();
 
   const wrap = document.createElement("div");
@@ -296,11 +312,14 @@ export function createCarPicker(parent: HTMLElement, cars: CarOption[], onPick: 
 
   const menuPanel = document.createElement("div");
   menuPanel.className = "panel gpanel";
+  const localRows = menuFeatures.showGarageAndUpgrades === false ? "" : `
+      <button class="gmenu-item" data-go="garage"><span class="gmenu-ic">${icon("car", 20)}</span><span class="gmenu-tx"><b>Garage</b><small>your card collection</small></span><span class="gmenu-arr">${icon("chevron", 16)}</span></button>
+      <button class="gmenu-item" data-act="upgrades"><span class="gmenu-ic">${icon("level", 20)}</span><span class="gmenu-tx"><b>Upgrades</b><small>tune your car</small></span><span class="gmenu-arr">${icon("chevron", 16)}</span></button>`;
+  const historyRow = `
+      <button class="gmenu-item" data-act="history"><span class="gmenu-ic">${icon("clock", 20)}</span><span class="gmenu-tx"><b>History</b><small>your settled trades</small></span><span class="gmenu-arr">${icon("chevron", 16)}</span></button>`;
   menuPanel.innerHTML =
     `<div class="ghead"><span class="lbl">menu</span><button class="gicon-btn" data-act="close" aria-label="Close">✕</button></div>` +
-    `<div class="gmenu">
-      <button class="gmenu-item" data-go="garage"><span class="gmenu-ic">${icon("car", 20)}</span><span class="gmenu-tx"><b>Garage</b><small>your card collection</small></span><span class="gmenu-arr">${icon("chevron", 16)}</span></button>
-      <button class="gmenu-item" data-act="upgrades"><span class="gmenu-ic">${icon("level", 20)}</span><span class="gmenu-tx"><b>Upgrades</b><small>tune your car</small></span><span class="gmenu-arr">${icon("chevron", 16)}</span></button>
+    `<div class="gmenu">${localRows}${historyRow}
       <button class="gmenu-item" data-act="howto"><span class="gmenu-ic">${icon("help", 20)}</span><span class="gmenu-tx"><b>How to play</b><small>controls &amp; the bet</small></span><span class="gmenu-arr">${icon("chevron", 16)}</span></button>
     </div>`;
 
@@ -713,6 +732,7 @@ export function createCarPicker(parent: HTMLElement, cars: CarOption[], onPick: 
     if (!t) return;
     if (t.dataset.world !== undefined) { if (t.classList.contains("locked")) return; worlds?.set(t.dataset.world); renderWorlds(); return; } // switch level skin (sealed skins ignore the tap), stay open
     if (t.dataset.toggle !== undefined) { const i = +t.dataset.toggle; toggles[i].set(!toggles[i].get()); renderToggles(); return; }
+    if (t.dataset.act === "history") { close("chain"); menuFeatures.onHistory?.(); return; }
     if (t.dataset.act === "close") close();
     else if (t.dataset.act === "back") setView("menu");
     else if (t.dataset.act === "upgrades") { close("chain"); onUpgrades?.(); }

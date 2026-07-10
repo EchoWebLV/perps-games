@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { describe, expect, test } from "vitest";
+import { describe, expect, it, test } from "vitest";
 import { createCarPicker, setHudMenuMode, type CarOption } from "./carpicker";
 
 function fakeEl(display = "") {
@@ -158,5 +158,31 @@ describe("setHudMenuMode", () => {
     expect(bal.style.display).toBe("flex");
     expect(menu.style.display).toBe("");
     expect(dock.style.display).toBe("grid");
+  });
+});
+
+describe("hamburger product menu", () => {
+  const oneCar: CarOption[] = [{ name: "Solana Paper", url: "/models/trabant.glb" }];
+
+  it("always exposes History but can omit Garage and Upgrades", () => {
+    const parent = document.createElement("div");
+    createCarPicker(parent, oneCar, () => {}, undefined, [], undefined, undefined, undefined, undefined, {
+      showGarageAndUpgrades: false,
+      onHistory: () => {},
+    });
+    expect(parent.querySelector('[data-act="history"]')).not.toBeNull();
+    expect(parent.querySelector('[data-go="garage"]')).toBeNull();
+    expect(parent.querySelector('[data-act="upgrades"]')).toBeNull();
+  });
+
+  it("calls the History callback from the menu row", () => {
+    const parent = document.createElement("div");
+    let opens = 0;
+    createCarPicker(parent, oneCar, () => {}, undefined, [], undefined, undefined, undefined, undefined, {
+      showGarageAndUpgrades: false,
+      onHistory: () => { opens++; },
+    });
+    (parent.querySelector('[data-act="history"]') as HTMLButtonElement).click();
+    expect(opens).toBe(1);
   });
 });
