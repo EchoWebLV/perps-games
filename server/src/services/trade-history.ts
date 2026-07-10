@@ -106,7 +106,7 @@ export function makeTradeHistory(opts: { db: any; users: Users; now?: () => Date
     },
 
     async list(userId: string, cursor: string | undefined, limit: number): Promise<TradeHistoryPage> {
-      const c = cursor ? decodeCursor(cursor) : null;
+      const c = cursor === undefined ? null : decodeCursor(cursor);
       const before = c
         ? or(
             lt(tradeHistory.settledAt, new Date(c.settledAt)),

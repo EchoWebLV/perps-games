@@ -91,6 +91,12 @@ describe("trade history service", () => {
     await expect(history.list(userId, malformed, 25)).rejects.toThrowError(new Error("bad_cursor"));
   });
 
+  it("rejects an empty cursor", async () => {
+    const { history, userId } = await listSubject("wallet:empty-cursor");
+
+    await expect(history.list(userId, "", 25)).rejects.toThrowError(new Error("bad_cursor"));
+  });
+
   it("normalizes malformed JSON cursor failures", async () => {
     const { history, userId } = await listSubject("wallet:bad-json-cursor");
     const malformed = Buffer.from("{").toString("base64url");
