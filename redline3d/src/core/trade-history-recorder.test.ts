@@ -1,12 +1,12 @@
 import { describe, expect, it, vi } from "vitest";
 import { createTradeHistoryRecorder } from "./trade-history-recorder";
 
-function memoryStore(): Storage {
+function memoryStore(onRemove?: (key: string) => void): Storage {
   const values = new Map<string, string>();
   return {
     getItem: (key) => values.get(key) ?? null,
     setItem: (key, value) => { values.set(key, value); },
-    removeItem: (key) => { values.delete(key); },
+    removeItem: (key) => { values.delete(key); onRemove?.(key); },
     clear: () => values.clear(),
     key: (index) => [...values.keys()][index] ?? null,
     get length() { return values.size; },
@@ -19,8 +19,8 @@ function throwingStore(): Storage {
     setItem: () => { throw new Error("set_failed"); },
     removeItem: () => { throw new Error("remove_failed"); },
     clear: () => {},
-    key: () => null,
-    get length() { return 0; },
+    key: () => "redline.trade-history.outbox.v1:AliceWallet:existing",
+    get length() { return 1; },
   };
 }
 
@@ -201,6 +201,102 @@ describe("trade history recorder", () => {
       ["22222222-2222-4222-8222-222222222222", "AliceWallet"],
     ]);
     expect(recorder.pending()).toBe(0);
+  });
+
+  it("restarts a drain when append and flush land before latch cleanup", async () => {
+    const ids = [
+      "11111111-1111-4111-8111-111111111111",
+      "22222222-2222-4222-8222-222222222222",
+    ];
+    let recorder!: ReturnType<typeof createTradeHistoryRecorder>;
+    let racedFlush: Promise<void> | undefined;
+    let scheduleRace = true;
+    const store = memoryStore(() => {
+      if (!scheduleRace) return;
+      scheduleRace = false;
+      queueMicrotask(() => {
+        recorder.begin(draft);
+        recorder.complete({ ...completion, exitPrice: 152 });
+        racedFlush = recorder.flush();
+      });
+    });
+    const recordTrade = vi.fn().mockResolvedValue({});
+    recorder = createTradeHistoryRecorder({
+      api: { recordTrade } as any,
+      wallet: () => "AliceWallet",
+      store,
+      newId: () => ids.shift()!,
+    });
+    recorder.begin(draft);
+    recorder.complete(completion);
+
+    const firstFlush = recorder.flush();
+    await firstFlush;
+
+    expect(racedFlush).toBe(firstFlush);
+    expect(recordTrade.mock.calls.map(([record]) => record.id)).toEqual([
+      "11111111-1111-4111-8111-111111111111",
+      "22222222-2222-4222-8222-222222222222",
+    ]);
+    expect(recorder.pending()).toBe(0);
+  });
+
+  it("keeps cross-tab records collision-free and removes only the uploaded record", async () => {
+    const store = memoryStore();
+    const aliceId = "22222222-2222-4222-8222-222222222222";
+    const bobId = "11111111-1111-4111-8111-111111111111";
+    const recordTradeA = vi.fn(async (record: { id: string }) => {
+      if (record.id === aliceId) throw new Error("offline");
+      return {};
+    });
+
+    vi.resetModules();
+    const tabAModule = await import("./trade-history-recorder");
+    const tabA = tabAModule.createTradeHistoryRecorder({
+      api: { recordTrade: recordTradeA } as any,
+      wallet: () => "AliceWallet",
+      store,
+      newId: () => aliceId,
+    });
+    expect(tabA.pending()).toBe(0);
+
+    vi.resetModules();
+    const tabBModule = await import("./trade-history-recorder");
+    const tabB = tabBModule.createTradeHistoryRecorder({
+      api: { recordTrade: vi.fn() } as any,
+      wallet: () => "AliceWallet",
+      store,
+      newId: () => bobId,
+    });
+    tabB.begin(draft);
+    tabB.complete({ ...completion, exitPrice: 152 });
+
+    tabA.begin(draft);
+    tabA.complete(completion);
+
+    expect(tabA.pending()).toBe(2);
+    expect(tabB.pending()).toBe(2);
+
+    await tabA.flush();
+    expect(recordTradeA.mock.calls.map(([record]) => record.id)).toEqual([bobId, aliceId]);
+    expect(tabB.pending()).toBe(1);
+
+    vi.resetModules();
+    const observerModule = await import("./trade-history-recorder");
+    const recordTradeObserver = vi.fn().mockResolvedValue({});
+    const observer = observerModule.createTradeHistoryRecorder({
+      api: { recordTrade: recordTradeObserver } as any,
+      wallet: () => "AliceWallet",
+      store,
+    });
+    expect(observer.pending()).toBe(1);
+
+    await observer.flush();
+    expect(recordTradeObserver).toHaveBeenCalledWith(
+      expect.objectContaining({ id: aliceId }),
+      "AliceWallet",
+    );
+    expect(observer.pending()).toBe(0);
   });
 
   it("recreates over the same durable store and flushes its pending record", async () => {

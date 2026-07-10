@@ -111,6 +111,27 @@ describe("trade history routes", () => {
     expect(bobList.json()).toEqual({ items: [], nextCursor: null });
   });
 
+  it("accepts a matching expected wallet and still derives the stored wallet server-side", async () => {
+    ctx = await makeTestDb();
+    await bindDevWallet(ctx, "guard-match", "AliceWallet");
+
+    const response = await ctx.server.inject({
+      method: "POST",
+      url: "/v1/trades",
+      headers: {
+        ...headersFor("guard-match"),
+        "x-trade-wallet": "AliceWallet",
+      },
+      payload: body,
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(response.json()).toMatchObject({
+      id: body.id,
+      walletPublicKey: "AliceWallet",
+    });
+  });
+
   it.each([
     { method: "POST" as const, url: "/v1/trades", payload: body },
     { method: "GET" as const, url: "/v1/trades", payload: undefined },
