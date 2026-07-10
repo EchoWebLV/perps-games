@@ -732,7 +732,7 @@ export function createCarPicker(
     if (!t) return;
     if (t.dataset.world !== undefined) { if (t.classList.contains("locked")) return; worlds?.set(t.dataset.world); renderWorlds(); return; } // switch level skin (sealed skins ignore the tap), stay open
     if (t.dataset.toggle !== undefined) { const i = +t.dataset.toggle; toggles[i].set(!toggles[i].get()); renderToggles(); return; }
-    if (t.dataset.act === "history") { close("chain"); menuFeatures.onHistory?.(); return; }
+    if (t.dataset.act === "history") { close("chain"); menuButton.focus(); menuFeatures.onHistory?.(); return; }
     if (t.dataset.act === "close") close();
     else if (t.dataset.act === "back") setView("menu");
     else if (t.dataset.act === "upgrades") { close("chain"); onUpgrades?.(); }

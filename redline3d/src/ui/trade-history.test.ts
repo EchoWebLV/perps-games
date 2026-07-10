@@ -114,6 +114,7 @@ describe("trade history states", () => {
     const rows = tradeRows();
     expect(rows.map((row) => row.dataset.tradeId)).toEqual([firstTrade.id, secondTrade.id]);
     expect(rows[0]?.textContent).toContain(new Date(firstTrade.settledAt).toLocaleString());
+    expect(rows[0]?.querySelector("time")?.dateTime).toBe(firstTrade.settledAt);
     expect(rows[0]?.textContent).toContain("SOL");
     expect(rows[0]?.textContent).toContain("LONG");
     expect(rows[0]?.textContent).toContain("Leverage 250×");
@@ -138,11 +139,14 @@ describe("trade history states", () => {
     await panel.open();
 
     expect(historyBody()?.textContent).toContain("Could not load history");
-    document.querySelector<HTMLButtonElement>('[data-history="retry"]')?.click();
+    const retry = document.querySelector<HTMLButtonElement>('[data-history="retry"]');
+    retry?.focus();
+    retry?.click();
     await vi.waitFor(() => {
       expect(historyBody()?.textContent).toContain("No settled trades yet");
     });
     expect(load).toHaveBeenCalledTimes(2);
+    expect(document.activeElement).toBe(document.querySelector('[data-history="close"]'));
   });
 });
 
@@ -154,11 +158,14 @@ describe("trade history pagination", () => {
     const { panel } = mount({ load });
     await panel.open();
 
-    document.querySelector<HTMLButtonElement>('[data-history="more"]')?.click();
+    const more = document.querySelector<HTMLButtonElement>('[data-history="more"]');
+    more?.focus();
+    more?.click();
     await vi.waitFor(() => expect(tradeRows()).toHaveLength(2));
 
     expect(load).toHaveBeenLastCalledWith("next");
     expect(tradeRows().map((row) => row.dataset.tradeId)).toEqual([firstTrade.id, secondTrade.id]);
+    expect(document.activeElement).toBe(tradeRows()[1]);
   });
 
   it("deduplicates repeated trade ids and stops a repeated cursor loop", async () => {
@@ -191,6 +198,48 @@ describe("trade history pagination", () => {
     nextPage.resolve({ items: [secondTrade], nextCursor: null });
     await vi.waitFor(() => expect(tradeRows()).toHaveLength(2));
   });
+
+  it("keeps prior rows and retries an append with the original cursor", async () => {
+    const load = vi.fn()
+      .mockResolvedValueOnce({ items: [firstTrade], nextCursor: "next" })
+      .mockRejectedValueOnce(new Error("offline"))
+      .mockResolvedValueOnce({ items: [secondTrade], nextCursor: null });
+    const { panel } = mount({ load });
+    await panel.open();
+
+    document.querySelector<HTMLButtonElement>('[data-history="more"]')?.click();
+    await vi.waitFor(() => expect(document.querySelector('[data-history="retry"]')).not.toBeNull());
+    expect(tradeRows().map((row) => row.dataset.tradeId)).toEqual([firstTrade.id]);
+    expect(load).toHaveBeenLastCalledWith("next");
+
+    const retry = document.querySelector<HTMLButtonElement>('[data-history="retry"]');
+    retry?.focus();
+    retry?.click();
+    await vi.waitFor(() => expect(tradeRows()).toHaveLength(2));
+
+    expect(load.mock.calls.map(([cursor]) => cursor)).toEqual([undefined, "next", "next"]);
+    expect(tradeRows().map((row) => row.dataset.tradeId)).toEqual([firstTrade.id, secondTrade.id]);
+    expect(document.activeElement).toBe(tradeRows()[1]);
+  });
+
+  it("does not render an append response after close", async () => {
+    const appendPage = deferred<TradeHistoryPage>();
+    const load = vi.fn()
+      .mockResolvedValueOnce({ items: [firstTrade], nextCursor: "next" })
+      .mockImplementationOnce(() => appendPage.promise);
+    const { panel } = mount({ load });
+    await panel.open();
+
+    document.querySelector<HTMLButtonElement>('[data-history="more"]')?.click();
+    await vi.waitFor(() => expect(load).toHaveBeenCalledTimes(2));
+    panel.close();
+    appendPage.resolve({ items: [secondTrade], nextCursor: null });
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(panel.isOpen()).toBe(false);
+    expect(tradeRows()).toHaveLength(0);
+  });
 });
 
 describe("trade history modal behavior", () => {
@@ -210,6 +259,72 @@ describe("trade history modal behavior", () => {
     expect(buttons.length).toBeGreaterThan(0);
     expect(buttons.every((button) => button instanceof HTMLButtonElement)).toBe(true);
     expect(document.activeElement).toBe(document.querySelector('[data-history="close"]'));
+  });
+
+  it("wraps Tab and Shift+Tab inside the open modal", async () => {
+    const before = document.createElement("button");
+    before.textContent = "Before history";
+    document.body.appendChild(before);
+    const { panel } = mount({
+      load: async () => ({ items: [firstTrade], nextCursor: "next" }),
+    });
+    const after = document.createElement("button");
+    after.textContent = "After history";
+    document.body.appendChild(after);
+    await panel.open();
+
+    const close = document.querySelector<HTMLButtonElement>('[data-history="close"]');
+    const more = document.querySelector<HTMLButtonElement>('[data-history="more"]');
+    close?.focus();
+    const backwards = new KeyboardEvent("keydown", {
+      key: "Tab",
+      shiftKey: true,
+      bubbles: true,
+      cancelable: true,
+    });
+    document.dispatchEvent(backwards);
+    expect(backwards.defaultPrevented).toBe(true);
+    expect(document.activeElement).toBe(more);
+
+    const forwards = new KeyboardEvent("keydown", {
+      key: "Tab",
+      bubbles: true,
+      cancelable: true,
+    });
+    document.dispatchEvent(forwards);
+    expect(forwards.defaultPrevented).toBe(true);
+    expect(document.activeElement).toBe(close);
+
+    after.focus();
+    document.dispatchEvent(new KeyboardEvent("keydown", {
+      key: "Tab",
+      bubbles: true,
+      cancelable: true,
+    }));
+    expect(document.activeElement).toBe(close);
+    expect(document.activeElement).not.toBe(before);
+    expect(document.activeElement).not.toBe(after);
+  });
+
+  it("focuses the dialog when no enabled modal control remains", async () => {
+    const outside = document.createElement("button");
+    document.body.appendChild(outside);
+    const { panel } = mount({ signedIn: false });
+    await panel.open();
+    const close = document.querySelector<HTMLButtonElement>('[data-history="close"]');
+    const dialog = document.querySelector<HTMLElement>('[role="dialog"]');
+    if (close) close.disabled = true;
+    outside.focus();
+
+    const tab = new KeyboardEvent("keydown", {
+      key: "Tab",
+      bubbles: true,
+      cancelable: true,
+    });
+    document.dispatchEvent(tab);
+
+    expect(tab.defaultPrevented).toBe(true);
+    expect(document.activeElement).toBe(dialog);
   });
 
   it("closes on Escape and returns focus to the opener", async () => {
@@ -255,6 +370,44 @@ describe("trade history modal behavior", () => {
     expect(panel.isOpen()).toBe(true);
     expect(tradeRows().map((row) => row.dataset.tradeId)).toEqual([secondTrade.id]);
   });
+
+  it("does not load after closing during the pre-load flush", async () => {
+    const pendingFlush = deferred<void>();
+    const { panel, load } = mount({ flush: () => pendingFlush.promise });
+
+    const opening = panel.open();
+    expect(historyBody()?.textContent).toContain("Loading history");
+    panel.close();
+    pendingFlush.resolve(undefined);
+    await opening;
+
+    expect(panel.isOpen()).toBe(false);
+    expect(load).not.toHaveBeenCalled();
+    expect(tradeRows()).toHaveLength(0);
+  });
+
+  it("ignores an older pre-load flush after reopening", async () => {
+    const staleFlush = deferred<void>();
+    const currentFlush = deferred<void>();
+    const flush = vi.fn()
+      .mockImplementationOnce(() => staleFlush.promise)
+      .mockImplementationOnce(() => currentFlush.promise);
+    const load = vi.fn().mockResolvedValue({ items: [secondTrade], nextCursor: null });
+    const { panel } = mount({ flush, load });
+
+    const staleOpening = panel.open();
+    await vi.waitFor(() => expect(flush).toHaveBeenCalledTimes(1));
+    panel.close();
+    const currentOpening = panel.open();
+    await vi.waitFor(() => expect(flush).toHaveBeenCalledTimes(2));
+    currentFlush.resolve(undefined);
+    await currentOpening;
+    staleFlush.resolve(undefined);
+    await staleOpening;
+
+    expect(load).toHaveBeenCalledTimes(1);
+    expect(tradeRows().map((row) => row.dataset.tradeId)).toEqual([secondTrade.id]);
+  });
 });
 
 describe("trade history rendering safety", () => {
@@ -277,8 +430,17 @@ describe("trade history rendering safety", () => {
   it("injects only trade-history-scoped CSS selectors", () => {
     mount();
 
-    const css = document.querySelector<HTMLStyleElement>(".trade-history-styles")?.textContent ?? "";
-    expect(css).toContain(".trade-history-overlay");
-    expect(css).not.toMatch(/(?:^|})\s*(?:button|header|h2|article|p)(?:\W|$)/m);
+    const style = document.querySelector<HTMLStyleElement>(".trade-history-styles");
+    const selectors = (rules: CSSRuleList): string[] => Array.from(rules).flatMap((rule) => {
+      if ("selectorText" in rule) {
+        return (rule as CSSStyleRule).selectorText.split(",").map((selector) => selector.trim());
+      }
+      if ("cssRules" in rule) return selectors((rule as CSSMediaRule).cssRules);
+      return [];
+    });
+    const allSelectors = selectors(style?.sheet?.cssRules ?? [] as unknown as CSSRuleList);
+
+    expect(allSelectors.length).toBeGreaterThan(0);
+    expect(allSelectors.filter((selector) => !selector.startsWith(".trade-history-"))).toEqual([]);
   });
 });

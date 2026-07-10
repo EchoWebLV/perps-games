@@ -162,6 +162,7 @@ export function createTradeHistory(
   const dialog = make("section", "trade-history-panel");
   dialog.setAttribute("role", "dialog");
   dialog.setAttribute("aria-modal", "true");
+  dialog.tabIndex = -1;
 
   const header = make("header", "trade-history-header");
   const title = make("h2", "trade-history-title", "History");
@@ -207,8 +208,10 @@ export function createTradeHistory(
   const renderTrade = (trade: TradeHistoryItem): HTMLElement => {
     const row = make("article", "trade-history-row");
     row.dataset.tradeId = trade.id;
+    row.tabIndex = -1;
 
     const date = make("time", "trade-history-date");
+    date.dateTime = trade.settledAt;
     date.textContent = new Date(trade.settledAt).toLocaleString();
 
     const side = trade.dir === 1 ? "LONG" : "SHORT";
@@ -263,7 +266,7 @@ export function createTradeHistory(
       retry.dataset.history = "retry";
       const run = generation;
       retry.addEventListener("click", () => {
-        void loadPage(options.retryCursor, options.retryAppend ?? false, run);
+        void loadPage(options.retryCursor, options.retryAppend ?? false, run, true);
       });
       body.append(message, retry);
       return;
@@ -288,14 +291,20 @@ export function createTradeHistory(
       const more = make("button", "trade-history-button trade-history-more", "Load more");
       more.type = "button";
       more.dataset.history = "more";
-      more.addEventListener("click", () => { void loadPage(next, true, run); });
+      more.addEventListener("click", () => { void loadPage(next, true, run, true); });
       body.appendChild(more);
     }
   };
 
-  async function loadPage(next: string | undefined, append: boolean, run: number): Promise<void> {
+  async function loadPage(
+    next: string | undefined,
+    append: boolean,
+    run: number,
+    focusAfter = false,
+  ): Promise<void> {
     if (!isCurrent(run) || loading) return;
 
+    const focusIndex = append ? items.length : 0;
     loading = true;
     if (append) renderList({ loadingMore: true });
     else renderStatus("Loading history…");
@@ -309,11 +318,19 @@ export function createTradeHistory(
       items = uniqueTrades(append ? items : [], page.items);
       cursor = page.nextCursor && !loadedCursors.has(page.nextCursor) ? page.nextCursor : null;
       renderList();
+      if (focusAfter) {
+        const rows = body.querySelectorAll<HTMLElement>("[data-trade-id]");
+        const target = rows[focusIndex]
+          ?? body.querySelector<HTMLButtonElement>('[data-history="more"]')
+          ?? closeButton;
+        target.focus();
+      }
     } catch {
       if (!isCurrent(run)) return;
 
       loading = false;
       renderList({ error: true, retryCursor: next, retryAppend: append });
+      if (focusAfter) body.querySelector<HTMLButtonElement>('[data-history="retry"]')?.focus();
     }
   }
 
@@ -336,10 +353,48 @@ export function createTradeHistory(
     if (event.target === overlay) close();
   });
   doc.addEventListener("keydown", (event) => {
-    if (event.key !== "Escape" || overlay.hidden || !overlay.isConnected) return;
-    event.preventDefault();
-    event.stopPropagation();
-    close();
+    if (overlay.hidden || !overlay.isConnected) return;
+    if (event.key === "Escape") {
+      event.preventDefault();
+      event.stopPropagation();
+      close();
+      return;
+    }
+    if (event.key !== "Tab") return;
+
+    const focusable = Array.from(dialog.querySelectorAll<HTMLElement>([
+      "a[href]",
+      "button:not([disabled])",
+      "input:not([disabled]):not([type='hidden'])",
+      "select:not([disabled])",
+      "textarea:not([disabled])",
+      "[contenteditable='true']",
+      "[tabindex]:not([tabindex='-1'])",
+    ].join(","))).filter((element) => {
+      const style = doc.defaultView?.getComputedStyle(element);
+      return element.tabIndex >= 0
+        && !element.closest("[hidden]")
+        && element.getAttribute("aria-hidden") !== "true"
+        && style?.display !== "none"
+        && style?.visibility !== "hidden";
+    });
+
+    if (!focusable.length) {
+      event.preventDefault();
+      dialog.focus();
+      return;
+    }
+
+    const first = focusable[0];
+    const last = focusable[focusable.length - 1];
+    const active = doc.activeElement;
+    if (event.shiftKey && (active === first || !dialog.contains(active))) {
+      event.preventDefault();
+      last.focus();
+    } else if (!event.shiftKey && (active === last || !dialog.contains(active))) {
+      event.preventDefault();
+      first.focus();
+    }
   });
 
   return {

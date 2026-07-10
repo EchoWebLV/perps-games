@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
 import { describe, expect, it, test } from "vitest";
 import { createCarPicker, setHudMenuMode, type CarOption } from "./carpicker";
+import { createTradeHistory } from "./trade-history";
 
 function fakeEl(display = "") {
   return { style: { display } } as HTMLElement;
@@ -175,14 +176,42 @@ describe("hamburger product menu", () => {
     expect(parent.querySelector('[data-act="upgrades"]')).toBeNull();
   });
 
-  it("calls the History callback from the menu row", () => {
+  it("closes before History, focuses the hamburger, and lets the panel restore there", async () => {
     const parent = document.createElement("div");
-    let opens = 0;
-    createCarPicker(parent, oneCar, () => {}, undefined, [], undefined, undefined, undefined, undefined, {
-      showGarageAndUpgrades: false,
-      onHistory: () => { opens++; },
+    document.body.appendChild(parent);
+    const historyPanel = createTradeHistory(parent, {
+      signedIn: () => false,
+      flush: async () => undefined,
+      load: async () => ({ items: [], nextCursor: null }),
     });
-    (parent.querySelector('[data-act="history"]') as HTMLButtonElement).click();
-    expect(opens).toBe(1);
+    const order: string[] = [];
+    let focusAtCallback: Element | null = null;
+    let opening: Promise<void> | undefined;
+    createCarPicker(parent, oneCar, () => {}, undefined, [], undefined, (reason) => {
+      order.push(`close:${reason}`);
+    }, undefined, undefined, {
+      showGarageAndUpgrades: false,
+      onHistory: () => {
+        order.push("history");
+        focusAtCallback = document.activeElement;
+        opening = historyPanel.open();
+      },
+    });
+    const hamburger = parent.querySelector<HTMLButtonElement>('button[aria-label="Open menu"]');
+    const history = parent.querySelector<HTMLButtonElement>('[data-act="history"]');
+
+    hamburger?.click();
+    history?.focus();
+    history?.click();
+    await opening;
+
+    expect(order).toEqual(["close:chain", "history"]);
+    expect(hamburger?.style.display).toBe("grid");
+    expect(focusAtCallback).toBe(hamburger);
+    expect(document.activeElement).toBe(parent.querySelector('[data-history="close"]'));
+
+    historyPanel.close();
+    expect(document.activeElement).toBe(hamburger);
+    parent.remove();
   });
 });
