@@ -37,6 +37,7 @@ export interface Garage {
 
 const MODEL_YAW = Math.PI;       // base facing (matches the in-game car)
 const HERO_YAW = -0.6;           // 3/4 pose for the captured card art
+const clamp01 = (v: number) => (v < 0 ? 0 : v > 1 ? 1 : v);
 
 // neon line-icons (no emoji) — stroked, inherit currentColor
 const ICONS: Record<string, string> = {
@@ -127,6 +128,22 @@ function injectStyles() {
     .gbusy{display:flex;align-items:center;gap:7px;margin:0 6px;padding:7px 10px;border-radius:8px;
       background:rgba(255,77,109,.12);border:1px solid rgba(255,77,109,.42);color:#ff9aa6;
       font:700 9px/1 'Chakra Petch',ui-monospace,monospace;letter-spacing:.1em;text-transform:uppercase}
+    /* audio volume faders (Music / SFX) — match the menu items' dark card + cyan accent */
+    .gaudio{display:flex;align-items:center;gap:12px;padding:11px 14px;border-radius:12px;
+      background:rgba(18,14,40,.72);border:1px solid rgba(132,150,224,.24)}
+    .gaudio .gmenu-ic{color:var(--cyan);filter:drop-shadow(0 0 6px rgba(39,231,255,.55))}
+    .gaudio-tx{display:flex;flex-direction:column;gap:3px;min-width:62px}
+    .gaudio-tx b{font:700 14px/1 'Chakra Petch',ui-monospace,monospace;letter-spacing:.05em;color:var(--ink)}
+    .gaudio-val{font:600 10px/1.2 'Chakra Petch',ui-monospace,monospace;color:var(--cyan);letter-spacing:.06em}
+    .gaudio-range{flex:1;-webkit-appearance:none;appearance:none;height:5px;border-radius:999px;margin:0;
+      background:rgba(132,150,224,.24);outline:none;cursor:pointer}
+    .gaudio-range::-webkit-slider-runnable-track{height:5px;border-radius:999px;background:transparent}
+    .gaudio-range::-webkit-slider-thumb{-webkit-appearance:none;appearance:none;width:16px;height:16px;margin-top:-6px;
+      border-radius:50%;background:var(--cyan);box-shadow:0 0 8px rgba(39,231,255,.7),0 1px 3px rgba(0,0,0,.5);cursor:pointer}
+    .gaudio-range::-moz-range-track{height:5px;border-radius:999px;background:rgba(132,150,224,.24)}
+    .gaudio-range::-moz-range-progress{height:5px;border-radius:999px;background:linear-gradient(90deg,#2775ca,var(--cyan))}
+    .gaudio-range::-moz-range-thumb{width:16px;height:16px;border:0;border-radius:50%;background:var(--cyan);
+      box-shadow:0 0 8px rgba(39,231,255,.7)}
     .ggrid.locked .gcard:not(.locked){cursor:not-allowed}
     .ggrid.locked .gcard:not(.locked):hover{transform:none;box-shadow:0 9px 22px rgba(0,0,0,.55)}
     .ggrid{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:13px;overflow-y:auto;overflow-x:hidden;overscroll-behavior:contain;
@@ -254,13 +271,14 @@ function injectStyles() {
 }
 
 /** Game menu → Garage. Cars are rendered ONCE to static card art (light, no live canvas). */
-/** A bottom-of-menu on/off row (Music, SFX, …). State is owned by the caller via get/set. */
-export interface MenuToggle {
+/** A bottom-of-menu volume fader (Music, SFX, …). Value is 0..1, owned by the caller via get/set;
+ *  0 = fully off. Rendered as a styled range slider. */
+export interface MenuSlider {
   label: string;
   sub?: string;
   glyph?: string;
-  get: () => boolean;
-  set: (on: boolean) => void;
+  get: () => number;      // 0..1
+  set: (v: number) => void; // 0..1
 }
 
 /** race-level skin picker for the menu — `list()` is the seam the crate-reward system filters later */
@@ -280,7 +298,7 @@ export function createCarPicker(
   cars: CarOption[],
   onPick: (c: CarOption) => void,
   onUpgrades?: () => void,
-  toggles: MenuToggle[] = [],
+  sliders: MenuSlider[] = [],
   onLogout?: () => void,
   onClose?: (reason?: "dismiss" | "chain") => void,
   accountInfo?: () => { label: string; sub: string },
@@ -336,20 +354,34 @@ export function createCarPicker(
       `<span class="gmenu-arr">${icon("chevron", 16)}</span>`;
     gmenu.appendChild(b);
   }
-  if (toggles.length && gmenu) {
+  // audio volume faders (Music / SFX) — a styled range slider per channel; 0 = off
+  const sliderEls: { input: HTMLInputElement; val: HTMLElement }[] = [];
+  const paintSlider = (input: HTMLInputElement, val: HTMLElement) => {
+    const v = +input.value;
+    val.textContent = v === 0 ? "off" : v + "%";
+    input.style.background = `linear-gradient(90deg,var(--cyan) ${v}%,rgba(132,150,224,.24) ${v}%)`;
+  };
+  if (sliders.length && gmenu) {
     const sep = document.createElement("div");
     sep.textContent = "audio";
     sep.style.cssText = "margin:8px 4px 2px;font:700 10px/1 'Chakra Petch',ui-monospace,monospace;letter-spacing:.16em;color:var(--mut)";
     gmenu.appendChild(sep);
-    toggles.forEach((t, i) => {
-      const b = document.createElement("button");
-      b.className = "gmenu-item";
-      b.dataset.toggle = String(i);
-      b.innerHTML =
-        `<span class="gmenu-ic" style="font:700 18px/1 'Chakra Petch',ui-monospace,monospace">${t.glyph ?? "♪"}</span>` +
-        `<span class="gmenu-tx"><b>${t.label}</b>${t.sub ? `<small>${t.sub}</small>` : ""}</span>` +
-        `<span class="gmenu-sw" style="margin-left:auto;min-width:48px;text-align:center;padding:5px 9px;border-radius:999px;font:700 11px/1 'Chakra Petch',ui-monospace,monospace;letter-spacing:.1em"></span>`;
-      gmenu.appendChild(b);
+    sliders.forEach((sl) => {
+      const row = document.createElement("div");
+      row.className = "gaudio";
+      row.innerHTML =
+        `<span class="gmenu-ic" style="font:700 18px/1 'Chakra Petch',ui-monospace,monospace">${sl.glyph ?? "♪"}</span>` +
+        `<span class="gaudio-tx"><b>${sl.label}</b><small class="gaudio-val"></small></span>` +
+        `<input type="range" class="gaudio-range" min="0" max="100" step="1" aria-label="${sl.label} volume">`;
+      gmenu.appendChild(row);
+      const input = row.querySelector(".gaudio-range") as HTMLInputElement;
+      const val = row.querySelector(".gaudio-val") as HTMLElement;
+      input.value = String(Math.round(clamp01(sl.get()) * 100));
+      paintSlider(input, val);
+      input.addEventListener("input", () => { sl.set(clamp01(+input.value / 100)); paintSlider(input, val); });
+      // keep a slider drag from bubbling to the overlay's click/dismiss delegation
+      input.addEventListener("click", (e) => e.stopPropagation());
+      sliderEls.push({ input, val });
     });
   }
 
@@ -369,7 +401,7 @@ export function createCarPicker(
     gmenu.appendChild(b);
   }
 
-  const renderToggles = () => {
+  const refreshMenu = () => {
     // the account row reads out WHO is riding and what the action is (guest → "Sign in",
     // signed-in → "Log out") — refreshed on every menu open
     if (accountInfo) {
@@ -379,14 +411,12 @@ export function createCarPicker(
       if (label) label.textContent = info.label;
       if (sub) sub.textContent = info.sub;
     }
-    toggles.forEach((t, i) => {
-      const sw = menuPanel.querySelector(`[data-toggle="${i}"] .gmenu-sw`) as HTMLElement | null;
-      if (!sw) return;
-      const on = t.get();
-      sw.textContent = on ? "ON" : "OFF";
-      sw.style.background = on ? "rgba(39,231,255,.16)" : "rgba(255,255,255,.05)";
-      sw.style.color = on ? "var(--cyan)" : "var(--mut)";
-      sw.style.boxShadow = on ? "inset 0 0 10px rgba(39,231,255,.35)" : "none";
+    // reflect the current Music/SFX volumes (they can change elsewhere) on every menu open
+    sliders.forEach((sl, i) => {
+      const el = sliderEls[i];
+      if (!el) return;
+      el.input.value = String(Math.round(clamp01(sl.get()) * 100));
+      paintSlider(el.input, el.val);
     });
   };
 
@@ -701,7 +731,7 @@ export function createCarPicker(
     worldsPanel.style.display = v === "worlds" ? "flex" : "none";
     if (v === "garage") { renderArt(); updateBusyUI(); }
     if (v === "worlds") renderWorlds(); // reflect the active skin + highlight it
-    if (v === "menu") renderToggles(); // reflect current Music/SFX state each time the menu shows
+    if (v === "menu") refreshMenu(); // reflect current Music/SFX volumes each time the menu shows
   };
 
   const open = () => {
@@ -731,7 +761,6 @@ export function createCarPicker(
     const t = (e.target as HTMLElement).closest("[data-act],[data-go],[data-toggle],[data-world]") as HTMLElement | null;
     if (!t) return;
     if (t.dataset.world !== undefined) { if (t.classList.contains("locked")) return; worlds?.set(t.dataset.world); renderWorlds(); return; } // switch level skin (sealed skins ignore the tap), stay open
-    if (t.dataset.toggle !== undefined) { const i = +t.dataset.toggle; toggles[i].set(!toggles[i].get()); renderToggles(); return; }
     if (t.dataset.act === "history") { close("chain"); menuButton.focus(); menuFeatures.onHistory?.(); return; }
     if (t.dataset.act === "close") close();
     else if (t.dataset.act === "back") setView("menu");

@@ -48,6 +48,7 @@ import { createAutoExit } from "./ui/pinkrod";
 import { createJoystick } from "./ui/joystick";
 import { createAudio } from "./core/audio";
 import { createRadio } from "./ui/radio";
+import { readVolume, writeVolume, MUSIC_VOL_KEY, SFX_VOL_KEY } from "./core/audio-prefs";
 import { createCoinCounter } from "./ui/coins";
 import { createScrapCounter } from "./ui/scrap";
 import { createFpsMeter } from "./ui/fpsmeter";
@@ -287,7 +288,11 @@ const joystick = createJoystick();
 // shipped build still starts with music + SFX on. Either can be flipped back on
 // from the menu (Music / SFX).
 const AUDIO_DEFAULT_ON = !import.meta.env.DEV;
-const audio = createAudio(AUDIO_DEFAULT_ON);
+// Persisted fader positions (0..1). A fresh player boots at the shipped default — full on prod,
+// muted on the dev server — and their last-set volumes are restored on reload.
+const sfxVol0 = readVolume(SFX_VOL_KEY, AUDIO_DEFAULT_ON ? 1 : 0);
+const musicVol0 = readVolume(MUSIC_VOL_KEY, AUDIO_DEFAULT_ON ? 1 : 0);
+const audio = createAudio(sfxVol0);
 const coins = createCoinCounter(hudRoot);
 const scrap = createScrapCounter(hudRoot); // banks scrap caught while driving (every 3rd–5th pickup)
 const fpsMeter = createFpsMeter(hudRoot); // ?fps diagnostic chip for on-device perf tuning — inert without the flag
@@ -451,7 +456,7 @@ async function syncTableCap() {
 // pot); the stepper is locked during a live round, so skip the read noise there
 setInterval(() => { if (signedIn && !roundActive && !opening) void syncTableCap(); }, 12_000);
 // synthwave radio — streams on the first gesture; its on/off toggle lives in the menu (below)
-const radio = createRadio(hudRoot, AUDIO_DEFAULT_ON);
+const radio = createRadio(hudRoot, musicVol0);
 const inventory = createInventory("redline.owned.v1", ["Solana Paper"], localStorage, {
   onGrant: (id) => accountSync.carGranted(id),
   onMelt: (id) => accountSync.carMelted(id),
@@ -504,8 +509,8 @@ for (const c of CAR_DEFS) c.locked = poolable(c) && !inventory.owns(c.name);
 let equippedCar: CarOption = CAR_DEFS[0];
 let garageRoom: ReturnType<typeof createGarageRoom> | null = null;
 const garage = createCarPicker(hudRoot, CAR_DEFS, (c) => { car.setModel(c.url, c.scale, c.yaw); setAbility(c.ability); carBaseLev = c.baseLev ?? 0; tach.rebuild(effRmax()); equippedCar = c; garageRoom?.setCar(c); }, () => upgrades.open(), [
-  { label: "Music", sub: "synthwave radio", glyph: "♫", get: () => radio.isOn(), set: (on) => radio.setOn(on) },
-  { label: "SFX", sub: "engine & coins", glyph: "🔊", get: () => audio.isEnabled(), set: (on) => audio.setEnabled(on) },
+  { label: "Music", sub: "synthwave radio", glyph: "♫", get: () => radio.getVolume(), set: (v) => { radio.setVolume(v); writeVolume(MUSIC_VOL_KEY, v); } },
+  { label: "SFX", sub: "engine & coins", glyph: "🔊", get: () => audio.getVolume(), set: (v) => { audio.setVolume(v); writeVolume(SFX_VOL_KEY, v); } },
 ], () => {
   // Account action (garage menu). Refused mid-round — the on-chain round would keep running
   // invisibly and wedge the game on re-login. For a signed-in player this is Log out (real

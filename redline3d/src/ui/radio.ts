@@ -1,11 +1,15 @@
 export interface Radio {
-  /** start playback if the user wants it on — call from a user gesture (autoplay) */
+  /** start playback if the volume is up — call from a user gesture (autoplay) */
   resume(): void;
-  /** is the music currently switched on (user intent)? */
-  isOn(): boolean;
-  /** switch music on/off — call from a user gesture so play() isn't blocked */
-  setOn(on: boolean): void;
+  /** current music volume, 0..1 (0 = off) */
+  getVolume(): number;
+  /** set music volume 0..1 — 0 pauses, >0 plays at that level. Call from a user gesture so play() isn't blocked. */
+  setVolume(v: number): void;
 }
+
+// The stream sits UNDER the engine/stings, so slider 100% maps to this element volume, not 1.0.
+const MUSIC_MAX = 0.42;
+const clamp01 = (v: number) => (v < 0 ? 0 : v > 1 ? 1 : v);
 
 // Live synthwave stream (Nightride FM). NOTE: third-party copyrighted music —
 // fine for dev/feel, but swap for a licensed / royalty-free source before any
@@ -42,25 +46,26 @@ export function pickStreamSource(
   return null;
 }
 
-/** A muteable synthwave radio. The on/off toggle lives in the menu (see carpicker). */
-export function createRadio(parent: HTMLElement, startOn = true): Radio {
+/** A faded synthwave radio. The volume slider lives in the menu (see carpicker). */
+export function createRadio(parent: HTMLElement, startVolume = 1): Radio {
   const audio = document.createElement("audio");
   // Feature-detect a decodable format (iOS can't play Ogg/Opus) before setting
   // src. null → leave src unset; play() then rejects and is swallowed as today.
   const source = pickStreamSource((mime) => audio.canPlayType(mime));
   if (source) audio.src = source.url;
   audio.preload = "none";
-  audio.volume = 0.42; // sit under the engine/stings
+
+  let vol = clamp01(startVolume); // 0..1 user intent; 0 = off
+  audio.volume = vol * MUSIC_MAX; // sit under the engine/stings
   parent.appendChild(audio);
 
-  let want = startOn; // user intent to play
-
   return {
-    resume() { if (want) void audio.play().catch(() => {}); },
-    isOn: () => want,
-    setOn(on) {
-      want = on;
-      if (on) void audio.play().catch(() => {});
+    resume() { if (vol > 0) void audio.play().catch(() => {}); },
+    getVolume: () => vol,
+    setVolume(v) {
+      vol = clamp01(v);
+      audio.volume = vol * MUSIC_MAX;
+      if (vol > 0) void audio.play().catch(() => {});
       else audio.pause();
     },
   };

@@ -9,13 +9,16 @@ export interface GameAudio {
   cashout(): void;
   /** loss sting — a blown-engine drop + noise burst */
   liquidate(): void;
-  /** master mute for ALL game SFX (engine drone, coins, stings). Music/radio is separate. */
-  setEnabled(on: boolean): void;
-  isEnabled(): boolean;
+  /** master volume (0..1) for ALL game SFX — engine drone, coins, stings. 0 = fully silent.
+   *  Scales MASTER_VOL (and the coin HTMLAudio, which bypasses the WebAudio graph). Music is separate. */
+  setVolume(v: number): void;
+  /** current SFX volume, 0..1 */
+  getVolume(): number;
 }
 
 export const COIN_VOLUME = 0.1;
 const MASTER_VOL = 0.45;
+const clamp01 = (v: number) => (v < 0 ? 0 : v > 1 ? 1 : v);
 
 /**
  * Fully procedural Web Audio — no sample assets (so it's commercial-safe and adds
@@ -23,7 +26,7 @@ const MASTER_VOL = 0.45;
  * for cash-out / liquidation. The context is created lazily on the first gesture so
  * it never trips the autoplay policy.
  */
-export function createAudio(startEnabled = true): GameAudio {
+export function createAudio(startVolume = 1): GameAudio {
   let ctx: AudioContext | null = null;
   let master: GainNode | null = null;
   let lp: BiquadFilterNode | null = null;  // tone — opens with throttle
@@ -34,7 +37,7 @@ export function createAudio(startEnabled = true): GameAudio {
   let ng: GainNode | null = null;          // combustion / intake noise level
   let coinPool: HTMLAudioElement[] | null = null;
   let coinI = 0;
-  let enabled = startEnabled; // SFX master switch (Music is the separate radio)
+  let volume = clamp01(startVolume); // SFX master volume 0..1 (Music is the separate radio)
 
   // soft-clip (tanh) distortion — grit/roar
   const driveCurve = (k: number) => {
@@ -50,7 +53,7 @@ export function createAudio(startEnabled = true): GameAudio {
     const AC: typeof AudioContext | undefined = window.AudioContext || (window as any).webkitAudioContext;
     if (!AC) return;
     const C = ctx = new AC();
-    master = C.createGain(); master.gain.value = enabled ? MASTER_VOL : 0; master.connect(C.destination);
+    master = C.createGain(); master.gain.value = volume * MASTER_VOL; master.connect(C.destination);
     eg = C.createGain(); eg.gain.value = 0; eg.connect(master);
 
     // tone lowpass (dry path) fed by the distorted engine voices on an excitation bus
@@ -131,12 +134,13 @@ export function createAudio(startEnabled = true): GameAudio {
       ng.gain.setTargetAtTime(active ? 0.005 + f * 0.05 : 0, now, 0.08); // combustion air
     },
     coin(count = 1) {
-      if (!enabled) return;
+      if (volume <= 0) return;
       ensureCoinPool();
       if (!coinPool) return;
       const n = Math.max(0, Math.floor(count));
       for (let i = 0; i < n; i++) {
         const a = coinPool[coinI++ % coinPool.length];
+        a.volume = COIN_VOLUME * volume; // this element bypasses the WebAudio master — scale it here or the fader won't touch coins
         a.currentTime = 0;
         void a.play().catch(() => {});
       }
@@ -162,10 +166,10 @@ export function createAudio(startEnabled = true): GameAudio {
       const ng = ctx.createGain(); ng.gain.value = 0.14;
       n.connect(ng); ng.connect(master); n.start(t);
     },
-    setEnabled(on) {
-      enabled = on;
-      if (ctx && master) master.gain.setTargetAtTime(on ? MASTER_VOL : 0, ctx.currentTime, 0.02);
+    setVolume(v) {
+      volume = clamp01(v);
+      if (ctx && master) master.gain.setTargetAtTime(volume * MASTER_VOL, ctx.currentTime, 0.02);
     },
-    isEnabled() { return enabled; },
+    getVolume() { return volume; },
   };
 }
