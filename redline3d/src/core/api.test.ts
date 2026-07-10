@@ -226,4 +226,38 @@ describe("createApi", () => {
     const api = createApi({ baseUrl: "http://x", userId: "u", fetch: async () => res(402, { error: "insufficient_balance" }) });
     await expect(api.coinsSpend({ amount: 9, ref: "x" })).rejects.toMatchObject({ code: "insufficient_balance" });
   });
+
+  it("records and cursor-lists account trade history", async () => {
+    const calls: Array<{ url: string; body?: unknown }> = [];
+    const api = createApi({
+      baseUrl: "http://x",
+      userId: "u",
+      fetch: async (url, init) => {
+        calls.push({ url: String(url), body: init?.body ? JSON.parse(String(init.body)) : undefined });
+        return res(200, String(url).includes("cursor=")
+          ? { items: [], nextCursor: null }
+          : { id: "11111111-1111-4111-8111-111111111111" });
+      },
+    });
+    const record = {
+      id: "11111111-1111-4111-8111-111111111111",
+      asset: "SOL" as const,
+      dir: 1 as const,
+      lev: 250,
+      stakeBase: 10_000_000,
+      entryPrice: 150,
+      exitPrice: 151,
+      openedAt: "2026-07-10T10:00:00.000Z",
+      outcome: "cashout" as const,
+      payoutBase: 11_000_000,
+    };
+
+    await api.recordTrade(record);
+    await api.listTrades("next token");
+
+    expect(calls).toEqual([
+      { url: "http://x/v1/trades", body: record },
+      { url: "http://x/v1/trades?limit=25&cursor=next%20token", body: undefined },
+    ]);
+  });
 });

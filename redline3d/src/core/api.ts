@@ -3,6 +3,31 @@ import type { AuthProvider } from "./auth";
 
 export type Asset = "BTC" | "ETH" | "SOL";
 export type Dir = 1 | -1;
+export type TradeOutcome = "cashout" | "cap" | "liq" | "time";
+
+export interface TradeRecordInput {
+  id: string;
+  asset: Asset;
+  dir: Dir;
+  lev: number;
+  stakeBase: number;
+  entryPrice: number;
+  exitPrice: number;
+  openedAt: string;
+  outcome: TradeOutcome;
+  payoutBase: number;
+}
+
+export interface TradeHistoryItem extends TradeRecordInput {
+  walletPublicKey: string;
+  pnlBase: number;
+  settledAt: string;
+}
+
+export interface TradeHistoryPage {
+  items: TradeHistoryItem[];
+  nextCursor: string | null;
+}
 
 export interface MeResult { userId: string; balance: number; coins: number; scrap: number; cars: { carId: string; count: number; acquiredAt?: string }[]; openRoundId: string | null; access: string[]; levels?: { turbo: number; tank: number; suspension: number }; }
 export interface OpenResult { roundId: string; asset: Asset; dir: Dir; lev: number; stake: number; entryRaw: number; entryTsUs: number; }
@@ -51,6 +76,8 @@ export interface Api {
   roundAction(p: { roundId: string; actionId: string; kind: "flip" | "lever"; dir?: Dir; lev?: number }): Promise<void>;
   closeRound(p: { roundId: string; reason: "cashout" | "expire" }): Promise<CloseResult>;
   markRound(roundId: string): Promise<MarkResult>;
+  recordTrade(input: TradeRecordInput): Promise<TradeHistoryItem>;
+  listTrades(cursor?: string): Promise<TradeHistoryPage>;
   bindWalletChallenge(wallet: string): Promise<{ challenge: string; message: string; wallet: string; expiresAt: string }>;
   bindWallet(input: { challenge: string; signatureBase58: string }): Promise<{
     wallet: string;
@@ -159,6 +186,11 @@ export function createApi(opts: ApiOpts = {}): Api {
     roundAction: (p) => call<void>("POST", "/v1/round/action", p),
     closeRound: (p) => call<CloseResult>("POST", "/v1/round/close", p),
     markRound: (id) => call<MarkResult>("GET", `/v1/round/${id}/mark`),
+    recordTrade: (input) => call<TradeHistoryItem>("POST", "/v1/trades", input),
+    listTrades: (cursor) => call<TradeHistoryPage>(
+      "GET",
+      `/v1/trades?limit=25${cursor ? `&cursor=${encodeURIComponent(cursor)}` : ""}`,
+    ),
     bindWalletChallenge: (wallet) => call("POST", "/v1/wallet/bind-challenge", { wallet }),
     bindWallet: (input) => call("POST", "/v1/wallet/bind", input),
     depositBuild: (amountCents) => call<{ txBase64: string; depositIntent: string; expiresAt: string }>("POST", "/v1/deposit/build", { amountCents }),
