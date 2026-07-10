@@ -85,6 +85,32 @@ describe("trade history routes", () => {
     expect(aliceList.json()).toEqual({ items: [], nextCursor: null });
   });
 
+  it("rejects a mismatched expected wallet before inserting the trade", async () => {
+    ctx = await makeTestDb();
+    await bindDevWallet(ctx, "guard-alice", "AliceWallet");
+    await bindDevWallet(ctx, "guard-bob", "BobWallet");
+
+    const response = await ctx.server.inject({
+      method: "POST",
+      url: "/v1/trades",
+      headers: {
+        ...headersFor("guard-bob"),
+        "x-trade-wallet": "AliceWallet",
+      },
+      payload: body,
+    });
+    const bobList = await ctx.server.inject({
+      method: "GET",
+      url: "/v1/trades",
+      headers: headersFor("guard-bob"),
+    });
+
+    expect(response.statusCode).toBe(409);
+    expect(response.json()).toEqual({ error: "trade_wallet_mismatch" });
+    expect(bobList.statusCode).toBe(200);
+    expect(bobList.json()).toEqual({ items: [], nextCursor: null });
+  });
+
   it.each([
     { method: "POST" as const, url: "/v1/trades", payload: body },
     { method: "GET" as const, url: "/v1/trades", payload: undefined },

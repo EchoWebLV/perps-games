@@ -54,6 +54,35 @@ describe("createApi", () => {
       .rejects.toMatchObject({ code: "feed_halt" });
   });
 
+  it.each(["trade_id_conflict", "trade_wallet_mismatch"] as const)(
+    "maps %s without misclassifying it as a round conflict",
+    async (code) => {
+      const api = createApi({
+        baseUrl: "http://x",
+        userId: "u",
+        fetch: async () => res(409, { error: code }),
+      });
+      const record = {
+        id: "11111111-1111-4111-8111-111111111111",
+        asset: "SOL" as const,
+        dir: 1 as const,
+        lev: 250,
+        stakeBase: 10_000_000,
+        entryPrice: 150,
+        exitPrice: 151,
+        openedAt: "2026-07-10T10:00:00.000Z",
+        outcome: "cashout" as const,
+        payoutBase: 11_000_000,
+      };
+
+      await expect(api.recordTrade(record, "AliceWallet")).rejects.toMatchObject({
+        code,
+        status: 409,
+        bodyError: code,
+      });
+    },
+  );
+
   it("markRound GETs the mark endpoint and parses the mark", async () => {
     let seen: { url: string; init: RequestInit } | null = null;
     const api = createApi({
@@ -228,12 +257,16 @@ describe("createApi", () => {
   });
 
   it("records and cursor-lists account trade history", async () => {
-    const calls: Array<{ url: string; body?: unknown }> = [];
+    const calls: Array<{ url: string; body?: unknown; tradeWallet?: string }> = [];
     const api = createApi({
       baseUrl: "http://x",
       userId: "u",
       fetch: async (url, init) => {
-        calls.push({ url: String(url), body: init?.body ? JSON.parse(String(init.body)) : undefined });
+        calls.push({
+          url: String(url),
+          body: init?.body ? JSON.parse(String(init.body)) : undefined,
+          tradeWallet: (init?.headers as Record<string, string>)["x-trade-wallet"],
+        });
         return res(200, String(url).includes("cursor=")
           ? { items: [], nextCursor: null }
           : { id: "11111111-1111-4111-8111-111111111111" });
@@ -252,12 +285,12 @@ describe("createApi", () => {
       payoutBase: 11_000_000,
     };
 
-    await api.recordTrade(record);
+    await api.recordTrade(record, "AliceWallet");
     await api.listTrades("next token");
 
     expect(calls).toEqual([
-      { url: "http://x/v1/trades", body: record },
-      { url: "http://x/v1/trades?limit=25&cursor=next%20token", body: undefined },
+      { url: "http://x/v1/trades", body: record, tradeWallet: "AliceWallet" },
+      { url: "http://x/v1/trades?limit=25&cursor=next%20token", body: undefined, tradeWallet: undefined },
     ]);
   });
 });

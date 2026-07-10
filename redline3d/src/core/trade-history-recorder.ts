@@ -12,6 +12,22 @@ export interface TradeHistoryRecorder {
 
 const PREFIX = "redline.trade-history.outbox.v1:";
 
+interface OutboxState {
+  items: TradeRecordInput[];
+  loaded: boolean;
+}
+
+const sessionOutboxes = new WeakMap<Storage, Map<string, OutboxState>>();
+
+function outboxesFor(store: Storage): Map<string, OutboxState> {
+  let outboxes = sessionOutboxes.get(store);
+  if (!outboxes) {
+    outboxes = new Map();
+    sessionOutboxes.set(store, outboxes);
+  }
+  return outboxes;
+}
+
 export function createTradeHistoryRecorder(deps: {
   api: Pick<Api, "recordTrade">;
   wallet: () => string;
@@ -20,24 +36,47 @@ export function createTradeHistoryRecorder(deps: {
 }): TradeHistoryRecorder {
   const store = deps.store ?? localStorage;
   const newId = deps.newId ?? (() => crypto.randomUUID());
+  const outboxes = outboxesFor(store);
   let active: (ActiveTradeDraft & { id: string; outboxKey: string }) | null = null;
-  let flushing: Promise<void> | null = null;
-  const key = () => PREFIX + deps.wallet();
+  const flushing = new Map<string, Promise<void>>();
+  const key = (wallet: string) => PREFIX + wallet;
+  const stateAt = (outboxKey: string): OutboxState => {
+    let state = outboxes.get(outboxKey);
+    if (!state) {
+      state = { items: [], loaded: false };
+      outboxes.set(outboxKey, state);
+    }
+    return state;
+  };
   const readAt = (outboxKey: string): TradeRecordInput[] => {
+    const state = stateAt(outboxKey);
+    if (!state.loaded) {
+      try {
+        const value = JSON.parse(store.getItem(outboxKey) ?? "[]");
+        state.items = Array.isArray(value) ? value : [];
+        state.loaded = true;
+      } catch {
+        // Keep the in-memory copy and retry storage only until a successful read or local write.
+      }
+    }
+    return [...state.items];
+  };
+  const writeAt = (outboxKey: string, items: TradeRecordInput[]) => {
+    const state = stateAt(outboxKey);
+    state.items = [...items];
+    state.loaded = true;
     try {
-      const value = JSON.parse(store.getItem(outboxKey) ?? "[]");
-      return Array.isArray(value) ? value : [];
+      if (items.length) store.setItem(outboxKey, JSON.stringify(items));
+      else store.removeItem(outboxKey);
     } catch {
-      return [];
+      // The same-session queue remains authoritative until durable storage works again.
     }
   };
-  const writeAt = (outboxKey: string, items: TradeRecordInput[]) => items.length
-    ? store.setItem(outboxKey, JSON.stringify(items))
-    : store.removeItem(outboxKey);
 
   return {
     begin(draft) {
-      if (deps.wallet()) active = { ...draft, id: newId(), outboxKey: key() };
+      const wallet = deps.wallet();
+      if (wallet) active = { ...draft, id: newId(), outboxKey: key(wallet) };
     },
     complete(result) {
       if (!active) return null;
@@ -49,21 +88,32 @@ export function createTradeHistoryRecorder(deps: {
       return record;
     },
     flush() {
-      if (flushing) return flushing;
-      const outboxKey = key();
-      flushing = (async () => {
-        const items = readAt(outboxKey);
-        for (const item of items) {
+      const wallet = deps.wallet();
+      if (!wallet) return Promise.resolve();
+      const outboxKey = key(wallet);
+      const current = flushing.get(outboxKey);
+      if (current) return current;
+      const task = (async () => {
+        while (deps.wallet() === wallet) {
+          const item = readAt(outboxKey)[0];
+          if (!item) break;
           try {
-            await deps.api.recordTrade(item);
-            writeAt(outboxKey, readAt(outboxKey).filter((pending) => pending.id !== item.id));
+            await deps.api.recordTrade(item, wallet);
           } catch {
             break;
           }
+          if (deps.wallet() !== wallet) break;
+          writeAt(outboxKey, readAt(outboxKey).filter((pending) => pending.id !== item.id));
         }
-      })().finally(() => { flushing = null; });
-      return flushing;
+      })().finally(() => {
+        if (flushing.get(outboxKey) === task) flushing.delete(outboxKey);
+      });
+      flushing.set(outboxKey, task);
+      return task;
     },
-    pending: () => readAt(key()).length,
+    pending() {
+      const wallet = deps.wallet();
+      return wallet ? readAt(key(wallet)).length : 0;
+    },
   };
 }

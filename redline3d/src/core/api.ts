@@ -38,7 +38,8 @@ export interface WalletBalanceResult { wallet: string | null; balance: number; }
 
 export type ApiErrorCode =
   | "unauthorized" | "insufficient_balance" | "round_already_open" | "round_not_open"
-  | "round_not_found" | "feed_halt" | "bad_request" | "network" | "server";
+  | "round_not_found" | "trade_id_conflict" | "trade_wallet_mismatch"
+  | "feed_halt" | "bad_request" | "network" | "server";
 
 export class ApiError extends Error {
   constructor(public code: ApiErrorCode, public status: number, public bodyError?: string) { super(code); this.name = "ApiError"; }
@@ -50,7 +51,12 @@ function codeFor(status: number, bodyError?: string): ApiErrorCode {
   if (status === 402) return "insufficient_balance";
   if (status === 404) return "round_not_found";
   if (status === 503) return "feed_halt";
-  if (status === 409) return bodyError === "round_not_open" ? "round_not_open" : "round_already_open";
+  if (status === 409) {
+    if (bodyError === "round_not_open") return "round_not_open";
+    if (bodyError === "trade_id_conflict") return "trade_id_conflict";
+    if (bodyError === "trade_wallet_mismatch") return "trade_wallet_mismatch";
+    return "round_already_open";
+  }
   if (status === 400) return "bad_request";
   return "server";
 }
@@ -76,7 +82,7 @@ export interface Api {
   roundAction(p: { roundId: string; actionId: string; kind: "flip" | "lever"; dir?: Dir; lev?: number }): Promise<void>;
   closeRound(p: { roundId: string; reason: "cashout" | "expire" }): Promise<CloseResult>;
   markRound(roundId: string): Promise<MarkResult>;
-  recordTrade(input: TradeRecordInput): Promise<TradeHistoryItem>;
+  recordTrade(input: TradeRecordInput, expectedWallet?: string): Promise<TradeHistoryItem>;
   listTrades(cursor?: string): Promise<TradeHistoryPage>;
   bindWalletChallenge(wallet: string): Promise<{ challenge: string; message: string; wallet: string; expiresAt: string }>;
   bindWallet(input: { challenge: string; signatureBase58: string }): Promise<{
@@ -135,6 +141,7 @@ export function createApi(opts: ApiOpts = {}): Api {
     method: "GET" | "POST",
     path: string,
     body?: unknown,
+    requestHeaders?: Record<string, string>,
     timeoutOverrideMs?: number,
     retriedAuth = false,
   ): Promise<T> {
@@ -145,7 +152,7 @@ export function createApi(opts: ApiOpts = {}): Api {
       try {
         r = await doFetch(baseUrl + path, {
           method,
-          headers: { ...(await headers()), "content-type": "application/json" },
+          headers: { ...(await headers()), ...requestHeaders, "content-type": "application/json" },
           body: body === undefined ? undefined : JSON.stringify(body),
           signal: ctrl.signal,
         });
@@ -157,7 +164,7 @@ export function createApi(opts: ApiOpts = {}): Api {
         try { err = (await r.json())?.error; } catch { /* ignore */ }
         if (!retriedAuth && opts.auth?.logout && shouldRefreshAuth(r.status, err)) {
           await opts.auth.logout();
-          return call<T>(method, path, body, timeoutOverrideMs, true);
+          return call<T>(method, path, body, requestHeaders, timeoutOverrideMs, true);
         }
         throw new ApiError(codeFor(r.status, err), r.status, err);
       }
@@ -186,7 +193,12 @@ export function createApi(opts: ApiOpts = {}): Api {
     roundAction: (p) => call<void>("POST", "/v1/round/action", p),
     closeRound: (p) => call<CloseResult>("POST", "/v1/round/close", p),
     markRound: (id) => call<MarkResult>("GET", `/v1/round/${id}/mark`),
-    recordTrade: (input) => call<TradeHistoryItem>("POST", "/v1/trades", input),
+    recordTrade: (input, expectedWallet) => call<TradeHistoryItem>(
+      "POST",
+      "/v1/trades",
+      input,
+      expectedWallet ? { "x-trade-wallet": expectedWallet } : undefined,
+    ),
     listTrades: (cursor) => call<TradeHistoryPage>(
       "GET",
       `/v1/trades?limit=25${cursor ? `&cursor=${encodeURIComponent(cursor)}` : ""}`,

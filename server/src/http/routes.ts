@@ -397,6 +397,14 @@ export function registerRoutes(server: FastifyInstance, deps: RouteDeps): void {
   });
 
   server.post("/v1/trades", { preHandler: requireWalletBoundUser }, async (req, reply) => {
+    const assertedWalletHeader = req.headers["x-trade-wallet"];
+    const assertedWallet = Array.isArray(assertedWalletHeader) ? assertedWalletHeader[0] : assertedWalletHeader;
+    if (assertedWallet !== undefined) {
+      const user = await deps.users.get(req.userId!);
+      if (user?.walletPublicKey !== assertedWallet) {
+        return reply.code(409).send({ error: "trade_wallet_mismatch" });
+      }
+    }
     const parsed = TradeBody.safeParse(req.body);
     if (!parsed.success) return reply.code(400).send({ error: "bad_request" });
     try {
