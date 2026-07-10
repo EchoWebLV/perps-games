@@ -86,13 +86,14 @@ export interface RoundSnap {
   exitRaw: bigint; exitHuman: number; deadlineTs: number;
 }
 
-/** A round's composite on-chain identity. `deadline_ts` (= now + secs) is NOT unique — two rounds of
- *  the same duration opened in the same second collide — so the ER's stale-corpse guards must not key
- *  on it alone. Fold in the entry snapshot (Lazer `publish_time` entryTs + the price mantissa entryRaw,
- *  distinct per open in practice) plus the owner, all from data the client already reads. Tolerates a
- *  settled corpse missing the entry fields (a deadline difference still keys them apart). */
-export function roundKey(r: { entryTs?: number; entryRaw?: bigint; deadlineTs: number }, owner: string): string {
-  return `${owner}:${r.entryTs ?? 0}:${(r.entryRaw ?? 0n).toString()}:${r.deadlineTs}`;
+/** A round's stable on-chain identity: owner + deadline_ts. `deadline_ts` is written once at
+ *  `open` and NEVER rewritten (flip/lever re-anchor `entry_raw`/`entry_expo`, so entry fields
+ *  MUST NOT be part of the identity — keying on them made every post-flip settle look like a
+ *  stale corpse and rounds never closed). Per-owner rounds are strictly serial (one Round PDA,
+ *  each open gated on the prior settle + confirmed txs), so consecutive rounds can never share
+ *  a deadline second in practice. */
+export function roundKey(r: { deadlineTs: number }, owner: string): string {
+  return `${owner}:${r.deadlineTs}`;
 }
 
 /** Result of a mid-round flip/lever: either re-anchored (still open) or settled (terminal-first hit). */
@@ -121,8 +122,8 @@ export function roundToSnap(r: {
 /** Shape a flip/lever outcome: settled payload when the action hit a terminal (status 2), else the re-anchored round. */
 export function actionResultFromSnap(snap: RoundSnap, balance: bigint): ActionResult {
   if (snap.status === 2) {
-    // carry the entry snapshot (entryTs/entryRaw) so the caller can key the settle to THIS round —
-    // a bare deadlineTs can't distinguish it from the previous round's corpse (see roundKey).
+    // deadlineTs is the settle's identity (owner + deadline_ts — see roundKey); entryTs/entryRaw
+    // ride along as display/diagnostic fields (they re-anchor on flip/lever, so they must NOT key it).
     return { settled: true, outcome: snap.outcome, outcomeName: snap.outcomeName, payout: snap.payout, exitRaw: snap.exitRaw, exitHuman: snap.exitHuman, balance, entryTs: snap.entryTs, entryRaw: snap.entryRaw, deadlineTs: snap.deadlineTs };
   }
   return { settled: false, banked: snap.banked, dir: snap.dir, lev: snap.lev, entryHuman: snap.entryHuman };

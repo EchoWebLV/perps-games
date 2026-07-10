@@ -47,25 +47,38 @@ describe("chain-round pure helpers", () => {
     expect(s.entryHuman).toBeCloseTo(59217.57, 1);
   });
 
-  it("roundKey distinguishes two same-duration/same-second rounds by their entry snapshot", () => {
-    // deadline_ts = now + secs is NOT unique — two rounds of the same duration opened in the same
-    // second collide. The Lazer entry snapshot (publish_time + price mantissa) is distinct per open,
-    // so the composite key tells them apart even when deadlineTs is identical.
+  it("roundKey identifies a round by owner + deadline_ts ONLY — a re-anchored entry MUST NOT change it", () => {
+    // Contract change (P0 fix): flip/lever REWRITE entry_raw/entry_expo on-chain (the mid-round
+    // re-anchor); deadline_ts is written once at open and never again. Keying identity on the entry
+    // snapshot made every post-flip settle look like a stale corpse — poll() discarded genuine
+    // settles and rounds never closed. Identity is owner+deadline_ts, immutable for the round's life,
+    // so the SAME round keeps ONE key across every re-anchor.
     const dl = 1_751_000_060;
-    const a = roundKey({ entryTs: 1_751_000_000, entryRaw: 8_100_000_000n, deadlineTs: dl }, "Owner1111");
-    const b = roundKey({ entryTs: 1_751_000_001, entryRaw: 8_100_050_000n, deadlineTs: dl }, "Owner1111");
-    expect(a).not.toBe(b);
+    const atOpen = { entryTs: 1_751_000_000, entryRaw: 8_100_000_000n, deadlineTs: dl };
+    const flipped = { entryTs: 1_751_000_000, entryRaw: 8_100_500_000n, deadlineTs: dl }; // entry re-anchored by a flip
+    const levered = { entryTs: 1_751_000_000, entryRaw: 7_900_000_000n, deadlineTs: dl }; // and again by a lever
+    expect(roundKey(flipped, "Owner1111")).toBe(roundKey(atOpen, "Owner1111")); // was the bug: these keys differed
+    expect(roundKey(levered, "Owner1111")).toBe(roundKey(atOpen, "Owner1111"));
   });
 
-  it("roundKey is stable for the same round and owner-scoped", () => {
+  it("roundKey still keys DIFFERENT rounds apart by deadline_ts and by owner", () => {
+    // Per-owner rounds are strictly serial (one Round PDA, each open gated on the prior settle), so
+    // consecutive rounds never share a deadline second — deadline still separates THIS round from the
+    // previous round's settled corpse (the stale-corpse guard the key exists for).
     const r = { entryTs: 111, entryRaw: 222n, deadlineTs: 333 };
-    expect(roundKey(r, "OwnerA")).toBe(roundKey(r, "OwnerA")); // same round → same key
-    expect(roundKey(r, "OwnerA")).not.toBe(roundKey(r, "OwnerB")); // different owner → different key
+    const next = { entryTs: 999, entryRaw: 888n, deadlineTs: 334 }; // the serially-next round (later deadline)
+    expect(roundKey(r, "OwnerA")).toBe(roundKey(r, "OwnerA"));        // same round → same key
+    expect(roundKey(r, "OwnerA")).not.toBe(roundKey(next, "OwnerA")); // next round → different key
+    expect(roundKey(r, "OwnerA")).not.toBe(roundKey(r, "OwnerB"));    // different owner → different key
   });
 
-  it("roundKey tolerates a settled result missing the entry snapshot (deadline still distinguishes)", () => {
-    // flip/lever settled corpses may omit entryTs/entryRaw; a deadline difference must still key apart.
-    expect(roundKey({ deadlineTs: 1000 } as any, "O")).not.toBe(roundKey({ deadlineTs: 2000 } as any, "O"));
+  it("roundKey needs only deadline_ts (a settled corpse missing the entry snapshot still keys correctly)", () => {
+    // flip/lever settled corpses may omit entryTs/entryRaw; identity no longer reads them, so a
+    // bare { deadlineTs } keys exactly like the full round object.
+    const full = { entryTs: 5, entryRaw: 9n, deadlineTs: 1000 };
+    const bare = { deadlineTs: 1000 };
+    expect(roundKey(bare, "O")).toBe(roundKey(full, "O"));                     // entry fields ignored → same key
+    expect(roundKey(bare, "O")).not.toBe(roundKey({ deadlineTs: 2000 }, "O")); // deadline still distinguishes
   });
 
   it("actionResultFromSnap exposes the settled payload only when status==2", () => {

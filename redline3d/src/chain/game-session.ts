@@ -70,11 +70,11 @@ export function createGameSession(opts: {
   let isDelegated = false;
   let armed = false;
   let bal = 0n;
-  // THIS round's composite identity (owner + entry snapshot + deadline — see roundKey). The ER
-  // router can serve the PREVIOUS round's settled state for a while after a fresh open, so every
-  // settle consumer checks its snap's key against this before treating the round as over. A bare
-  // deadlineTs isn't unique (two same-second/same-duration rounds collide), hence the composite.
-  // null = no round known yet.
+  // THIS round's stable identity (owner + deadline_ts — see roundKey). The ER router can serve the
+  // PREVIOUS round's settled state for a while after a fresh open, so every settle consumer checks
+  // its snap's key against this before treating the round as over. deadline_ts is immutable for the
+  // round's life (flip/lever re-anchor entry_raw, so entry fields must NOT key it) and per-owner
+  // rounds are serial, so it separates THIS round from the previous round's corpse. null = no round yet.
   let curKey: string | null = null;
   // The identity of a round a PRIOR open attempt (this same GO) opened but couldn't confirm —
   // captured so a retry ADOPTS it instead of the stale-round reconcile settling our own fresh

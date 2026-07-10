@@ -521,8 +521,8 @@ describe("round identity — the previous round's settled corpse must not settle
   });
 
   it("a lever fetch that raced onto the corpse does NOT fire onSettled; the real settle does", async () => {
-    // The settled result now carries the round's entry snapshot (entryTs/entryRaw), so the guard
-    // keys on the full identity: the corpse (a DIFFERENT round) is swallowed; THIS round's settle fires.
+    // The guard keys on owner+deadline_ts (see roundKey): the corpse (a DIFFERENT round, an older
+    // deadline) is swallowed; THIS round's settle (matching deadline) fires.
     let leverResult: any = { settled: true, outcome: 3, outcomeName: "time", payout: 47_000_000n, exitRaw: 0n, exitHuman: 0, balance: 1n, entryTs: 1000, entryRaw: 8_100_000_000n, deadlineTs: 1000 };
     const chain = fakeChain({
       delegationState: vi.fn(async () => "reuse" as const),
@@ -559,6 +559,58 @@ describe("round identity — the previous round's settled corpse must not settle
     expect(opened.deadlineTs).toBe(2000);
     expect(opened.entryHuman).toBe(81);
     expect(await s.poll()).toBeNull();               // corpse at the OLD deadline still suppressed
+  });
+
+  it("poll surfaces a crank settle after a flip re-anchored the entry (rounds must never stick open)", async () => {
+    // REGRESSION (live P0): flip/lever REWRITE round.entry_raw on-chain (the mid-round re-anchor,
+    // lib.rs:754/:820); deadline_ts is written once at open and never again. A round identity that
+    // folds entry_raw in false-mismatches every post-flip settle — poll() then discards the genuine
+    // crank/deadline settle and the round sticks OPEN in the HUD forever (the user-reported bug).
+    const DL = 2222;
+    const openLive = snap(DL, { entryRaw: 60_000n, entryTs: 1111 });                     // entry snapshot at open
+    const settle = snap(DL, { entryRaw: 60_500n, entryTs: 1111, status: 2, outcome: 3,   // re-anchored, then crank-settled
+                              outcomeName: "time", payout: 47_000_000n });
+    const reads = [null, openLive]; // open: reconcile (nothing stale) → verify read (stamps curKey)
+    const chain = fakeChain({
+      open: vi.fn(async () => ({ entryRaw: 60_000n, entryExpo: 8, entryHuman: 60000, entryTs: 1111, deadlineTs: DL, feed: "F" })),
+      readRound: vi.fn(async () => (reads.length ? reads.shift()! : settle)), // post-open reads = the re-anchored settle
+      flip: vi.fn(async () => ({ settled: false as const, banked: 0n, dir: -1, lev: 50, entryHuman: 60005 })), // re-anchor, still open
+    });
+    const s = createGameSession({ mint: MINT, onSettled: vi.fn(), injectChain: chain, injectAddress: "Fake111" });
+    await s.init();
+    await s.open("SOL", 1, 50, 1_000_000, 60, 200_000);
+    await s.flip(-1); // re-anchors entry_raw on-chain (60_000n → 60_500n); round stays open
+    const settled = await s.poll();
+    expect(settled).not.toBeNull();       // the genuine settle of THIS round must surface (was null — the bug)
+    expect(settled?.status).toBe(2);
+    expect(settled?.outcomeName).toBe("time");
+  });
+
+  it("a background lever settle after a flip re-anchored the entry fires onSettled (not 'ignored stale settle')", async () => {
+    // Same re-anchor root cause on the lever guard (game-session.ts:136): a genuine lever-triggered
+    // settle carries the re-anchored entry_raw, so a composite-key guard drops it as a stale corpse.
+    // Identity keyed on owner+deadline_ts recognizes it as THIS round → onSettled fires.
+    const DL = 2222;
+    const openLive = snap(DL, { entryRaw: 60_000n, entryTs: 1111 });
+    const reads = [null, openLive]; // open: reconcile → verify (stamps curKey at entry_raw 60_000n)
+    const onSettled = vi.fn();
+    const chain = fakeChain({
+      readPlayerBalance: vi.fn(async (onEr?: boolean) => (onEr ? 5_000_000n : 0n)), // funded ER clone → no post-delegate poll wait
+      open: vi.fn(async () => ({ entryRaw: 60_000n, entryExpo: 8, entryHuman: 60000, entryTs: 1111, deadlineTs: DL, feed: "F" })),
+      readRound: vi.fn(async () => (reads.length ? reads.shift()! : openLive)),
+      flip: vi.fn(async () => ({ settled: false as const, banked: 0n, dir: -1, lev: 50, entryHuman: 60005 })),
+      // the lever hits terminal after its own re-anchor: settle carries entry_raw 60_500n (≠ curKey's 60_000n)
+      lever: vi.fn(async () => ({ settled: true as const, outcome: 3, outcomeName: "time", payout: 47_000_000n, exitRaw: 0n, exitHuman: 0, balance: 4_000_000n, entryTs: 1111, entryRaw: 60_500n, deadlineTs: DL })),
+    });
+    const s = createGameSession({ mint: MINT, onSettled, injectChain: chain, injectAddress: "Fake111" });
+    await s.init();
+    await s.ensureSession(2_000_000, 1_000_000); // delegate so noteLeverage drives the on-chain lever
+    await s.open("SOL", 1, 50, 1_000_000, 60, 200_000);
+    await s.flip(-1); // re-anchors entry_raw on-chain
+    s.noteLeverage(30);
+    await tick(); await tick();
+    expect(onSettled).toHaveBeenCalledTimes(1); // the genuine settle of THIS round (was dropped as stale — the bug)
+    expect(onSettled).toHaveBeenCalledWith(expect.objectContaining({ outcomeName: "time", payout: 47_000_000n }));
   });
 });
 
