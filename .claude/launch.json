@@ -43,6 +43,13 @@
       "port": 4100
     },
     {
+      "name": "redline3d-vrf-e2e",
+      "runtimeExecutable": "bash",
+      "runtimeArgs": ["-c", "VITE_WALLET=dev VITE_API_BASE=http://localhost:8099 npm run dev -- --port 4102 --strictPort --host"],
+      "cwd": "redline3d",
+      "port": 4102
+    },
+    {
       "name": "redline3d-dist",
       "runtimeExecutable": "bash",
       "runtimeArgs": ["-c", "npm run preview -- --port 4500 --strictPort"],
