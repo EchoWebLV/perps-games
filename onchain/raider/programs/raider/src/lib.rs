@@ -456,7 +456,7 @@ pub mod raider {
         round.stake = stake;
         round.entry_raw = snap.price;
         round.entry_expo = snap.exponent;
-        round.entry_ts = snap.publish_time;
+        round.entry_ts = now;
         round.banked = 0;
         round.max_payout = max_payout;
         // Track uses a bounded positive deadline. The dedicated Highway sentinel uses
@@ -730,8 +730,15 @@ pub mod raider {
         );
         require!(ctx.accounts.round.status == 1, RaiderError::NoOpenRound);
 
-        if settle::fires(
+        let fee_banked = settle::accrue_borrow_fee_fp(
             ctx.accounts.round.banked,
+            ctx.accounts.round.lev,
+            ctx.accounts.round.entry_ts,
+            now,
+            ctx.accounts.round.deadline_ts,
+        );
+        if settle::fires(
+            fee_banked,
             ctx.accounts.round.dir,
             ctx.accounts.round.lev,
             ctx.accounts.round.entry_raw,
@@ -750,9 +757,10 @@ pub mod raider {
         }
 
         let round = &mut ctx.accounts.round;
-        round.banked = settle::rebank_fp(round.banked, round.dir, round.lev, round.entry_raw, snap.price);
+        round.banked = settle::rebank_fp(fee_banked, round.dir, round.lev, round.entry_raw, snap.price);
         round.entry_raw = snap.price;
         round.entry_expo = snap.exponent;
+        round.entry_ts = now;
         round.dir = new_dir;
         emit!(RoundEvent {
             owner: round.owner,
@@ -796,8 +804,15 @@ pub mod raider {
         );
         require!(ctx.accounts.round.status == 1, RaiderError::NoOpenRound);
 
-        if settle::fires(
+        let fee_banked = settle::accrue_borrow_fee_fp(
             ctx.accounts.round.banked,
+            ctx.accounts.round.lev,
+            ctx.accounts.round.entry_ts,
+            now,
+            ctx.accounts.round.deadline_ts,
+        );
+        if settle::fires(
+            fee_banked,
             ctx.accounts.round.dir,
             ctx.accounts.round.lev,
             ctx.accounts.round.entry_raw,
@@ -816,9 +831,10 @@ pub mod raider {
         }
 
         let round = &mut ctx.accounts.round;
-        round.banked = settle::rebank_fp(round.banked, round.dir, round.lev, round.entry_raw, snap.price);
+        round.banked = settle::rebank_fp(fee_banked, round.dir, round.lev, round.entry_raw, snap.price);
         round.entry_raw = snap.price;
         round.entry_expo = snap.exponent;
+        round.entry_ts = now;
         round.lev = new_lev;
         emit!(RoundEvent {
             owner: round.owner,
@@ -900,8 +916,15 @@ fn try_settle_tick<'info>(
     // liq/cap/time terminal check. Stamp/clear write the grace breach timestamp WITHOUT
     // settling (the round rides on); Settle hands off to the shared settle body, which
     // renders the outcome/payout (a grace-elapsed liq or an SL/TP cashout at the mark).
-    match settle::tick_action(
+    let fee_banked = settle::accrue_borrow_fee_fp(
         round.banked,
+        round.lev,
+        round.entry_ts,
+        now,
+        round.deadline_ts,
+    );
+    match settle::tick_action(
+        fee_banked,
         round.dir,
         round.lev,
         round.entry_raw,
@@ -950,6 +973,16 @@ fn settle_round(
     now: i64,
 ) -> Result<()> {
     require!(round.status == 1, RaiderError::NoOpenRound);
+
+    // Highway fees are settled lazily at the same authenticated action boundary as
+    // PnL. Re-anchoring on flip/lever prevents any interval from being charged twice.
+    round.banked = settle::accrue_borrow_fee_fp(
+        round.banked,
+        round.lev,
+        round.entry_ts,
+        now,
+        round.deadline_ts,
+    );
 
     let (mut outcome, payout) = settle::settle(
         round.banked,

@@ -32,6 +32,38 @@ pub fn is_open_ended(deadline_ts: i64) -> bool {
 pub fn deadline_elapsed(now: i64, deadline_ts: i64) -> bool {
     deadline_ts > 0 && now >= deadline_ts
 }
+
+pub const HIGHWAY_BORROW_BPS_PER_DAY: i128 = 1;
+const BPS_DENOM: i128 = 10_000;
+const DAY_SECS: i128 = 86_400;
+
+/// Borrow fee as a fraction of collateral in SCALE units. The fee is charged on
+/// notional, so leverage multiplies the one-basis-point daily rate. Division
+/// rounds up by one fixed-point atom in the house's favor.
+pub fn borrow_fee_fp(lev: u32, elapsed_secs: i64) -> i128 {
+    if elapsed_secs <= 0 {
+        return 0;
+    }
+    let num = (lev as i128)
+        * SCALE
+        * HIGHWAY_BORROW_BPS_PER_DAY
+        * (elapsed_secs as i128);
+    let den = BPS_DENOM * DAY_SECS;
+    (num + den - 1) / den
+}
+
+pub fn accrue_borrow_fee_fp(
+    banked_fp: i128,
+    lev: u32,
+    entry_ts: i64,
+    now: i64,
+    deadline_ts: i64,
+) -> i128 {
+    if !is_open_ended(deadline_ts) {
+        return banked_fp;
+    }
+    banked_fp.saturating_sub(borrow_fee_fp(lev, now.saturating_sub(entry_ts)))
+}
 // Fallback ceiling (base units) for the per-session house slice (FIX 2): the largest
 // per-round stake the bounded-by-construction default assumes. `max_payout(MAX_STAKE)`
 // is exactly one worst-case round's reservation, which `slice_from_pot` uses as the cap
@@ -93,6 +125,46 @@ pub fn equity_fp(banked_fp: i128, dir: i8, lev: u32, entry_raw: i64, exit_raw: i
     } else {
         eq
     }
+}
+
+#[allow(clippy::too_many_arguments)]
+pub fn rebank_with_borrow_fee_fp(
+    banked_fp: i128,
+    dir: i8,
+    lev: u32,
+    entry_raw: i64,
+    price_raw: i64,
+    entry_ts: i64,
+    now: i64,
+    deadline_ts: i64,
+) -> i128 {
+    rebank_fp(
+        accrue_borrow_fee_fp(banked_fp, lev, entry_ts, now, deadline_ts),
+        dir,
+        lev,
+        entry_raw,
+        price_raw,
+    )
+}
+
+#[allow(clippy::too_many_arguments)]
+pub fn equity_with_borrow_fee_fp(
+    banked_fp: i128,
+    dir: i8,
+    lev: u32,
+    entry_raw: i64,
+    exit_raw: i64,
+    entry_ts: i64,
+    now: i64,
+    deadline_ts: i64,
+) -> i128 {
+    equity_fp(
+        accrue_borrow_fee_fp(banked_fp, lev, entry_ts, now, deadline_ts),
+        dir,
+        lev,
+        entry_raw,
+        exit_raw,
+    )
 }
 
 /// Apply terminal precedence at the exit mark; return (outcome, settled_equity_fp).
@@ -271,6 +343,50 @@ mod tests {
         assert!(!deadline_elapsed(10_000, -123));
         assert!(!deadline_elapsed(10_000, 0));
         assert!(deadline_elapsed(101, 100));
+    }
+
+    #[test]
+    fn highway_borrow_fee_is_one_bp_of_notional_per_day() {
+        assert_eq!(borrow_fee_fp(10, 86_400), 1_000);
+        assert_eq!(borrow_fee_fp(250, 86_400), 25_000);
+        assert_eq!(borrow_fee_fp(250, 43_200), 12_500);
+    }
+
+    #[test]
+    fn fee_accrual_only_changes_open_ended_rounds() {
+        assert_eq!(accrue_borrow_fee_fp(0, 250, 100, 86_500, -42), -25_000);
+        assert_eq!(accrue_borrow_fee_fp(0, 250, 100, 86_500, 90_000), 0);
+        assert_eq!(accrue_borrow_fee_fp(7, 250, 200, 100, -42), 7);
+    }
+
+    #[test]
+    fn segmented_fee_accrual_charges_each_interval_once() {
+        let first = accrue_borrow_fee_fp(0, 250, 0, 43_200, -42);
+        let second = accrue_borrow_fee_fp(first, 250, 43_200, 86_400, -42);
+        assert_eq!(first, -12_500);
+        assert_eq!(second, -25_000);
+    }
+
+    #[test]
+    fn highway_rebank_and_equity_include_lazy_borrow_fee() {
+        assert_eq!(
+            rebank_with_borrow_fee_fp(0, 1, 250, 60_000, 60_000, 0, 86_400, -42),
+            -25_000,
+        );
+        assert_eq!(
+            equity_with_borrow_fee_fp(0, 1, 250, 60_000, 60_000, 0, 86_400, -42),
+            975_000,
+        );
+
+        // Positive deadlines are Track rounds and remain fee-free.
+        assert_eq!(
+            rebank_with_borrow_fee_fp(0, 1, 250, 60_000, 60_000, 0, 86_400, 90_000),
+            0,
+        );
+        assert_eq!(
+            equity_with_borrow_fee_fp(0, 1, 250, 60_000, 60_000, 0, 86_400, 90_000),
+            SCALE,
+        );
     }
 
     // banked = 0 path (Phase-1 parity): long, 100x, +1% => equity 2.0x, cashout.
