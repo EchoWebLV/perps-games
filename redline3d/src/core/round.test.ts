@@ -51,6 +51,28 @@ describe("RoundEngine", () => {
     expect(s.reason).toBe("time");
   });
 
+  it("previews the Highway borrow fee without time-settling", () => {
+    const r = new RoundEngine();
+    r.launch({
+      dir: 1, lev: 250, stake: 1, entryRaw: 100, startMs: 0,
+      maxSec: Number.POSITIVE_INFINITY, borrowBpsPerDay: 1,
+    });
+    const s = r.tick(100, 86_400_000);
+    expect(s.phase).toBe("live");
+    expect(s.equity).toBeCloseTo(0.975, 8);
+  });
+
+  it("banks each fee interval once when Highway leverage changes", () => {
+    const r = new RoundEngine();
+    r.launch({
+      dir: 1, lev: 250, stake: 1, entryRaw: 100, startMs: 0,
+      maxSec: Number.POSITIVE_INFINITY, borrowBpsPerDay: 1,
+    });
+    r.setLeverage(100, 100, 43_200_000);
+    const s = r.tick(100, 86_400_000);
+    expect(s.equity).toBeCloseTo(1 - 0.0125 - 0.005, 8);
+  });
+
   it("cashout settles with reason cashout", () => {
     const r = launched();
     r.tick(102, 1000);
