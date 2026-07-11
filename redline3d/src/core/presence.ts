@@ -351,7 +351,11 @@ export function createPresenceClient(options: PresenceClientOptions): PresenceCl
       }
       if (localId === null || currentStatus !== "live") return;
       if (message.type === "emote") {
-        options.onEmote?.({ id: message.id, kind: message.kind, nonce: message.nonce });
+        try {
+          options.onEmote?.({ id: message.id, kind: message.kind, nonce: message.nonce });
+        } catch {
+          // Presence visuals are best-effort and cannot block local play.
+        }
         return;
       }
 

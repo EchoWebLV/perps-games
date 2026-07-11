@@ -286,6 +286,26 @@ describe("presence client", () => {
     expect(emotes).toEqual([{ id: "p1", kind, nonce: 1 }]);
   });
 
+  it("contains emote callback failures and continues processing messages", async () => {
+    const emotes: string[] = [];
+    const client = createPresenceClient(clientOptions({
+      onEmote: ({ kind }) => {
+        if (kind === "laugh") throw new Error("renderer failed");
+        emotes.push(kind);
+      },
+    }));
+    client.connect();
+    await flush();
+    const ws = FakeWebSocket.only();
+    ws.open();
+    ws.message({ type: "welcome", id: "self", serverTime: 1 });
+
+    expect(() => ws.message({ type: "emote", id: "p1", kind: "laugh", nonce: 1 })).not.toThrow();
+    ws.message({ type: "emote", id: "p1", kind: "fire", nonce: 2 });
+
+    expect(emotes).toEqual(["fire"]);
+  });
+
   it("emits join and leave diffs without treating pose changes as joins", async () => {
     const joins: string[] = [];
     const leaves: Array<[string, number]> = [];
