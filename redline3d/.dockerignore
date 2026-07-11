@@ -1,0 +1,9 @@
+node_modules
+dist
+android
+public/models
+.env
+.env.development
+.vercel
+*.log
+_*.mjs
