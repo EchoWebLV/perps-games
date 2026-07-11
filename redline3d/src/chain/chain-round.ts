@@ -86,6 +86,13 @@ export interface RoundSnap {
   exitRaw: bigint; exitHuman: number; deadlineTs: number;
 }
 
+export const HIGHWAY_DURATION_SENTINEL = -1;
+export const HIGHWAY_CRANK_ITERATIONS = 24 * 60 * 60;
+
+export function isHighwayRound(round: Pick<RoundSnap, "status" | "deadlineTs">): boolean {
+  return round.status === 1 && round.deadlineTs < 0;
+}
+
 /** A round's stable on-chain identity: owner + deadline_ts. `deadline_ts` is written once at
  *  `open` and NEVER rewritten (flip/lever re-anchor `entry_raw`/`entry_expo`, so entry fields
  *  MUST NOT be part of the identity — keying on them made every post-flip settle look like a

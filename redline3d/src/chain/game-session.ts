@@ -2,7 +2,7 @@ import { PublicKey } from "@solana/web3.js";
 import type { SolanaWalletPort } from "../core/solana-wallet";
 import { createDevKeypairPort } from "./dev-keypair-port";
 import { portToAnchorWallet, type AnchorWalletLike } from "./anchor-wallet";
-import { createChainRound, maxPayoutBase, roundKey, WalletUnfundedError, BankrollFullError, type ChainRound, type OpenedRound, type SettledRound, type ActionResult, type RoundSnap, type AssetSym } from "./chain-round";
+import { createChainRound, maxPayoutBase, roundKey, WalletUnfundedError, BankrollFullError, HIGHWAY_DURATION_SENTINEL, HIGHWAY_CRANK_ITERATIONS, isHighwayRound, type ChainRound, type OpenedRound, type SettledRound, type ActionResult, type RoundSnap, type AssetSym } from "./chain-round";
 import { createLeverSync } from "./lever-sync";
 
 /** The settled shape main.ts needs to finalize a round in the HUD. */
@@ -30,6 +30,7 @@ export interface GameSession {
   delegated(): boolean;
   crankArmed(): boolean;
   balance(): bigint;
+  liveRound(): RoundSnap | null;
   init(): Promise<bigint>;
   /** Sign-in with ACCOUNT-CHOOSER semantics (the identity gate's SIGN IN): any lingering
    *  wallet auth is cleared FIRST so connect() always shows the login UI. A persisted Privy
@@ -67,12 +68,20 @@ export function createGameSession(opts: {
   port?: SolanaWalletPort;            // the on-chain signer (defaults to dev-keypair)
   injectChain?: ChainRound;
   injectAddress?: string;
+  coverageStore?: Pick<Storage, "getItem" | "setItem" | "removeItem">;
 }): GameSession {
   const port = opts.port ?? (opts.injectChain ? null : createDevKeypairPort());
   let chain: ChainRound | null = opts.injectChain ?? null;
   let isDelegated = false;
   let armed = false;
   let bal = 0n;
+  let liveSnap: RoundSnap | null = null;
+  const memoryCoverage = new Map<string, number>();
+  const coverageStore = opts.coverageStore ?? {
+    getItem: (key: string) => { try { return globalThis.localStorage?.getItem(key) ?? null; } catch { return null; } },
+    setItem: (key: string, value: string) => { try { globalThis.localStorage?.setItem(key, value); } catch { /* unavailable */ } },
+    removeItem: (key: string) => { try { globalThis.localStorage?.removeItem(key); } catch { /* unavailable */ } },
+  };
   // THIS round's stable identity (owner + deadline_ts — see roundKey). The ER router can serve the
   // PREVIOUS round's settled state for a while after a fresh open, so every settle consumer checks
   // its snap's key against this before treating the round as over. deadline_ts is immutable for the
@@ -94,6 +103,49 @@ export function createGameSession(opts: {
     return chain;
   }
 
+  const coverageKey = (round: { deadlineTs: number }) => `redline.highway.crank.v1:${roundKey(round, ownerId())}`;
+
+  function coverageUntil(round: { deadlineTs: number }): number {
+    const key = coverageKey(round);
+    const persisted = Number(coverageStore.getItem(key) ?? 0);
+    return Math.max(memoryCoverage.get(key) ?? 0, Number.isFinite(persisted) ? persisted : 0);
+  }
+
+  function recordCoverage(round: { deadlineTs: number }, untilMs: number): void {
+    const key = coverageKey(round);
+    memoryCoverage.set(key, untilMs);
+    coverageStore.setItem(key, String(untilMs));
+  }
+
+  async function armCrank(c: ChainRound, durationSecs: number, round: { deadlineTs: number }): Promise<void> {
+    armed = false;
+    if (durationSecs === HIGHWAY_DURATION_SENTINEL && coverageUntil(round) > Date.now()) {
+      armed = true;
+      return;
+    }
+    const iterations = durationSecs === HIGHWAY_DURATION_SENTINEL
+      ? HIGHWAY_CRANK_ITERATIONS
+      : durationSecs + 10;
+    try {
+      await c.scheduleCrank({ iterations });
+      armed = true;
+      if (durationSecs === HIGHWAY_DURATION_SENTINEL) {
+        recordCoverage(round, Date.now() + HIGHWAY_CRANK_ITERATIONS * 1000);
+      }
+    } catch {
+      armed = false;
+    }
+  }
+
+  function openedSnap(opened: OpenedRound, dir: 1 | -1, lev: number): RoundSnap {
+    return {
+      status: 1, outcome: 0, outcomeName: "cashout", payout: 0n, banked: 0n,
+      dir, lev, entryRaw: opened.entryRaw, entryExpo: opened.entryExpo,
+      entryHuman: opened.entryHuman, entryTs: opened.entryTs ?? 0,
+      exitRaw: 0n, exitHuman: 0, deadlineTs: opened.deadlineTs,
+    };
+  }
+
   // End a live session: settle any open round, commit+undelegate, return the till to the
   // master pot. Shared by endSession (cash-out) and ensureSession's rebuild-on-short-ledger.
   async function teardownSession(c: ChainRound): Promise<void> {
@@ -109,6 +161,7 @@ export function createGameSession(opts: {
     // session/player (self-smoothing). Now safe because the round is settled (lock released).
     try { await c.sweepTill(); } catch (e) { console.warn("sweep_till skipped:", e); }
     isDelegated = false;
+    liveSnap = null;
   }
 
   // Re-adopt a still-live session (page reload / log-out→log-in mid-session): the L1 copy
@@ -116,6 +169,7 @@ export function createGameSession(opts: {
   // otherwise the chip shows old money and "Cash out" withdraws against a locked PDA.
   async function adoptAndRead(): Promise<void> {
     const c = need();
+    armed = false;
     const state = await c.delegationState().catch(() => "fresh" as const);
     isDelegated = state === "reuse";
     bal = await c.readPlayerBalance(isDelegated);
@@ -123,7 +177,15 @@ export function createGameSession(opts: {
       // adopting a live session mid-round: pick up the round's identity so the corpse
       // guard below keys on it (a still-open round is the only trustworthy source)
       const snap = await c.readRound(true).catch(() => null);
-      if (snap && snap.status === 1) curKey = roundKey(snap, ownerId());
+      if (snap && snap.status === 1) {
+        curKey = roundKey(snap, ownerId());
+        liveSnap = snap;
+        if (isHighwayRound(snap)) await armCrank(c, HIGHWAY_DURATION_SENTINEL, snap);
+      } else {
+        liveSnap = null;
+      }
+    } else {
+      liveSnap = null;
     }
   }
 
@@ -137,7 +199,11 @@ export function createGameSession(opts: {
         // after open can fetch the PREVIOUS round's settled corpse. Only a settle carrying
         // THIS round's identity may end the round (phantom "Settled at ×…" live-hit).
         if (curKey && roundKey(res, ownerId()) !== curKey) { console.warn("[session] ignored stale settle (lever raced a fresh open)"); return; }
+        liveSnap = null;
         opts.onSettled(res);
+      } else {
+        const fresh = await chain.readRound(true).catch(() => null);
+        if (fresh?.status === 1) liveSnap = fresh;
       }
     },
   });
@@ -160,6 +226,7 @@ export function createGameSession(opts: {
     delegated: () => isDelegated,
     crankArmed: () => armed,
     balance: () => bal,
+    liveRound: () => liveSnap,
 
     async init() {
       await connectChain();
@@ -178,6 +245,7 @@ export function createGameSession(opts: {
       isDelegated = false;
       armed = false;
       bal = 0n;
+      liveSnap = null;
       curKey = null; pendingOpenKey = null; // the old account's round identity must not gate the new one's settles
       await connectChain();
       await adoptAndRead();
@@ -317,7 +385,6 @@ export function createGameSession(opts: {
       const c = need();
       // Size the crank to THIS round: 1s ticks over the whole duration + settle margin. A fixed
       // 70-tick schedule let a 90s Heavy-Load round outlive its crank (live-found on devnet).
-      const armCrank = async () => { armed = false; try { await c.scheduleCrank({ iterations: durationSecs + 10 }); armed = true; } catch { armed = false; } };
       // Reconcile a leftover OPEN round before starting a new one. After a page reload, a
       // log-out→log-in, or a missed auto-settle (crank), a prior round can still be open on-chain
       // while the client thinks it's idle — `open` would then reject it as RoundAlreadyOpen. Settle
@@ -331,7 +398,8 @@ export function createGameSession(opts: {
           if (pendingOpenKey && roundKey(snap, ownerId()) === pendingOpenKey) {
             curKey = pendingOpenKey;
             pendingOpenKey = null;
-            await armCrank(); // the uncertain attempt threw before arming — arm the adopted round now
+            liveSnap = snap;
+            await armCrank(c, durationSecs, snap); // the uncertain attempt threw before arming
             return { entryRaw: snap.entryRaw, entryExpo: snap.entryExpo, entryHuman: snap.entryHuman, entryTs: snap.entryTs, deadlineTs: snap.deadlineTs, feed: "" };
           }
           await c.close();
@@ -363,7 +431,8 @@ export function createGameSession(opts: {
       if (live && roundKey(live, ownerId()) !== roundKey(opened, ownerId())) {
         opened = { entryRaw: live.entryRaw, entryExpo: live.entryExpo, entryHuman: live.entryHuman, entryTs: live.entryTs, deadlineTs: live.deadlineTs, feed: opened.feed };
       }
-      await armCrank();
+      liveSnap = live ?? openedSnap(opened, dir, lev);
+      await armCrank(c, durationSecs, liveSnap);
       return opened;
     },
 
@@ -376,7 +445,15 @@ export function createGameSession(opts: {
       if (res.settled && curKey && roundKey(res, ownerId()) !== curKey) {
         // the flip landed but its fetch raced onto the previous round's corpse — re-read
         const fresh = await need().readRound(true).catch(() => null);
-        if (fresh && fresh.status === 1) return { settled: false as const, banked: fresh.banked, dir: fresh.dir, lev: fresh.lev, entryHuman: fresh.entryHuman };
+        if (fresh && fresh.status === 1) {
+          liveSnap = fresh;
+          return { settled: false as const, banked: fresh.banked, dir: fresh.dir, lev: fresh.lev, entryHuman: fresh.entryHuman };
+        }
+      }
+      if (res.settled) liveSnap = null;
+      else {
+        const fresh = await need().readRound(true).catch(() => null);
+        if (fresh?.status === 1) liveSnap = fresh;
       }
       return res;
     },
@@ -384,6 +461,7 @@ export function createGameSession(opts: {
     async close() {
       const res = await need().close();
       bal = res.balance;
+      liveSnap = null;
       return res;
     },
 
@@ -391,12 +469,17 @@ export function createGameSession(opts: {
       const snap = await need().readRound(true);
       // a settled snap from a PREVIOUS round (stale ER node) must not end THIS round
       if (snap && snap.status === 2 && curKey && roundKey(snap, ownerId()) !== curKey) return null;
+      liveSnap = snap?.status === 1 ? snap : null;
+      if (liveSnap && isHighwayRound(liveSnap) && coverageUntil(liveSnap) <= Date.now()) {
+        await armCrank(need(), HIGHWAY_DURATION_SENTINEL, liveSnap);
+      }
       return snap;
     },
 
     async endSession() {
       const c = need();
       await teardownSession(c);
+      liveSnap = null;
       bal = await c.readPlayerBalance(false);
     },
 
@@ -418,6 +501,7 @@ export function createGameSession(opts: {
       isDelegated = false;
       armed = false;
       bal = 0n;
+      liveSnap = null;
     },
   };
 }

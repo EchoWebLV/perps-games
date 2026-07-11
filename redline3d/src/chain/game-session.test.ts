@@ -147,6 +147,58 @@ describe("createGameSession", () => {
     expect(opts?.iterations ?? 70).toBeGreaterThanOrEqual(100);
   });
 
+  it("arms 24 hours of one-second ticks for an open-ended Highway round", async () => {
+    const chain = fakeChain({
+      open: vi.fn(async () => ({ entryRaw: 60_000n, entryExpo: 8, entryHuman: 60000, entryTs: 100, deadlineTs: -123, feed: "F" })),
+    });
+    const s = createGameSession({ mint: MINT, onSettled: vi.fn(), injectChain: chain, injectAddress: "Fake111" });
+    await s.init();
+    await s.open("SOL", 1, 250, 1_000_000, -1, 200_000);
+    expect(chain.scheduleCrank).toHaveBeenCalledWith(expect.objectContaining({ iterations: 86_400 }));
+  });
+
+  it("exposes an adopted open Highway round after reconnect", async () => {
+    const open = {
+      status: 1, outcome: 0, outcomeName: "cashout", payout: 0n, banked: 0n,
+      dir: -1, lev: 250, entryRaw: 60_000n, entryExpo: 8, entryHuman: 60000,
+      entryTs: 100, exitRaw: 0n, exitHuman: 0, deadlineTs: -123,
+    };
+    const chain = fakeChain({
+      delegationState: vi.fn(async () => "reuse" as const),
+      readRound: vi.fn(async () => open),
+    });
+    const s = createGameSession({ mint: MINT, onSettled: vi.fn(), injectChain: chain, injectAddress: "Fake111" });
+    await s.init();
+    expect(s.liveRound()).toEqual(open);
+  });
+
+  it("does not overlap Highway crank coverage when the same round reconnects", async () => {
+    const values = new Map<string, string>();
+    const coverageStore = {
+      getItem: (key: string) => values.get(key) ?? null,
+      setItem: (key: string, value: string) => { values.set(key, value); },
+      removeItem: (key: string) => { values.delete(key); },
+    };
+    const open = {
+      status: 1, outcome: 0, outcomeName: "cashout", payout: 0n, banked: 0n,
+      dir: 1, lev: 250, entryRaw: 60_000n, entryExpo: 8, entryHuman: 60000,
+      entryTs: 100, exitRaw: 0n, exitHuman: 0, deadlineTs: -987,
+    };
+    const scheduleCrank = vi.fn(async () => {});
+    const make = () => createGameSession({
+      mint: MINT, onSettled: vi.fn(), injectAddress: "Fake111", coverageStore,
+      injectChain: fakeChain({
+        delegationState: vi.fn(async () => "reuse" as const),
+        readRound: vi.fn(async () => open),
+        scheduleCrank,
+      }),
+    });
+
+    await make().init();
+    await make().init();
+    expect(scheduleCrank).toHaveBeenCalledTimes(1);
+  });
+
   it("open still resolves when the crank fails to arm (degrades)", async () => {
     const chain = fakeChain({ scheduleCrank: vi.fn(async () => { throw new Error("escrow underfunded"); }) });
     const s = createGameSession({ mint: MINT, onSettled: vi.fn(), injectChain: chain, injectAddress: "Fake111" });

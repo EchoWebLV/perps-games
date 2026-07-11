@@ -1,10 +1,18 @@
 import { describe, it, expect } from "vitest";
 import { PublicKey } from "@solana/web3.js";
-import { deriveRaiderPdas, rawToHuman, roundToSnap, actionResultFromSnap, maxPayoutBase, roundKey } from "./chain-round";
+import { deriveRaiderPdas, rawToHuman, roundToSnap, actionResultFromSnap, maxPayoutBase, roundKey, HIGHWAY_DURATION_SENTINEL, HIGHWAY_CRANK_ITERATIONS, isHighwayRound } from "./chain-round";
 import { classifyDelegateState, DelegateBusyError } from "./chain-round";
 import { CHAIN } from "./config";
 
 describe("chain-round pure helpers", () => {
+  it("identifies open-ended Highway rounds and defines one day of crank coverage", () => {
+    expect(HIGHWAY_DURATION_SENTINEL).toBe(-1);
+    expect(HIGHWAY_CRANK_ITERATIONS).toBe(86_400);
+    expect(isHighwayRound({ status: 1, deadlineTs: -123 })).toBe(true);
+    expect(isHighwayRound({ status: 2, deadlineTs: -123 })).toBe(false);
+    expect(isHighwayRound({ status: 1, deadlineTs: 123 })).toBe(false);
+  });
+
   it("derives master, till, and the per-player PDAs the program expects", () => {
     const owner = new PublicKey("FP39ztVCx7FDPpou4mfPV6HyXoNVDRLEqZyvKkFgpCCM");
     const mint = new PublicKey("3TDF3grFqPJEdX4BhoCYzZuiRG6wrhKYE89wxoEg5kMX");
