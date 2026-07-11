@@ -1,5 +1,5 @@
 import * as THREE from "three";
-import type { PresenceEmote, RemotePresencePlayer } from "../core/presence";
+import type { PresenceEmote, PresenceEmoteKind, RemotePresencePlayer } from "../core/presence";
 import { smoothRemote, type RemotePose } from "../core/remote-motion";
 import { createCar } from "./car";
 import { tagTexture } from "./stripcars";
@@ -24,15 +24,15 @@ export interface RemoteObjectVisual {
   dispose(): void;
 }
 
-export interface RemoteSparkVisual extends RemoteObjectVisual {
-  pulse(): void;
+export interface RemoteEmoteVisual extends RemoteObjectVisual {
+  pulse(kind: PresenceEmoteKind): void;
   update(dt: number): void;
 }
 
 export interface RemoteCarsDeps {
   makeCar(): RemoteCarVisual;
   makeNameplate(name: string): RemoteObjectVisual;
-  makeSpark(): RemoteSparkVisual;
+  makeEmote?(): RemoteEmoteVisual;
 }
 
 export interface RemoteCars {
@@ -48,7 +48,7 @@ interface RemoteEntry {
   anchor: THREE.Group;
   car: RemoteCarVisual;
   nameplate: RemoteObjectVisual;
-  spark: RemoteSparkVisual;
+  emoteVisual: RemoteEmoteVisual;
   name: string;
   carId: string;
   hasResolvedModel: boolean;
@@ -82,60 +82,73 @@ function makeDefaultNameplate(name: string): RemoteObjectVisual {
   };
 }
 
-function makeSparkTexture(): THREE.DataTexture {
-  const size = 64;
-  const pixels = new Uint8Array(size * size * 4);
-  for (let y = 0; y < size; y += 1) {
-    for (let x = 0; x < size; x += 1) {
-      const dx = (x + 0.5 - size / 2) / (size / 2);
-      const dy = (y + 0.5 - size / 2) / (size / 2);
-      const radius = Math.min(1, Math.hypot(dx, dy));
-      const glow = 1 - radius;
-      const offset = (y * size + x) * 4;
-      pixels[offset] = 255;
-      pixels[offset + 1] = Math.round(77 + glow * 178);
-      pixels[offset + 2] = Math.round(210 + glow * 45);
-      pixels[offset + 3] = Math.round(glow * glow * 255);
-    }
-  }
-  const texture = new THREE.DataTexture(pixels, size, size, THREE.RGBAFormat);
-  texture.needsUpdate = true;
+const EMOTE_GLYPHS: Record<PresenceEmoteKind, { glyph: string; color: string }> = {
+  laugh: { glyph: "😂", color: "#ffd166" },
+  fire: { glyph: "🔥", color: "#ff6a3d" },
+  skull: { glyph: "💀", color: "#d6c7ff" },
+};
+
+function makeGlyphTexture(glyph: string): THREE.CanvasTexture {
+  const canvas = document.createElement("canvas");
+  canvas.width = canvas.height = 128;
+  const context = canvas.getContext("2d")!;
+  context.clearRect(0, 0, 128, 128);
+  context.font = "88px 'Apple Color Emoji','Segoe UI Emoji',sans-serif";
+  context.textAlign = "center";
+  context.textBaseline = "middle";
+  context.fillText(glyph, 64, 68);
+  const texture = new THREE.CanvasTexture(canvas);
+  texture.colorSpace = THREE.SRGBColorSpace;
   return texture;
 }
 
-function makeDefaultSpark(): RemoteSparkVisual {
-  const texture = makeSparkTexture();
-  const material = new THREE.SpriteMaterial({
-    map: texture,
-    transparent: true,
-    opacity: 0,
-    depthWrite: false,
-    blending: THREE.AdditiveBlending,
-  });
-  const sprite = new THREE.Sprite(material);
-  sprite.position.y = 4.5;
-  sprite.visible = false;
-  let age = Infinity;
-  const duration = 0.55;
+function makeDefaultEmoteResources() {
+  const textures: Record<PresenceEmoteKind, THREE.CanvasTexture> = {
+    laugh: makeGlyphTexture(EMOTE_GLYPHS.laugh.glyph),
+    fire: makeGlyphTexture(EMOTE_GLYPHS.fire.glyph),
+    skull: makeGlyphTexture(EMOTE_GLYPHS.skull.glyph),
+  };
   return {
-    object: sprite,
-    pulse() {
-      age = 0;
-      sprite.visible = true;
-      sprite.scale.setScalar(2);
-      material.opacity = 1;
-    },
-    update(dt) {
-      if (!sprite.visible) return;
-      age += dt;
-      const phase = Math.min(1, age / duration);
-      sprite.scale.setScalar(2 + phase * 7);
-      material.opacity = 1 - phase;
-      if (phase >= 1) sprite.visible = false;
+    make(): RemoteEmoteVisual {
+      const material = new THREE.SpriteMaterial({
+        map: textures.laugh,
+        transparent: true,
+        opacity: 0,
+        depthWrite: false,
+        blending: THREE.AdditiveBlending,
+      });
+      const sprite = new THREE.Sprite(material);
+      sprite.position.y = 6.8;
+      sprite.visible = false;
+      let age = Infinity;
+      return {
+        object: sprite,
+        pulse(kind) {
+          material.map = textures[kind];
+          material.color.set(EMOTE_GLYPHS[kind].color);
+          material.needsUpdate = true;
+          age = 0;
+          sprite.visible = true;
+          sprite.position.y = 6.8;
+          sprite.scale.setScalar(3);
+          material.opacity = 1;
+        },
+        update(dt) {
+          if (!sprite.visible) return;
+          age += dt;
+          const phase = Math.min(1, age / 0.7);
+          sprite.position.y = 6.8 + phase * 2.4;
+          sprite.scale.setScalar(3 + phase * 3);
+          material.opacity = 1 - phase;
+          if (phase >= 1) sprite.visible = false;
+        },
+        dispose() {
+          material.dispose();
+        },
+      };
     },
     dispose() {
-      material.dispose();
-      texture.dispose();
+      Object.values(textures).forEach((texture) => texture.dispose());
     },
   };
 }
@@ -145,12 +158,14 @@ export function createRemoteCars(resolver: RemoteCarResolver, deps: Partial<Remo
   const entries = new Map<string, RemoteEntry>();
   const makeCar = deps.makeCar ?? makeDefaultCar;
   const makeNameplate = deps.makeNameplate ?? makeDefaultNameplate;
-  const makeSpark = deps.makeSpark ?? makeDefaultSpark;
+  const defaultEmotes = deps.makeEmote ? null : makeDefaultEmoteResources();
+  const makeEmote = deps.makeEmote ?? (() => defaultEmotes!.make());
+  let disposed = false;
   const removeEntry = (id: string, entry: RemoteEntry) => {
     group.remove(entry.anchor);
     entry.car.dispose();
     entry.nameplate.dispose();
-    entry.spark.dispose();
+    entry.emoteVisual.dispose();
     entry.anchor.clear();
     entries.delete(id);
   };
@@ -170,14 +185,14 @@ export function createRemoteCars(resolver: RemoteCarResolver, deps: Partial<Remo
           const anchor = new THREE.Group();
           const car = makeCar();
           const nameplate = makeNameplate(player.name);
-          const spark = makeSpark();
-          anchor.add(car.group, nameplate.object, spark.object);
+          const emoteVisual = makeEmote();
+          anchor.add(car.group, nameplate.object, emoteVisual.object);
           const pose = { x: player.x, z: player.z, heading: player.heading, speed: player.speed };
           anchor.position.set(pose.x, 0, pose.z);
           anchor.rotation.y = pose.heading;
           group.add(anchor);
           entry = {
-            anchor, car, nameplate, spark, name: player.name, carId: player.carId,
+            anchor, car, nameplate, emoteVisual, name: player.name, carId: player.carId,
             hasResolvedModel: false, lastEmoteNonce: 0, current: pose, target: pose,
           };
           entries.set(player.id, entry);
@@ -215,7 +230,7 @@ export function createRemoteCars(resolver: RemoteCarResolver, deps: Partial<Remo
       const entry = entries.get(event.id);
       if (!entry || event.nonce <= entry.lastEmoteNonce) return;
       entry.lastEmoteNonce = event.nonce;
-      entry.spark.pulse();
+      entry.emoteVisual.pulse(event.kind);
     },
     update(dt) {
       for (const entry of entries.values()) {
@@ -223,14 +238,17 @@ export function createRemoteCars(resolver: RemoteCarResolver, deps: Partial<Remo
         entry.anchor.position.set(entry.current.x, 0, entry.current.z);
         entry.anchor.rotation.y = entry.current.heading;
         entry.car.update(dt, entry.current.speed);
-        entry.spark.update(dt);
+        entry.emoteVisual.update(dt);
       }
     },
     clear() {
       clearEntries();
     },
     dispose() {
+      if (disposed) return;
+      disposed = true;
       clearEntries();
+      defaultEmotes?.dispose();
     },
   };
 }

@@ -21,7 +21,7 @@ export interface Lobby {
   hide(): void;
   /** multiplayer seam — called with [] today; later a presence feed drives ghost cars */
   setRemoteCars(states: RemoteCarState[]): void;
-  /** pulse a remote driver's visual-only spark emote */
+  /** pulse a remote driver's visual-only emote */
   emoteRemote(event: PresenceEmote): void;
   /** which entry ring the player's car is inside (flares that ring), or null */
   setActiveDoor(kind: BuildingKind | null): void;

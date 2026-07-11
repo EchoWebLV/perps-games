@@ -24,7 +24,7 @@ function fakeDeps() {
     dispose: ReturnType<typeof vi.fn>;
   }> = [];
   const nameplates: Array<{ name: string; object: THREE.Group; dispose: ReturnType<typeof vi.fn> }> = [];
-  const sparks: Array<{
+  const emotes: Array<{
     object: THREE.Group;
     pulse: ReturnType<typeof vi.fn>;
     update: ReturnType<typeof vi.fn>;
@@ -41,13 +41,13 @@ function fakeDeps() {
       nameplates.push(nameplate);
       return nameplate;
     },
-    makeSpark: () => {
-      const spark = { object: new THREE.Group(), pulse: vi.fn(), update: vi.fn(), dispose: vi.fn() };
-      sparks.push(spark);
-      return spark;
+    makeEmote: () => {
+      const emote = { object: new THREE.Group(), pulse: vi.fn(), update: vi.fn(), dispose: vi.fn() };
+      emotes.push(emote);
+      return emote;
     },
   };
-  return { deps, cars, nameplates, sparks };
+  return { deps, cars, nameplates, emotes };
 }
 
 const resolveCar = (carId: string) => carId === "Orion"
@@ -82,7 +82,7 @@ function gltfFixture() {
 function nonCarVisualDeps() {
   return {
     makeNameplate: () => ({ object: new THREE.Group(), dispose: vi.fn() }),
-    makeSpark: () => ({ object: new THREE.Group(), pulse: vi.fn(), update: vi.fn(), dispose: vi.fn() }),
+    makeEmote: () => ({ object: new THREE.Group(), pulse: vi.fn(), update: vi.fn(), dispose: vi.fn() }),
   };
 }
 
@@ -110,7 +110,7 @@ describe("createRemoteCars", () => {
   });
 
   it("disposes every visual resource when a driver leaves", () => {
-    const { deps, cars, nameplates, sparks } = fakeDeps();
+    const { deps, cars, nameplates, emotes } = fakeDeps();
     const remotes = createRemoteCars(resolveCar, deps);
     remotes.setTargets([player(), player({ id: "p2", name: "bob_2" })]);
 
@@ -119,12 +119,12 @@ describe("createRemoteCars", () => {
     expect(remotes.group.children).toHaveLength(1);
     expect(cars[0].dispose).toHaveBeenCalledOnce();
     expect(nameplates[0].dispose).toHaveBeenCalledOnce();
-    expect(sparks[0].dispose).toHaveBeenCalledOnce();
+    expect(emotes[0].dispose).toHaveBeenCalledOnce();
     expect(cars[1].dispose).not.toHaveBeenCalled();
   });
 
   it("clears every active driver", () => {
-    const { deps, cars, nameplates, sparks } = fakeDeps();
+    const { deps, cars, nameplates, emotes } = fakeDeps();
     const remotes = createRemoteCars(resolveCar, deps);
     remotes.setTargets([player(), player({ id: "p2", name: "bob_2" })]);
 
@@ -133,7 +133,7 @@ describe("createRemoteCars", () => {
     expect(remotes.group.children).toHaveLength(0);
     expect(cars.every(({ dispose }) => dispose.mock.calls.length === 1)).toBe(true);
     expect(nameplates.every(({ dispose }) => dispose.mock.calls.length === 1)).toBe(true);
-    expect(sparks.every(({ dispose }) => dispose.mock.calls.length === 1)).toBe(true);
+    expect(emotes.every(({ dispose }) => dispose.mock.calls.length === 1)).toBe(true);
   });
 
   it("smooths toward target poses and animates the car at smoothed speed", () => {
@@ -170,34 +170,32 @@ describe("createRemoteCars", () => {
     expect(remotes.group.children).toHaveLength(1);
   });
 
-  it("pulses once for each new spark nonce", () => {
-    const { deps, sparks } = fakeDeps();
+  it("selects the typed visual once per fresh nonce", () => {
+    const { deps, emotes } = fakeDeps();
     const remotes = createRemoteCars(resolveCar, deps);
-    remotes.setTargets([player(), player({ id: "p2", name: "bob_2" })]);
+    remotes.setTargets([player()]);
 
-    remotes.emote({ id: "p1", kind: "spark", nonce: 1 });
-    remotes.emote({ id: "p1", kind: "spark", nonce: 1 });
-    remotes.emote({ id: "p1", kind: "spark", nonce: 2 });
-    remotes.emote({ id: "p2", kind: "spark", nonce: 1 });
-    remotes.emote({ id: "gone", kind: "spark", nonce: 1 });
+    remotes.emote({ id: "p1", kind: "laugh", nonce: 1 });
+    remotes.emote({ id: "p1", kind: "laugh", nonce: 1 });
+    remotes.emote({ id: "p1", kind: "fire", nonce: 2 });
+    remotes.emote({ id: "p1", kind: "skull", nonce: 3 });
 
-    expect(sparks[0].pulse).toHaveBeenCalledTimes(2);
-    expect(sparks[1].pulse).toHaveBeenCalledOnce();
+    expect(emotes[0].pulse.mock.calls).toEqual([["laugh"], ["fire"], ["skull"]]);
   });
 
-  it("advances each driver's spark animation", () => {
-    const { deps, sparks } = fakeDeps();
+  it("advances each driver's emote animation", () => {
+    const { deps, emotes } = fakeDeps();
     const remotes = createRemoteCars(resolveCar, deps);
     remotes.setTargets([player(), player({ id: "p2", name: "bob_2" })]);
 
     remotes.update(0.125);
 
-    expect(sparks[0].update).toHaveBeenCalledWith(0.125);
-    expect(sparks[1].update).toHaveBeenCalledWith(0.125);
+    expect(emotes[0].update).toHaveBeenCalledWith(0.125);
+    expect(emotes[1].update).toHaveBeenCalledWith(0.125);
   });
 
   it("releases active resources when disposed", () => {
-    const { deps, cars, nameplates, sparks } = fakeDeps();
+    const { deps, cars, nameplates, emotes } = fakeDeps();
     const remotes = createRemoteCars(resolveCar, deps);
     remotes.setTargets([player()]);
 
@@ -207,7 +205,7 @@ describe("createRemoteCars", () => {
     expect(remotes.group.children).toHaveLength(0);
     expect(cars[0].dispose).toHaveBeenCalledOnce();
     expect(nameplates[0].dispose).toHaveBeenCalledOnce();
-    expect(sparks[0].dispose).toHaveBeenCalledOnce();
+    expect(emotes[0].dispose).toHaveBeenCalledOnce();
   });
 
   it("keeps an unknown initial car procedural without starting a GLTF request", () => {
@@ -217,6 +215,7 @@ describe("createRemoteCars", () => {
     try {
       const remotes = createRemoteCars(() => null, {
         makeNameplate: () => nameplate,
+        makeEmote: () => ({ object: new THREE.Group(), pulse: vi.fn(), update: vi.fn(), dispose: vi.fn() }),
       });
 
       remotes.setTargets([player({ carId: "Unknown" })]);
@@ -277,7 +276,7 @@ describe("createRemoteCars", () => {
 });
 
 describe("Lobby remote seam", () => {
-  it("keeps snapshots and spark emotes on separate typed methods", () => {
+  it("keeps snapshots and emotes on separate typed methods", () => {
     const snapshots: RemoteCarState[][] = [];
     const nonces: number[] = [];
     const seam: Pick<Lobby, "setRemoteCars" | "emoteRemote"> = {
@@ -287,7 +286,7 @@ describe("Lobby remote seam", () => {
     const remote: RemoteCarState = player();
 
     seam.setRemoteCars([remote]);
-    seam.emoteRemote({ id: remote.id, kind: "spark", nonce: 7 });
+    seam.emoteRemote({ id: remote.id, kind: "laugh", nonce: 7 });
 
     expect(snapshots[0][0]).toMatchObject({ name: "alice_1", carId: "Orion", speed: 12 });
     expect(nonces).toEqual([7]);
