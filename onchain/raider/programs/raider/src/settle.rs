@@ -24,6 +24,14 @@ pub const MIN_LIQ_FP: i128 = 100_000; // 0.10 — Suspension-maxed (lowest/best 
 pub const CAP_FP: i128 = 25_000_000; // 25.0
 pub const RMIN: u32 = 10;
 pub const RMAX: u32 = 3000;
+
+pub fn is_open_ended(deadline_ts: i64) -> bool {
+    deadline_ts < 0
+}
+
+pub fn deadline_elapsed(now: i64, deadline_ts: i64) -> bool {
+    deadline_ts > 0 && now >= deadline_ts
+}
 // Fallback ceiling (base units) for the per-session house slice (FIX 2): the largest
 // per-round stake the bounded-by-construction default assumes. `max_payout(MAX_STAKE)`
 // is exactly one worst-case round's reservation, which `slice_from_pot` uses as the cap
@@ -165,7 +173,7 @@ pub fn fires(
     // refund_fp = 0 here: the airbag changes WHAT a liq pays, never WHETHER it
     // fires, and the settled equity is discarded — only the outcome class matters.
     let (term, _) = terminal(equity_fp(banked_fp, dir, lev, entry_raw, exit_raw), liq_fp, 0);
-    term != Outcome::Cashout || now >= deadline_ts
+    term != Outcome::Cashout || deadline_elapsed(now, deadline_ts)
 }
 
 /// What the permissionless tick/crank should do at one mark. This extends the plain
@@ -215,7 +223,7 @@ pub fn tick_action(
     tp_fp: i128,
 ) -> TickAction {
     // The deadline is terminal — settle now, whatever the grace/SL/TP state.
-    if now >= deadline_ts {
+    if deadline_elapsed(now, deadline_ts) {
         return TickAction::Settle;
     }
 
@@ -255,6 +263,15 @@ pub fn tick_action(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn negative_deadline_is_open_ended_and_never_elapsed() {
+        assert!(is_open_ended(-123));
+        assert!(!is_open_ended(0));
+        assert!(!deadline_elapsed(10_000, -123));
+        assert!(!deadline_elapsed(10_000, 0));
+        assert!(deadline_elapsed(101, 100));
+    }
 
     // banked = 0 path (Phase-1 parity): long, 100x, +1% => equity 2.0x, cashout.
     #[test]
@@ -330,6 +347,12 @@ mod tests {
         assert!(!fires(0, 1, 100, 60_000, 60_060, 100, 1_000_000, LIQ_FP));
         // same benign price but now >= deadline => time => fires
         assert!(fires(0, 1, 100, 60_000, 60_060, 1_000_000, 1_000_000, LIQ_FP));
+        // a negative Highway marker is identity, not a time cap
+        assert!(!fires(0, 1, 100, 60_000, 60_060, 1_000_000, -42, LIQ_FP));
+        assert_eq!(
+            tick_action(0, 1, 100, 60_000, 60_060, 1_000_000, -42, LIQ_FP, 0, 0, 0, 0),
+            TickAction::Hold,
+        );
     }
 
     // Per-round floor: an equity of 0.15 (150_000) LIQUIDATES at the default 0.20 floor

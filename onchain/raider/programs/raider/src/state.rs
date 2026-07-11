@@ -34,6 +34,29 @@ pub const MAX_ROUND_SECS: i64 = 180;
 pub const MIN_ROUND_SECS: i64 = 5;
 pub const HARD_MAX_ROUND_SECS: i64 = 180;
 
+/// Client wire value that requests an open-ended Highway round. Timed Track
+/// rounds keep using zero/default or a positive bounded duration.
+pub const HIGHWAY_DURATION_SENTINEL: i64 = -1;
+
+/// Encode an open-ended round identity in the existing deadline field. Negative
+/// values can never collide with positive Track deadlines, and the slot keeps
+/// consecutive Highway rounds distinct without resizing the Round account.
+pub fn highway_round_marker(slot: u64) -> Option<i64> {
+    i64::try_from(slot).ok().map(|slot| -slot.max(1))
+}
+
+pub fn deadline_for_open(dur: i64, now: i64, slot: u64) -> Option<i64> {
+    if dur == HIGHWAY_DURATION_SENTINEL {
+        return highway_round_marker(slot);
+    }
+    let secs = if dur <= 0 {
+        MAX_ROUND_SECS
+    } else {
+        dur.clamp(MIN_ROUND_SECS, HARD_MAX_ROUND_SECS)
+    };
+    now.checked_add(secs)
+}
+
 // Flintstone "Stone-Age Airbag" ceiling (SCALE units): the max fraction of stake a
 // liquidation can refund. 20% — at the stock 0.20 liq floor the airbag then pays
 // exactly what a cash-out at the floor would (see settle::terminal), so it can never
@@ -188,6 +211,20 @@ impl Round {
 #[cfg(test)]
 mod size_tests {
     use super::*;
+
+    #[test]
+    fn highway_marker_is_negative_and_slot_specific() {
+        assert_eq!(highway_round_marker(42), Some(-42));
+        assert_ne!(highway_round_marker(42), highway_round_marker(43));
+        assert_eq!(highway_round_marker(0), Some(-1));
+    }
+
+    #[test]
+    fn open_deadline_selects_highway_or_bounded_track_semantics() {
+        assert_eq!(deadline_for_open(HIGHWAY_DURATION_SENTINEL, 100, 42), Some(-42));
+        assert_eq!(deadline_for_open(0, 100, 42), Some(100 + MAX_ROUND_SECS));
+        assert_eq!(deadline_for_open(999, 100, 42), Some(100 + HARD_MAX_ROUND_SECS));
+    }
     #[test]
     fn round_size_includes_feed() {
         // 132 + 32 (feed: Pubkey) = 164; + 4 (liq_fp) = 168; + grace_secs(2) + sl_fp(4)

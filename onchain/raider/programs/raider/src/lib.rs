@@ -23,7 +23,7 @@ pub mod settle;
 pub mod state;
 
 use state::{FeedRegistry, HouseBalance, PlayerBalance, Round};
-use state::{FEEDS_SEED, HARD_MAX_ROUND_SECS, HOUSE_SEED, MAX_ROUND_SECS, MIN_ROUND_SECS, PLAYER_SEED, ROUND_SEED, STALE_SECS, VAULT_SEED};
+use state::{FEEDS_SEED, HOUSE_SEED, PLAYER_SEED, ROUND_SEED, STALE_SECS, VAULT_SEED};
 
 // ===========================================================================
 // PROVEN PLUMBING PATTERN — Task 2 (two-account co-delegation), GREEN on devnet
@@ -407,7 +407,8 @@ pub mod raider {
         require!(entry.enabled, RaiderError::UnknownAsset);
         require_keys_eq!(ctx.accounts.price_update.key(), entry.feed, RaiderError::UntrustedFeed);
 
-        let now = Clock::get()?.unix_timestamp;
+        let clock = Clock::get()?;
+        let now = clock.unix_timestamp;
         let snap = price::read_fresh(&ctx.accounts.price_update, now)?;
         require!(snap.feed_id == entry.feed_id, RaiderError::UntrustedFeed);
         // entry_raw is a DIVISOR in settle::equity_fp at close — a <= 0 entry would
@@ -458,12 +459,11 @@ pub mod raider {
         round.entry_ts = snap.publish_time;
         round.banked = 0;
         round.max_payout = max_payout;
-        // Round length: the client requests `dur` seconds (the Long-Range Tank upgrade raises it
-        // above the base). 0/negative → the default MAX_ROUND_SECS; anything else is clamped into
-        // [MIN_ROUND_SECS, HARD_MAX_ROUND_SECS] so a longer round can't be forced past the ceiling.
-        // Duration never affects house solvency (max_payout is CAP-bounded, not time-bounded).
-        let secs = if dur <= 0 { MAX_ROUND_SECS } else { dur.clamp(MIN_ROUND_SECS, HARD_MAX_ROUND_SECS) };
-        round.deadline_ts = now + secs;
+        // Track uses a bounded positive deadline. The dedicated Highway sentinel uses
+        // a negative slot-derived identity, which can never fire a time settlement.
+        // Duration never affects house solvency because max payout is cap-bounded.
+        round.deadline_ts = state::deadline_for_open(dur, now, clock.slot)
+            .ok_or(RaiderError::MathOverflow)?;
         // Liquidation floor: the client requests `liq` in SCALE units (the Suspension upgrade
         // lowers it below the base). 0 → the default 0.20; anything else is clamped into
         // [MIN_LIQ_FP, LIQ_FP] (0.10..0.20) so a client can NEVER push the floor below the
@@ -569,7 +569,7 @@ pub mod raider {
         let round = &ctx.accounts.round;
         require!(round.status == 1, RaiderError::NoOpenRound);
         // The ONLY gate: the round must have outlived its liveness deadline.
-        require!(now >= round.deadline_ts, RaiderError::NotYetExpired);
+        require!(settle::deadline_elapsed(now, round.deadline_ts), RaiderError::NotYetExpired);
 
         settle_round(
             &mut ctx.accounts.player,
@@ -965,7 +965,7 @@ fn settle_round(
     let payout = payout.min(round.max_payout);
     // Precedence liq > cap > time > cashout: relabel a plain cashout to Time once
     // the 60s cap has elapsed (payout is the same current-equity cashout).
-    if outcome == settle::Outcome::Cashout && now >= round.deadline_ts {
+    if outcome == settle::Outcome::Cashout && settle::deadline_elapsed(now, round.deadline_ts) {
         outcome = settle::Outcome::Time;
     }
 
