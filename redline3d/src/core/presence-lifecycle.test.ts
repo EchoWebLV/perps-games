@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { presenceShouldConnect } from "./presence-lifecycle";
+import { presenceHudShouldShow, presenceShouldConnect } from "./presence-lifecycle";
 
 describe("presence lifecycle", () => {
   it("connects in social driving modes after identity is available", () => {
@@ -8,5 +8,10 @@ describe("presence lifecycle", () => {
     expect(presenceShouldConnect({ mode: "race", hasIdentity: true })).toBe(false);
     expect(presenceShouldConnect({ mode: "lobby", hasIdentity: false })).toBe(false);
     expect(presenceShouldConnect({ mode: "highway", hasIdentity: false })).toBe(false);
+  });
+
+  it("keeps emote chrome in the lobby while Highway presence stays connected", () => {
+    expect(presenceHudShouldShow("lobby")).toBe(true);
+    expect(presenceHudShouldShow("highway")).toBe(false);
   });
 });

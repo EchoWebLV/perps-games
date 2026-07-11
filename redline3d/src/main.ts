@@ -45,7 +45,7 @@ import { createTradeHistoryBridge } from "./core/trade-history-live";
 import { createAccountSync } from "./core/account-sync";
 import { createPresenceClient, type PresenceClient, type PresencePlayer, type PresenceHighway } from "./core/presence";
 import { routePresenceEmote } from "./core/presence-emote-route";
-import { presenceShouldConnect } from "./core/presence-lifecycle";
+import { presenceHudShouldShow, presenceShouldConnect } from "./core/presence-lifecycle";
 import { bindAndHydrate } from "./core/sign-in-sync";
 import { poolable } from "./core/rarity";
 import { createFx } from "./ui/fx";
@@ -309,7 +309,7 @@ addEventListener("pageshow", (e) => { if ((e as PageTransitionEvent).persisted) 
 const hud = createHud(hudRoot, ACTIVE_STAKE_CURRENCY);
 const tach = createTach(hud.tachMount);
 const controls = createControls(hud.ctrlMount, hud.goMount, hud.pedalMount);
-const highwayControls = createHighwayControls(hudRoot, {
+const highwayControls = createHighwayControls(hud.highwayMount, {
   onCommit: (lev) => {
     if (engine.getPhase() !== "live") {
       highwayConfirmedLev = lev;
@@ -1019,7 +1019,7 @@ presence = createPresenceClient({
 
 function syncPresenceLifecycle(): void {
   try {
-    presenceHud.setVisible(mode === "lobby" || mode === "highway");
+    presenceHud.setVisible(presenceHudShouldShow(mode));
     if (presenceShouldConnect({ mode, hasIdentity: identity !== null })) presence?.connect();
     else presence?.disconnect();
   } catch {

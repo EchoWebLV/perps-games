@@ -7,6 +7,7 @@ export interface Hud {
   tachMount: HTMLElement;
   ctrlMount: HTMLElement;
   goMount: HTMLElement;
+  highwayMount: HTMLElement;
   pedalMount: HTMLElement;
   miniCanvas: HTMLCanvasElement;
   setPrice(px: number, live: boolean): void;
@@ -76,6 +77,7 @@ export function createHud(parent: HTMLElement, currency: StakeCurrency = ACTIVE_
         </div>
         <div id="ctrlMount" style="flex:1;display:flex;flex-direction:column;gap:8px;justify-content:center"></div>
       </div>
+      <div id="highwayMount"></div>
       <div id="goMount"></div>
     </div>`;
 
@@ -96,6 +98,7 @@ export function createHud(parent: HTMLElement, currency: StakeCurrency = ACTIVE_
     tachMount: q("#tachMount"),
     ctrlMount: q("#ctrlMount"),
     goMount: q("#goMount"),
+    highwayMount: q("#highwayMount"),
     pedalMount: q("#pedalMount"),
     miniCanvas: q("#mini") as HTMLCanvasElement,
     setPrice(p, live) {
