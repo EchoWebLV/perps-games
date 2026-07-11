@@ -138,6 +138,43 @@ describe("presence client", () => {
     });
   });
 
+  it("sends a strict Highway advertisement without a client-supplied wallet", async () => {
+    const client = createPresenceClient(clientOptions());
+    client.connect();
+    await flush();
+    const ws = FakeWebSocket.only();
+    ws.open();
+    ws.message({ type: "welcome", id: "self", serverTime: 1 });
+    client.advertiseHighway({
+      asset: "SOL", roundPda: "Round1111111111111111111111111111111111",
+      dir: 1, lev: 250, laneSeed: 2, carId: "Orion",
+    });
+    expect(JSON.parse(ws.sent[ws.sent.length - 1]!)).toEqual({
+      type: "highway", asset: "SOL", roundPda: "Round1111111111111111111111111111111111",
+      dir: 1, lev: 250, laneSeed: 2, carId: "Orion",
+    });
+  });
+
+  it("accepts wallet-bound Highway snapshot data and the 32-player render cap", async () => {
+    const snapshots: unknown[] = [];
+    const client = createPresenceClient(clientOptions({ onSnapshot: (players) => snapshots.push(players) }));
+    client.connect();
+    await flush();
+    const ws = FakeWebSocket.only();
+    ws.open();
+    ws.message({ type: "welcome", id: "self", serverTime: 1 });
+    const players = Array.from({ length: 32 }, (_, i) => player(`p${i}`, i === 0 ? {
+      highway: {
+        wallet: "Wallet1111111111111111111111111111111111111",
+        asset: "SOL", roundPda: "Round1111111111111111111111111111111111",
+        dir: -1, lev: 150, laneSeed: 1, carId: "Orion",
+      },
+    } : {}));
+    ws.message({ type: "snapshot", players, serverTime: 2 });
+    expect(snapshots).toHaveLength(1);
+    expect((snapshots[0] as any[])[0].highway).toMatchObject({ asset: "SOL", dir: -1, lev: 150 });
+  });
+
   it("throttles pose updates to 100 ms and sends the latest pose", async () => {
     vi.useFakeTimers();
     const client = createPresenceClient({

@@ -96,18 +96,49 @@ describe("presence websocket", () => {
     await closed;
   });
 
-  it("rejects a ninth authenticated member when the room is full", async () => {
+  it("rejects a 33rd authenticated member when the room is full", async () => {
     const ctx = await setup();
-    for (let index = 0; index < 8; index++) await authenticate(ctx, `rider_${index}`);
+    for (let index = 0; index < 32; index++) await authenticate(ctx, `rider_${index}`);
 
     const { token } = await ctx.sessionAuth.issueAnonymous();
-    const ninth = await connect(ctx);
-    const error = nextJson(ninth);
-    const closed = nextClose(ninth);
-    ninth.send(JSON.stringify({ type: "hello", token, name: "rider_9", carId: "Orion" }));
+    const overflow = await connect(ctx);
+    const error = nextJson(overflow);
+    const closed = nextClose(overflow);
+    overflow.send(JSON.stringify({ type: "hello", token, name: "rider_33", carId: "Orion" }));
 
     await expect(error).resolves.toEqual({ type: "error", code: "lobby_full" });
     await closed;
+  });
+
+  it("rejects Highway state from an authenticated but unbound account", async () => {
+    const ctx = await setup();
+    const { socket } = await authenticate(ctx, "alice_1");
+    const error = nextJson(socket);
+    const closed = nextClose(socket);
+    socket.send(JSON.stringify({
+      type: "highway", asset: "SOL", roundPda: "Round1111111111111111111111111111111111",
+      dir: 1, lev: 250, laneSeed: 2, carId: "Orion",
+    }));
+    await expect(error).resolves.toEqual({ type: "error", code: "unauthorized" });
+    await closed;
+  });
+
+  it("attaches the bound wallet to accepted Highway state", async () => {
+    const ctx = await setup();
+    const { token, userId } = await ctx.sessionAuth.issueAnonymous();
+    await ctx.users.setWalletPublicKey(userId, "BoundWallet111");
+    const socket = await connect(ctx);
+    const welcome = nextJson(socket);
+    socket.send(JSON.stringify({ type: "hello", token, name: "alice_1", carId: "Orion" }));
+    await welcome;
+    socket.send(JSON.stringify({
+      type: "highway", asset: "SOL", roundPda: "Round1111111111111111111111111111111111",
+      dir: 1, lev: 250, laneSeed: 2, carId: "Orion",
+    }));
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    expect(ctx.presenceRoom.snapshot(0).players[0]?.highway).toMatchObject({
+      wallet: "BoundWallet111", asset: "SOL", dir: 1, lev: 250,
+    });
   });
 
   it("applies poses to the next visual-only snapshot", async () => {

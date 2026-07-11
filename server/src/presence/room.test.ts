@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import type { ClientHello, ClientPose, ServerEmote, ServerSnapshot } from "./protocol.js";
+import type { ClientHello, ClientHighway, ClientPose, ServerEmote, ServerSnapshot } from "./protocol.js";
 import { makePresenceRoom, type PresenceSink } from "./room.js";
 
 function hello(name = "rider_1", carId = "Orion"): ClientHello {
@@ -29,26 +29,32 @@ function sequentialIds(): () => string {
 }
 
 describe("presence room", () => {
-  it("caps the room at eight while keeping public ids distinct", () => {
+  it("caps the room at 32 while keeping public ids distinct", () => {
     const room = makePresenceRoom({ id: sequentialIds() });
-    for (let i = 0; i < 8; i++) {
+    for (let i = 0; i < 32; i++) {
       expect(room.join("same-private-user", hello(`rider_${i}`), sink().send).ok).toBe(true);
     }
-    expect(room.join("ninth", hello("rider_9"), sink().send)).toEqual({
+    expect(room.join("overflow", hello("rider_33"), sink().send)).toEqual({
       ok: false,
       code: "lobby_full",
     });
-    expect(room.snapshot(10).players.map((player) => player.id)).toEqual([
-      "p1",
-      "p2",
-      "p3",
-      "p4",
-      "p5",
-      "p6",
-      "p7",
-      "p8",
-    ]);
+    expect(room.snapshot(10).players).toHaveLength(32);
     expect(JSON.stringify(room.snapshot(10))).not.toContain("same-private-user");
+  });
+
+  it("adds the authenticated wallet to Highway state and never trusts one from the client", () => {
+    const room = makePresenceRoom({ id: sequentialIds() });
+    const joined = room.join("private-user", hello(), sink().send);
+    if (!joined.ok) throw new Error("expected join to succeed");
+    const highway: ClientHighway = {
+      type: "highway", asset: "SOL", roundPda: "Round1111111111111111111111111111111111",
+      dir: -1, lev: 150, laneSeed: 1, carId: "Orion",
+    };
+    expect(room.highway(joined.id, "BoundWallet111", highway)).toEqual({ ok: true });
+    expect(room.snapshot(10).players[0]?.highway).toEqual({
+      wallet: "BoundWallet111", asset: "SOL", roundPda: highway.roundPda,
+      dir: -1, lev: 150, laneSeed: 1, carId: "Orion",
+    });
   });
 
   it("removes a leaving member from the next snapshot", () => {

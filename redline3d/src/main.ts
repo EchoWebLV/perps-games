@@ -43,7 +43,7 @@ import { showLocalEconomyMenu } from "./core/menu-visibility";
 import { createTradeHistoryRecorder } from "./core/trade-history-recorder";
 import { createTradeHistoryBridge } from "./core/trade-history-live";
 import { createAccountSync } from "./core/account-sync";
-import { createPresenceClient, type PresenceClient } from "./core/presence";
+import { createPresenceClient, type PresenceClient, type PresencePlayer, type PresenceHighway } from "./core/presence";
 import { routePresenceEmote } from "./core/presence-emote-route";
 import { presenceShouldConnect } from "./core/presence-lifecycle";
 import { bindAndHydrate } from "./core/sign-in-sync";
@@ -94,6 +94,7 @@ import { createGameSession } from "./chain/game-session";
 import { HIGHWAY_DURATION_SENTINEL, isHighwayRound, roundKey, type RoundSnap } from "./chain/chain-round";
 import { selectChainWalletPort } from "./chain/wallet-select";
 import { createCrateRollDraws, makeCrateRollIo } from "./chain/crate-roll";
+import { createHighwayRoundReader, deriveHighwayRoundPda, verifyHighwayPresence } from "./chain/highway-verifier";
 
 const canvas = document.getElementById("gl") as HTMLCanvasElement;
 const hudRoot = document.getElementById("hud") as HTMLElement;
@@ -873,6 +874,9 @@ function enterHighway(restoring = false) {
 function exitHighwayToLobby() {
   if (modeSwitchBlocked({ opening, phase: engine.getPhase(), roundActive })) return;
   oval.hide();
+  highwayPresenceGeneration += 1;
+  verifiedHighwayCars = [];
+  highwayControls.setSentiment(0, 0, 0);
   highwayControls.hide();
   hud.setOpenPosition(false);
   tach.rebuild(effRmax());
@@ -926,6 +930,68 @@ const mapBtn = createMapButton(hudRoot, () => {
 const lobbyHud = createLobbyHud(hudRoot);
 let presence: PresenceClient | null = null;
 const presenceHud = createPresenceHud(hudRoot, (kind) => presence?.emote(kind));
+const highwayRoundReader = createHighwayRoundReader();
+let highwayPresenceGeneration = 0;
+let verifiedHighwayCars: Array<{
+  id: string;
+  roundPda: string;
+  dir: 1 | -1;
+  lev: number;
+  motion: HighwayMotion;
+}> = [];
+const highwayVerificationCache = new Map<string, { signature: string; expires: number; valid: boolean }>();
+const highwayVerificationInflight = new Map<string, Promise<PresenceHighway | null>>();
+
+async function verifyCachedHighway(advertised: PresenceHighway): Promise<PresenceHighway | null> {
+  const signature = `${advertised.wallet}:${advertised.asset}:${advertised.dir}:${advertised.lev}`;
+  const cached = highwayVerificationCache.get(advertised.roundPda);
+  if (cached && cached.signature === signature && cached.expires > Date.now()) {
+    return cached.valid ? advertised : null;
+  }
+  const inflightKey = `${advertised.roundPda}:${signature}`;
+  const existing = highwayVerificationInflight.get(inflightKey);
+  if (existing) return existing;
+  const verification = verifyHighwayPresence(advertised, highwayRoundReader).then((verified) => {
+    highwayVerificationCache.set(advertised.roundPda, {
+      signature,
+      expires: Date.now() + 2_000,
+      valid: verified !== null,
+    });
+    return verified;
+  }).finally(() => highwayVerificationInflight.delete(inflightKey));
+  highwayVerificationInflight.set(inflightKey, verification);
+  return verification;
+}
+
+async function updateVerifiedHighway(players: PresencePlayer[]): Promise<void> {
+  const generation = ++highwayPresenceGeneration;
+  const candidates = players.filter((player) => player.highway?.asset === asset && player.highway !== undefined);
+  const checked = await Promise.all(candidates.map(async (player) => ({
+    id: player.id,
+    state: await verifyCachedHighway(player.highway!),
+  })));
+  if (generation !== highwayPresenceGeneration || mode !== "highway") return;
+
+  const prior = new Map(verifiedHighwayCars.map((car) => [`${car.id}:${car.roundPda}`, car]));
+  verifiedHighwayCars = checked.flatMap(({ id, state }) => {
+    if (!state) return [];
+    const key = `${id}:${state.roundPda}`;
+    const existing = prior.get(key);
+    const motion = existing?.motion ?? stepHighwayMotion(
+      seedHighwayMotion(state.roundPda, state.dir),
+      state.lev,
+      Date.now() / 1000,
+    );
+    return [{ id, roundPda: state.roundPda, dir: state.dir, lev: state.lev, motion }];
+  });
+  const longs = verifiedHighwayCars.filter(({ dir }) => dir === 1).length;
+  const shorts = verifiedHighwayCars.length - longs;
+  const average = verifiedHighwayCars.length === 0
+    ? 0
+    : verifiedHighwayCars.reduce((sum, { lev }) => sum + lev, 0) / verifiedHighwayCars.length;
+  highwayControls.setSentiment(longs, shorts, average);
+}
+
 presence = createPresenceClient({
   baseUrl: (import.meta.env.VITE_API_BASE as string | undefined) ?? "http://localhost:8080",
   auth,
@@ -933,7 +999,8 @@ presence = createPresenceClient({
   carId: () => equippedCar.name,
   onSnapshot: (players, localId) => {
     try {
-      lobby.setRemoteCars(localId === null ? [] : players.filter(({ id }) => id !== localId));
+      if (mode === "highway") void updateVerifiedHighway(localId === null ? [] : players);
+      else lobby.setRemoteCars(localId === null ? [] : players);
     } catch {
       // Presence visuals are optional. A renderer failure must not interrupt local driving.
     }
@@ -952,7 +1019,7 @@ presence = createPresenceClient({
 
 function syncPresenceLifecycle(): void {
   try {
-    presenceHud.setVisible(mode === "lobby");
+    presenceHud.setVisible(mode === "lobby" || mode === "highway");
     if (presenceShouldConnect({ mode, hasIdentity: identity !== null })) presence?.connect();
     else presence?.disconnect();
   } catch {
@@ -1003,7 +1070,6 @@ let roundStartMs = 0;
 let roundMaxSec = 0; // this round's time cap, frozen at GO (Heavy Load runs longer than CONFIG.MAXSEC)
 const round = { entryPx: 0, dir: 1 as 1 | -1 };
 // frame-loop scratch (hot rAF path — zero per-frame allocation):
-const NO_REMOTE_CARS: never[] = [];    // shared empty for the multiplayer/ghost seams, fed every frame
 const _popNdc = new THREE.Vector3();   // coin-pop screen projection scratch
 
 // asset switching (BTC/ETH/SOL) — blocked mid-bet; resets the chart for the new asset
@@ -1096,6 +1162,15 @@ function reconcileHighwaySnapshot(snap: RoundSnap): void {
     maxSec: Number.POSITIVE_INFINITY,
     borrowBpsPerDay: 1,
   });
+  if (roundActive) advertiseHighwayPosition(dir, snap.lev);
+}
+
+function advertiseHighwayPosition(dir: 1 | -1, lev: number): void {
+  if (mode !== "highway" || identity?.mode !== "privy" || !signedIn || simRound || !roundActive) return;
+  const roundPda = deriveHighwayRoundPda(session.address());
+  if (!roundPda) return;
+  const laneSeed = seedHighwayMotion(roundPda, dir).lane;
+  presence?.advertiseHighway({ asset, roundPda, dir, lev, laneSeed, carId: equippedCar.name });
 }
 
 function restoreHighwayPosition(): boolean {
@@ -1121,6 +1196,8 @@ function restoreHighwayPosition(): boolean {
   highwayControls.show();
   highwayControls.setDisabled(false);
   hud.setOpenPosition(true);
+  syncPresenceLifecycle();
+  advertiseHighwayPosition(dir, snap.lev);
   hud.setStatus(session.crankArmed() ? "Position restored." : "Position restored. Auto protection needs rearming.");
   return true;
 }
@@ -1132,6 +1209,7 @@ function finalizeSettled(info: { outcome: number; outcomeName: string; payout: b
   if (!roundActive) return;
   roundActive = false;
   tradeHistoryBridge.settle(info);
+  presence?.clearHighway();
   const price = priceSource.price(), now = Date.now();
   if (engine.getPhase() === "live") engine.cashout(price, now); // freeze the visual at the live value
   const finalEq = engine.snapshot(price, now).equity;
@@ -1209,6 +1287,7 @@ function launchPractice() {
 function finalizePractice(snap: Snapshot) {
   if (!roundActive) return;
   roundActive = false;
+  presence?.clearHighway();
   simRound = false;
   const liq = snap.reason === "liq";
   nearDeath = false;
@@ -1445,6 +1524,8 @@ controls.onLaunch(async () => {
       highwayMotion = seedHighwayMotion(roundKey({ deadlineTs: opened.deadlineTs }, session.address()), dir);
       game.lev = lev;
       hud.setOpenPosition(true);
+      syncPresenceLifecycle();
+      advertiseHighwayPosition(dir, lev);
     } else {
       chase.setDriving(true);
     }
@@ -1670,9 +1751,15 @@ function frame(now: number) {
     minimap.draw({ hist: priceHist, inRun: engine.getPhase() === "live", equity: game.equity, entryPx: round.entryPx, liqPx, dir: round.dir });
 
     oval.update(dt);
-    // ghost seam — Phase 2 replaces this with live presence; the window var is the
-    // Preview verification hook (persists across frames, unlike a one-shot call)
-    oval.setRemoteCars(((window as any).__hwGhostStates as import("./render/oval").OvalRemoteCar[] | undefined) ?? NO_REMOTE_CARS);
+    const verifiedRemoteStates = verifiedHighwayCars.map((remote) => {
+      remote.motion = stepHighwayMotion(remote.motion, remote.lev, dt);
+      const remotePose = highwayPose(remote.motion);
+      return { id: remote.id, x: remotePose.x, z: remotePose.z, heading: remotePose.heading, dir: remote.dir };
+    });
+    oval.setRemoteCars(
+      ((window as any).__hwGhostStates as import("./render/oval").OvalRemoteCar[] | undefined)
+      ?? verifiedRemoteStates,
+    );
     lobbyCam.update(ctx.camera, dt, pose.x, pose.z, pose.heading, yHere);
 
     if (post) post.render();

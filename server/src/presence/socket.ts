@@ -47,6 +47,7 @@ interface Connection {
   closed: boolean;
   badMessages: number;
   helloTimer?: ReturnType<typeof setTimeout>;
+  walletPublicKey?: string;
 }
 
 export function registerPresenceSocket(server: FastifyInstance, deps: PresenceSocketDeps): PresenceSocketGateway {
@@ -135,6 +136,7 @@ export function registerPresenceSocket(server: FastifyInstance, deps: PresenceSo
         return;
       }
       connection.memberId = joined.id;
+      connection.walletPublicKey = user.walletPublicKey ?? undefined;
       send(connection, { type: "welcome", id: joined.id, serverTime: now() });
       return;
     }
@@ -144,9 +146,15 @@ export function registerPresenceSocket(server: FastifyInstance, deps: PresenceSo
       return;
     }
 
-    const result =
-      message.type === "pose"
-        ? deps.room.pose(connection.memberId, message, now())
+    if (message.type === "highway" && connection.walletPublicKey === undefined) {
+      closeWithError(connection, "unauthorized");
+      return;
+    }
+
+    const result = message.type === "pose"
+      ? deps.room.pose(connection.memberId, message, now())
+      : message.type === "highway"
+        ? deps.room.highway(connection.memberId, connection.walletPublicKey!, message)
         : deps.room.emote(connection.memberId, message.kind, now());
     if (!result.ok) send(connection, { type: "error", code: result.code });
   }

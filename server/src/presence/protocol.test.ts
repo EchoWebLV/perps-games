@@ -7,6 +7,28 @@ import {
 } from "./protocol.js";
 
 describe("presence protocol", () => {
+  it("accepts a strict Highway state advertisement", () => {
+    expect(parseClientMessage(JSON.stringify({
+      type: "highway",
+      asset: "SOL",
+      roundPda: "Round1111111111111111111111111111111111",
+      dir: 1,
+      lev: 250,
+      laneSeed: 2,
+      carId: "Orion",
+    }))).toMatchObject({ type: "highway", asset: "SOL", dir: 1, lev: 250 });
+  });
+
+  it("rejects malformed or client-wallet-bearing Highway advertisements", () => {
+    const valid = {
+      type: "highway", asset: "SOL", roundPda: "Round1111111111111111111111111111111111",
+      dir: 1, lev: 250, laneSeed: 2, carId: "Orion",
+    };
+    expect(parseClientMessage(JSON.stringify({ ...valid, lev: 255 }))).toBeNull();
+    expect(parseClientMessage(JSON.stringify({ ...valid, laneSeed: 3 }))).toBeNull();
+    expect(parseClientMessage(JSON.stringify({ ...valid, wallet: "untrusted" }))).toBeNull();
+  });
+
   it("parses a valid hello", () => {
     expect(
       parseClientMessage(

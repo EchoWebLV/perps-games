@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import {
   normalizePose,
+  type ClientHighway,
   type ClientHello,
   type ClientPose,
   type PresenceEmoteKind,
@@ -9,7 +10,7 @@ import {
   type ServerSnapshot,
 } from "./protocol.js";
 
-const MAX_PLAYERS = 8;
+const MAX_PLAYERS = 32;
 const RATE_WINDOW_MS = 1_000;
 const MAX_POSES_PER_WINDOW = 15;
 const MAX_EMOTES_PER_WINDOW = 2;
@@ -23,6 +24,7 @@ export interface PresenceRoom {
   join(userId: string, hello: ClientHello, sink: PresenceSink): JoinResult;
   leave(id: string): void;
   pose(id: string, pose: ClientPose, now: number): RateLimitResult;
+  highway(id: string, wallet: string, state: ClientHighway): RateLimitResult;
   emote(id: string, kind: PresenceEmoteKind, now: number): RateLimitResult;
   snapshot(serverTime: number): ServerSnapshot;
   broadcastSnapshot(serverTime: number): void;
@@ -36,6 +38,7 @@ interface PresenceMember {
   sink: PresenceSink;
   poseTimes: number[];
   emoteTimes: number[];
+  highway?: Omit<ClientHighway, "type"> & { wallet: string };
 }
 
 export interface PresenceRoomOptions {
@@ -95,6 +98,21 @@ export function makePresenceRoom(options: PresenceRoomOptions = {}): PresenceRoo
       return { ok: true };
     },
 
+    highway(id, wallet, state) {
+      const member = members.get(id);
+      if (!member) return { ok: false, code: "rate_limited" };
+      member.highway = {
+        wallet,
+        asset: state.asset,
+        roundPda: state.roundPda,
+        dir: state.dir,
+        lev: state.lev,
+        laneSeed: state.laneSeed,
+        carId: state.carId,
+      };
+      return { ok: true };
+    },
+
     emote(id, kind, now) {
       const member = members.get(id);
       if (!member || !withinRateLimit(member.emoteTimes, now, MAX_EMOTES_PER_WINDOW)) {
@@ -122,6 +140,7 @@ export function makePresenceRoom(options: PresenceRoomOptions = {}): PresenceRoo
           z: member.pose.z,
           heading: member.pose.heading,
           speed: member.pose.speed,
+          ...(member.highway ? { highway: member.highway } : {}),
         })),
         serverTime,
       };

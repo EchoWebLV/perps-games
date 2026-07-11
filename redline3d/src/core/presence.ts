@@ -13,6 +13,22 @@ export interface PresencePose {
 export interface PresencePlayer extends PresencePose {
   id: string;
   name: string;
+  highway?: PresenceHighway;
+}
+
+export type PresenceAsset = "BTC" | "ETH" | "SOL";
+
+export interface HighwayAdvertisement {
+  asset: PresenceAsset;
+  roundPda: string;
+  dir: 1 | -1;
+  lev: number;
+  laneSeed: number;
+  carId: string;
+}
+
+export interface PresenceHighway extends HighwayAdvertisement {
+  wallet: string;
 }
 
 export type RemotePresencePlayer = PresencePlayer;
@@ -78,7 +94,8 @@ function isEmoteKind(value: unknown): value is PresenceEmoteKind {
 
 function parsePlayer(value: unknown): PresencePlayer | null {
   if (!isRecord(value)) return null;
-  if (!hasExactKeys(value, ["id", "name", "carId", "x", "z", "heading", "speed"])) return null;
+  const baseKeys = ["id", "name", "carId", "x", "z", "heading", "speed"];
+  if (!hasExactKeys(value, value.highway === undefined ? baseKeys : [...baseKeys, "highway"])) return null;
   if (typeof value.id !== "string" || value.id.length === 0) return null;
   if (typeof value.name !== "string" || !/^[a-z0-9_]{3,16}$/.test(value.name)) return null;
   if (typeof value.carId !== "string" || !/^[\x20-\x7e]{1,64}$/.test(value.carId)) return null;
@@ -94,6 +111,19 @@ function parsePlayer(value: unknown): PresencePlayer | null {
   ) {
     return null;
   }
+  let highway: PresenceHighway | undefined;
+  if (value.highway !== undefined) {
+    if (!isRecord(value.highway) || !hasExactKeys(value.highway, ["wallet", "asset", "roundPda", "dir", "lev", "laneSeed", "carId"])) return null;
+    const h = value.highway;
+    if (typeof h.wallet !== "string" || h.wallet.length < 32 || h.wallet.length > 44) return null;
+    if (h.asset !== "BTC" && h.asset !== "ETH" && h.asset !== "SOL") return null;
+    if (typeof h.roundPda !== "string" || h.roundPda.length < 32 || h.roundPda.length > 44) return null;
+    if (h.dir !== 1 && h.dir !== -1) return null;
+    if (typeof h.lev !== "number" || !Number.isInteger(h.lev) || h.lev < 10 || h.lev > 250 || h.lev % 10 !== 0) return null;
+    if (typeof h.laneSeed !== "number" || !Number.isInteger(h.laneSeed) || h.laneSeed < 0 || h.laneSeed > 2) return null;
+    if (typeof h.carId !== "string" || !/^[\x20-\x7e]{1,64}$/.test(h.carId)) return null;
+    highway = h as unknown as PresenceHighway;
+  }
   return {
     id: value.id,
     name: value.name,
@@ -102,6 +132,7 @@ function parsePlayer(value: unknown): PresencePlayer | null {
     z: value.z,
     heading: value.heading,
     speed: value.speed,
+    ...(highway ? { highway } : {}),
   };
 }
 
@@ -118,7 +149,7 @@ function parseServerMessage(raw: unknown): ParsedServerMessage | null {
     }
     if (value.type === "snapshot") {
       if (!hasExactKeys(value, ["type", "players", "serverTime"])) return null;
-      if (!Array.isArray(value.players) || value.players.length > 8) return null;
+      if (!Array.isArray(value.players) || value.players.length > 32) return null;
       if (typeof value.serverTime !== "number" || !Number.isFinite(value.serverTime)) return null;
       const players: PresencePlayer[] = [];
       const ids = new Set<string>();
@@ -172,6 +203,8 @@ export interface PresenceClient {
   connect(): void;
   disconnect(): void;
   updatePose(pose: PresencePose): void;
+  advertiseHighway(state: HighwayAdvertisement): void;
+  clearHighway(): void;
   emote(kind: PresenceEmoteKind): void;
   status(): PresenceStatus;
 }
@@ -207,6 +240,8 @@ export function createPresenceClient(options: PresenceClientOptions): PresenceCl
   let poseTimer: ReturnType<typeof setTimeout> | null = null;
   let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
   let reconnectAttempt = 0;
+  let desiredHighway: HighwayAdvertisement | null = null;
+  let sentHighway = "";
   const reconnectDelays = [500, 1000, 2000, 5000] as const;
 
   function clearPoseQueue(): void {
@@ -242,6 +277,7 @@ export function createPresenceClient(options: PresenceClientOptions): PresenceCl
   function reconnectAfterLoss(next: SocketLike, myGeneration: number, closeTransport = false): void {
     if (!desired || myGeneration !== generation || socket !== next) return;
     socket = null;
+    sentHighway = "";
     clearPoseQueue();
     clearRemoteState();
     if (closeTransport) {
@@ -252,6 +288,19 @@ export function createPresenceClient(options: PresenceClientOptions): PresenceCl
       }
     }
     scheduleReconnect(myGeneration);
+  }
+
+  function sendHighway(): void {
+    const next = socket;
+    if (next?.readyState !== 1 || currentStatus !== "live" || desiredHighway === null) return;
+    const encoded = JSON.stringify({ type: "highway", ...desiredHighway });
+    if (encoded === sentHighway) return;
+    try {
+      next.send(encoded);
+      sentHighway = encoded;
+    } catch {
+      reconnectAfterLoss(next, generation, true);
+    }
   }
 
   function sendPose(): void {
@@ -319,6 +368,7 @@ export function createPresenceClient(options: PresenceClientOptions): PresenceCl
         reconnectAttempt = 0;
         currentStatus = "live";
         options.onStatus?.("live", 1);
+        sendHighway();
         return;
       }
       if (message.type === "error") {
@@ -389,12 +439,15 @@ export function createPresenceClient(options: PresenceClientOptions): PresenceCl
     },
     disconnect() {
       desired = false;
+      desiredHighway = null;
+      sentHighway = "";
       generation += 1;
       if (reconnectTimer !== null) clearTimeout(reconnectTimer);
       reconnectTimer = null;
       reconnectAttempt = 0;
       socket?.close();
       socket = null;
+      sentHighway = "";
       clearPoseQueue();
       clearRemoteState();
       currentStatus = "offline";
@@ -402,6 +455,14 @@ export function createPresenceClient(options: PresenceClientOptions): PresenceCl
     },
     updatePose(pose) {
       queuePose(pose);
+    },
+    advertiseHighway(state) {
+      desiredHighway = state;
+      sendHighway();
+    },
+    clearHighway() {
+      desiredHighway = null;
+      sentHighway = "";
     },
     emote(kind) {
       const next = socket;

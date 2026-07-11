@@ -33,12 +33,24 @@ const clientMessageSchema = z.discriminatedUnion("type", [
       carId: carIdSchema,
     })
     .strict(),
+  z
+    .object({
+      type: z.literal("highway"),
+      asset: z.enum(["BTC", "ETH", "SOL"]),
+      roundPda: z.string().min(32).max(44),
+      dir: z.union([z.literal(1), z.literal(-1)]),
+      lev: z.number().int().min(10).max(250).multipleOf(10),
+      laneSeed: z.number().int().min(0).max(2),
+      carId: carIdSchema,
+    })
+    .strict(),
   z.object({ type: z.literal("emote"), kind: emoteKindSchema }).strict(),
 ]);
 
 export type ClientMessage = z.infer<typeof clientMessageSchema>;
 export type ClientHello = Extract<ClientMessage, { type: "hello" }>;
 export type ClientPose = Extract<ClientMessage, { type: "pose" }>;
+export type ClientHighway = Extract<ClientMessage, { type: "highway" }>;
 export type ClientEmote = Extract<ClientMessage, { type: "emote" }>;
 
 export interface PresencePose {
@@ -52,6 +64,11 @@ export interface PresencePose {
 export interface PresencePlayer extends PresencePose {
   id: string;
   name: string;
+  highway?: PresenceHighway;
+}
+
+export interface PresenceHighway extends Omit<ClientHighway, "type"> {
+  wallet: string;
 }
 
 export interface ServerWelcome {

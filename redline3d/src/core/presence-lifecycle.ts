@@ -4,5 +4,5 @@ export interface PresenceLifecycleState {
 }
 
 export function presenceShouldConnect(state: PresenceLifecycleState): boolean {
-  return state.mode === "lobby" && state.hasIdentity;
+  return (state.mode === "lobby" || state.mode === "highway") && state.hasIdentity;
 }
