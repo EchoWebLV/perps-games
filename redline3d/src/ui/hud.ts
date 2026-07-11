@@ -15,6 +15,7 @@ export interface Hud {
   setActiveAsset(asset: string): void;
   setMultiplier(equity: number, phase: "idle" | "live" | "settled" | "liquidated"): void;
   setTimer(secLeft: number, live: boolean): void;
+  setOpenPosition(open: boolean): void;
   setStatus(text: string): void;
   /** cruise chrome: hide the whole trading cluster (price chip, timer, ×N, the graph) —
    *  cruising the strip keeps ONLY the balance chip (+ the hamburger, owned elsewhere) */
@@ -88,6 +89,7 @@ export function createHud(parent: HTMLElement, currency: StakeCurrency = ACTIVE_
   // identical DOM/style writes keeps text/CSSOM churn out of the WebView's frame budget.
   let lastPx = "", lastFeed = "", lastMulti = "", lastMultiCol = "", lastTimer = "", lastTimerCol = "";
   let lastTimerUrgent = false; // final-10s red-pulse state (toggled only on the transition, not per-frame)
+  let openPosition = false;
 
   return {
     root: parent,
@@ -122,6 +124,17 @@ export function createHud(parent: HTMLElement, currency: StakeCurrency = ACTIVE_
       if (col !== lastMultiCol) { lastMultiCol = col; multi.style.color = col; multi.style.textShadow = "0 0 26px " + col + "8c"; }
     },
     setTimer(secLeft, live) {
+      if (openPosition) {
+        if (lastTimer !== "OPEN") { lastTimer = "OPEN"; timer.textContent = "OPEN"; }
+        if (lastTimerCol !== "#aef0d0") { lastTimerCol = "#aef0d0"; timer.style.color = "#aef0d0"; }
+        if (lastTimerUrgent) {
+          lastTimerUrgent = false;
+          timer.style.display = "";
+          timer.style.animation = "";
+          timer.style.textShadow = "";
+        }
+        return;
+      }
       const s = Math.max(0, Math.ceil(secLeft));
       const t = Math.floor(s / 60) + ":" + String(s % 60).padStart(2, "0");
       if (t !== lastTimer) { lastTimer = t; timer.textContent = t; }
@@ -135,6 +148,17 @@ export function createHud(parent: HTMLElement, currency: StakeCurrency = ACTIVE_
         timer.style.display = urgent ? "inline-block" : ""; // inline-block so the scale transform applies
         timer.style.animation = urgent ? "hudTimerPulse 1s ease-in-out infinite" : "";
         timer.style.textShadow = urgent ? "0 0 13px #ff506799" : "";
+      }
+    },
+    setOpenPosition(open) {
+      openPosition = open;
+      lastTimer = "";
+      lastTimerCol = "";
+      if (open) {
+        lastTimer = "OPEN";
+        lastTimerCol = "#aef0d0";
+        timer.textContent = "OPEN";
+        timer.style.color = "#aef0d0";
       }
     },
     setStatus(t) { status.textContent = t; },

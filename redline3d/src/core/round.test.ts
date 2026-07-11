@@ -73,6 +73,15 @@ describe("RoundEngine", () => {
     expect(s.equity).toBeCloseTo(1 - 0.0125 - 0.005, 8);
   });
 
+  it("restores an on-chain re-anchored Highway segment", () => {
+    const r = new RoundEngine();
+    r.launch({
+      dir: -1, lev: 150, stake: 1, entryRaw: 105, banked: 0.2,
+      startMs: 10_000, maxSec: Number.POSITIVE_INFINITY, borrowBpsPerDay: 1,
+    });
+    expect(r.snapshot(105, 10_000).equity).toBeCloseTo(1.2, 8);
+  });
+
   it("cashout settles with reason cashout", () => {
     const r = launched();
     r.tick(102, 1000);

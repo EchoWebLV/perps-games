@@ -7,6 +7,8 @@ export interface LaunchParams {
   lev: number;
   stake: number;
   entryRaw: number;
+  /** Realized fixed-point PnL restored from the on-chain segment, expressed as equity units. */
+  banked?: number;
   startMs: number;
   /** per-round time cap in seconds (Six Wheeler Heavy Load runs longer); defaults to CONFIG.MAXSEC */
   maxSec?: number;
@@ -33,7 +35,7 @@ export class RoundEngine {
 
   launch(p: LaunchParams): void {
     this.phase = "live";
-    this.pos = { dir: p.dir, lev: p.lev, entryRaw: p.entryRaw, banked: 0 };
+    this.pos = { dir: p.dir, lev: p.lev, entryRaw: p.entryRaw, banked: p.banked ?? 0 };
     this.stake = p.stake;
     this.startMs = p.startMs;
     this.maxSec = p.maxSec ?? CONFIG.MAXSEC;

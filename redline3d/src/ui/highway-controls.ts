@@ -22,7 +22,7 @@ export function createHighwayControls(
   const panel = document.createElement("section");
   panel.setAttribute("aria-label", "Highway position controls");
   panel.style.cssText = [
-    "display:none", "position:fixed", "left:50%", "bottom:max(18px,env(safe-area-inset-bottom))",
+    "display:none", "position:fixed", "left:50%", "bottom:max(112px,calc(env(safe-area-inset-bottom) + 94px))",
     "transform:translateX(-50%)", "z-index:40", "width:min(92vw,520px)",
     "box-sizing:border-box", "padding:14px 16px", "border:1px solid rgba(255,255,255,.18)",
     "border-radius:16px", "background:rgba(8,12,18,.9)", "backdrop-filter:blur(14px)",

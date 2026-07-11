@@ -12,6 +12,7 @@ import { createPost } from "./render/post";
 import { createHud } from "./ui/hud";
 import { createTach } from "./ui/tach";
 import { createControls, DEFAULT_PLAY_CAP } from "./ui/controls";
+import { createHighwayControls } from "./ui/highway-controls";
 import { connectFeed } from "./core/feed";
 import { createBootReveal } from "./core/boot-reveal";
 import { createPriceSource } from "./core/price-source";
@@ -78,18 +79,19 @@ import { shouldGrantWelcome, welcomeClaimed, markWelcome } from "./core/welcome"
 import { restoreSave, stashSave, wipeSave } from "./core/save-vault";
 import { createMapButton } from "./ui/mapbutton";
 import { createLobbyHud } from "./ui/lobbyhud";
-import { step as driveStep, DRIVE, HIGHWAY_DRIVE, type DriveState, type DriveTune } from "./core/freedrive";
+import { step as driveStep, DRIVE, type DriveState, type DriveTune } from "./core/freedrive";
 import { stepBody, type BodyState } from "./core/body-language";
 import { laneStep, type LaneState } from "./core/lane-drive";
 import { entranceHit, LOT_BOUNDS, LOBBY_SPAWN, doorExitPose, type BuildingKind } from "./core/lobby-layout";
 import { modeSwitchBlocked } from "./core/mode-guard";
 import { createOval } from "./render/oval";
 import { createGarageRoom } from "./render/garage-room";
-import { spawnPose, contain, HW_BOUNDS, elevationAt, progress, WALL_SCRAPE } from "./core/track";
-import { shiftGear, levOf, HW_MAX_LEV } from "./core/highway-gears";
+import { elevationAt } from "./core/track";
+import { HIGHWAY_MAX_LEV, highwayPose, seedHighwayMotion, speedForLeverage, stepHighwayMotion, type HighwayMotion } from "./core/highway-auto";
 import { PublicKey } from "@solana/web3.js";
 import { CHAIN } from "./chain/config";
 import { createGameSession } from "./chain/game-session";
+import { HIGHWAY_DURATION_SENTINEL, isHighwayRound, roundKey, type RoundSnap } from "./chain/chain-round";
 import { selectChainWalletPort } from "./chain/wallet-select";
 import { createCrateRollDraws, makeCrateRollIo } from "./chain/crate-roll";
 
@@ -237,6 +239,7 @@ async function ensureSignedIn(fresh = false): Promise<boolean> {
     syncOnchainBalance();
     signedIn = true;
     await syncAccount(); // bind Privy → server + hydrate coins/scrap/cars
+    restoreHighwayPosition();
     void syncTableCap(); // clamp the bet stepper to the live table limit right away
     return true;
   } catch (e) {
@@ -305,6 +308,25 @@ addEventListener("pageshow", (e) => { if ((e as PageTransitionEvent).persisted) 
 const hud = createHud(hudRoot, ACTIVE_STAKE_CURRENCY);
 const tach = createTach(hud.tachMount);
 const controls = createControls(hud.ctrlMount, hud.goMount, hud.pedalMount);
+const highwayControls = createHighwayControls(hudRoot, {
+  onCommit: (lev) => {
+    if (engine.getPhase() !== "live") {
+      highwayConfirmedLev = lev;
+      game.lev = lev;
+      highwayControls.setConfirmed(lev);
+      return;
+    }
+    engine.setLeverage(lev, priceSource.price(), Date.now());
+    game.lev = lev;
+    if (simRound) {
+      highwayConfirmedLev = lev;
+      highwayControls.setConfirmed(lev);
+    } else {
+      highwayControls.setSyncing(lev);
+      session.noteLeverage(lev);
+    }
+  },
+});
 const minimap = createMinimap(hud.miniCanvas, quality.pixelRatioCap);
 const fx = createFx();
 const deathsDoor = createDeathsDoor(); // Skull car: near-death sequence at the liq floor
@@ -720,7 +742,8 @@ function precompileModes(): void {
   }
   groups.forEach((g, i) => { g.visible = before[i]; });
 }
-let hwGear = 0; // current highway gear (index into GEARS)
+let highwayMotion: HighwayMotion | null = null;
+let highwayConfirmedLev = 100;
 // drive-mode body language (all modes): eased roll into corners + squat/dive on
 // throttle/brake — core/body-language owns the math. Visual only — never physics or money.
 let body: BodyState = { roll: 0, pitch: 0 };
@@ -772,6 +795,8 @@ function lobbyEntryPose(): DriveState {
 function enterLobby() {
   if (modeSwitchBlocked({ opening, phase: engine.getPhase() })) return; // no mode switch while a GO is in flight
   mode = "lobby";
+  highwayControls.hide();
+  hud.setOpenPosition(false);
   drive = lobbyEntryPose(); // at the door of the building you left (Track/Garage), else the south spawn
   doorDwell = 0;
   doorArmed = true;
@@ -817,14 +842,16 @@ function exitLobby() {
   car.group.rotation.order = "YXZ"; // same convention as every mode (see the boot-time note)
 }
 
-// ── highway: the free-drive divided oval (spec 2026-07-02) ─────────────────
-// Direction is picked at GO and locked; speed drives the 10..100× gear ladder.
-function enterHighway() {
-  if (modeSwitchBlocked({ opening, phase: engine.getPhase(), roundActive })) return;
+// ── highway: automatic divided-oval perpetuals ─────────────────────────────
+// Direction selects the carriageway. Leverage controls automatic speed, not steering.
+function enterHighway(restoring = false) {
+  if (!restoring && modeSwitchBlocked({ opening, phase: engine.getPhase(), roundActive })) return;
   mode = "highway";
   syncPresenceLifecycle();
-  drive = spawnPose(controls.dir());
-  hwGear = 0;
+  highwayConfirmedLev = highwayControls.value();
+  highwayControls.setConfirmed(highwayConfirmedLev);
+  highwayControls.show();
+  highwayMotion = seedHighwayMotion(session.address() || identity?.name || "practice", controls.dir());
   body = { roll: 0, pitch: 0 }; prevDriveSpeed = 0;
   lobby.hide(); lobbyHud.hide(); lobbyHud.setPrompt(null);
   world.group.visible = false;
@@ -833,8 +860,8 @@ function enterHighway() {
   oval.show();
   setChrome("race"); // the highway uses the full driving chrome
   mapBtn.setVisible(true); // "map" = back to the strip
-  tach.rebuild(HW_MAX_LEV); // the tach reads the gear ladder, not the racer's RMAX
-  // racer-only ability buttons are meaningless here — the gear ladder owns leverage
+  tach.rebuild(HIGHWAY_MAX_LEV);
+  // Racer-only ability buttons are disabled here. The Highway position owns leverage.
   nitro.setEnabled(false); flux.setEnabled(false); magnet.setEnabled(false); autoExit.setEnabled(false); barrelRoll.setEnabled(false);
   hwBillboardCd = 0; // fresh entry → redraw the billboard immediately (no stale asset/price beat)
   // pitch composes over yaw on the hills (YXZ = yaw outer, pitch local); all modes
@@ -846,6 +873,8 @@ function enterHighway() {
 function exitHighwayToLobby() {
   if (modeSwitchBlocked({ opening, phase: engine.getPhase(), roundActive })) return;
   oval.hide();
+  highwayControls.hide();
+  hud.setOpenPosition(false);
   tach.rebuild(effRmax());
   setAbility(ability); // restore the car's own buttons/toggles
   audio.engine(0, false); // the highway drives the drone every frame; silence it for the lobby
@@ -885,7 +914,7 @@ function triggerBuilding(kind: BuildingKind) {
     case "crates": lobbyHud.hide(); crateBox.open(); break;           // open a crate → pull a car
     case "scrapyard": lobbyHud.toast("ScrapYard — coming soon"); break; // collect scrap, not built yet
     case "track": exitFrom = "track"; exitLobby(); break;            // onto the track — full racing HUD, GO lives there
-    case "highway": lobbyHud.toast("Highway - coming soon"); break; // closed for now
+    case "highway": exitFrom = "highway"; enterHighway(); break;
   }
 }
 
@@ -1007,7 +1036,7 @@ let anchorX = 0, anchorY = 0, anchorCarX = 0;
 canvas.addEventListener("pointerdown", (e) => {
   audio.resume(); radio.resume(); // unlock audio + start the radio on the first touch (any finger)
   if (drivePointerId !== null) return; // already driving with another finger — a second touch must not re-anchor
-  if ((mode === "race" && engine.getPhase() !== "live") || mode === "garage") return; // no driving in the showroom / pre-live race
+  if (mode === "highway" || (mode === "race" && engine.getPhase() !== "live") || mode === "garage") return;
   drivePointerId = e.pointerId; holding = true; touchGas = true; touchBrake = false;
   anchorX = e.clientX; anchorY = e.clientY; anchorCarX = carXTarget;
   joystick.show(e.clientX, e.clientY); // white ring at the thumb
@@ -1035,6 +1064,67 @@ addEventListener("pointermove", (e) => {
   touchGas = !touchBrake;
 });
 
+function assetForRoundFeed(feed?: string): "BTC" | "ETH" | "SOL" | null {
+  if (!feed) return null;
+  for (const key of Object.keys(CHAIN.FEEDS) as ("BTC" | "ETH" | "SOL")[]) {
+    if (CHAIN.FEEDS[key].toBase58() === feed) return key;
+  }
+  return null;
+}
+
+function reconcileHighwaySnapshot(snap: RoundSnap): void {
+  const dir = snap.dir === -1 ? -1 : 1;
+  const restoredAsset = assetForRoundFeed(snap.feed);
+  if (restoredAsset) {
+    asset = restoredAsset;
+    hud.setActiveAsset(asset);
+  }
+  highwayConfirmedLev = snap.lev;
+  highwayControls.setConfirmed(snap.lev);
+  game.lev = snap.lev;
+  round.entryPx = snap.entryHuman;
+  round.dir = dir;
+  roundStartMs = snap.entryTs > 0 ? snap.entryTs * 1000 : Date.now();
+  roundMaxSec = Number.POSITIVE_INFINITY;
+  engine.launch({
+    dir,
+    lev: snap.lev,
+    stake: snap.stake === undefined ? controls.playAmount() : baseToUnits(snap.stake),
+    entryRaw: snap.entryHuman,
+    banked: Number(snap.banked) / 1_000_000,
+    startMs: roundStartMs,
+    maxSec: Number.POSITIVE_INFINITY,
+    borrowBpsPerDay: 1,
+  });
+}
+
+function restoreHighwayPosition(): boolean {
+  const snap = session.liveRound();
+  if (!snap || !isHighwayRound(snap)) return false;
+  const dir = snap.dir === -1 ? -1 : 1;
+  if (mode !== "highway") {
+    controls.setDir(dir);
+    enterHighway(true);
+  }
+  reconcileHighwaySnapshot(snap);
+  highwayMotion = seedHighwayMotion(roundKey(snap, session.address()), dir);
+  roundActive = true;
+  simRound = false;
+  nearDeath = false;
+  deathsDoor.clear();
+  autoExit.setLive(true);
+  controls.setLive(true, "CASH OUT");
+  garage.setBusy(true);
+  mapBtn.setVisible(false);
+  upgrades.setBusy(true);
+  walletUI.setBusy(true);
+  highwayControls.show();
+  highwayControls.setDisabled(false);
+  hud.setOpenPosition(true);
+  hud.setStatus(session.crankArmed() ? "Position restored." : "Position restored. Auto protection needs rearming.");
+  return true;
+}
+
 // Single sink for every ending — manual cash out, terminal-first flip/lever, and the crank poll.
 // Freezes the local visual, sets the HUD outcome from the on-chain settled payload, fires FX, and
 // refreshes the on-chain balance. Idempotent per round via `roundActive`.
@@ -1054,6 +1144,8 @@ function finalizeSettled(info: { outcome: number; outcomeName: string; payout: b
   dropDrive();
   throttle = 34; game.equity = 1; chase.setDriving(false);
   garage.setBusy(false); mapBtn.setVisible(true); upgrades.setBusy(false); walletUI.setBusy(false);
+  highwayControls.setDisabled(false);
+  hud.setOpenPosition(false);
   hud.setTimer(effMaxSec(), false);
   controls.setLive(false, "GO!");
   hud.setMultiplier(Math.max(0, liq ? 0 : finalEq), liq ? "liquidated" : "settled");
@@ -1089,16 +1181,25 @@ function launchPractice() {
   const price = priceSource.price();
   if (!(price > 0)) { hud.setStatus("Waiting for the price feed…"); return; }
   const dir = controls.dir();
-  const lev = mode === "highway" ? levOf(0) : clampInt(game.lev, 10, 3000);
-  roundMaxSec = effMaxSec();
+  const lev = mode === "highway" ? highwayControls.value() : clampInt(game.lev, 10, 3000);
+  roundMaxSec = mode === "highway" ? Number.POSITIVE_INFINITY : effMaxSec();
   simRound = true;
   round.entryPx = price;
   round.dir = dir;
   roundStartMs = Date.now();
-  engine.launch({ dir, lev, stake: controls.playAmount(), entryRaw: price, startMs: roundStartMs, maxSec: roundMaxSec });
+  engine.launch({
+    dir, lev, stake: controls.playAmount(), entryRaw: price, startMs: roundStartMs,
+    maxSec: roundMaxSec, borrowBpsPerDay: mode === "highway" ? 1 : 0,
+  });
   roundActive = true;
   nearDeath = false; deathsDoor.clear();
-  if (mode === "highway") { drive = spawnPose(dir); hwGear = 0; game.lev = lev; }
+  if (mode === "highway") {
+    highwayConfirmedLev = lev;
+    highwayControls.setConfirmed(lev);
+    highwayMotion = seedHighwayMotion(identity?.name ?? "practice", dir);
+    game.lev = lev;
+    hud.setOpenPosition(true);
+  }
   else chase.setDriving(true);
   controls.setLive(true, "CASH OUT");
   garage.setBusy(true); mapBtn.setVisible(false); upgrades.setBusy(true);
@@ -1116,6 +1217,8 @@ function finalizePractice(snap: Snapshot) {
   dropDrive();
   throttle = 34; game.equity = 1; chase.setDriving(false);
   garage.setBusy(false); mapBtn.setVisible(true); upgrades.setBusy(false);
+  highwayControls.setDisabled(false);
+  hud.setOpenPosition(false);
   hud.setTimer(effMaxSec(), false);
   controls.setLive(false, "GO!");
   hud.setMultiplier(Math.max(0, liq ? 0 : snap.equity), liq ? "liquidated" : "settled");
@@ -1139,6 +1242,7 @@ async function closeRound(reason: "cashout" | "expire") {
   }
   settling = true;
   dropDrive();
+  if (mode === "highway") highwayControls.setDisabled(true);
   controls.setBusy("BAILING…"); // the big button shows the bail is in flight
   try {
     const res = await session.close();
@@ -1149,6 +1253,7 @@ async function closeRound(reason: "cashout" | "expire") {
     void reason;
   } finally {
     settling = false;
+    highwayControls.setDisabled(false);
     controls.setBusy(null); // settle → finalizeSettled already set GO!; failure → repaint CASH OUT (round still live)
   }
 }
@@ -1182,12 +1287,14 @@ controls.onLaunch(async () => {
   if (!priceSource.live()) { hud.setStatus("Waiting for the live price feed…"); return; }
   opening = true;
   controls.setBusy("LAUNCHING…"); // the big button reads the launch state (a status line is invisible on the phone)
+  if (mode === "highway") highwayControls.setDisabled(true);
   // The round opens on whatever asset the BTC/ETH/SOL tabs have selected; the registry binds the
   // round to that asset's feed and `hud.onAsset` blocks switching once live, so the local engine's ×
   // (driven off priceSource for `asset`) reads the same feed the chain settles against.
   try {
     // Not signed in yet? This is where the wallet connects (Privy opens its login modal here).
     if (!(await ensureSignedIn())) return;
+    if (roundActive) return; // ensureSignedIn may have restored an existing Highway position
     // First GO auto-starts the ER session (buy-in if empty + slice the bankroll + delegate).
     let playAmount = controls.playAmount(); // 0.01-SOL units — sizes the house slice for the round
     hud.setStatus("Getting on track…");
@@ -1245,8 +1352,9 @@ controls.onLaunch(async () => {
     const dir = controls.dir();
     // Highway: you pull onto the road from a stop — open in bottom gear (10×); the ladder
     // takes it from there. Racer: the throttle's live leverage, on-chain RMAX=3000.
-    const lev = mode === "highway" ? levOf(0) : clampInt(game.lev, 10, 3000);
-    roundMaxSec = effMaxSec(); // freeze this round's time cap (Heavy Load: +50%)
+    const lev = mode === "highway" ? highwayControls.value() : clampInt(game.lev, 10, 3000);
+    roundMaxSec = mode === "highway" ? Number.POSITIVE_INFINITY : effMaxSec();
+    const openDuration = mode === "highway" ? HIGHWAY_DURATION_SENTINEL : roundMaxSec;
     hud.setStatus("Launching…");
     // liq floor in on-chain SCALE units (1e6): CONFIG.LIQ is 0.20 by default and drops toward
     // 0.10 as the Suspension upgrade is bought. The program clamps to [100_000, 200_000] and
@@ -1270,7 +1378,7 @@ controls.onLaunch(async () => {
     // rebuild that itself fails, or a second 6005, surfaces a message — a NAMED one.
     for (let rebuilt = false, retried = false; ; ) {
       try {
-        opened = await session.open(asset, dir, lev, unitsToBase(playAmount), roundMaxSec, Math.round(CONFIG.LIQ * 1_000_000), graceSecs, slFp, tpFp, refundFp);
+        opened = await session.open(asset, dir, lev, unitsToBase(playAmount), openDuration, Math.round(CONFIG.LIQ * 1_000_000), graceSecs, slFp, tpFp, refundFp);
         break;
       } catch (e: any) {
         console.error("on-chain open failed", e);
@@ -1324,23 +1432,30 @@ controls.onLaunch(async () => {
     round.entryPx = opened.entryHuman; // human entry price (NOT the raw mantissa)
     round.dir = dir;
     roundStartMs = Date.now();
-    engine.launch({ dir, lev, stake: playAmount, entryRaw: opened.entryHuman, startMs: roundStartMs, maxSec: roundMaxSec });
+    engine.launch({
+      dir, lev, stake: playAmount, entryRaw: opened.entryHuman, startMs: roundStartMs,
+      maxSec: roundMaxSec, borrowBpsPerDay: mode === "highway" ? 1 : 0,
+    });
     roundActive = true;
     nearDeath = false; deathsDoor.clear(); // fresh round → drop any lingering Skull near-death state
     autoExit.setLive(true); // Pink Rod panel: armed + locked (values stamped on-chain at open)
     if (mode === "highway") {
-      // locked direction = locked carriageway: respawn on the on-ramp of your side
-      drive = spawnPose(dir);
-      hwGear = 0;
+      highwayConfirmedLev = lev;
+      highwayControls.setConfirmed(lev);
+      highwayMotion = seedHighwayMotion(roundKey({ deadlineTs: opened.deadlineTs }, session.address()), dir);
       game.lev = lev;
+      hud.setOpenPosition(true);
     } else {
       chase.setDriving(true);
     }
     controls.setLive(true, "CASH OUT");
     garage.setBusy(true); mapBtn.setVisible(false); upgrades.setBusy(true); walletUI.setBusy(true);
-    hud.setStatus(session.crankArmed() ? "" : "⚠ Auto cash-out is off this round — tap CASH OUT before the timer ends.");
+    hud.setStatus(session.crankArmed() ? "" : mode === "highway"
+      ? "⚠ Auto protection is off. Keep the app open or tap CASH OUT."
+      : "⚠ Auto cash-out is off this round. Tap CASH OUT before the timer ends.");
   } finally {
     opening = false;
+    highwayControls.setDisabled(false);
     controls.setBusy(null); // round live → repaint BAIL; an early-return failure → repaint GO! (the error status stays)
   }
 });
@@ -1499,37 +1614,26 @@ function frame(now: number) {
   }
 
   if (mode === "highway") {
-    // same input model as the lobby: hold+drag or WASD
-    const kSteer = controls.steer();
-    const gas = holding || controls.gas();
-    const brake = touchBrake || controls.brake();
-    const th = brake ? -1 : gas ? 1 : 0;
-    const steer = Math.max(-1, Math.min(1, (holding ? steerNorm : 0) + kSteer));
-    drive = driveStep(drive, { throttle: th, steer }, dt, HW_BOUNDS, HIGHWAY_DRIVE);
-    // the median and outer barrier are the real walls (track-shaped contain) — sliding
-    // contact: position clamps along the wall while speed bleeds off exponentially,
-    // never a dead stop (user drive-feedback v2)
-    const c = contain(drive.x, drive.z);
-    drive = { ...drive, x: c.x, z: c.z, speed: c.hitWall ? drive.speed * Math.exp(-WALL_SCRAPE * dt) : drive.speed };
-    stepFreedriveBody(HIGHWAY_DRIVE, dt);
-
-    // ride the hills: road height under the car, plus ahead/behind samples along the
-    // heading — their difference pitches the nose over crests (racer's slope trick)
-    const fwdX = Math.sin(drive.heading), fwdZ = -Math.cos(drive.heading);
-    const yHere = elevationAt(progress(drive.x, drive.z).s);
-    const yAhead = elevationAt(progress(drive.x + fwdX * SLOPE_SAMPLE, drive.z + fwdZ * SLOPE_SAMPLE).s);
-    const yBehind = elevationAt(progress(drive.x - fwdX * SLOPE_SAMPLE, drive.z - fwdZ * SLOPE_SAMPLE).s);
-    car.update(dt, drive.speed);
-    car.group.position.set(drive.x, yHere, drive.z);
-    // order is YXZ in this mode: yaw first, then pitch about the car's own axle line.
-    // Rx(+θ) tips the −Z nose UP, so nose-up on a climb needs POSITIVE x — hence ahead−behind
-    // (same sign as the racer's slope trick; the inverted form ships the car nose-down uphill).
-    const slopePitch = Math.max(-SLOPE_CLAMP, Math.min(SLOPE_CLAMP, Math.atan2(yAhead - yBehind, 2 * SLOPE_SAMPLE)));
-    car.group.rotation.set(slopePitch + body.pitch, -drive.heading, body.roll);
-    car.setSteer(drive.steer / HIGHWAY_DRIVE.MAX_STEER_LOW);
-
     const roundPrice = samplePrice();
     const nowMs = Date.now();
+
+    if (!highwayMotion) {
+      highwayMotion = seedHighwayMotion(session.address() || identity?.name || "practice", round.dir);
+    }
+    highwayMotion = stepHighwayMotion(highwayMotion, highwayConfirmedLev, dt);
+    const pose = highwayPose(highwayMotion);
+    const autoSpeed = speedForLeverage(highwayConfirmedLev);
+    drive = { x: pose.x, z: pose.z, heading: pose.heading, speed: autoSpeed, steer: 0 };
+
+    const yHere = elevationAt(highwayMotion.s);
+    const yAhead = elevationAt(highwayMotion.s + highwayMotion.dir * SLOPE_SAMPLE);
+    const yBehind = elevationAt(highwayMotion.s - highwayMotion.dir * SLOPE_SAMPLE);
+    const slopePitch = Math.max(-SLOPE_CLAMP, Math.min(SLOPE_CLAMP, Math.atan2(yAhead - yBehind, 2 * SLOPE_SAMPLE)));
+    body = { roll: body.roll * Math.exp(-5 * dt), pitch: body.pitch * Math.exp(-5 * dt) };
+    car.update(dt, autoSpeed);
+    car.group.position.set(pose.x, yHere, pose.z);
+    car.group.rotation.set(slopePitch + body.pitch, -pose.heading, body.roll);
+    car.setSteer(0);
 
     // trackside billboard: the same feed the round settles against, made physical
     hwBillboardCd -= dt;
@@ -1539,18 +1643,12 @@ function frame(now: number) {
       oval.setBillboard(asset, px > 0 ? px.toLocaleString("en-US", { maximumFractionDigits: 2 }) : "—");
     }
 
-    // speed → gear → leverage (the ladder is the only leverage source in this mode)
-    const speedFrac = Math.abs(drive.speed) / HIGHWAY_DRIVE.MAX_FWD;
-    hwGear = shiftGear(hwGear, speedFrac);
-    const lev = levOf(hwGear);
-    tach.setThrottle(speedFrac, lev);
+    const speedFrac = autoSpeed / speedForLeverage(HIGHWAY_MAX_LEV);
+    tach.setThrottle(speedFrac, highwayConfirmedLev);
     audio.engine(speedFrac, true);
 
     if (engine.getPhase() === "live") {
-      game.lev = lev;
-      engine.setLeverage(lev, roundPrice);   // instant local rebank (no-op if unchanged)
-      if (!simRound) session.noteLeverage(lev); // coalesced on-chain lever (practice never touches the chain)
-      // practice rounds settle on the ENGINE (tick liquidates/caps/times out locally)
+      hud.setOpenPosition(true);
       const snap = simRound ? engine.tick(roundPrice, nowMs) : engine.snapshot(roundPrice, nowMs);
       if (snap.phase !== "live") {
         if (simRound) finalizePractice(snap);
@@ -1559,24 +1657,23 @@ function frame(now: number) {
         hud.setMultiplier(Math.max(0, snap.equity), "live");
         controls.setBuffer(Math.max(0, Math.min(1, snap.buffer)));
         controls.setLive(true, `${snap.equity >= 1 ? "CASH OUT" : "BAIL"} ${sol3(snap.payout)}`, snap.equity < 1);
-        hud.setTimer(roundMaxSec - (nowMs - roundStartMs) / 1000, true);
+        hud.setTimer(0, true);
         car.setEquity("live", Math.max(0, snap.equity));
-        // local time-cap backstop, same as the race branch
-        if (roundActive && !settling && (nowMs - roundStartMs) / 1000 >= roundMaxSec) void closeRound("expire");
       }
     } else {
       car.setEquity("idle", 1);
+      hud.setOpenPosition(false);
       hud.setTimer(effMaxSec(), false);
     }
 
-    const liqPx = engine.getPhase() === "live" ? liqPriceOf(round.entryPx, round.dir, game.lev, CONFIG.LIQ) : 0;
+    const liqPx = engine.getPhase() === "live" ? liqPriceOf(round.entryPx, round.dir, highwayConfirmedLev, CONFIG.LIQ) : 0;
     minimap.draw({ hist: priceHist, inRun: engine.getPhase() === "live", equity: game.equity, entryPx: round.entryPx, liqPx, dir: round.dir });
 
     oval.update(dt);
     // ghost seam — Phase 2 replaces this with live presence; the window var is the
     // Preview verification hook (persists across frames, unlike a one-shot call)
     oval.setRemoteCars(((window as any).__hwGhostStates as import("./render/oval").OvalRemoteCar[] | undefined) ?? NO_REMOTE_CARS);
-    lobbyCam.update(ctx.camera, dt, drive.x, drive.z, drive.heading, yHere);
+    lobbyCam.update(ctx.camera, dt, pose.x, pose.z, pose.heading, yHere);
 
     if (post) post.render();
     else ctx.renderer.render(ctx.scene, ctx.camera);
@@ -1813,6 +1910,7 @@ setInterval(async () => {
   try {
     const snap = await session.poll();
     if (snap && snap.status === 2) finalizeSettled(snap);
+    else if (snap && mode === "highway" && isHighwayRound(snap)) reconcileHighwaySnapshot(snap);
   } catch { /* transient RPC — keep last */ }
   finally { polling = false; }
 }, 650);
@@ -1972,6 +2070,7 @@ if (identity?.mode === "privy") {
     syncOnchainBalance();
     void syncTableCap();
     await syncAccount();                 // hydrate coins/scrap/cars + the account's redeemed-code set
+    restoreHighwayPosition();
     reconnectPresenceForIdentity();
     // The gate's sign-in now RELOADS before its own post-wall flow can run (identity-scoped save
     // swap), so the boot reconnect completes it: wall → how-to (device flag: no-op if ever seen)
@@ -1990,7 +2089,7 @@ if (import.meta.env.DEV) {
     // would be wiped by the very next frame)
     ghosts: (states: import("./render/oval").OvalRemoteCar[] | undefined) => { (window as any).__hwGhostStates = states; },
     gfx: { renderer: ctx.renderer, scene: ctx.scene, camera: ctx.camera }, // 7F draw-call/mesh-count probe (DEV-only)
-    state: () => ({ mode, hwGear, lev: levOf(hwGear), x: drive.x, z: drive.z, speed: drive.speed, roll: body.roll, pitch: body.pitch, rot: { x: car.group.rotation.x, y: car.group.rotation.y, z: car.group.rotation.z } }),
+    state: () => ({ mode, lev: highwayConfirmedLev, x: drive.x, z: drive.z, speed: drive.speed, roll: body.roll, pitch: body.pitch, rot: { x: car.group.rotation.x, y: car.group.rotation.y, z: car.group.rotation.z } }),
   };
   // on-chain probe (GO-path fault injection for browser verification) — e.g. wrap
   // session.open with a one-shot 6005 throw to prove the same-press table rebuild

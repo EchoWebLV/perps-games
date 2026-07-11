@@ -82,6 +82,7 @@ export function classifyDelegateState(owners: {
 export interface RoundSnap {
   status: number; outcome: number; outcomeName: string;
   payout: bigint; banked: bigint; dir: number; lev: number;
+  stake?: bigint; feed?: string;
   entryRaw: bigint; entryExpo: number; entryHuman: number; entryTs: number;
   exitRaw: bigint; exitHuman: number; deadlineTs: number;
 }
@@ -111,6 +112,7 @@ export type ActionResult =
 /** Map an anchor-decoded Round account into a typed, BN-free snapshot. */
 export function roundToSnap(r: {
   status: number; outcome: number; payout: { toString(): string }; banked: { toString(): string };
+  stake?: { toString(): string }; feed?: { toBase58(): string };
   dir: number; lev: number; entryRaw: { toString(): string }; entryExpo: number; entryTs?: number;
   exitRaw: { toString(): string }; deadlineTs: number;
 }): RoundSnap {
@@ -120,6 +122,8 @@ export function roundToSnap(r: {
   return {
     status: Number(r.status), outcome: Number(r.outcome), outcomeName: OUTCOME[Number(r.outcome)] ?? "?",
     payout: BigInt(r.payout.toString()), banked: BigInt(r.banked.toString()),
+    stake: r.stake ? BigInt(r.stake.toString()) : undefined,
+    feed: r.feed?.toBase58(),
     dir: Number(r.dir), lev: Number(r.lev),
     entryRaw, entryExpo, entryHuman: rawToHuman(entryRaw, entryExpo), entryTs: Number(r.entryTs ?? 0),
     exitRaw, exitHuman: rawToHuman(exitRaw, entryExpo), deadlineTs: Number(r.deadlineTs),

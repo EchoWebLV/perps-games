@@ -19,6 +19,7 @@ describe("modeSwitchBlocked", () => {
   });
 
   it("allows switching when idle with nothing in flight", () => {
+    expect(modeSwitchBlocked({ opening: false, phase: "idle", roundActive: false })).toBe(false);
     expect(modeSwitchBlocked({ opening: false, phase: "idle" })).toBe(false);
     expect(modeSwitchBlocked({ opening: false, phase: "settled", roundActive: false })).toBe(false);
     expect(modeSwitchBlocked({ opening: false, phase: "liquidated", roundActive: false })).toBe(false);

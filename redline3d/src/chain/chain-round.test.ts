@@ -43,6 +43,7 @@ describe("chain-round pure helpers", () => {
   it("roundToSnap maps an anchor-decoded round to a typed snapshot (BN -> bigint, raw -> human)", () => {
     const fake = {
       status: 1, outcome: 0, payout: { toString: () => "0" }, banked: { toString: () => "-50000" },
+      stake: { toString: () => "10000000" }, feed: new PublicKey("ENYwebBThHzmzwPLAQvCucUTsjyfBSZdD9ViXksS4jPu"),
       dir: -1, lev: 2000, entryRaw: { toString: () => "5921756678227" }, entryExpo: 8,
       exitRaw: { toString: () => "0" }, deadlineTs: 1751000000,
     };
@@ -51,6 +52,8 @@ describe("chain-round pure helpers", () => {
     expect(s.dir).toBe(-1);
     expect(s.lev).toBe(2000);
     expect(s.banked).toBe(-50000n); // i128 can be negative
+    expect(s.stake).toBe(10_000_000n);
+    expect(s.feed).toBe("ENYwebBThHzmzwPLAQvCucUTsjyfBSZdD9ViXksS4jPu");
     expect(s.outcomeName).toBe("cashout");
     expect(s.entryHuman).toBeCloseTo(59217.57, 1);
   });
