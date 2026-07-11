@@ -42,6 +42,31 @@ export interface CrateBox {
   setBusy(busy: boolean): void;
 }
 
+/** Free welcome gifts must not depend on a brand-new wallet having SOL for a VRF transaction. */
+export function shouldUseVrfForOpen(free: boolean, hasProvider: boolean): boolean {
+  return !free && hasProvider;
+}
+
+/** Keep the player-facing failure actionable while retaining the raw error in the console. */
+export function vrfFailureMessage(error: unknown): string {
+  const cause = error instanceof Error && "cause" in error
+    ? String((error as Error & { cause?: unknown }).cause ?? "")
+    : "";
+  const text = error instanceof Error
+    ? `${error.name} ${error.message} ${cause}`
+    : String(error);
+  if (/prior credit|insufficient (funds|lamports).*fee|insufficient.*balance/i.test(text)) {
+    return "This wallet needs devnet SOL for VRF. Open Wallet, send a little SOL, then try again. Coins restored.";
+  }
+  if (/vrf_timeout/i.test(text)) {
+    return "The randomness oracle timed out. Your coins were restored. Try again.";
+  }
+  if (/429|too many requests|failed to fetch|network/i.test(text)) {
+    return "The devnet connection is busy. Your coins were restored. Try again shortly.";
+  }
+  return "The VRF request failed. Your coins were restored. Try again.";
+}
+
 const gems = (r: number) => {
   const c = tierOf(r).color;
   return Array.from({ length: r }, () => `<span class="cb-gem" style="background:${c};box-shadow:0 0 6px ${c}"></span>`).join("");
@@ -318,7 +343,9 @@ export function createCrateBox(parent: HTMLElement, deps: CrateBoxDeps): CrateBo
   const doOpen = (crate: CrateType, free = false) => {
     if (opening) return;
     if (!free) giftMode = false; // a paid open ends the welcome flow → its reveal returns to the shop
-    const vrfProvider = deps.vrfDraws?.() ?? null; // resolved per-open: a mid-session sign-in upgrades the path
+    // Resolve only paid opens. A welcome gift must work before the embedded wallet is funded.
+    const availableVrf = free ? null : deps.vrfDraws?.() ?? null;
+    const vrfProvider = shouldUseVrfForOpen(free, !!availableVrf) ? availableVrf : null;
 
     if (!vrfProvider) {
       // ── guest / not connected: the existing sync client-RNG path, verbatim behavior ──
@@ -355,10 +382,11 @@ export function createCrateBox(parent: HTMLElement, deps: CrateBoxDeps): CrateBo
     void vrfProvider(4).then((draws) => {
       if (!free) deps.settleHold!(crate.priceCoins, true); // commit: forward the spend to the server
       if (!resolveAndReveal(crate, draws, true)) { opening = false; if (giftMode) { giftMode = false; close(); } else showShop(); }
-    }).catch(() => {
+    }).catch((error) => {
       if (!free) deps.settleHold!(crate.priceCoins, false); // release: quiet local restore, zero server traffic
       opening = false;
-      deps.onVrfFail?.("Couldn't reach the randomness oracle — try again.");
+      console.warn("[crate] VRF request failed:", error);
+      deps.onVrfFail?.(vrfFailureMessage(error));
       if (giftMode) { giftMode = false; close(); } else showShop();
     });
   };

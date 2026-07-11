@@ -1,5 +1,6 @@
 import { describe, expect, test, vi } from "vitest";
-import { redeem, redeemForAccount, normalizeCode, isRedeemed, anyRedeemed, ACCESS_CODES, type RedeemPorts } from "./access-code";
+import { readFile } from "node:fs/promises";
+import { redeem, redeemForAccount, normalizeCode, isRedeemed, isAccountRedeemed, anyRedeemed, ACCESS_CODES, type RedeemPorts } from "./access-code";
 import { createInventory } from "./inventory";
 import type { KvStore } from "./identity";
 
@@ -163,11 +164,12 @@ describe("redeem — idempotent + persistent (the anti-double-grant guarantees)"
   });
 });
 
-describe("redeemForAccount — the signed-in path (server-first, local-first fallback)", () => {
+describe("redeemForAccount — the signed-in path (server-first, account-scoped fallback)", () => {
   // Wire the account ports onto the SAME counted inventory the guest path uses, so the reward
   // application is proven identical — only the once-guard (server vs browser flag) differs.
   const acctPorts = (h: ReturnType<typeof harness>, granted: boolean) => ({
     api: { redeemAccess: vi.fn(async (_code: string) => ({ granted })) },
+    accountId: "acct-a",
     rosterIds: ROSTER,
     owns: (id: string) => h.inv.owns(id),
     grantCar: (id: string) => { h.inv.grant(id); },
@@ -182,7 +184,17 @@ describe("redeemForAccount — the signed-in path (server-first, local-first fal
     for (const id of ROSTER) expect(h.inv.owns(id)).toBe(true);
     expect(h.creditCalls).toEqual([1000]);
     expect(ports.api.redeemAccess).toHaveBeenCalledWith("magic"); // normalized code id sent to the server
-    expect(isRedeemed("magic", h.store)).toBe(true); // and remembered locally so a relaunch skips the wall
+    expect(isAccountRedeemed("acct-a", "magic", h.store)).toBe(true);
+  });
+
+  test("a browser flag left by another rider cannot bypass this account's server redemption", async () => {
+    const h = harness();
+    h.store.set("raider.access.magic.v1", "1");
+    const ports = acctPorts(h, true);
+
+    expect(await redeemForAccount("magic", ports)).toBe("granted");
+    expect(ports.api.redeemAccess).toHaveBeenCalledWith("magic");
+    expect(h.creditCalls).toEqual([1000]);
   });
 
   test("server says already-claimed → applies NOTHING and returns 'already' (no double coins)", async () => {
@@ -206,7 +218,7 @@ describe("redeemForAccount — the signed-in path (server-first, local-first fal
     const h = harness();
     const ports = acctPorts(h, true);
     expect(await redeemForAccount("magic", ports)).toBe("granted");
-    expect(isRedeemed("magic", h.store)).toBe(true);
+    expect(isAccountRedeemed("acct-a", "magic", h.store)).toBe(true);
     expect(await redeemForAccount("magic", ports)).toBe("already"); // the local flag guards the re-grant
     expect(ports.api.redeemAccess).toHaveBeenCalledTimes(1);        // the 2nd attempt never hit the server
     expect(h.creditCalls).toEqual([1000]);                          // coins credited exactly once, ever
@@ -216,6 +228,7 @@ describe("redeemForAccount — the signed-in path (server-first, local-first fal
     const h = harness();
     const ports = {
       api: { redeemAccess: vi.fn(async () => { throw new Error("network"); }) },
+      accountId: "acct-a",
       rosterIds: ROSTER,
       owns: (id: string) => h.inv.owns(id),
       grantCar: (id: string) => { h.inv.grant(id); },
@@ -225,6 +238,20 @@ describe("redeemForAccount — the signed-in path (server-first, local-first fal
     expect(await redeemForAccount("magic", ports)).toBe("granted"); // fallback grant, not a dead end
     for (const id of ROSTER) expect(h.inv.owns(id)).toBe(true);     // reward applied locally
     expect(h.creditCalls).toEqual([1000]);
-    expect(isRedeemed("magic", h.store)).toBe(true);                // flag set → idempotent next time
+    expect(isAccountRedeemed("acct-a", "magic", h.store)).toBe(true);
+  });
+});
+
+describe("signed-in access wall wiring", () => {
+  test("a device-wide guest redemption cannot bypass a fresh signed-in account", async () => {
+    const main = await readFile(new URL("../main.ts", import.meta.url), "utf8");
+    const start = main.indexOf("function accountAccessThenEnter");
+    const end = main.indexOf("// The signed-in welcome crate", start);
+    const accountGate = main.slice(start, end);
+
+    expect(start).toBeGreaterThanOrEqual(0);
+    expect(end).toBeGreaterThan(start);
+    expect(accountGate).toContain("accountSync.accessCodes().length > 0");
+    expect(accountGate).not.toContain("anyRedeemed()");
   });
 });

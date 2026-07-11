@@ -20,3 +20,8 @@ export function markWelcome(store: KvStore = browserStore): void {
 export function shouldGrantWelcome(freshVisitor: boolean, claimed: boolean): boolean {
   return freshVisitor && !claimed;
 }
+
+/** Recover a consumed account claim only when no non-starter reward car was ever delivered. */
+export function shouldDeliverAccountWelcome(claimGranted: boolean, hasRewardCar: boolean): boolean {
+  return claimGranted || !hasRewardCar;
+}

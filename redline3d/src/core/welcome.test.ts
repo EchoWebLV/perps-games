@@ -1,5 +1,6 @@
 import { describe, expect, test } from "vitest";
 import { shouldGrantWelcome, welcomeClaimed, markWelcome } from "./welcome";
+import * as welcomeModule from "./welcome";
 import type { KvStore } from "./identity";
 
 const memStore = (): KvStore => {
@@ -28,5 +29,17 @@ describe("welcome flag — durable once-ever claim", () => {
     const store = memStore();
     markWelcome(store);
     expect(welcomeClaimed(store)).toBe(true); // a new call re-reads the store, not in-memory state
+  });
+});
+
+describe("signed-in welcome recovery", () => {
+  test("redelivers only when the server claim was consumed without a reward car", () => {
+    const shouldDeliver = (welcomeModule as unknown as {
+      shouldDeliverAccountWelcome?: (claimGranted: boolean, hasRewardCar: boolean) => boolean;
+    }).shouldDeliverAccountWelcome;
+
+    expect(shouldDeliver?.(true, false)).toBe(true);
+    expect(shouldDeliver?.(false, false)).toBe(true);
+    expect(shouldDeliver?.(false, true)).toBe(false);
   });
 });

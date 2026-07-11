@@ -48,6 +48,7 @@ export function normalizeCode(raw: string): string {
 }
 
 const flagKey = (codeId: string) => `raider.access.${codeId}.v1`;
+const accountFlagKey = (accountId: string, codeId: string) => `raider.access.account.${accountId}.${codeId}.v1`;
 
 /** true once this code has been redeemed on this browser (persists across reloads / logout / switch). */
 export function isRedeemed(codeId: string, store: KvStore = browserStore): boolean {
@@ -57,6 +58,16 @@ export function isRedeemed(codeId: string, store: KvStore = browserStore): boole
 /** true once ANY access code has been redeemed here — drives the gate's persistent "unlocked" state. */
 export function anyRedeemed(store: KvStore = browserStore): boolean {
   return Object.keys(ACCESS_CODES).some((id) => isRedeemed(id, store));
+}
+
+/** Browser fallback state scoped to one signed-in wallet, never shared with guests or other accounts. */
+export function isAccountRedeemed(accountId: string, codeId: string, store: KvStore = browserStore): boolean {
+  return store.get(accountFlagKey(accountId, codeId)) === "1";
+}
+
+/** True when this exact signed-in account redeemed any access code on this browser. */
+export function anyAccountRedeemed(accountId: string, store: KvStore = browserStore): boolean {
+  return Object.keys(ACCESS_CODES).some((id) => isAccountRedeemed(accountId, id, store));
 }
 
 /**
@@ -82,23 +93,24 @@ export function redeem(raw: string, ports: RedeemPorts): RedeemResult {
 }
 
 /**
- * Account redemption — the SIGNED-IN counterpart to redeem(). LOCAL-FIRST, best-effort account pin:
+ * Account redemption is the signed-in counterpart to redeem(). It uses the server as authority and
+ * keeps only an account-scoped browser fallback:
  * the server is the authority on which codes an account has claimed (idempotent per account+code),
  * but a server hiccup must NEVER wall the player out (that dead end was the whole bug). So:
  *  - unknown code                     → "invalid" (no server call at all)
- *  - already recorded on this browser → "already" (idempotent — no second local grant)
+ *  - already recorded for this account on this browser → "already" (no second local grant)
  *  - server reachable, first time     → grant unowned cars + credit coins once → "granted"
  *  - server reachable, already        → "already" (apply NOTHING — no duplicate cars, no extra coins)
  *  - server UNREACHABLE               → grant locally anyway → "granted"; the cars/coins still sync to
  *                                       the account via the earn-deltas, and the server `access_codes`
  *                                       record fills in on a later online redeem.
- * A local flag is written whenever we grant/settle, so this browser stays idempotent and skips the
- * wall next launch even if the account-level record never landed.
+ * The local flag includes the wallet address, so one guest or account can never unlock another.
  */
 export async function redeemForAccount(
   raw: string,
   ports: {
     api: Pick<Api, "redeemAccess">;
+    accountId: string;
     rosterIds: string[];
     owns(id: string): boolean;
     grantCar(id: string): void;
@@ -110,7 +122,7 @@ export async function redeemForAccount(
   const codeId = normalizeCode(raw);
   const reward = ACCESS_CODES[codeId];
   if (!reward) return "invalid"; // don't burn a server round-trip on a typo
-  if (isRedeemed(codeId, store)) return "already"; // this browser already settled it → never double-grant
+  if (isAccountRedeemed(ports.accountId, codeId, store)) return "already";
   const applyReward = () => {
     if (reward.allCars) {
       for (const id of ports.rosterIds) if (!ports.owns(id)) ports.grantCar(id);
@@ -120,13 +132,13 @@ export async function redeemForAccount(
   try {
     const { granted } = await ports.api.redeemAccess(codeId);
     if (granted) applyReward(); // server: first time for this account → grant once
-    store.set(flagKey(codeId), "1"); // remember on this browser (skip the wall next launch)
+    store.set(accountFlagKey(ports.accountId, codeId), "1");
     return granted ? "granted" : "already";
   } catch {
     // Server unreachable — never lock the player out. Best-effort local grant; the account record
     // reconciles on the next online redeem (owned cars are skipped, so no duplicate copies).
     applyReward();
-    store.set(flagKey(codeId), "1");
+    store.set(accountFlagKey(ports.accountId, codeId), "1");
     return "granted";
   }
 }

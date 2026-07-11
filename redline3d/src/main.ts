@@ -74,8 +74,8 @@ import { createCruisers } from "./render/cruisers";
 import { clearIdentity, createIdentityGate, loadIdentity, saveIdentity, type Identity } from "./ui/identity";
 import { createPresenceHud } from "./ui/presence";
 import { createAccessWall } from "./ui/access-wall";
-import { anyRedeemed, redeem, redeemForAccount, type RedeemPorts } from "./core/access-code";
-import { shouldGrantWelcome, welcomeClaimed, markWelcome } from "./core/welcome";
+import { anyAccountRedeemed, anyRedeemed, redeem, redeemForAccount, type RedeemPorts } from "./core/access-code";
+import { shouldDeliverAccountWelcome, shouldGrantWelcome, welcomeClaimed, markWelcome } from "./core/welcome";
 import { restoreSave, stashSave, wipeSave } from "./core/save-vault";
 import { createMapButton } from "./ui/mapbutton";
 import { createLobbyHud } from "./ui/lobbyhud";
@@ -2057,12 +2057,13 @@ function guestAccessThenEnter(onDone: () => void) {
   });
 }
 function accountAccessThenEnter(onDone: () => void) {
-  // Skip if the account already redeemed (from hydrate) OR this browser did — the latter covers an
-  // earlier offline redeem whose server record never landed, so we never re-prompt or re-grant.
-  if (accountSync.accessCodes().length > 0 || anyRedeemed()) { onDone(); return; }
+  // Server state follows the account across devices. The scoped browser flag only covers an offline
+  // redemption by this same wallet and can never leak guest or another account's access.
+  const accountId = session.address();
+  if (accountSync.accessCodes().length > 0 || anyAccountRedeemed(accountId)) { onDone(); return; }
   createAccessWall(hudRoot, {
     onRedeem: (code) => redeemForAccount(code, {
-      api, rosterIds: accessPorts.rosterIds, owns: accessPorts.owns,
+      api, accountId, rosterIds: accessPorts.rosterIds, owns: accessPorts.owns,
       grantCar: accessPorts.grantCar, credit: accessPorts.credit,
     }),
     onUnlocked: onDone,
@@ -2071,7 +2072,11 @@ function accountAccessThenEnter(onDone: () => void) {
 // The signed-in welcome crate is ONCE PER ACCOUNT (server-side). Extracted so it fires AFTER the
 // access wall clears — otherwise the crate reveal would draw behind the wall.
 async function claimWelcomeAccount() {
-  try { const { granted } = await api.claimWelcome(); if (granted) setTimeout(() => crateBox.openGift("wooden"), 0); }
+  try {
+    const { granted } = await api.claimWelcome();
+    const hasRewardCar = inventory.all().some((id) => id !== "Solana Paper");
+    if (shouldDeliverAccountWelcome(granted, hasRewardCar)) setTimeout(() => crateBox.openGift("wooden"), 0);
+  }
   catch { /* offline: skip — the server is the source of truth for accounts, never fall back to a local flag here */ }
 }
 let gateUp = false;
