@@ -1576,12 +1576,7 @@ export type Raider = {
           "address": "11111111111111111111111111111111"
         }
       ],
-      "args": [
-        {
-          "name": "maxSlice",
-          "type": "u64"
-        }
-      ]
+      "args": []
     },
     {
       "name": "initRound",
@@ -2920,10 +2915,6 @@ export type Raider = {
           },
           {
             "name": "locked",
-            "type": "u64"
-          },
-          {
-            "name": "maxSlice",
             "type": "u64"
           },
           {

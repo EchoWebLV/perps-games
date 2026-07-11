@@ -172,7 +172,7 @@ describe("raider — lever mid-round parity (terminal-first rebank, BigInt seque
     );
 
     await program.methods
-      .initHouse(new anchor.BN(0))
+      .initHouse()
       .accounts({
         authority: funder.publicKey,
         mint,

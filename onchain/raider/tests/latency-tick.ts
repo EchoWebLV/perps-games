@@ -70,7 +70,7 @@ describe("raider — continuous-tick ER latency (submit -> confirmed p50/p95)", 
       [Buffer.from("vault"), mint.toBuffer()], program.programId);
     const vaultToken = getAssociatedTokenAddressSync(mint, vaultAuthority, true);
 
-    await program.methods.initHouse(new anchor.BN(0)).accounts({
+    await program.methods.initHouse().accounts({
       authority: funder.publicKey, mint, house: housePda, vaultAuthority, vaultToken,
       tokenProgram: TOKEN_PROGRAM_ID, associatedTokenProgram: ASSOCIATED_TOKEN_PROGRAM_ID,
       systemProgram: SystemProgram.programId,

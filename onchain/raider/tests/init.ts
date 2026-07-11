@@ -57,7 +57,7 @@ describe("raider init_house", function () {
 
   it("init_house creates the HouseBalance PDA (balance=0, locked=0) and the vault ATA", async () => {
     await program.methods
-      .initHouse(new anchor.BN(0))
+      .initHouse()
       .accounts({
         authority: wallet.publicKey,
         mint,

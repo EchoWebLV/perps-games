@@ -97,23 +97,12 @@ pub mod raider {
 
     /// Create the shared HouseBalance ledger PDA + the program-owned vault token
     /// account (ATA of the `[b"vault", mint]` authority PDA) that custodies real USDC.
-    pub fn init_house(ctx: Context<InitHouse>, max_slice: u64) -> Result<()> {
+    pub fn init_house(ctx: Context<InitHouse>) -> Result<()> {
         let h = &mut ctx.accounts.house;
         h.authority = ctx.accounts.authority.key();
         h.mint = ctx.accounts.mint.key();
         h.balance = 0;
         h.locked = 0;
-        // FIX 2: the operator sets the per-session slice ceiling here (init is inherently
-        // operator-controlled — the signer becomes `authority`; fund_house is permissionless
-        // so it is NOT a safe place to set a security-critical cap). Passing 0 accepts the
-        // bounded-by-construction default (one worst-case round at MAX_STAKE); a positive
-        // value tightens it for a lower-stakes table. Stored so slice_from_pot can enforce
-        // `slice <= max_slice` and no caller can carve the whole bankroll.
-        h.max_slice = if max_slice == 0 {
-            settle::max_payout(settle::MAX_STAKE)
-        } else {
-            max_slice
-        };
         h.bump = ctx.bumps.house;
         Ok(())
     }
@@ -319,16 +308,9 @@ pub mod raider {
         // would strand the open round's lock. Clean tills (settled or fresh) have locked == 0.
         require!(ctx.accounts.till.locked == 0, RaiderError::RoundAlreadyOpen);
 
-        // FIX 2: bound the carve to the master's operator-configured per-session ceiling so
-        // one caller can never reserve more than a single worst-case round's payout off the
-        // shared bankroll. An unconfigured (or legacy) master stores max_slice == 0, which is
-        // NEVER "unlimited" — it falls back to the bounded-by-construction default
-        // max_payout(MAX_STAKE), so no code path permits an unbounded slice.
-        let cap = if ctx.accounts.master.max_slice == 0 {
-            settle::max_payout(settle::MAX_STAKE)
-        } else {
-            ctx.accounts.master.max_slice
-        };
+        // Keep the anti-DoS ceiling without changing the deployed HouseBalance ABI: a session
+        // can reserve at most one worst-case max-stake payout from the shared bankroll.
+        let cap = settle::max_payout(settle::MAX_STAKE);
 
         let (new_master, new_till) = house::reclaim_and_slice(
             ctx.accounts.master.balance,
@@ -352,8 +334,6 @@ pub mod raider {
         till.mint = mint;
         till.balance = new_till;
         till.locked = 0;
-        // Tills never gate their own slice — the ceiling lives on the master. Keep it 0.
-        till.max_slice = 0;
         till.bump = ctx.bumps.till;
         Ok(())
     }
@@ -1498,7 +1478,7 @@ pub enum RaiderError {
     BadDirection,
     /// open/set_feed got an asset index outside the registry, or an unregistered/disabled feed.
     UnknownAsset,
-    /// slice_from_pot got a slice larger than the master's per-session ceiling (max_slice) —
+    /// slice_from_pot got a slice larger than the program's per-session ceiling —
     /// one caller may reserve at most one worst-case round's payout off the shared bankroll.
     SliceTooLarge,
 }

@@ -131,7 +131,7 @@ describe("raider — 60s time-cap (deterministic clock terminal, outcome=Time)",
     );
 
     await program.methods
-      .initHouse(new anchor.BN(0))
+      .initHouse()
       .accounts({
         authority: funder.publicKey,
         mint,

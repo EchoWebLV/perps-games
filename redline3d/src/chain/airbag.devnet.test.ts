@@ -31,7 +31,7 @@ describe.skipIf(!RUN)("airbag liq refund (devnet)", () => {
     const [house] = PublicKey.findProgramAddressSync([Buffer.from("house2"), mint.toBuffer()], program.programId);
     const [vaultAuthority] = PublicKey.findProgramAddressSync([Buffer.from("vault"), mint.toBuffer()], program.programId);
     const vaultToken = getAssociatedTokenAddressSync(mint, vaultAuthority, true);
-    await program.methods.initHouse(new anchor.BN(0)).accounts({ authority: funder.publicKey, mint, house, vaultAuthority, vaultToken, tokenProgram: TOKEN_PROGRAM_ID, associatedTokenProgram: ASSOCIATED_TOKEN_PROGRAM_ID, systemProgram: SystemProgram.programId }).rpc({ skipPreflight: true });
+    await program.methods.initHouse().accounts({ authority: funder.publicKey, mint, house, vaultAuthority, vaultToken, tokenProgram: TOKEN_PROGRAM_ID, associatedTokenProgram: ASSOCIATED_TOKEN_PROGRAM_ID, systemProgram: SystemProgram.programId }).rpc({ skipPreflight: true });
     const funderAta = await getOrCreateAssociatedTokenAccount(conn, funder, mint, funder.publicKey);
     await mintTo(conn, funder, mint, funderAta.address, funder.publicKey, 250_000_000);
     await program.methods.fundHouse(new anchor.BN(250_000_000)).accounts({ funder: funder.publicKey, mint, house, funderToken: funderAta.address, vaultAuthority, vaultToken, tokenProgram: TOKEN_PROGRAM_ID }).rpc({ skipPreflight: true });

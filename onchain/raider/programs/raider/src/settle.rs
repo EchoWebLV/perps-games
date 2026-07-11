@@ -64,13 +64,9 @@ pub fn accrue_borrow_fee_fp(
     }
     banked_fp.saturating_sub(borrow_fee_fp(lev, now.saturating_sub(entry_ts)))
 }
-// Fallback ceiling (base units) for the per-session house slice (FIX 2): the largest
-// per-round stake the bounded-by-construction default assumes. `max_payout(MAX_STAKE)`
-// is exactly one worst-case round's reservation, which `slice_from_pot` uses as the cap
-// when a master pot has no operator-configured `max_slice` (0). It is a conservative
-// fail-safe only — the operator sets the REAL per-mint ceiling at `init_house` (decimals
-// differ across mints), so this never has to be exactly right, only finite. Chosen large
-// enough not to block legitimate play yet small relative to a funded bankroll.
+// Ceiling basis (base units) for the per-session house slice (FIX 2). The instruction
+// caps every carve at `max_payout(MAX_STAKE)`: one worst-case max-stake reservation.
+// Keeping the ceiling as program logic preserves the deployed 89-byte HouseBalance ABI.
 pub const MAX_STAKE: u64 = 1_000_000_000;
 // Skull "Death's Door" grace cap (seconds). A round's grace window (the time a
 // sub-floor position may ride before the tick liquidates it) is clamped to this at

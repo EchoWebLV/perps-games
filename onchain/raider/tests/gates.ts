@@ -64,7 +64,7 @@ async function buildScenario({ funder, baseProvider, program, delegate, buyInAmo
     [Buffer.from("round"), session.publicKey.toBuffer()], program.programId);
   const ownerAta = await getOrCreateAssociatedTokenAccount(conn, funder.payer, mint, session.publicKey);
 
-  await program.methods.initHouse(new anchor.BN(0)).accounts({
+  await program.methods.initHouse().accounts({
     authority: funder.publicKey, mint, house: housePda, vaultAuthority, vaultToken,
     tokenProgram: TOKEN_PROGRAM_ID, associatedTokenProgram: ASSOCIATED_TOKEN_PROGRAM_ID,
     systemProgram: SystemProgram.programId,

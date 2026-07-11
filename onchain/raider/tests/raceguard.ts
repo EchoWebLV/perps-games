@@ -124,7 +124,7 @@ describe("raider — flip-after-settle race guard (NoOpenRound)", function () {
     );
 
     await program.methods
-      .initHouse(new anchor.BN(0))
+      .initHouse()
       .accounts({
         authority: funder.publicKey,
         mint,

@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import anchor from "@coral-xyz/anchor";
-import { Connection, PublicKey, SystemProgram, Keypair, LAMPORTS_PER_SOL } from "@solana/web3.js";
+import { Connection, PublicKey, SystemProgram, Keypair, LAMPORTS_PER_SOL, Transaction, sendAndConfirmTransaction } from "@solana/web3.js";
 import { createMint, getOrCreateAssociatedTokenAccount, getAssociatedTokenAddressSync, mintTo, TOKEN_PROGRAM_ID, ASSOCIATED_TOKEN_PROGRAM_ID } from "@solana/spl-token";
 import { readFileSync } from "node:fs";
 import idl from "./idl/raider.json";
@@ -47,7 +47,7 @@ describe.skipIf(!RUN)("chain-round devnet loop", () => {
     const [house] = PublicKey.findProgramAddressSync([Buffer.from("house2"), mint.toBuffer()], program.programId);
     const [vaultAuthority] = PublicKey.findProgramAddressSync([Buffer.from("vault"), mint.toBuffer()], program.programId);
     const vaultToken = getAssociatedTokenAddressSync(mint, vaultAuthority, true);
-    await program.methods.initHouse(new anchor.BN(0)).accounts({ authority: funder.publicKey, mint, house, vaultAuthority, vaultToken, tokenProgram: TOKEN_PROGRAM_ID, associatedTokenProgram: ASSOCIATED_TOKEN_PROGRAM_ID, systemProgram: SystemProgram.programId }).rpc({ skipPreflight: true });
+    await program.methods.initHouse().accounts({ authority: funder.publicKey, mint, house, vaultAuthority, vaultToken, tokenProgram: TOKEN_PROGRAM_ID, associatedTokenProgram: ASSOCIATED_TOKEN_PROGRAM_ID, systemProgram: SystemProgram.programId }).rpc({ skipPreflight: true });
     const funderAta = await getOrCreateAssociatedTokenAccount(conn, funder, mint, funder.publicKey);
     await mintTo(conn, funder, mint, funderAta.address, funder.publicKey, 50_000_000);
     await program.methods.fundHouse(new anchor.BN(50_000_000)).accounts({ funder: funder.publicKey, mint, house, funderToken: funderAta.address, vaultAuthority, vaultToken, tokenProgram: TOKEN_PROGRAM_ID }).rpc({ skipPreflight: true });
@@ -100,7 +100,7 @@ describe.skipIf(!RUN)("chain-round devnet loop", () => {
     const [house] = PublicKey.findProgramAddressSync([Buffer.from("house2"), mint.toBuffer()], program.programId);
     const [vaultAuthority] = PublicKey.findProgramAddressSync([Buffer.from("vault"), mint.toBuffer()], program.programId);
     const vaultToken = getAssociatedTokenAddressSync(mint, vaultAuthority, true);
-    await program.methods.initHouse(new anchor.BN(0)).accounts({ authority: funder.publicKey, mint, house, vaultAuthority, vaultToken, tokenProgram: TOKEN_PROGRAM_ID, associatedTokenProgram: ASSOCIATED_TOKEN_PROGRAM_ID, systemProgram: SystemProgram.programId }).rpc({ skipPreflight: true });
+    await program.methods.initHouse().accounts({ authority: funder.publicKey, mint, house, vaultAuthority, vaultToken, tokenProgram: TOKEN_PROGRAM_ID, associatedTokenProgram: ASSOCIATED_TOKEN_PROGRAM_ID, systemProgram: SystemProgram.programId }).rpc({ skipPreflight: true });
     const funderAta = await getOrCreateAssociatedTokenAccount(conn, funder, mint, funder.publicKey);
     await mintTo(conn, funder, mint, funderAta.address, funder.publicKey, 50_000_000);
     await program.methods.fundHouse(new anchor.BN(50_000_000)).accounts({ funder: funder.publicKey, mint, house, funderToken: funderAta.address, vaultAuthority, vaultToken, tokenProgram: TOKEN_PROGRAM_ID }).rpc({ skipPreflight: true });
@@ -161,7 +161,7 @@ describe.skipIf(!RUN)("chain-round devnet loop", () => {
     const [master] = PublicKey.findProgramAddressSync([Buffer.from("house2"), mint.toBuffer()], program.programId);
     const [vaultAuthority] = PublicKey.findProgramAddressSync([Buffer.from("vault"), mint.toBuffer()], program.programId);
     const vaultToken = getAssociatedTokenAddressSync(mint, vaultAuthority, true);
-    await program.methods.initHouse(new anchor.BN(0)).accounts({ authority: funder.publicKey, mint, house: master, vaultAuthority, vaultToken, tokenProgram: TOKEN_PROGRAM_ID, associatedTokenProgram: ASSOCIATED_TOKEN_PROGRAM_ID, systemProgram: SystemProgram.programId }).rpc({ skipPreflight: true });
+    await program.methods.initHouse().accounts({ authority: funder.publicKey, mint, house: master, vaultAuthority, vaultToken, tokenProgram: TOKEN_PROGRAM_ID, associatedTokenProgram: ASSOCIATED_TOKEN_PROGRAM_ID, systemProgram: SystemProgram.programId }).rpc({ skipPreflight: true });
     const funderAta = await getOrCreateAssociatedTokenAccount(conn, funder, mint, funder.publicKey);
     await mintTo(conn, funder, mint, funderAta.address, funder.publicKey, 50_000_000);
     await program.methods.fundHouse(new anchor.BN(50_000_000)).accounts({ funder: funder.publicKey, mint, house: master, funderToken: funderAta.address, vaultAuthority, vaultToken, tokenProgram: TOKEN_PROGRAM_ID }).rpc({ skipPreflight: true });
@@ -231,7 +231,7 @@ describe.skipIf(!RUN)("chain-round devnet loop", () => {
     const [house] = PublicKey.findProgramAddressSync([Buffer.from("house2"), mint.toBuffer()], program.programId);
     const [vaultAuthority] = PublicKey.findProgramAddressSync([Buffer.from("vault"), mint.toBuffer()], program.programId);
     const vaultToken = getAssociatedTokenAddressSync(mint, vaultAuthority, true);
-    await sendIxHttp(conn, program.methods.initHouse(new anchor.BN(0)).accounts({ authority: funder.publicKey, mint, house, vaultAuthority, vaultToken, tokenProgram: TOKEN_PROGRAM_ID, associatedTokenProgram: ASSOCIATED_TOKEN_PROGRAM_ID, systemProgram: SystemProgram.programId }), funder);
+    await sendIxHttp(conn, program.methods.initHouse().accounts({ authority: funder.publicKey, mint, house, vaultAuthority, vaultToken, tokenProgram: TOKEN_PROGRAM_ID, associatedTokenProgram: ASSOCIATED_TOKEN_PROGRAM_ID, systemProgram: SystemProgram.programId }), funder);
     const funderAta = await getOrCreateAssociatedTokenAccount(conn, funder, mint, funder.publicKey);
     await mintTo(conn, funder, mint, funderAta.address, funder.publicKey, 50_000_000);
     await sendIxHttp(conn, program.methods.fundHouse(new anchor.BN(50_000_000)).accounts({ funder: funder.publicKey, mint, house, funderToken: funderAta.address, vaultAuthority, vaultToken, tokenProgram: TOKEN_PROGRAM_ID }), funder);
@@ -354,7 +354,7 @@ describe.skipIf(!RUN)("chain-round devnet loop", () => {
 
   // --- SOL stakes via wSOL: the stake mint is wrapped SOL; the client wraps native SOL on
   // buy-in and unwraps (closes the ATA) on withdraw. Uses the bootstrapped wSOL house. ---
-  it("plays a full SOL (wSOL) round and unwraps back to native SOL, conserved", async () => {
+  it("runs a full 60-second production Track round, then opens and restores Highway", async () => {
     const RPC = process.env.BASE_RPC || "https://api.devnet.solana.com";
     const conn = new Connection(RPC, { commitment: "confirmed" });
     const wpath = process.env.ANCHOR_WALLET || `${process.env.HOME}/.config/solana/lazer-probe.json`;
@@ -367,22 +367,67 @@ describe.skipIf(!RUN)("chain-round devnet loop", () => {
     const port = createDevKeypairPort({ secretKey: player.secretKey, store: { get: () => null, set: () => {} } });
     await port.connect();
     const chain = createChainRound({ wallet: portToAnchorWallet(port), mint });
+    let cleanupChain = chain;
 
-    await chain.wrapForBuyIn(100_000_000); // wrap 0.1 SOL → wSOL
-    await chain.buyIn(100_000_000);
-    expect(await chain.readPlayerBalance()).toBe(100_000_000n);
-    await chain.ensureRoundInited();
-    await chain.sliceFromPot(maxPayoutBase(50_000_000));
-    await chain.delegate();
-    await chain.open("SOL", 1, 50, 50_000_000, 60, 200_000); // 0.05 SOL stake on the SOL feed
-    expect(await chain.readRoundStatus(true)).toBe(1);
-    await sleep(6000);
-    const settled = await chain.close();
-    expect(settled.balance).toBe(100_000_000n - 50_000_000n + settled.payout); // conserved (lamports)
-    await chain.commitAndUndelegate();
-    const l1 = await chain.readPlayerBalance(false);
-    await chain.withdraw(Number(l1));
-    await chain.unwrapAll();
-    expect(await chain.readPlayerBalance(false)).toBe(0n);
-  }, 180_000);
+    try {
+      await chain.wrapForBuyIn(50_000_000); // wrap 0.05 SOL → wSOL
+      await chain.buyIn(50_000_000);
+      expect(await chain.readPlayerBalance()).toBe(50_000_000n);
+      await chain.ensureRoundInited();
+      await chain.sliceFromPot(maxPayoutBase(10_000_000));
+      await chain.delegate();
+
+      await chain.open("SOL", 1, 10, 10_000_000, 60, 200_000); // production Track: 0.01 SOL, 10x, 60s
+      expect(await chain.readRoundStatus(true)).toBe(1);
+      await chain.scheduleCrank({ intervalMs: 1000, iterations: 70 });
+      const trackDeadline = Date.now() + 90_000;
+      let track = await chain.readRound(true);
+      while (Date.now() < trackDeadline && track?.status !== 2) {
+        await sleep(2_000);
+        track = await chain.readRound(true);
+      }
+      expect(track?.status).toBe(2);
+      expect(track?.outcome).toBe(3); // the one-minute clock, not a client cash-out, ended Track
+
+      await chain.open("SOL", -1, 10, 1_000_000, HIGHWAY_DURATION_SENTINEL, 200_000);
+      const highwayDeadline = Date.now() + 10_000;
+      let highway = await chain.readRound(true);
+      while (Date.now() < highwayDeadline && (!highway || !isHighwayRound(highway))) {
+        await sleep(500);
+        highway = await chain.readRound(true);
+      }
+      expect(highway && isHighwayRound(highway)).toBe(true);
+      await chain.scheduleCrank({ intervalMs: 1000, iterations: 30 });
+      await sleep(5_000);
+
+      // A fresh chain client (the page-reload boundary) must rediscover the same live Highway round.
+      const restored = createChainRound({ wallet: portToAnchorWallet(port), mint });
+      cleanupChain = restored;
+      expect(await restored.delegationState()).toBe("reuse");
+      const restoredRound = await restored.readRound(true);
+      expect(restoredRound && isHighwayRound(restoredRound)).toBe(true);
+    } finally {
+      // Best-effort teardown runs even when an assertion fails: never strand a delegated till,
+      // open round, play balance, wrapped SOL, or faucet funds in a throwaway wallet.
+      const state = await cleanupChain.delegationState().catch(() => "fresh" as const);
+      if (state === "reuse") {
+        await cleanupChain.close().catch(() => undefined);
+        await cleanupChain.commitAndUndelegate().catch(() => undefined);
+      }
+      await cleanupChain.sweepTill().catch(() => undefined);
+      const l1 = await cleanupChain.readPlayerBalance(false).catch(() => 0n);
+      if (l1 > 0n) await cleanupChain.withdraw(Number(l1)).catch(() => undefined);
+      await cleanupChain.unwrapAll().catch(() => undefined);
+
+      const refund = await conn.getBalance(player.publicKey);
+      if (refund > 5_000) {
+        await sendAndConfirmTransaction(conn, new Transaction().add(SystemProgram.transfer({
+          fromPubkey: player.publicKey,
+          toPubkey: funder.publicKey,
+          lamports: refund - 5_000, // fee leaves the throwaway system account at exactly zero
+        })), [player], { commitment: "confirmed" });
+      }
+    }
+    expect(await cleanupChain.readPlayerBalance(false)).toBe(0n);
+  }, 240_000);
 });

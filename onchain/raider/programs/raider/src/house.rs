@@ -13,7 +13,7 @@
 pub enum HouseMathError {
     Overflow,
     Undercapitalized,
-    /// The requested slice exceeds the master's per-session ceiling `max_slice` (FIX 2):
+    /// The requested slice exceeds the program's per-session ceiling `max_slice` (FIX 2):
     /// one caller may reserve at most one worst-case round's payout off the shared pot.
     SliceTooLarge,
 }
@@ -21,9 +21,9 @@ pub enum HouseMathError {
 /// Session start: fold any leftover ALREADY in the till back into the master first
 /// (self-healing — covers a skipped end-sweep or a delegate that failed after a prior
 /// slice, so re-slicing never double-spends), then carve `slice` off the combined pot
-/// into the till. `max_slice` is the master's operator-configured ceiling: a single carve
-/// may reserve at most one worst-case round's payout (FIX 2), so no caller can strand the
-/// whole bankroll. Returns (new_master_balance, new_till_balance). Errors with
+/// into the till. `max_slice` is the caller-supplied ceiling; the instruction passes the
+/// program constant for one worst-case max-stake payout (FIX 2), so no caller can strand
+/// the whole bankroll. Returns (new_master_balance, new_till_balance). Errors with
 /// `SliceTooLarge` when the requested slice exceeds `max_slice` (checked against the
 /// request, NOT the reclaimed pot — an oversized carve is rejected even when the pot could
 /// cover it), or `Undercapitalized` when the combined pot can't cover the slice (the

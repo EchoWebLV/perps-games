@@ -1570,12 +1570,7 @@
           "address": "11111111111111111111111111111111"
         }
       ],
-      "args": [
-        {
-          "name": "max_slice",
-          "type": "u64"
-        }
-      ]
+      "args": []
     },
     {
       "name": "init_round",
@@ -2914,10 +2909,6 @@
           },
           {
             "name": "locked",
-            "type": "u64"
-          },
-          {
-            "name": "max_slice",
             "type": "u64"
           },
           {

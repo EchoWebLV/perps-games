@@ -27,7 +27,7 @@ const vaultToken = getAssociatedTokenAddressSync(mint, vaultAuthority, true);
 
 const existing = await program.account.houseBalance.fetchNullable(house);
 if (!existing) {
-  await program.methods.initHouse(new anchor.BN(0)).accounts({
+  await program.methods.initHouse().accounts({
     authority: funder.publicKey, mint, house, vaultAuthority, vaultToken,
     tokenProgram: TOKEN_PROGRAM_ID, associatedTokenProgram: ASSOCIATED_TOKEN_PROGRAM_ID, systemProgram: SystemProgram.programId,
   }).rpc({ skipPreflight: true });

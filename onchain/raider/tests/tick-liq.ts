@@ -120,7 +120,7 @@ describe("raider — continuous 2000x liquidation via tick (keeper-driven)", fun
       );
 
       await program.methods
-        .initHouse(new anchor.BN(0))
+        .initHouse()
         .accounts({
           authority: funder.publicKey,
           mint,

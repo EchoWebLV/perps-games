@@ -114,7 +114,7 @@ describe("raider — self-driving 2000x liquidation via native crank (zero clien
       );
 
       await program.methods
-        .initHouse(new anchor.BN(0))
+        .initHouse()
         .accounts({
           authority: funder.publicKey,
           mint,

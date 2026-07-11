@@ -104,18 +104,11 @@ pub struct HouseBalance {
     pub mint: Pubkey,
     pub balance: u64,
     pub locked: u64,
-    // Operator-configured ceiling (base units) on a single `slice_from_pot` carve (FIX 2).
-    // Bounds one session to at most ONE worst-case round's payout so no caller can reserve
-    // the whole shared bankroll and deny it to everyone else. Only meaningful on the master
-    // `[HOUSE_SEED, mint]` pot (set at `init_house`); unused (0) on per-session tills. A
-    // value of 0 on the master is NEVER treated as "unlimited": `slice_from_pot` falls back
-    // to the bounded-by-construction default `max_payout(MAX_STAKE)`.
-    pub max_slice: u64,
     pub bump: u8,
 }
 impl HouseBalance {
-    // disc(8) + authority(32) + mint(32) + balance(8) + locked(8) + max_slice(8) + bump(1)
-    pub const SIZE: usize = 8 + 32 + 32 + 8 + 8 + 8 + 1;
+    // This is a deployed ABI: the production master pot and existing session tills are 89 bytes.
+    pub const SIZE: usize = 8 + 32 + 32 + 8 + 8 + 1;
 }
 
 #[derive(AnchorSerialize, AnchorDeserialize, Clone, Copy, Default)]
@@ -238,10 +231,10 @@ mod size_tests {
         assert_eq!(FeedRegistry::SIZE, 8 + 32 + 1 + 8 * 65);
     }
     #[test]
-    fn house_size_includes_max_slice() {
-        // disc(8) + authority(32) + mint(32) + balance(8) + locked(8) + max_slice(8) + bump(1)
-        // = 97 (FIX 2 added the u64 max_slice ceiling).
-        assert_eq!(HouseBalance::SIZE, 97);
+    fn house_size_stays_compatible_with_deployed_pots() {
+        // The devnet master pot and every pre-upgrade session till were allocated with
+        // this 89-byte ABI. A program upgrade must not make those live ledgers unreadable.
+        assert_eq!(HouseBalance::SIZE, 89);
     }
     #[test]
     fn refund_clamps_to_ceiling() {

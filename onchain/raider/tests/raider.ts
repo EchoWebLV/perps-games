@@ -118,9 +118,8 @@ describe("raider — canonical end-to-end loop (L1 <-> ER, real USDC, provable f
     console.log("mint    :", mint.toBase58());
     console.log("PDAs    : player", playerPda.toBase58(), "| house", masterPda.toBase58(), "| till", till.toBase58(), "| round", roundPda.toBase58());
 
-    // ---- init_house (max_slice = 0 => accept the bounded-by-construction default ceiling,
-    // FIX 2; the operator would pass max_payout(their max stake) in production) ----
-    await program.methods.initHouse(new BN(0)).accounts({
+    // ---- init_house (the program applies its bounded per-session slice ceiling) ----
+    await program.methods.initHouse().accounts({
       authority: funder.publicKey, mint, house: masterPda, vaultAuthority, vaultToken,
       tokenProgram: TOKEN_PROGRAM_ID, associatedTokenProgram: ASSOCIATED_TOKEN_PROGRAM_ID,
       systemProgram: SystemProgram.programId,
