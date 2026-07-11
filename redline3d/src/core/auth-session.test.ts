@@ -33,7 +33,10 @@ describe("createSessionAuth", () => {
       baseUrl: "http://api",
       fetch: fetch as any,
       storage: {
-        getItem: (k: string) => (k.endsWith(":token") ? "stored-token" : "stored-user"),
+        getItem: (k: string) => {
+          if (k.endsWith(":api-base")) return "http://api";
+          return k.endsWith(":token") ? "stored-token" : "stored-user";
+        },
         setItem: () => {},
         removeItem: () => {},
       } as any,
@@ -75,6 +78,7 @@ describe("createSessionAuth", () => {
     const store = new Map<string, string>([
       ["redline.session:token", "stored-token"],
       ["redline.session:user", "stored-user"],
+      ["redline.session:api-base", "http://api"],
     ]);
     const storage: Pick<Storage, "getItem" | "setItem" | "removeItem"> = {
       getItem: (k) => store.get(k) ?? null,
@@ -97,6 +101,7 @@ describe("createSessionAuth", () => {
     expect(auth.userId()).toBe("");
     expect(store.get("redline.session:token")).toBeUndefined();
     expect(store.get("redline.session:user")).toBeUndefined();
+    expect(store.get("redline.session:api-base")).toBeUndefined();
   });
 
   it("adopts a wallet-recovered session", async () => {
@@ -154,5 +159,34 @@ describe("createSessionAuth", () => {
     expect(await auth.authHeaders()).toEqual({ authorization: "Bearer tok" });
     expect(auth.userId()).toBe("u1");
     expect(fetch).toHaveBeenCalledTimes(2);
+  });
+
+  it("replaces a stored session issued by a different API server", async () => {
+    const store = new Map<string, string>([
+      ["redline.session:token", "localhost-token"],
+      ["redline.session:user", "localhost-user"],
+      ["redline.session:api-base", "http://localhost:8080"],
+    ]);
+    const storage: Pick<Storage, "getItem" | "setItem" | "removeItem"> = {
+      getItem: (key) => store.get(key) ?? null,
+      setItem: (key, value) => { store.set(key, value); },
+      removeItem: (key) => { store.delete(key); },
+    };
+    const fetch = vi.fn(async () => new Response(
+      JSON.stringify({ token: "railway-token", userId: "railway-user" }),
+      { status: 200 },
+    ));
+    const auth = createSessionAuth({
+      baseUrl: "https://redline-server.up.railway.app",
+      fetch: fetch as any,
+      storage,
+    });
+
+    await auth.ready();
+
+    expect(await auth.authHeaders()).toEqual({ authorization: "Bearer railway-token" });
+    expect(auth.userId()).toBe("railway-user");
+    expect(store.get("redline.session:api-base")).toBe("https://redline-server.up.railway.app");
+    expect(fetch).toHaveBeenCalledOnce();
   });
 });
