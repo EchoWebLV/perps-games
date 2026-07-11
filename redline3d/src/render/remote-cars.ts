@@ -1,7 +1,8 @@
 import * as THREE from "three";
-import type { PresenceEmote, PresenceEmoteKind, RemotePresencePlayer } from "../core/presence";
+import type { PresenceEmote, RemotePresencePlayer } from "../core/presence";
 import { smoothRemote, type RemotePose } from "../core/remote-motion";
 import { createCar } from "./car";
+import { createEmoteVisualResources, type EmoteVisual } from "./emote-visual";
 import { tagTexture } from "./stripcars";
 
 export interface RemoteCarModel {
@@ -24,15 +25,10 @@ export interface RemoteObjectVisual {
   dispose(): void;
 }
 
-export interface RemoteEmoteVisual extends RemoteObjectVisual {
-  pulse(kind: PresenceEmoteKind): void;
-  update(dt: number): void;
-}
-
 export interface RemoteCarsDeps {
   makeCar(): RemoteCarVisual;
   makeNameplate(name: string): RemoteObjectVisual;
-  makeEmote?(): RemoteEmoteVisual;
+  makeEmote?(): EmoteVisual;
 }
 
 export interface RemoteCars {
@@ -48,7 +44,7 @@ interface RemoteEntry {
   anchor: THREE.Group;
   car: RemoteCarVisual;
   nameplate: RemoteObjectVisual;
-  emoteVisual: RemoteEmoteVisual;
+  emoteVisual: EmoteVisual;
   name: string;
   carId: string;
   hasResolvedModel: boolean;
@@ -82,83 +78,12 @@ function makeDefaultNameplate(name: string): RemoteObjectVisual {
   };
 }
 
-const EMOTE_GLYPHS: Record<PresenceEmoteKind, { glyph: string; color: string }> = {
-  laugh: { glyph: "😂", color: "#ffd166" },
-  fire: { glyph: "🔥", color: "#ff6a3d" },
-  skull: { glyph: "💀", color: "#d6c7ff" },
-};
-
-function makeGlyphTexture(glyph: string): THREE.CanvasTexture {
-  const canvas = document.createElement("canvas");
-  canvas.width = canvas.height = 128;
-  const context = canvas.getContext("2d")!;
-  context.clearRect(0, 0, 128, 128);
-  context.font = "88px 'Apple Color Emoji','Segoe UI Emoji',sans-serif";
-  context.textAlign = "center";
-  context.textBaseline = "middle";
-  context.fillText(glyph, 64, 68);
-  const texture = new THREE.CanvasTexture(canvas);
-  texture.colorSpace = THREE.SRGBColorSpace;
-  return texture;
-}
-
-function makeDefaultEmoteResources() {
-  const textures: Record<PresenceEmoteKind, THREE.CanvasTexture> = {
-    laugh: makeGlyphTexture(EMOTE_GLYPHS.laugh.glyph),
-    fire: makeGlyphTexture(EMOTE_GLYPHS.fire.glyph),
-    skull: makeGlyphTexture(EMOTE_GLYPHS.skull.glyph),
-  };
-  return {
-    make(): RemoteEmoteVisual {
-      const material = new THREE.SpriteMaterial({
-        map: textures.laugh,
-        transparent: true,
-        opacity: 0,
-        depthWrite: false,
-        blending: THREE.AdditiveBlending,
-      });
-      const sprite = new THREE.Sprite(material);
-      sprite.position.y = 6.8;
-      sprite.visible = false;
-      let age = Infinity;
-      return {
-        object: sprite,
-        pulse(kind) {
-          material.map = textures[kind];
-          material.color.set(EMOTE_GLYPHS[kind].color);
-          material.needsUpdate = true;
-          age = 0;
-          sprite.visible = true;
-          sprite.position.y = 6.8;
-          sprite.scale.setScalar(3);
-          material.opacity = 1;
-        },
-        update(dt) {
-          if (!sprite.visible) return;
-          age += dt;
-          const phase = Math.min(1, age / 0.7);
-          sprite.position.y = 6.8 + phase * 2.4;
-          sprite.scale.setScalar(3 + phase * 3);
-          material.opacity = 1 - phase;
-          if (phase >= 1) sprite.visible = false;
-        },
-        dispose() {
-          material.dispose();
-        },
-      };
-    },
-    dispose() {
-      Object.values(textures).forEach((texture) => texture.dispose());
-    },
-  };
-}
-
 export function createRemoteCars(resolver: RemoteCarResolver, deps: Partial<RemoteCarsDeps> = {}): RemoteCars {
   const group = new THREE.Group();
   const entries = new Map<string, RemoteEntry>();
   const makeCar = deps.makeCar ?? makeDefaultCar;
   const makeNameplate = deps.makeNameplate ?? makeDefaultNameplate;
-  const defaultEmotes = deps.makeEmote ? null : makeDefaultEmoteResources();
+  const defaultEmotes = deps.makeEmote ? null : createEmoteVisualResources();
   const makeEmote = deps.makeEmote ?? (() => defaultEmotes!.make());
   let disposed = false;
   const removeEntry = (id: string, entry: RemoteEntry) => {
