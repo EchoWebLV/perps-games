@@ -163,7 +163,7 @@ export interface PresenceClientOptions {
   onSnapshot?: (players: PresencePlayer[], localId: string | null) => void;
   onJoin?: (player: PresencePlayer) => void;
   onLeave?: (player: PresencePlayer) => void;
-  onEmote?: (event: PresenceEmote) => void;
+  onEmote?: (event: PresenceEmote, localId: string) => void;
   onStatus?: (status: PresenceStatus, count: number) => void;
   onError?: (code: "unauthorized" | "lobby_full") => void;
 }
@@ -200,6 +200,7 @@ export function createPresenceClient(options: PresenceClientOptions): PresenceCl
   let socket: SocketLike | null = null;
   let currentStatus: PresenceStatus = "offline";
   let localId: string | null = null;
+  let lastEmoteNonce = 0;
   let players = new Map<string, PresencePlayer>();
   let lastPoseSentAt = Number.NEGATIVE_INFINITY;
   let pendingPose: PresencePose | null = null;
@@ -219,6 +220,7 @@ export function createPresenceClient(options: PresenceClientOptions): PresenceCl
     const hadState = players.size > 0 || localId !== null;
     players = new Map();
     localId = null;
+    lastEmoteNonce = 0;
     if (hadState) options.onSnapshot?.([], null);
   }
 
@@ -351,8 +353,10 @@ export function createPresenceClient(options: PresenceClientOptions): PresenceCl
       }
       if (localId === null || currentStatus !== "live") return;
       if (message.type === "emote") {
+        if (message.nonce <= lastEmoteNonce) return;
+        lastEmoteNonce = message.nonce;
         try {
-          options.onEmote?.({ id: message.id, kind: message.kind, nonce: message.nonce });
+          options.onEmote?.({ id: message.id, kind: message.kind, nonce: message.nonce }, localId);
         } catch {
           // Presence visuals are best-effort and cannot block local play.
         }

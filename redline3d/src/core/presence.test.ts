@@ -286,6 +286,28 @@ describe("presence client", () => {
     expect(emotes).toEqual([{ id: "p1", kind, nonce: 1 }]);
   });
 
+  it("delivers the welcome identity before a snapshot and rejects stale emote nonces", async () => {
+    const delivered: Array<{ id: string; localId: string; nonce: number }> = [];
+    const client = createPresenceClient(clientOptions({
+      onEmote: (event, localId) => delivered.push({ id: event.id, localId, nonce: event.nonce }),
+    }));
+    client.connect();
+    await flush();
+    const ws = FakeWebSocket.only();
+    ws.open();
+    ws.message({ type: "welcome", id: "self", serverTime: 1 });
+
+    ws.message({ type: "emote", id: "self", kind: "laugh", nonce: 2 });
+    ws.message({ type: "emote", id: "self", kind: "laugh", nonce: 2 });
+    ws.message({ type: "emote", id: "self", kind: "fire", nonce: 1 });
+    ws.message({ type: "emote", id: "self", kind: "skull", nonce: 3 });
+
+    expect(delivered).toEqual([
+      { id: "self", localId: "self", nonce: 2 },
+      { id: "self", localId: "self", nonce: 3 },
+    ]);
+  });
+
   it("contains emote callback failures and continues processing messages", async () => {
     const emotes: string[] = [];
     const client = createPresenceClient(clientOptions({

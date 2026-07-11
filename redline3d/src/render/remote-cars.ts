@@ -2,7 +2,7 @@ import * as THREE from "three";
 import type { PresenceEmote, RemotePresencePlayer } from "../core/presence";
 import { smoothRemote, type RemotePose } from "../core/remote-motion";
 import { createCar } from "./car";
-import { createEmoteVisualResources, type EmoteVisual } from "./emote-visual";
+import { createEmoteVisualResources, type EmoteVisual, updateEmoteVisual } from "./emote-visual";
 import { tagTexture } from "./stripcars";
 
 export interface RemoteCarModel {
@@ -163,7 +163,7 @@ export function createRemoteCars(resolver: RemoteCarResolver, deps: Partial<Remo
         entry.anchor.position.set(entry.current.x, 0, entry.current.z);
         entry.anchor.rotation.y = entry.current.heading;
         entry.car.update(dt, entry.current.speed);
-        entry.emoteVisual.update(dt);
+        updateEmoteVisual(entry.emoteVisual, dt);
       }
     },
     clear() {

@@ -194,6 +194,17 @@ describe("createRemoteCars", () => {
     expect(emotes[1].update).toHaveBeenCalledWith(0.125);
   });
 
+  it("contains one emote update failure and continues updating other drivers", () => {
+    const { deps, cars, emotes } = fakeDeps();
+    const remotes = createRemoteCars(resolveCar, deps);
+    remotes.setTargets([player(), player({ id: "p2", name: "bob_2" })]);
+    emotes[0].update.mockImplementation(() => { throw new Error("animation failed"); });
+
+    expect(() => remotes.update(0.125)).not.toThrow();
+    expect(cars[1].update).toHaveBeenCalledWith(0.125, 12);
+    expect(emotes[1].update).toHaveBeenCalledWith(0.125);
+  });
+
   it("releases active resources when disposed", () => {
     const { deps, cars, nameplates, emotes } = fakeDeps();
     const remotes = createRemoteCars(resolveCar, deps);

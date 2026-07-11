@@ -1,6 +1,6 @@
 import * as THREE from "three";
 import { describe, expect, it, vi } from "vitest";
-import { createEmoteVisualResources, EMOTE_GLYPHS } from "./emote-visual";
+import { createEmoteVisualResources, EMOTE_GLYPHS, updateEmoteVisual } from "./emote-visual";
 
 describe("createEmoteVisualResources", () => {
   it("creates ordered glyph textures and selects the requested kind", () => {
@@ -56,5 +56,17 @@ describe("createEmoteVisualResources", () => {
 
     expect(materialDispose).toHaveBeenCalledOnce();
     expect(disposals.every((dispose) => dispose.mock.calls.length === 1)).toBe(true);
+  });
+
+  it("contains animation update failures because emotes are visual-only", () => {
+    const visual = {
+      object: new THREE.Group(),
+      pulse: vi.fn(),
+      update: vi.fn(() => { throw new Error("animation failed"); }),
+      dispose: vi.fn(),
+    };
+
+    expect(() => updateEmoteVisual(visual, 0.1)).not.toThrow();
+    expect(visual.update).toHaveBeenCalledWith(0.1);
   });
 });

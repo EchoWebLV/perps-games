@@ -21,7 +21,6 @@ export const EMOTE_GLYPHS: Record<PresenceEmoteKind, { glyph: string; color: str
   skull: { glyph: "💀", color: "#d6c7ff" },
 };
 
-const KINDS: PresenceEmoteKind[] = ["laugh", "fire", "skull"];
 const START_Y = 6.8;
 const DURATION_SECONDS = 0.7;
 
@@ -42,9 +41,11 @@ function makeGlyphTexture(glyph: string): THREE.Texture {
 export function createEmoteVisualResources(
   makeTexture: EmoteTextureFactory = makeGlyphTexture,
 ): EmoteVisualResources {
-  const textures = Object.fromEntries(
-    KINDS.map((kind) => [kind, makeTexture(EMOTE_GLYPHS[kind].glyph)]),
-  ) as Record<PresenceEmoteKind, THREE.Texture>;
+  const textures: Record<PresenceEmoteKind, THREE.Texture> = {
+    laugh: makeTexture(EMOTE_GLYPHS.laugh.glyph),
+    fire: makeTexture(EMOTE_GLYPHS.fire.glyph),
+    skull: makeTexture(EMOTE_GLYPHS.skull.glyph),
+  };
 
   return {
     make() {
@@ -89,4 +90,12 @@ export function createEmoteVisualResources(
       Object.values(textures).forEach((texture) => texture.dispose());
     },
   };
+}
+
+export function updateEmoteVisual(visual: EmoteVisual, dt: number): void {
+  try {
+    visual.update(dt);
+  } catch {
+    // Emotes are optional visuals and cannot interrupt the driving loop.
+  }
 }
