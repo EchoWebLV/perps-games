@@ -1,5 +1,5 @@
 import * as THREE from "three";
-import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader.js";
+import { GLTFLoader, type GLTF } from "three/examples/jsm/loaders/GLTFLoader.js";
 import { describe, expect, it, vi } from "vitest";
 import type { RemotePresencePlayer } from "../core/presence";
 import type { Lobby, RemoteCarState } from "./lobby";
@@ -55,6 +55,36 @@ const resolveCar = (carId: string) => carId === "Orion"
   : carId === "Banana"
     ? { url: "/models/banana.glb", scale: undefined, yaw: Math.PI / 2 }
     : null;
+
+function loaderHarness() {
+  const loads: Array<{ url: string; succeed(gltf: GLTF): void }> = [];
+  const spy = vi.spyOn(GLTFLoader.prototype, "load").mockImplementation((url, onLoad) => {
+    loads.push({ url, succeed: onLoad });
+    return undefined as never;
+  });
+  return { loads, spy };
+}
+
+function gltfFixture() {
+  const texture = new THREE.Texture();
+  const geometry = new THREE.BoxGeometry(2, 1, 4);
+  const material = new THREE.MeshStandardMaterial({ map: texture });
+  const scene = new THREE.Group();
+  scene.add(new THREE.Mesh(geometry, material));
+  return {
+    gltf: { scene } as unknown as GLTF,
+    disposeGeometry: vi.spyOn(geometry, "dispose"),
+    disposeMaterial: vi.spyOn(material, "dispose"),
+    disposeTexture: vi.spyOn(texture, "dispose"),
+  };
+}
+
+function nonCarVisualDeps() {
+  return {
+    makeNameplate: () => ({ object: new THREE.Group(), dispose: vi.fn() }),
+    makeSpark: () => ({ object: new THREE.Group(), pulse: vi.fn(), update: vi.fn(), dispose: vi.fn() }),
+  };
+}
 
 describe("createRemoteCars", () => {
   it("keeps identity stable while changing the equipped model", () => {
@@ -180,9 +210,9 @@ describe("createRemoteCars", () => {
     expect(sparks[0].dispose).toHaveBeenCalledOnce();
   });
 
-  it("uses the createCar adapter when makeCar is omitted", () => {
+  it("keeps an unknown initial car procedural without starting a GLTF request", () => {
     vi.stubGlobal("window", {});
-    const load = vi.spyOn(GLTFLoader.prototype, "load").mockImplementation(() => undefined as never);
+    const { loads, spy } = loaderHarness();
     const nameplate = { object: new THREE.Group(), dispose: vi.fn() };
     try {
       const remotes = createRemoteCars(() => null, {
@@ -190,10 +220,57 @@ describe("createRemoteCars", () => {
       });
 
       remotes.setTargets([player({ carId: "Unknown" })]);
+      expect(loads).toEqual([]);
       expect(remotes.group.children).toHaveLength(1);
       expect(() => remotes.dispose()).not.toThrow();
     } finally {
-      load.mockRestore();
+      spy.mockRestore();
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it("returns from a known model to a procedural fallback without another request", () => {
+    vi.stubGlobal("window", {});
+    const { loads, spy } = loaderHarness();
+    try {
+      const remotes = createRemoteCars(resolveCar, nonCarVisualDeps());
+      remotes.setTargets([player({ carId: "Orion" })]);
+      const stale = gltfFixture();
+
+      remotes.setTargets([player({ carId: "https://attacker.invalid/car.glb" })]);
+      loads[0].succeed(stale.gltf);
+
+      expect(loads.map(({ url }) => url)).toEqual(["/models/orion.glb"]);
+      const anchor = remotes.group.children[0] as THREE.Group;
+      const fallback = anchor.children[anchor.children.length - 1] as THREE.Group;
+      expect(fallback.children.length).toBeGreaterThan(0);
+      expect(stale.disposeGeometry).toHaveBeenCalledOnce();
+      expect(stale.disposeMaterial).toHaveBeenCalledOnce();
+      expect(stale.disposeTexture).toHaveBeenCalledOnce();
+      remotes.dispose();
+    } finally {
+      spy.mockRestore();
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it("invalidates and disposes a pending GLTF when a remote driver leaves", () => {
+    vi.stubGlobal("window", {});
+    const { loads, spy } = loaderHarness();
+    try {
+      const remotes = createRemoteCars(resolveCar, nonCarVisualDeps());
+      remotes.setTargets([player({ carId: "Orion" })]);
+      const late = gltfFixture();
+
+      remotes.setTargets([]);
+      loads[0].succeed(late.gltf);
+
+      expect(remotes.group.children).toHaveLength(0);
+      expect(late.disposeGeometry).toHaveBeenCalledOnce();
+      expect(late.disposeMaterial).toHaveBeenCalledOnce();
+      expect(late.disposeTexture).toHaveBeenCalledOnce();
+    } finally {
+      spy.mockRestore();
       vi.unstubAllGlobals();
     }
   });

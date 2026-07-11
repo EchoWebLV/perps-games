@@ -16,6 +16,13 @@ export interface Car {
   setSteer(angle: number): void;
   /** apply a cosmetic paint finish (id from core/paint), or null to leave the model's own colors */
   setFinish(finishId: string | null): void;
+  /** invalidate pending loads and release every GPU resource owned by this car */
+  dispose(): void;
+}
+
+export interface CarOptions {
+  /** Remote fallback cars opt out so an untrusted or unknown id never starts a model request. */
+  loadDefault?: boolean;
 }
 
 const IDLE = "#4da6ff";
@@ -27,6 +34,28 @@ const TARGET_LEN = 11.23;     // scale the model so its longest horizontal axis 
 const MODEL_YAW = Math.PI;    // spin so the car faces down the road (-Z); tune in π/2 steps if needed
 const MAX_STEER = 0.5;        // radians the front wheels swing at full lock (~28°)
 
+function disposeObject(root: THREE.Object3D): void {
+  const geometries = new Set<THREE.BufferGeometry>();
+  const materials = new Set<THREE.Material>();
+  const textures = new Set<THREE.Texture>();
+  root.traverse((object) => {
+    const mesh = object as THREE.Mesh;
+    if (!mesh.isMesh) return;
+    if (mesh.geometry) geometries.add(mesh.geometry);
+    const meshMaterials = Array.isArray(mesh.material) ? mesh.material : [mesh.material];
+    for (const material of meshMaterials) {
+      if (!material) continue;
+      materials.add(material);
+      for (const value of Object.values(material)) {
+        if ((value as THREE.Texture | undefined)?.isTexture) textures.add(value as THREE.Texture);
+      }
+    }
+  });
+  for (const texture of textures) texture.dispose();
+  for (const material of materials) material.dispose();
+  for (const geometry of geometries) geometry.dispose();
+}
+
 /**
  * The player car. Loads the real GLB model and normalizes it (scale → our
  * footprint, center, sit on the road). A procedural stainless wedge shows
@@ -34,9 +63,10 @@ const MAX_STEER = 0.5;        // radians the front wheels swing at full lock (~2
  * Either way the body tints blue→green→red with equity, and an underglow
  * PointLight carries the color cue onto the road.
  */
-export function createCar(onReady?: () => void): Car {
+export function createCar(onReady?: () => void, options: CarOptions = {}): Car {
   const group = new THREE.Group();
   let readyFired = false; // fire onReady once, when the first GLB finishes loading
+  let disposed = false;
 
   // ---- instant procedural fallback (a DeLorean-style stainless wedge) ----
   const placeholder = new THREE.Group();
@@ -122,6 +152,7 @@ export function createCar(onReady?: () => void): Car {
   let loadGen = 0; // 40MB GLBs race: only the LATEST pick may win, not the last to finish
   let lastReq = ""; // re-picking the shown car (incl. the picker's boot re-pick) must not re-fetch
   const loadModel = (url: string, scaleMul = 1, yawAdd = 0) => {
+    if (disposed) return;
     const req = `${url}|${scaleMul}|${yawAdd}`;
     if (req === lastReq) return;
     lastReq = req;
@@ -129,8 +160,11 @@ export function createCar(onReady?: () => void): Car {
     loader.load(
       url,
       (gltf) => {
-        if (gen !== loadGen) return; // a newer pick superseded this load
         const model = gltf.scene;
+        if (disposed || gen !== loadGen) {
+          disposeObject(model);
+          return;
+        }
         // scale to our footprint (× per-model tweak), center horizontally, sit wheels on the ground
         const box = new THREE.Box3().setFromObject(model);
         const size = box.getSize(new THREE.Vector3());
@@ -150,7 +184,10 @@ export function createCar(onReady?: () => void): Car {
             if ((mm as THREE.MeshStandardMaterial).isMeshStandardMaterial) mats.push(mm as THREE.MeshStandardMaterial);
           }
         });
-        if (current) group.remove(current);
+        if (current) {
+          group.remove(current);
+          disposeObject(current);
+        }
         current = model;
         rig = buildWheelRig(model, model.scale.x); // uniform scalar → world-unit radii
         modelMats = mats.length ? mats : null;
@@ -164,7 +201,7 @@ export function createCar(onReady?: () => void): Car {
       (err) => { if (gen === loadGen) lastReq = ""; console.warn("[car] GLB failed to load:", url, err); } // failed load → allow a retry pick
     );
   };
-  loadModel(MODEL_URL);
+  if (options.loadDefault ?? true) loadModel(MODEL_URL);
 
   let t = 0;
   const api: Car = {
@@ -185,6 +222,17 @@ export function createCar(onReady?: () => void): Car {
     },
     setModel: loadModel,
     setFinish(finishId) { finishS = finishId; applyFinish(); },
+    dispose() {
+      if (disposed) return;
+      disposed = true;
+      loadGen += 1;
+      lastReq = "";
+      disposeObject(group);
+      group.clear();
+      current = null;
+      rig = null;
+      modelMats = null;
+    },
   };
   if (import.meta.env.DEV) (window as any).__car = api; // preview probe (Task 6 verification)
   return api;

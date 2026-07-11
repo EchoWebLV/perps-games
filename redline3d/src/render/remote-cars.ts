@@ -57,36 +57,13 @@ interface RemoteEntry {
   target: RemotePose;
 }
 
-function disposeCarGroup(group: THREE.Group): void {
-  const geometries = new Set<THREE.BufferGeometry>();
-  const materials = new Set<THREE.Material>();
-  const textures = new Set<THREE.Texture>();
-  group.traverse((object) => {
-    const mesh = object as THREE.Mesh;
-    if (!mesh.isMesh) return;
-    if (mesh.geometry) geometries.add(mesh.geometry);
-    const meshMaterials = Array.isArray(mesh.material) ? mesh.material : [mesh.material];
-    for (const material of meshMaterials) {
-      if (!material) continue;
-      materials.add(material);
-      for (const value of Object.values(material)) {
-        if ((value as THREE.Texture | undefined)?.isTexture) textures.add(value as THREE.Texture);
-      }
-    }
-  });
-  for (const texture of textures) texture.dispose();
-  for (const material of materials) material.dispose();
-  for (const geometry of geometries) geometry.dispose();
-  group.clear();
-}
-
 function makeDefaultCar(): RemoteCarVisual {
-  const car = createCar();
+  const car = createCar(undefined, { loadDefault: false });
   return {
     group: car.group,
     setModel: (url, scale, yaw) => car.setModel(url, scale, yaw),
     update: (dt, speed) => car.update(dt, speed),
-    dispose: () => disposeCarGroup(car.group),
+    dispose: () => car.dispose(),
   };
 }
 
