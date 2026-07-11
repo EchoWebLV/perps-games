@@ -40,6 +40,8 @@ import { showLocalEconomyMenu } from "./core/menu-visibility";
 import { createTradeHistoryRecorder } from "./core/trade-history-recorder";
 import { createTradeHistoryBridge } from "./core/trade-history-live";
 import { createAccountSync } from "./core/account-sync";
+import { createPresenceClient, type PresenceClient } from "./core/presence";
+import { presenceShouldConnect } from "./core/presence-lifecycle";
 import { bindAndHydrate } from "./core/sign-in-sync";
 import { poolable } from "./core/rarity";
 import { createFx } from "./ui/fx";
@@ -64,7 +66,8 @@ import { createLobbyCam } from "./render/lobbycam";
 import { createStripCars, lightestSpecs } from "./render/stripcars";
 import { createStripBillboard } from "./render/billboard";
 import { createCruisers } from "./render/cruisers";
-import { clearIdentity, createIdentityGate, loadIdentity, saveIdentity } from "./ui/identity";
+import { clearIdentity, createIdentityGate, loadIdentity, saveIdentity, type Identity } from "./ui/identity";
+import { createPresenceHud } from "./ui/presence";
 import { createAccessWall } from "./ui/access-wall";
 import { anyRedeemed, redeem, redeemForAccount, type RedeemPorts } from "./core/access-code";
 import { shouldGrantWelcome, welcomeClaimed, markWelcome } from "./core/welcome";
@@ -197,6 +200,11 @@ function syncOnchainBalance() {
 // The game is fully on-chain: the SOL play balance + round loop live in `session` (the ER round).
 // `balance` is the displayed cash chip, sourced only from the on-chain play balance (centi-SOL units).
 let balance = 0;
+
+// Identity is deliberately nullable during the first lobby entry. The game scene boots before
+// the returning rider is loaded or a new rider is chosen, so presence must remain offline until
+// one of those identity paths completes.
+let identity: Identity | null = null;
 
 // Lazy sign-in — there is NO login gate. The game boots straight into the scene; the wallet
 // connects on the FIRST money action (GO or the wallet panel). Under Privy that's the moment
@@ -535,9 +543,11 @@ const garage = createCarPicker(hudRoot, CAR_DEFS, (c) => { car.setModel(c.url, c
     // address (captured now — the teardown drops the port), the live keys are wiped, and the
     // reload boots a clean slate to the gate — the next guest starts from zero by design.
     const stashNs = session.address() || "account";
+    try { presence?.disconnect(); } catch { /* logout still proceeds without presence */ }
     void session.logout().then(() => {
       signedIn = false;
       identity = null;
+      syncPresenceLifecycle();
       accountSync.disable();
       void auth.logout?.(); // clears its keys synchronously — done before the reload below
       clearIdentity();
@@ -608,8 +618,11 @@ hudRoot.addEventListener("raider:howto", () => howto.open());
 
 // ── lobby: the economy-hub town ─────────────────────────────────────────────
 // the map button drops you into a giant drivable neon lot with 4 functional buildings —
-// Garage (cars), Upgrades, Crates (coming soon), Track (back to the race). Solo / no netcode.
-const lobby = createLobby(quality.detail);
+// Garage (cars), Upgrades, Crates (coming soon), Track (back to the race), plus live presence.
+const lobby = createLobby(quality.detail, (carId) => {
+  const carDef = CAR_DEFS.find(({ name }) => name === carId);
+  return carDef ? { url: carDef.url, scale: carDef.scale, yaw: carDef.yaw } : null;
+});
 ctx.scene.add(lobby.group);
 // live dial / kill-switch for the lobby's synthwave backdrop — tweak from the console:
 //   __backdrop.setOpacity(0.5) · __backdrop.black() · __backdrop.show()
@@ -766,11 +779,13 @@ function enterLobby() {
   setChrome("cruise");
   mapBtn.setVisible(false);
   lobbyHud.show();
+  syncPresenceLifecycle();
   audio.resume(); radio.resume();
 }
 
 function exitLobby() {
   mode = "race";
+  syncPresenceLifecycle();
   setChrome("race");
   lobby.hide();
   lobbyHud.hide();
@@ -796,6 +811,7 @@ function exitLobby() {
 function enterHighway() {
   if (modeSwitchBlocked({ opening, phase: engine.getPhase(), roundActive })) return;
   mode = "highway";
+  syncPresenceLifecycle();
   drive = spawnPose(controls.dir());
   hwGear = 0;
   body = { roll: 0, pitch: 0 }; prevDriveSpeed = 0;
@@ -829,6 +845,7 @@ function exitHighwayToLobby() {
 function enterGarage() {
   if (modeSwitchBlocked({ opening, phase: engine.getPhase(), roundActive })) return;
   mode = "garage";
+  syncPresenceLifecycle();
   lobby.hide(); lobbyHud.hide(); lobbyHud.setPrompt(null);
   world.group.visible = false;
   pickups.group.visible = false;
@@ -867,6 +884,47 @@ const mapBtn = createMapButton(hudRoot, () => {
   else if (mode === "garage") exitGarageToLobby();
 });
 const lobbyHud = createLobbyHud(hudRoot);
+let presence: PresenceClient | null = null;
+const presenceHud = createPresenceHud(hudRoot, () => presence?.emote());
+presence = createPresenceClient({
+  baseUrl: (import.meta.env.VITE_API_BASE as string | undefined) ?? "http://localhost:8080",
+  auth,
+  name: () => identity?.name ?? "",
+  carId: () => equippedCar.name,
+  onSnapshot: (players, localId) => {
+    try {
+      lobby.setRemoteCars(localId === null ? [] : players.filter(({ id }) => id !== localId));
+    } catch {
+      // Presence visuals are optional. A renderer failure must not interrupt local driving.
+    }
+  },
+  onJoin: (player) => lobbyHud.toast(`${player.name} rolled in`),
+  onLeave: (player) => lobbyHud.toast(`${player.name} rolled out`),
+  onEmote: (event) => lobby.emoteRemote(event),
+  onStatus: (status, count) => presenceHud.setState(status, count),
+});
+
+function syncPresenceLifecycle(): void {
+  try {
+    presenceHud.setVisible(mode === "lobby");
+    if (presenceShouldConnect({ mode, hasIdentity: identity !== null })) presence?.connect();
+    else presence?.disconnect();
+  } catch {
+    try { presenceHud.setState("offline", 0); } catch { /* presence cannot block a mode switch */ }
+  }
+}
+
+function reconnectPresenceForIdentity(): void {
+  try { presence?.disconnect(); } catch { /* presence is best-effort */ }
+  syncPresenceLifecycle();
+}
+
+addEventListener("pagehide", () => {
+  try { presence?.disconnect(); } catch { /* the page is already tearing down */ }
+});
+addEventListener("pageshow", (event) => {
+  if ((event as PageTransitionEvent).persisted) syncPresenceLifecycle();
+});
 
 // throttle = the accelerator: gas revs it up, brake slows it, release coasts down SLOWLY
 let throttle = 34; // 0..100 (starts ~50x)
@@ -1371,6 +1429,17 @@ function frame(now: number) {
     // so the body must use -heading to actually face the way it drives (camera stays behind it)
     car.group.rotation.set(body.pitch, -drive.heading, body.roll);
     car.setSteer(drive.steer / DRIVE.MAX_STEER_LOW); // front wheels point to the real steer angle
+    try {
+      presence?.updatePose({
+        x: drive.x,
+        z: drive.z,
+        heading: -drive.heading,
+        speed: Math.abs(drive.speed),
+        carId: equippedCar.name,
+      });
+    } catch {
+      // Presence is visual-only and cannot interrupt the local frame loop.
+    }
 
     // doors freeze while a GO is in flight (or a round is somehow active): parking into the
     // garage mid-launch would open an overlay over a race that starts behind it
@@ -1403,7 +1472,6 @@ function frame(now: number) {
       stripCars.cull(drive.x, drive.z, DRESSING_CULL_D);
       cruisers.cull(drive.x, drive.z, DRESSING_CULL_D);
     }
-    lobby.setRemoteCars(NO_REMOTE_CARS); // multiplayer seam — empty today (shared const: no per-frame alloc)
     lobbyCam.update(ctx.camera, dt, drive.x, drive.z, drive.heading);
 
     if (post) post.render();
@@ -1742,7 +1810,8 @@ enterLobby();
 //   RIDE AS GUEST (name required) → practice mode: engine-only rounds, no wallet, ever.
 //   SIGN IN (name optional)       → Privy (email/social); no name typed → one is derived
 //                                   from the wallet address. Real SOL from then on.
-let identity = loadIdentity();
+identity = loadIdentity();
+syncPresenceLifecycle();
 // First-login welcome gift: only a brand-new browser (no identity yet) is eligible. Grandfather
 // any returning player as already-welcomed so they're never handed a retroactive crate.
 const freshVisitor = !identity;
@@ -1814,6 +1883,7 @@ function showIdentityGate() {
     onGuest(name) {
       identity = { name, mode: "guest" as const };
       saveIdentity(identity);
+      reconnectPresenceForIdentity();
       syncOnchainBalance(); // renders the "practice" chip
       gateUp = false;
       // GUEST: the access wall (LOCAL) stands between the gate and the world; the welcome gift stays
@@ -1831,6 +1901,7 @@ function showIdentityGate() {
       if (ok) {
         identity = { name: name ?? "raider_" + session.address().slice(-4).toLowerCase(), mode: "privy" as const };
         saveIdentity(identity);
+        reconnectPresenceForIdentity();
         if (wasGuest) {
           // Identity-scoped saves (guest → account ONLY — never on a boot reconnect, which
           // would wipe the account's own live state every boot): guest progress is disposable
@@ -1883,6 +1954,7 @@ if (identity?.mode === "privy") {
     syncOnchainBalance();
     void syncTableCap();
     await syncAccount();                 // hydrate coins/scrap/cars + the account's redeemed-code set
+    reconnectPresenceForIdentity();
     // The gate's sign-in now RELOADS before its own post-wall flow can run (identity-scoped save
     // swap), so the boot reconnect completes it: wall → how-to (device flag: no-op if ever seen)
     // → the once-per-account welcome claim (server-side idempotent — granted only once, ever).

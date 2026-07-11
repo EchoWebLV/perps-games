@@ -2,6 +2,12 @@
 
 Stateful Node/TypeScript (Fastify) service. Authoritative coin ledger + car inventory.
 
+## Workspace installation
+
+Install dependencies from the repository root with `npm install`. The root
+`package-lock.json` is the canonical lockfile for the npm workspace, including
+`@perps/server`; the standalone `server/package-lock.json` is not an installation source.
+
 ## Run locally
 
 Postgres via Docker:
@@ -14,7 +20,6 @@ Then:
 ```bash
 cd server
 cp .env.example .env          # edit DATABASE_URL if needed
-npm install
 npm run db:generate           # only after schema changes
 npm run dev                    # migrates on boot (dev only), then serves on :8080
 ```
@@ -32,6 +37,16 @@ curl -H 'x-dev-user: alice' -H 'content-type: application/json' \
 npm test                       # in-process pglite, no Postgres needed
 npm run test:concurrency       # needs TEST_DATABASE_URL=<real postgres> (overdraft race)
 ```
+
+## Live paddock WebSocket
+
+The browser uses the same `VITE_API_BASE` host for HTTP and live paddock presence.
+It converts `http` to `ws` and `https` to `wss`, then connects to
+`/v1/presence`. No additional public WebSocket environment variable is required.
+
+In deployed environments, the reverse proxy in front of this service must allow
+WebSocket upgrade requests on `/v1/presence` and keep them routed to the same
+backend service as the HTTP API.
 
 ## Deploy (Railway)
 - New Railway project → add a **Postgres** plugin (sets `DATABASE_URL`).
