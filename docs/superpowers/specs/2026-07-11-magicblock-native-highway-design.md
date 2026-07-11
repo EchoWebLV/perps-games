@@ -26,7 +26,7 @@ the Round account remains the financial source of truth.
 
 - Enable the existing Highway gate and replace manual driving with automatic laps.
 - Put long cars on one carriageway and short cars on the opposite carriageway.
-- Let players choose leverage from 10x through 100x with a slider.
+- Let players choose leverage from 10x through 250x with a slider.
 - Make leverage the input and car speed the visual output.
 - Keep positions open until a financial terminal event, with no round timer.
 - Restore the live Highway and car after the same wallet closes and reopens the app.
@@ -91,7 +91,7 @@ settlement path.
 ### 3. Borrowing fee
 
 Open-ended positions pay a fixed v1 borrowing fee of 1 basis point of notional per
-24 hours. This equals 0.1% of collateral per day at 10x and 1% per day at 100x.
+24 hours. This equals 0.1% of collateral per day at 10x and 2.5% per day at 250x.
 
 The fee accrues mathematically and is never submitted as an hourly transaction. It
 is deducted from equity when a position is read for a terminal check, re-levered,
@@ -116,7 +116,7 @@ chooses asset, stake, direction, and leverage before opening.
 - Short cars spawn on the short carriageway and travel counterclockwise.
 - Direction is locked for the life of the position.
 - Cars follow the oval centerline without steering or throttle input.
-- The slider spans 10x to 100x in 10x confirmed steps.
+- The slider spans 10x to 250x in 10x confirmed steps.
 - Dragging previews leverage and speed locally.
 - Releasing the slider sends one coalesced ER `lever` instruction.
 - Until confirmation, the UI shows the requested value as syncing and retains the
