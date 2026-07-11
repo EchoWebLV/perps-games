@@ -16,7 +16,7 @@
 - Highway leverage is 10x through 250x in 10x steps.
 - Highway positions use a unique negative `deadline_ts`; positive deadlines remain Track timers and zero remains idle.
 - Borrowing fee is 1 basis point of notional per 24 hours, accrued without hourly transactions.
-- Highway schedules one-second terminal checks for 24 hours and rearms on reconnect and confirmed owner actions.
+- Highway schedules one-second terminal checks for 24 hours and ensures non-overlapping coverage on reconnect.
 - No Flash Trade, USDC toggle, public LP pool, steering, throttle, or collisions.
 - Public Highway cars must represent wallet-backed live positions; practice cars remain local-only.
 - Use test-first development and commit after every task.
@@ -209,7 +209,7 @@ Add one `tick_action` assertion proving a negative deadline holds at a benign ma
 
 - [ ] **Step 2: Run the Rust tests and confirm missing helpers**
 
-Run: `cd onchain/raider && cargo test -p raider negative_deadline highway_marker`
+Run: `cd onchain/raider && cargo test -p raider negative_deadline`
 
 Expected: FAIL because the helpers are undefined.
 
@@ -294,7 +294,7 @@ Add a rebank test proving two 12-hour 250x segments charge exactly the same 25,0
 
 - [ ] **Step 2: Run the fee tests and confirm failure**
 
-Run: `cd onchain/raider && cargo test -p raider borrow_fee fee_accrual`
+Run: `cd onchain/raider && cargo test -p raider borrow_fee`
 
 Expected: FAIL because the fee helpers do not exist.
 
@@ -396,7 +396,7 @@ const iterations = durationSecs === HIGHWAY_DURATION_SENTINEL
   : durationSecs + 10;
 ```
 
-Rearm a Highway crank after reconnect and after a confirmed non-terminal lever action. Keep the existing latest-wins lever synchronization.
+Store the active Round identity and crank coverage deadline in client storage. On reconnect, schedule a new window only when that Round has no unexpired recorded coverage. Do not rearm after lever actions. Keep the existing latest-wins lever synchronization.
 
 - [ ] **Step 4: Run session tests and build**
 
@@ -785,10 +785,10 @@ git commit -m "feat: show verified Highway positions"
 - [ ] **Step 1: Run all local automated checks**
 
 ```bash
-cd onchain/raider && cargo test -p raider
-cd ../../../packages/engine && npm test && npm run build
-cd ../../server && npm test && npm run build
-cd ../redline3d && npm test && npm run build
+(cd onchain/raider && cargo test -p raider)
+(cd packages/engine && npm test && npm run build)
+(cd server && npm test && npm run build)
+(cd redline3d && npm test && npm run build)
 ```
 
 Expected: every command exits 0. Existing Anchor `unexpected cfg` warnings may remain, but no test or build failures are allowed.

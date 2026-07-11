@@ -149,10 +149,11 @@ driving while the app was closed. No background browser process is required.
 
 The existing permissionless crank remains responsible for liquidation and automatic
 exits while the player is offline. MagicBlock scheduled tasks have a finite iteration
-count, so `openHighway` arms 24 hours of one-second checks. Reconnection and every
-confirmed owner action re-arm a fresh window with a unique task id. The position
-itself does not expire when a schedule ends; the next owner action performs a
-terminal-first check before changing state.
+count, so `openHighway` arms 24 hours of one-second checks. Reconnection ensures a
+fresh window only when the client has no recorded coverage for that Round identity;
+slider confirmations do not create overlapping tasks. The position itself does not
+expire when a schedule ends; the next owner action performs a terminal-first check
+before changing state.
 
 The devnet hackathon release must prove close-and-reopen behavior inside that window.
 A mainnet launch is blocked until one of these production backstops is verified with
