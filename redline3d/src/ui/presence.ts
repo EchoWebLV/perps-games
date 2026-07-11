@@ -1,3 +1,5 @@
+import { onTap } from "./tap";
+
 export type PresenceState = "offline" | "connecting" | "live";
 
 export interface PresenceHud {
@@ -23,6 +25,9 @@ export function createPresenceHud(parent: HTMLElement, onEmote: () => void): Pre
 
   const count = document.createElement("div");
   count.dataset.liveCount = "1";
+  count.setAttribute("role", "status");
+  count.setAttribute("aria-live", "polite");
+  count.setAttribute("aria-atomic", "true");
   count.style.cssText = [
     "padding:7px 10px",
     "border:1px solid rgba(46,230,166,.42)",
@@ -73,10 +78,10 @@ export function createPresenceHud(parent: HTMLElement, onEmote: () => void): Pre
     }, 180);
   };
 
-  emote.onclick = () => {
+  onTap(emote, () => {
     onEmote();
     pulse();
-  };
+  });
 
   return {
     setVisible(visible) {
