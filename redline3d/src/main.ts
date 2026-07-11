@@ -891,7 +891,7 @@ const mapBtn = createMapButton(hudRoot, () => {
 });
 const lobbyHud = createLobbyHud(hudRoot);
 let presence: PresenceClient | null = null;
-const presenceHud = createPresenceHud(hudRoot, () => presence?.emote());
+const presenceHud = createPresenceHud(hudRoot, (kind) => presence?.emote(kind));
 presence = createPresenceClient({
   baseUrl: (import.meta.env.VITE_API_BASE as string | undefined) ?? "http://localhost:8080",
   auth,

@@ -88,32 +88,48 @@ describe("createPresenceHud", () => {
     installFakeDocument();
     const parent = new FakeElement();
     const hud = createPresenceHud(parent as never, vi.fn());
-    const root = parent.children[0];
+    const status = parent.querySelector("[data-presence-status]")!;
+    const rail = parent.querySelector("[data-presence-emotes]")!;
 
-    expect(root.style.display).toBe("none");
+    expect(status.style.display).toBe("none");
+    expect(rail.style.display).toBe("none");
     hud.setVisible(true);
-    expect(root.style.display).toBe("flex");
+    expect(status.style.display).toBe("block");
+    expect(rail.style.display).toBe("flex");
     hud.setVisible(false);
-    expect(root.style.display).toBe("none");
+    expect(status.style.display).toBe("none");
+    expect(rail.style.display).toBe("none");
   });
 
-  test("shows LIVE 2 and dispatches the single spark button once", () => {
+  test("centers LIVE 3 independently from the right-side emote rail", () => {
     installFakeDocument();
     const parent = new FakeElement();
-    const onEmote = vi.fn();
-    const hud = createPresenceHud(parent as never, onEmote);
-    const root = parent.children[0];
-
+    const hud = createPresenceHud(parent as never, vi.fn());
     hud.setVisible(true);
-    hud.setState("live", 2);
+    hud.setState("live", 3);
+    const status = parent.querySelector("[data-presence-status]")!;
+    const rail = parent.querySelector("[data-presence-emotes]")!;
 
-    expect(root.querySelector("[data-live-count]")?.textContent).toBe("LIVE 2");
-    const button = root.querySelector("[data-live-emote]")!;
-    expect(button.tag).toBe("button");
-    expect(button.textContent).toBe("⚡");
-    expect(root.children.filter((child) => child.tag === "button")).toHaveLength(1);
-    button.fire("click");
-    expect(onEmote).toHaveBeenCalledTimes(1);
+    expect(status.textContent).toBe("LIVE 3");
+    expect(status.style.cssText).toContain("left:50%");
+    expect(status.style.cssText).toContain("translateX(-50%)");
+    expect(rail.style.cssText).toContain("right:max(12px,env(safe-area-inset-right))");
+  });
+
+  test("dispatches laugh, fire, and skull from three ordered buttons", () => {
+    installFakeDocument();
+    const parent = new FakeElement();
+    const sent: string[] = [];
+    createPresenceHud(parent as never, (kind) => sent.push(kind));
+    const rail = parent.querySelector("[data-presence-emotes]")!;
+    const buttons = rail.children.filter((child) => child.tag === "button");
+
+    expect(buttons.map(({ textContent }) => textContent)).toEqual(["😂", "🔥", "💀"]);
+    buttons.forEach((button) => button.fire("click"));
+    expect(sent).toEqual(["laugh", "fire", "skull"]);
+    expect(buttons.map((button) => button.attrs["aria-label"])).toEqual([
+      "Send laugh emote", "Send fire emote", "Send skull emote",
+    ]);
   });
 
   test("fires a non-primary tap once and swallows its retargeted synthetic click", () => {
@@ -123,7 +139,7 @@ describe("createPresenceHud", () => {
     const parent = new FakeElement();
     const onEmote = vi.fn();
     createPresenceHud(parent as never, onEmote);
-    const button = parent.children[0].querySelector("[data-live-emote]")!;
+    const button = parent.querySelector("[data-live-emote]")!;
 
     button.fire("pointerdown", { pointerId: 7, isPrimary: false });
     button.fire("pointerup", { pointerId: 7, isPrimary: false });
@@ -140,49 +156,55 @@ describe("createPresenceHud", () => {
     installFakeDocument();
     const parent = new FakeElement();
     const hud = createPresenceHud(parent as never, vi.fn());
-    const count = parent.children[0].querySelector("[data-live-count]")!;
+    const status = parent.querySelector("[data-presence-status]")!;
 
     hud.setState("offline", 8);
-    expect(count.textContent).toBe("LIVE OFFLINE");
+    expect(status.textContent).toBe("LIVE OFFLINE");
     hud.setState("connecting", 8);
-    expect(count.textContent).toBe("CONNECTING");
+    expect(status.textContent).toBe("CONNECTING");
   });
 
   test("announces changing presence as an atomic polite status", () => {
     installFakeDocument();
     const parent = new FakeElement();
     createPresenceHud(parent as never, vi.fn());
-    const count = parent.children[0].querySelector("[data-live-count]")!;
+    const status = parent.querySelector("[data-presence-status]")!;
 
-    expect(count.attrs.role).toBe("status");
-    expect(count.attrs["aria-live"]).toBe("polite");
-    expect(count.attrs["aria-atomic"]).toBe("true");
+    expect(status.attrs.role).toBe("status");
+    expect(status.attrs["aria-live"]).toBe("polite");
+    expect(status.attrs["aria-atomic"]).toBe("true");
   });
 
-  test("keeps the overlay inert except for its safe-area spark button", () => {
+  test("keeps the overlays inert except for exactly three safe-area emote buttons", () => {
     installFakeDocument();
     const parent = new FakeElement();
     createPresenceHud(parent as never, vi.fn());
-    const root = parent.children[0];
-    const button = root.querySelector("[data-live-emote]")!;
+    const status = parent.querySelector("[data-presence-status]")!;
+    const rail = parent.querySelector("[data-presence-emotes]")!;
+    const buttons = rail.children.filter((child) => child.tag === "button");
 
-    expect(root.style.cssText).toContain("env(safe-area-inset-top)");
-    expect(root.style.cssText).toContain("env(safe-area-inset-right)");
-    expect(root.style.cssText).toContain("pointer-events:none");
-    expect(button.style.cssText).toContain("pointer-events:auto");
-    expect(descendants(root).filter((element) => element.style.cssText.includes("pointer-events:auto"))).toEqual([button]);
+    expect(status.style.cssText).toContain("env(safe-area-inset-top)");
+    expect(rail.style.cssText).toContain("env(safe-area-inset-right)");
+    expect(status.style.cssText).toContain("pointer-events:none");
+    expect(rail.style.cssText).toContain("pointer-events:none");
+    expect(descendants(parent).filter((element) => element.style.cssText.includes("pointer-events:auto"))).toEqual(buttons);
+    expect(buttons).toHaveLength(3);
   });
 
-  test("pulses locally and settles back", () => {
+  test("pulses the selected emote locally and settles back", () => {
     vi.useFakeTimers();
     installFakeDocument();
     const parent = new FakeElement();
     const hud = createPresenceHud(parent as never, vi.fn());
-    const button = parent.children[0].querySelector("[data-live-emote]")!;
+    const rail = parent.querySelector("[data-presence-emotes]")!;
+    const buttons = rail.children.filter((child) => child.tag === "button");
+    const fire = buttons[1];
 
-    hud.pulse();
-    expect(button.style.transform).toBe("scale(1.18)");
+    hud.pulse("fire");
+    expect(fire.style.transform).toBe("scale(1.18)");
+    expect(buttons[0].style.transform).toBe("scale(1)");
+    expect(buttons[2].style.transform).toBe("scale(1)");
     vi.runAllTimers();
-    expect(button.style.transform).toBe("scale(1)");
+    expect(fire.style.transform).toBe("scale(1)");
   });
 });
