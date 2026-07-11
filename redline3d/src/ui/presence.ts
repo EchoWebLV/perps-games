@@ -85,8 +85,8 @@ export function createPresenceHud(
     button.setAttribute("aria-label", def.label);
     button.textContent = def.glyph;
     button.style.cssText = [
-      "width:32px",
-      "height:32px",
+      "width:42px",
+      "height:42px",
       "padding:0",
       `border:1px solid ${def.color}`,
       "border-radius:9px",
@@ -94,7 +94,7 @@ export function createPresenceHud(
       `color:${def.color}`,
       "cursor:pointer",
       "pointer-events:auto",
-      "font:800 15px/1 sans-serif",
+      "font:800 20px/1 sans-serif",
       "transform:scale(1)",
       "transition:transform .14s ease,box-shadow .14s ease",
     ].join(";");

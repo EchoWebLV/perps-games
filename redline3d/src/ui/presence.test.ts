@@ -125,6 +125,10 @@ describe("createPresenceHud", () => {
     const buttons = rail.children.filter((child) => child.tag === "button");
 
     expect(buttons.map(({ textContent }) => textContent)).toEqual(["😂", "🔥", "💀"]);
+    expect(buttons.map(({ style }) => [
+      style.cssText.includes("width:42px"),
+      style.cssText.includes("height:42px"),
+    ])).toEqual([[true, true], [true, true], [true, true]]);
     buttons.forEach((button) => button.fire("click"));
     expect(sent).toEqual(["laugh", "fire", "skull"]);
     expect(buttons.map((button) => button.attrs["aria-label"])).toEqual([

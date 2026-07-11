@@ -42,6 +42,7 @@ import { createTradeHistoryRecorder } from "./core/trade-history-recorder";
 import { createTradeHistoryBridge } from "./core/trade-history-live";
 import { createAccountSync } from "./core/account-sync";
 import { createPresenceClient, type PresenceClient } from "./core/presence";
+import { routePresenceEmote } from "./core/presence-emote-route";
 import { presenceShouldConnect } from "./core/presence-lifecycle";
 import { bindAndHydrate } from "./core/sign-in-sync";
 import { poolable } from "./core/rarity";
@@ -63,6 +64,7 @@ import { createWorldFlipCore } from "./core/worldflip";
 import { jackpotRoll } from "./core/slots";
 import { createWallet } from "./ui/wallet";
 import { createLobby } from "./render/lobby";
+import { createEmoteVisualResources } from "./render/emote-visual";
 import { createLobbyCam } from "./render/lobbycam";
 import { createStripCars, lightestSpecs } from "./render/stripcars";
 import { createStripBillboard } from "./render/billboard";
@@ -146,6 +148,9 @@ const bootReveal = createBootReveal({
   reveal: () => (window as Window & { hideSplash?: () => void }).hideSplash?.(),
 });
 const car = createCar((outcome) => bootReveal.modelSettled(outcome));
+const localEmoteResources = createEmoteVisualResources();
+const localEmoteVisual = localEmoteResources.make();
+car.group.add(localEmoteVisual.object);
 car.group.position.set(0, 0, -12);
 // YXZ everywhere: yaw first, then pitch/roll about the car's OWN axes — under the default
 // XYZ a pitched car leans sideways at yaw≠0 (the lobby bug de1760d fixed). Every mode
@@ -891,6 +896,7 @@ const mapBtn = createMapButton(hudRoot, () => {
 });
 const lobbyHud = createLobbyHud(hudRoot);
 let presence: PresenceClient | null = null;
+let localPresenceId: string | null = null;
 const presenceHud = createPresenceHud(hudRoot, (kind) => presence?.emote(kind));
 presence = createPresenceClient({
   baseUrl: (import.meta.env.VITE_API_BASE as string | undefined) ?? "http://localhost:8080",
@@ -898,6 +904,7 @@ presence = createPresenceClient({
   name: () => identity?.name ?? "",
   carId: () => equippedCar.name,
   onSnapshot: (players, localId) => {
+    localPresenceId = localId;
     try {
       lobby.setRemoteCars(localId === null ? [] : players.filter(({ id }) => id !== localId));
     } catch {
@@ -906,7 +913,10 @@ presence = createPresenceClient({
   },
   onJoin: (player) => lobbyHud.toast(`${player.name} rolled in`),
   onLeave: (player) => lobbyHud.toast(`${player.name} rolled out`),
-  onEmote: (event) => lobby.emoteRemote(event),
+  onEmote: (event) => routePresenceEmote(event, localPresenceId, {
+    local: (kind) => localEmoteVisual.pulse(kind),
+    remote: (remoteEvent) => lobby.emoteRemote(remoteEvent),
+  }),
   onStatus: (status, count) => presenceHud.setState(status, count),
   onError: (code) => {
     if (code === "lobby_full") lobbyHud.toast("Paddock full");
@@ -1432,6 +1442,7 @@ function frame(now: number) {
     stepFreedriveBody(DRIVE, dt);
 
     car.update(dt, drive.speed);
+    localEmoteVisual.update(dt);
     car.setEquity("idle", 1);
     car.group.position.set(drive.x, 0, drive.z);
     // -heading: Three's +Y rotation mirrors X vs the physics/camera (sin,-cos) convention,
