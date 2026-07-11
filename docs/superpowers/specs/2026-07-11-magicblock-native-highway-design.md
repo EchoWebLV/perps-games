@@ -75,9 +75,12 @@ and separate mint-keyed balances while still enforcing one active position globa
 Reuse the existing Round account, house lock, price feed, settlement math, ER
 delegation, crank, stop-loss, take-profit, grace, and airbag mechanics.
 
-`deadline_ts == 0` is the canonical marker for an open-ended Highway position.
-Timed Track rounds continue storing a positive deadline. Shared helpers must be used
-for every time check so a zero deadline never fires a time settlement.
+`deadline_ts < 0` is the canonical marker for an open-ended Highway position. Its
+absolute value is a slot-derived round identity, so consecutive Highway positions do
+not share the same stale-read guard key. Timed Track rounds continue storing a
+positive deadline, and zero remains reserved for an idle or uninitialized Round.
+Shared helpers must be used for every time check so a negative deadline never fires a
+time settlement.
 
 The existing open instruction accepts a dedicated protocol sentinel duration for
 Highway. The client exposes that sentinel only through `openHighway`; Track continues
@@ -132,7 +135,7 @@ a crash animation.
 
 On wallet connection or app resume, the client derives the wallet's Round PDA and
 checks base-layer delegation before trusting an ER clone. An open Round with
-`deadline_ts == 0` identifies a Highway position and restores:
+`deadline_ts < 0` identifies a Highway position and restores:
 
 - asset and direction
 - confirmed leverage and stake
@@ -171,7 +174,7 @@ For every remote Highway car, the client verifies that its Round account:
 
 - is open
 - uses the advertised owner and asset feed
-- has `deadline_ts == 0`
+- has `deadline_ts < 0`
 - matches the advertised direction and confirmed leverage
 
 Invalid or stale entries are not rendered as live positions. Clients animate remote
@@ -193,7 +196,7 @@ local-only so spectators cannot confuse simulated positions with funded ones.
 2. The SOL funding adapter wraps or transfers stake through the existing player
    balance flow.
 3. `ensureSession` creates the house slice and delegates the session accounts.
-4. `openHighway` opens a Round in ER with `deadline_ts == 0`.
+4. `openHighway` opens a Round in ER with a unique negative `deadline_ts` marker.
 5. The crank is armed and presence announces the verified Round PDA.
 6. The car begins automatic laps at speed derived from confirmed leverage.
 
@@ -217,8 +220,8 @@ local-only so spectators cannot confuse simulated positions with funded ones.
 ## Error Handling and Safety
 
 - Track rounds must produce byte-for-byte equivalent outcomes for existing cases.
-- A zero deadline is valid only as open-ended, never already expired.
-- `force_close` rejects open-ended positions.
+- A negative deadline is valid only as open-ended, never already expired.
+- `force_close` rejects non-positive deadlines.
 - Fee growth uses checked arithmetic and caps at terminal zero equity rather than
   underflowing.
 - A fee-only liquidation is possible after a sufficiently long flat market and must
@@ -238,8 +241,8 @@ local-only so spectators cannot confuse simulated positions with funded ones.
 ### Rust unit tests
 
 - Timed Track deadlines still fire at the same boundary.
-- Zero-deadline Highway positions do not time-settle.
-- `force_close` rejects a zero-deadline Round.
+- Negative-deadline Highway positions do not time-settle.
+- `force_close` rejects a negative-deadline Round.
 - Borrow fee is zero at entry, monotonic with time, and proportional to leverage.
 - Borrow fee is banked exactly once across one or several leverage changes.
 - Fee-inclusive cash-out, cap, and liquidation conserve player plus house value.
