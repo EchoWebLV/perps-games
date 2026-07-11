@@ -19,6 +19,7 @@ import { makeDepositIntents } from "./services/deposit-intents.js";
 import type { WithdrawSigner } from "./services/withdraw-worker.js";
 import { eq } from "drizzle-orm";
 import { withdrawals } from "./db/schema.js";
+import { makePresenceRoom } from "./presence/room.js";
 
 async function main(): Promise<void> {
   // fail loud: dev seed endpoints must never be enabled in production
@@ -166,6 +167,7 @@ async function main(): Promise<void> {
   const upgrades = makeUpgrades(db, ledger);
   const entitlements = makeEntitlements({ inventory, upgrades }); // consumed by Phase 2's /authorize; wired now as the seam
   const earnLimit = makeEarnLimit(db, { ceiling: env.EARN_WINDOW_CEILING, windowMs: env.EARN_WINDOW_MS });
+  const presenceRoom = makePresenceRoom();
 
   const server = buildServer({
     users,
@@ -196,6 +198,7 @@ async function main(): Promise<void> {
     upgrades,
     entitlements,
     earnLimit,
+    presenceRoom,
   });
 
   const addr = await server.listen({ port: env.PORT, host: "0.0.0.0" });

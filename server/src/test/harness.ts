@@ -16,6 +16,7 @@ import { makeDepositIntents, type DepositIntents } from "../services/deposit-int
 import type { SignedTxBroadcaster } from "../services/signed-tx-broadcaster.js";
 import type { Withdrawals } from "../services/withdrawals.js";
 import type { WithdrawProcessor, WithdrawSigner } from "../services/withdraw-worker.js";
+import { makePresenceRoom, type PresenceRoom } from "../presence/room.js";
 
 export interface TestCtx {
   raw: Db;
@@ -30,6 +31,8 @@ export interface TestCtx {
   upgrades: Upgrades;
   entitlements: Entitlements;
   earnLimit: EarnLimit;
+  sessionAuth: SessionAuth;
+  presenceRoom: PresenceRoom;
   server: ReturnType<typeof buildServer>;
   close(): Promise<void>;
 }
@@ -54,6 +57,16 @@ interface MakeTestDbOptions {
   adminSecret?: string | null;
   stakeAsset?: "coin" | "cash";
   earnLimit?: { ceiling: number; windowMs: number };
+  presenceSocketOptions?: {
+    now?: () => number;
+    setInterval?: typeof setInterval;
+    clearInterval?: typeof clearInterval;
+    setTimeout?: typeof setTimeout;
+    clearTimeout?: typeof clearTimeout;
+    snapshotIntervalMs?: number;
+    heartbeatIntervalMs?: number;
+    helloTimeoutMs?: number;
+  };
 }
 
 /** fresh in-memory pglite DB with migrations applied + services wired (stub feed) */
@@ -75,6 +88,11 @@ export async function makeTestDb(opts: MakeTestDbOptions = {}): Promise<TestCtx>
   // deliberately huge default ceiling so unrelated suites never trip the cap; cap tests override it.
   const earnLimit = makeEarnLimit(db, opts.earnLimit ?? { ceiling: 1_000_000, windowMs: 60_000 });
 
+  const sessionAuth = opts.sessionAuth ?? makeSessionAuth({
+    users,
+    secret: "test-session-secret-32-characters-long",
+  });
+  const presenceRoom = makePresenceRoom();
   const server = buildServer({
     users, ledger, inventory, rounds, tradeHistory, feed,
     upgrades, entitlements, earnLimit,
@@ -84,10 +102,9 @@ export async function makeTestDb(opts: MakeTestDbOptions = {}): Promise<TestCtx>
     startBalance: opts.startBalance ?? 100,
     corsOrigins: opts.corsOrigins ?? ["http://localhost:3000"],
     devAuth: opts.devAuth ?? true,
-    sessionAuth: opts.sessionAuth ?? makeSessionAuth({
-      users,
-      secret: "test-session-secret-32-characters-long",
-    }),
+    sessionAuth,
+    presenceRoom,
+    presenceSocketOptions: opts.presenceSocketOptions,
     walletBinding: opts.walletBinding ?? createWalletBinding({
       secret: "test-wallet-binding-secret-32-chars",
     }),
@@ -121,8 +138,13 @@ export async function makeTestDb(opts: MakeTestDbOptions = {}): Promise<TestCtx>
     upgrades,
     entitlements,
     earnLimit,
+    sessionAuth,
+    presenceRoom,
     server,
-    close: () => raw.close(),
+    close: async () => {
+      await server.close();
+      await raw.close();
+    },
   };
 }
 
