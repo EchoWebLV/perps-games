@@ -1570,7 +1570,12 @@
           "address": "11111111111111111111111111111111"
         }
       ],
-      "args": []
+      "args": [
+        {
+          "name": "max_slice",
+          "type": "u64"
+        }
+      ]
     },
     {
       "name": "init_round",
@@ -2823,6 +2828,10 @@
     {
       "code": 6012,
       "name": "UnknownAsset"
+    },
+    {
+      "code": 6013,
+      "name": "SliceTooLarge"
     }
   ],
   "types": [
@@ -2905,6 +2914,10 @@
           },
           {
             "name": "locked",
+            "type": "u64"
+          },
+          {
+            "name": "max_slice",
             "type": "u64"
           },
           {

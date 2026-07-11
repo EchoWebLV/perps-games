@@ -1576,7 +1576,12 @@ export type Raider = {
           "address": "11111111111111111111111111111111"
         }
       ],
-      "args": []
+      "args": [
+        {
+          "name": "maxSlice",
+          "type": "u64"
+        }
+      ]
     },
     {
       "name": "initRound",
@@ -2829,6 +2834,10 @@ export type Raider = {
     {
       "code": 6012,
       "name": "unknownAsset"
+    },
+    {
+      "code": 6013,
+      "name": "sliceTooLarge"
     }
   ],
   "types": [
@@ -2911,6 +2920,10 @@ export type Raider = {
           },
           {
             "name": "locked",
+            "type": "u64"
+          },
+          {
+            "name": "maxSlice",
             "type": "u64"
           },
           {

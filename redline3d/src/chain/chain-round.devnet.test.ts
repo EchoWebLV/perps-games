@@ -6,11 +6,32 @@ import { readFileSync } from "node:fs";
 import idl from "./idl/raider.json";
 import { createDevKeypairPort } from "./dev-keypair-port";
 import { portToAnchorWallet } from "./anchor-wallet";
-import { createChainRound, deriveRaiderPdas, maxPayoutBase } from "./chain-round";
+import { createChainRound, deriveRaiderPdas, HIGHWAY_DURATION_SENTINEL, isHighwayRound, maxPayoutBase } from "./chain-round";
 import { CHAIN, deriveFeedRegistry } from "./config";
 
 const RUN = process.env.RAIDER_DEVNET === "1";
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+
+async function sendIxHttp(
+  conn: Connection,
+  builder: { transaction(): Promise<anchor.web3.Transaction> },
+  signer: Keypair,
+): Promise<string> {
+  const tx = await builder.transaction();
+  tx.feePayer = signer.publicKey;
+  tx.recentBlockhash = (await conn.getLatestBlockhash("confirmed")).blockhash;
+  tx.sign(signer);
+  const sig = await conn.sendRawTransaction(tx.serialize(), { skipPreflight: true });
+  for (let i = 0; i < 60; i++) {
+    const status = (await conn.getSignatureStatuses([sig])).value[0];
+    if (status && (status.confirmationStatus === "confirmed" || status.confirmationStatus === "finalized")) {
+      if (status.err) throw new Error(`tx ${sig} failed: ${JSON.stringify(status.err)}`);
+      return sig;
+    }
+    await sleep(1000);
+  }
+  throw new Error(`tx ${sig} not confirmed within 60s`);
+}
 
 describe.skipIf(!RUN)("chain-round devnet loop", () => {
   it("buy_in -> delegate -> open -> close -> undelegate -> withdraw, conserved + recomputable", async () => {
@@ -26,7 +47,7 @@ describe.skipIf(!RUN)("chain-round devnet loop", () => {
     const [house] = PublicKey.findProgramAddressSync([Buffer.from("house2"), mint.toBuffer()], program.programId);
     const [vaultAuthority] = PublicKey.findProgramAddressSync([Buffer.from("vault"), mint.toBuffer()], program.programId);
     const vaultToken = getAssociatedTokenAddressSync(mint, vaultAuthority, true);
-    await program.methods.initHouse().accounts({ authority: funder.publicKey, mint, house, vaultAuthority, vaultToken, tokenProgram: TOKEN_PROGRAM_ID, associatedTokenProgram: ASSOCIATED_TOKEN_PROGRAM_ID, systemProgram: SystemProgram.programId }).rpc({ skipPreflight: true });
+    await program.methods.initHouse(new anchor.BN(0)).accounts({ authority: funder.publicKey, mint, house, vaultAuthority, vaultToken, tokenProgram: TOKEN_PROGRAM_ID, associatedTokenProgram: ASSOCIATED_TOKEN_PROGRAM_ID, systemProgram: SystemProgram.programId }).rpc({ skipPreflight: true });
     const funderAta = await getOrCreateAssociatedTokenAccount(conn, funder, mint, funder.publicKey);
     await mintTo(conn, funder, mint, funderAta.address, funder.publicKey, 50_000_000);
     await program.methods.fundHouse(new anchor.BN(50_000_000)).accounts({ funder: funder.publicKey, mint, house, funderToken: funderAta.address, vaultAuthority, vaultToken, tokenProgram: TOKEN_PROGRAM_ID }).rpc({ skipPreflight: true });
@@ -79,7 +100,7 @@ describe.skipIf(!RUN)("chain-round devnet loop", () => {
     const [house] = PublicKey.findProgramAddressSync([Buffer.from("house2"), mint.toBuffer()], program.programId);
     const [vaultAuthority] = PublicKey.findProgramAddressSync([Buffer.from("vault"), mint.toBuffer()], program.programId);
     const vaultToken = getAssociatedTokenAddressSync(mint, vaultAuthority, true);
-    await program.methods.initHouse().accounts({ authority: funder.publicKey, mint, house, vaultAuthority, vaultToken, tokenProgram: TOKEN_PROGRAM_ID, associatedTokenProgram: ASSOCIATED_TOKEN_PROGRAM_ID, systemProgram: SystemProgram.programId }).rpc({ skipPreflight: true });
+    await program.methods.initHouse(new anchor.BN(0)).accounts({ authority: funder.publicKey, mint, house, vaultAuthority, vaultToken, tokenProgram: TOKEN_PROGRAM_ID, associatedTokenProgram: ASSOCIATED_TOKEN_PROGRAM_ID, systemProgram: SystemProgram.programId }).rpc({ skipPreflight: true });
     const funderAta = await getOrCreateAssociatedTokenAccount(conn, funder, mint, funder.publicKey);
     await mintTo(conn, funder, mint, funderAta.address, funder.publicKey, 50_000_000);
     await program.methods.fundHouse(new anchor.BN(50_000_000)).accounts({ funder: funder.publicKey, mint, house, funderToken: funderAta.address, vaultAuthority, vaultToken, tokenProgram: TOKEN_PROGRAM_ID }).rpc({ skipPreflight: true });
@@ -140,7 +161,7 @@ describe.skipIf(!RUN)("chain-round devnet loop", () => {
     const [master] = PublicKey.findProgramAddressSync([Buffer.from("house2"), mint.toBuffer()], program.programId);
     const [vaultAuthority] = PublicKey.findProgramAddressSync([Buffer.from("vault"), mint.toBuffer()], program.programId);
     const vaultToken = getAssociatedTokenAddressSync(mint, vaultAuthority, true);
-    await program.methods.initHouse().accounts({ authority: funder.publicKey, mint, house: master, vaultAuthority, vaultToken, tokenProgram: TOKEN_PROGRAM_ID, associatedTokenProgram: ASSOCIATED_TOKEN_PROGRAM_ID, systemProgram: SystemProgram.programId }).rpc({ skipPreflight: true });
+    await program.methods.initHouse(new anchor.BN(0)).accounts({ authority: funder.publicKey, mint, house: master, vaultAuthority, vaultToken, tokenProgram: TOKEN_PROGRAM_ID, associatedTokenProgram: ASSOCIATED_TOKEN_PROGRAM_ID, systemProgram: SystemProgram.programId }).rpc({ skipPreflight: true });
     const funderAta = await getOrCreateAssociatedTokenAccount(conn, funder, mint, funder.publicKey);
     await mintTo(conn, funder, mint, funderAta.address, funder.publicKey, 50_000_000);
     await program.methods.fundHouse(new anchor.BN(50_000_000)).accounts({ funder: funder.publicKey, mint, house: master, funderToken: funderAta.address, vaultAuthority, vaultToken, tokenProgram: TOKEN_PROGRAM_ID }).rpc({ skipPreflight: true });
@@ -210,10 +231,10 @@ describe.skipIf(!RUN)("chain-round devnet loop", () => {
     const [house] = PublicKey.findProgramAddressSync([Buffer.from("house2"), mint.toBuffer()], program.programId);
     const [vaultAuthority] = PublicKey.findProgramAddressSync([Buffer.from("vault"), mint.toBuffer()], program.programId);
     const vaultToken = getAssociatedTokenAddressSync(mint, vaultAuthority, true);
-    await program.methods.initHouse().accounts({ authority: funder.publicKey, mint, house, vaultAuthority, vaultToken, tokenProgram: TOKEN_PROGRAM_ID, associatedTokenProgram: ASSOCIATED_TOKEN_PROGRAM_ID, systemProgram: SystemProgram.programId }).rpc({ skipPreflight: true });
+    await sendIxHttp(conn, program.methods.initHouse(new anchor.BN(0)).accounts({ authority: funder.publicKey, mint, house, vaultAuthority, vaultToken, tokenProgram: TOKEN_PROGRAM_ID, associatedTokenProgram: ASSOCIATED_TOKEN_PROGRAM_ID, systemProgram: SystemProgram.programId }), funder);
     const funderAta = await getOrCreateAssociatedTokenAccount(conn, funder, mint, funder.publicKey);
     await mintTo(conn, funder, mint, funderAta.address, funder.publicKey, 50_000_000);
-    await program.methods.fundHouse(new anchor.BN(50_000_000)).accounts({ funder: funder.publicKey, mint, house, funderToken: funderAta.address, vaultAuthority, vaultToken, tokenProgram: TOKEN_PROGRAM_ID }).rpc({ skipPreflight: true });
+    await sendIxHttp(conn, program.methods.fundHouse(new anchor.BN(50_000_000)).accounts({ funder: funder.publicKey, mint, house, funderToken: funderAta.address, vaultAuthority, vaultToken, tokenProgram: TOKEN_PROGRAM_ID }), funder);
     const player = Keypair.generate();
     await provider.sendAndConfirm(new anchor.web3.Transaction().add(SystemProgram.transfer({ fromPubkey: funder.publicKey, toPubkey: player.publicKey, lamports: 0.1 * LAMPORTS_PER_SOL })));
     const playerAta = await getOrCreateAssociatedTokenAccount(conn, funder, mint, player.publicKey);
@@ -223,6 +244,28 @@ describe.skipIf(!RUN)("chain-round devnet loop", () => {
     const chain = createChainRound({ wallet: portToAnchorWallet(port), mint });
     return { funder, conn, program, mint, player, chain };
   };
+
+  it("opens an open-ended Highway round that a refreshed client can recognize", async () => {
+    const { chain } = await mkEnv();
+    await chain.buyIn(5_000_000);
+    await chain.ensureRoundInited();
+    await chain.sliceFromPot(maxPayoutBase(1_000_000));
+    await chain.delegate();
+
+    try {
+      const opened = await chain.open("SOL", 1, 10, 1_000_000, HIGHWAY_DURATION_SENTINEL, 200_000);
+      const snap = await chain.readRound(true);
+
+      expect(opened.deadlineTs).toBeLessThan(0);
+      expect(snap).not.toBeNull();
+      expect(isHighwayRound(snap!)).toBe(true);
+    } finally {
+      const snap = await chain.readRound(true).catch(() => null);
+      if (snap?.status === 1) await chain.close().catch(() => undefined);
+      await chain.commitAndUndelegate().catch(() => undefined);
+      await chain.sweepTill().catch(() => undefined);
+    }
+  }, 180_000);
 
   it("opens an ETH round (reads the registry in-rollup) and settles conserved", async () => {
     const { chain } = await mkEnv();

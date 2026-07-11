@@ -167,8 +167,18 @@ describe("createGameSession", () => {
       delegationState: vi.fn(async () => "reuse" as const),
       readRound: vi.fn(async () => open),
     });
-    const s = createGameSession({ mint: MINT, onSettled: vi.fn(), injectChain: chain, injectAddress: "Fake111" });
-    await s.init();
+    const port = {
+      kind: "web-standard" as const,
+      connect: vi.fn(async () => ({ address: "Fake111" })),
+      reconnect: vi.fn(async () => ({ address: "Fake111" })),
+      disconnect: vi.fn(async () => {}),
+      currentAddress: () => "Fake111",
+      signMessage: vi.fn(async () => new Uint8Array()),
+      signTransaction: vi.fn(async (b64: string) => b64),
+    };
+    const s = createGameSession({ mint: MINT, onSettled: vi.fn(), port, injectChain: chain, injectAddress: "Fake111" });
+    expect(await s.reconnect()).toBe(true);
+    expect(port.connect).not.toHaveBeenCalled();
     expect(s.liveRound()).toEqual(open);
   });
 
