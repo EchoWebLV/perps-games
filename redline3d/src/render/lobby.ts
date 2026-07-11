@@ -1,9 +1,19 @@
 import * as THREE from "three";
 import { BUILDINGS, DOORS, LOT_BOUNDS, PLAZA, type BuildingKind } from "../core/lobby-layout";
+import type { PresenceEmote } from "../core/presence";
 import { buildBuilding } from "./buildings";
 import { buildLobbyBackdrop, type LobbyBackdrop } from "./lobby-backdrop";
+import { createRemoteCars, type RemoteCarResolver } from "./remote-cars";
 
-export interface RemoteCarState { id: string; x: number; z: number; heading: number }
+export interface RemoteCarState {
+  id: string;
+  name: string;
+  carId: string;
+  x: number;
+  z: number;
+  heading: number;
+  speed: number;
+}
 
 export interface Lobby {
   group: THREE.Group;
@@ -11,6 +21,8 @@ export interface Lobby {
   hide(): void;
   /** multiplayer seam — called with [] today; later a presence feed drives ghost cars */
   setRemoteCars(states: RemoteCarState[]): void;
+  /** pulse a remote driver's visual-only spark emote */
+  emoteRemote(event: PresenceEmote): void;
   /** which entry ring the player's car is inside (flares that ring), or null */
   setActiveDoor(kind: BuildingKind | null): void;
   /** synthwave dusk backdrop — dial/kill-switch exposed for live tuning (see lobby-backdrop.ts) */
@@ -37,7 +49,10 @@ function signTexture(name: string, css: string, px = 84): THREE.CanvasTexture {
 /** `detail` — "full" is the designed look (high tier, untouched); "reduced" (low tier)
  *  halves the drifting neon dust. Buildings, door rings and storefront lights stay — the
  *  town has to read as the town on every tier. */
-export function createLobby(detail: "full" | "reduced" = "full"): Lobby {
+export function createLobby(
+  detail: "full" | "reduced" = "full",
+  resolveRemoteCar: RemoteCarResolver = () => null,
+): Lobby {
   const group = new THREE.Group();
   group.visible = false;
   const disposables: Array<{ dispose(): void }> = [];
@@ -245,11 +260,9 @@ export function createLobby(detail: "full" | "reduced" = "full"): Lobby {
   // ambient fill so the lot isn't pitch black
   const amb = new THREE.AmbientLight(0x6a4cff, 0.5); group.add(amb);
 
-  // remote cars — multiplayer seam (empty today)
-  const remoteGroup = new THREE.Group(); group.add(remoteGroup);
-  const remoteMap = new Map<string, THREE.Mesh>();
-  const remoteGeo = track(new THREE.BoxGeometry(3.6, 1.6, 7));
-  const remoteMat = track(new THREE.MeshStandardMaterial({ color: 0x222233, emissive: 0x4da6ff, emissiveIntensity: 0.4 }));
+  // Remote drivers are presentation-only. They are not part of lobby layout or collision state.
+  const remoteCars = createRemoteCars(resolveRemoteCar);
+  group.add(remoteCars.group);
 
   let t = 0;
   return {
@@ -257,17 +270,8 @@ export function createLobby(detail: "full" | "reduced" = "full"): Lobby {
     backdrop,
     show() { group.visible = true; },
     hide() { group.visible = false; },
-    setRemoteCars(states) {
-      if (states.length === 0 && remoteMap.size === 0) return; // hot path: the seam idles every frame today
-      const seen = new Set<string>();
-      for (const s of states) {
-        seen.add(s.id);
-        let m = remoteMap.get(s.id);
-        if (!m) { m = new THREE.Mesh(remoteGeo, remoteMat); remoteGroup.add(m); remoteMap.set(s.id, m); }
-        m.position.set(s.x, 0.9, s.z); m.rotation.y = s.heading;
-      }
-      for (const [id, m] of remoteMap) if (!seen.has(id)) { remoteGroup.remove(m); remoteMap.delete(id); }
-    },
+    setRemoteCars(states) { remoteCars.setTargets(states); },
+    emoteRemote(event) { remoteCars.emote(event); },
     setActiveDoor(kind) { activeDoor = kind; },
     update(dt) {
       t += dt;
@@ -285,10 +289,11 @@ export function createLobby(detail: "full" | "reduced" = "full"): Lobby {
       }
       dust.rotation.y = t * 0.02;
       dust.position.y = 0.4 * Math.sin(t * 0.35);
+      remoteCars.update(dt);
     },
     dispose() {
+      remoteCars.dispose();
       for (const d of disposables) d.dispose();
-      remoteMap.clear();
     },
   };
 }
