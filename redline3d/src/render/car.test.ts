@@ -105,4 +105,43 @@ describe("createCar GLTF lifecycle", () => {
     expect(stale.disposeTexture).toHaveBeenCalledOnce();
     expect(latest.scene.parent).toBe(car.group);
   });
+
+  it("reports the first successful current model as loaded once", () => {
+    const settled = vi.fn();
+    createCar(settled);
+    pending[0].succeed(modelFixture().gltf);
+    expect(settled).toHaveBeenCalledOnce();
+    expect(settled).toHaveBeenCalledWith("loaded");
+  });
+
+  it("reports a current first-model failure once", () => {
+    const settled = vi.fn();
+    createCar(settled);
+    pending[0].fail(new Error("cold load failed"));
+    expect(settled).toHaveBeenCalledOnce();
+    expect(settled).toHaveBeenCalledWith("failed");
+  });
+
+  it("does not settle from a stale model callback", () => {
+    const settled = vi.fn();
+    const car = createCar(settled, { loadDefault: false });
+    car.setModel("/models/old.glb");
+    car.setModel("/models/new.glb");
+    pending[0].succeed(modelFixture().gltf);
+    expect(settled).not.toHaveBeenCalled();
+    pending[1].succeed(modelFixture().gltf);
+    expect(settled).toHaveBeenCalledWith("loaded");
+  });
+
+  it("uses a neutral rough fallback body before a GLB arrives", () => {
+    const car = createCar(undefined, { loadDefault: false });
+    const placeholder = car.group.children[0] as THREE.Group;
+    const body = placeholder.children[0] as THREE.Mesh;
+    const material = body.material as THREE.MeshStandardMaterial;
+    expect(material.color.getHexString()).toBe("b5bbc4");
+    expect(material.metalness).toBe(0.4);
+    expect(material.roughness).toBe(0.76);
+    expect(material.emissive.getHexString()).toBe("59616d");
+    expect(material.emissiveIntensity).toBe(0.32);
+  });
 });

@@ -2,6 +2,7 @@ import * as THREE from "three";
 import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader.js";
 import { buildWheelRig, type WheelRig } from "./wheels";
 import { finishById } from "../core/paint";
+import type { ModelLoadOutcome } from "../core/boot-reveal";
 import { carNormScale } from "./car-scale";
 
 export interface Car {
@@ -63,15 +64,27 @@ function disposeObject(root: THREE.Object3D): void {
  * Either way the body tints blue→green→red with equity, and an underglow
  * PointLight carries the color cue onto the road.
  */
-export function createCar(onReady?: () => void, options: CarOptions = {}): Car {
+export function createCar(onReady?: (outcome: ModelLoadOutcome) => void, options: CarOptions = {}): Car {
   const group = new THREE.Group();
-  let readyFired = false; // fire onReady once, when the first GLB finishes loading
+  let readinessSettled = false;
+  const settleReadiness = (outcome: ModelLoadOutcome) => {
+    if (readinessSettled) return;
+    readinessSettled = true;
+    onReady?.(outcome);
+  };
   let disposed = false;
 
   // ---- instant procedural fallback (a DeLorean-style stainless wedge) ----
   const placeholder = new THREE.Group();
   group.add(placeholder);
-  const bodyMat = new THREE.MeshStandardMaterial({ color: "#aab2bd", metalness: 0.95, roughness: 0.42, emissive: IDLE, emissiveIntensity: 0.22 });
+  // Keep the fallback neutral under the lobby's pink directional light.
+  const bodyMat = new THREE.MeshStandardMaterial({
+    color: "#b5bbc4",
+    metalness: 0.4,
+    roughness: 0.76,
+    emissive: "#59616d",
+    emissiveIntensity: 0.32,
+  });
   const accentMat = new THREE.MeshStandardMaterial({ color: "#0b0e18", emissive: IDLE, emissiveIntensity: 1.5 });
   const glassMat = new THREE.MeshStandardMaterial({ color: "#0a0f1f", metalness: 0.9, roughness: 0.12, emissive: "#10203a", emissiveIntensity: 0.45 });
   const trimMat = new THREE.MeshStandardMaterial({ color: "#0c0d11", metalness: 0.5, roughness: 0.7 });
@@ -125,10 +138,14 @@ export function createCar(onReady?: () => void, options: CarOptions = {}): Car {
     glow.color.set(col);
     if (modelMats) {
       // keep the tint a faint hint so the stainless steel stays visible, not painted
-      const inten = phaseS === "idle" ? 0.03 : 0.06;
-      for (const m of modelMats) { m.emissive.set(col); m.emissiveIntensity = inten; }
+      const intensity = phaseS === "idle" ? 0.03 : 0.06;
+      for (const material of modelMats) {
+        material.emissive.set(col);
+        material.emissiveIntensity = intensity;
+      }
     } else {
-      bodyMat.emissive.set(col);
+      bodyMat.emissive.set(phaseS === "idle" ? "#59616d" : col);
+      bodyMat.emissiveIntensity = phaseS === "idle" ? 0.32 : 0.22;
       accentMat.emissive.set(col);
     }
   };
@@ -195,10 +212,15 @@ export function createCar(onReady?: () => void, options: CarOptions = {}): Car {
         group.add(model);
         applyTint();
         applyFinish();
-        if (!readyFired) { readyFired = true; onReady?.(); }
+        settleReadiness("loaded");
       },
       undefined,
-      (err) => { if (gen === loadGen) lastReq = ""; console.warn("[car] GLB failed to load:", url, err); } // failed load → allow a retry pick
+      (error) => {
+        if (disposed || gen !== loadGen) return;
+        lastReq = "";
+        console.warn("[car] GLB failed to load:", url, error);
+        settleReadiness("failed");
+      }
     );
   };
   if (options.loadDefault ?? true) loadModel(MODEL_URL);

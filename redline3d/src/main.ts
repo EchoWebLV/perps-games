@@ -13,6 +13,7 @@ import { createHud } from "./ui/hud";
 import { createTach } from "./ui/tach";
 import { createControls, DEFAULT_PLAY_CAP } from "./ui/controls";
 import { connectFeed } from "./core/feed";
+import { createBootReveal } from "./core/boot-reveal";
 import { createPriceSource } from "./core/price-source";
 import { CALM_MARKET_PULSE, createMarketPulse, type MarketDirection, type MarketPulseFrame } from "./core/market-pulse";
 import { terrainGrade } from "./core/market-road";
@@ -138,8 +139,13 @@ function setWorldTheme(key: string): string {
   next: () => setWorldTheme(nextThemeKey(world.currentTheme())),
   current: () => world.currentTheme(),
 };
-// dismiss the loading splash (index.html) once the real car model is in
-const car = createCar(() => (window as any).hideSplash?.());
+// dismiss the loading splash (index.html) once the real car model settles,
+// with a bounded fallback in case the loader never calls back
+const bootReveal = createBootReveal({
+  timeoutMs: 20_000,
+  reveal: () => (window as Window & { hideSplash?: () => void }).hideSplash?.(),
+});
+const car = createCar((outcome) => bootReveal.modelSettled(outcome));
 car.group.position.set(0, 0, -12);
 // YXZ everywhere: yaw first, then pitch/roll about the car's OWN axes — under the default
 // XYZ a pitched car leans sideways at yaw≠0 (the lobby bug de1760d fixed). Every mode
