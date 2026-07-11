@@ -94,7 +94,12 @@ import { createGameSession } from "./chain/game-session";
 import { HIGHWAY_DURATION_SENTINEL, isHighwayRound, roundKey, type RoundSnap } from "./chain/chain-round";
 import { selectChainWalletPort } from "./chain/wallet-select";
 import { createCrateRollDraws, makeCrateRollIo } from "./chain/crate-roll";
-import { createHighwayRoundReader, deriveHighwayRoundPda, verifyHighwayPresence } from "./chain/highway-verifier";
+import {
+  createHighwayRoundReader,
+  deriveHighwayRoundPda,
+  selectRemoteHighwayPlayers,
+  verifyHighwayPresence,
+} from "./chain/highway-verifier";
 
 const canvas = document.getElementById("gl") as HTMLCanvasElement;
 const hudRoot = document.getElementById("hud") as HTMLElement;
@@ -965,7 +970,7 @@ async function verifyCachedHighway(advertised: PresenceHighway): Promise<Presenc
 
 async function updateVerifiedHighway(players: PresencePlayer[]): Promise<void> {
   const generation = ++highwayPresenceGeneration;
-  const candidates = players.filter((player) => player.highway?.asset === asset && player.highway !== undefined);
+  const candidates = selectRemoteHighwayPlayers(players, session.address(), asset);
   const checked = await Promise.all(candidates.map(async (player) => ({
     id: player.id,
     state: await verifyCachedHighway(player.highway!),

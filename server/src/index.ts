@@ -20,6 +20,7 @@ import type { WithdrawSigner } from "./services/withdraw-worker.js";
 import { eq } from "drizzle-orm";
 import { withdrawals } from "./db/schema.js";
 import { makePresenceRoom } from "./presence/room.js";
+import { makeHighwayIndexer, makeRpcHighwayRoundReader } from "./presence/highway-indexer.js";
 
 async function main(): Promise<void> {
   // fail loud: dev seed endpoints must never be enabled in production
@@ -168,6 +169,20 @@ async function main(): Promise<void> {
   const entitlements = makeEntitlements({ inventory, upgrades }); // consumed by Phase 2's /authorize; wired now as the seam
   const earnLimit = makeEarnLimit(db, { ceiling: env.EARN_WINDOW_CEILING, windowMs: env.EARN_WINDOW_MS });
   const presenceRoom = makePresenceRoom();
+  if (env.HIGHWAY_INDEXER_ENABLED) {
+    const highwayIndexer = makeHighwayIndexer({
+      read: makeRpcHighwayRoundReader(env.HIGHWAY_INDEXER_RPC),
+      publish: (positions) => presenceRoom.setIndexedHighways(positions),
+      pollMs: env.HIGHWAY_INDEXER_POLL_MS,
+      onError: (error) => console.warn("[highway_index_refresh_failed]", error),
+    });
+    try {
+      await highwayIndexer.refresh();
+    } catch (error) {
+      console.warn("[highway_index_initial_refresh_failed]", error);
+    }
+    highwayIndexer.start();
+  }
 
   const server = buildServer({
     users,

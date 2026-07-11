@@ -1,7 +1,7 @@
 import { BorshAccountsCoder, type Idl } from "@coral-xyz/anchor";
 import { Connection, PublicKey } from "@solana/web3.js";
 import { Buffer } from "buffer";
-import type { PresenceHighway } from "../core/presence";
+import type { PresenceHighway, PresencePlayer } from "../core/presence";
 import { CHAIN } from "./config";
 import idlJson from "./idl/raider.json";
 
@@ -15,6 +15,16 @@ export interface HighwayRoundRecord {
 }
 
 export type HighwayRoundReader = (roundPda: string) => Promise<HighwayRoundRecord | null>;
+
+export function selectRemoteHighwayPlayers(
+  players: PresencePlayer[],
+  ownWallet: string,
+  asset: PresenceHighway["asset"],
+): PresencePlayer[] {
+  return players.filter((player) =>
+    player.highway?.asset === asset && player.highway.wallet !== ownWallet,
+  );
+}
 
 export function deriveHighwayRoundPda(wallet: string): string | null {
   try {

@@ -5,7 +5,9 @@ import {
   type ClientHello,
   type ClientPose,
   type PresenceEmoteKind,
+  type PresenceHighway,
   type PresencePose,
+  type PresencePlayer,
   type ServerEmote,
   type ServerSnapshot,
 } from "./protocol.js";
@@ -25,6 +27,7 @@ export interface PresenceRoom {
   leave(id: string): void;
   pose(id: string, pose: ClientPose, now: number): RateLimitResult;
   highway(id: string, wallet: string, state: ClientHighway): RateLimitResult;
+  setIndexedHighways(positions: PresenceHighway[]): void;
   emote(id: string, kind: PresenceEmoteKind, now: number): RateLimitResult;
   snapshot(serverTime: number): ServerSnapshot;
   broadcastSnapshot(serverTime: number): void;
@@ -56,6 +59,7 @@ function withinRateLimit(timestamps: number[], now: number, limit: number): bool
 export function makePresenceRoom(options: PresenceRoomOptions = {}): PresenceRoom {
   const makeId = options.id ?? randomUUID;
   const members = new Map<string, PresenceMember>();
+  let indexedHighways: PresenceHighway[] = [];
   let emoteNonce = 0;
 
   function nextPublicId(): string {
@@ -113,6 +117,10 @@ export function makePresenceRoom(options: PresenceRoomOptions = {}): PresenceRoo
       return { ok: true };
     },
 
+    setIndexedHighways(positions) {
+      indexedHighways = positions.map((position) => ({ ...position }));
+    },
+
     emote(id, kind, now) {
       const member = members.get(id);
       if (!member || !withinRateLimit(member.emoteTimes, now, MAX_EMOTES_PER_WINDOW)) {
@@ -130,9 +138,22 @@ export function makePresenceRoom(options: PresenceRoomOptions = {}): PresenceRoo
     },
 
     snapshot(serverTime) {
-      return {
-        type: "snapshot",
-        players: [...members.values()].map((member) => ({
+      const indexedRoundPdas = new Set(indexedHighways.map((position) => position.roundPda));
+      const indexedPlayers: PresencePlayer[] = indexedHighways.map((highway) => ({
+        id: `chain:${highway.roundPda}`,
+        name: `${highway.dir === 1 ? "long" : "short"}_${highway.roundPda.slice(0, 8)}`
+          .toLowerCase()
+          .slice(0, 16),
+        carId: highway.carId,
+        x: 0,
+        z: 0,
+        heading: 0,
+        speed: 0,
+        highway,
+      }));
+      const connectedPlayers: PresencePlayer[] = [...members.values()]
+        .filter((member) => !member.highway || !indexedRoundPdas.has(member.highway.roundPda))
+        .map((member) => ({
           id: member.id,
           name: member.name,
           carId: member.pose.carId,
@@ -141,7 +162,10 @@ export function makePresenceRoom(options: PresenceRoomOptions = {}): PresenceRoo
           heading: member.pose.heading,
           speed: member.pose.speed,
           ...(member.highway ? { highway: member.highway } : {}),
-        })),
+        }));
+      return {
+        type: "snapshot",
+        players: [...indexedPlayers, ...connectedPlayers].slice(0, MAX_PLAYERS),
         serverTime,
       };
     },

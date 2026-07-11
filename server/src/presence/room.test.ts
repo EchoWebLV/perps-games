@@ -29,6 +29,53 @@ function sequentialIds(): () => string {
 }
 
 describe("presence room", () => {
+  it("keeps indexed Highway positions visible without a connected browser", () => {
+    const room = makePresenceRoom({ id: sequentialIds() });
+    room.setIndexedHighways([
+      {
+        wallet: "ShortWallet1111111111111111111111111111111",
+        asset: "SOL",
+        roundPda: "ShortRound11111111111111111111111111111111",
+        dir: -1,
+        lev: 250,
+        laneSeed: 0,
+        carId: "Highway",
+      },
+      {
+        wallet: "LongWallet11111111111111111111111111111111",
+        asset: "SOL",
+        roundPda: "LongRound111111111111111111111111111111111",
+        dir: 1,
+        lev: 250,
+        laneSeed: 2,
+        carId: "Highway",
+      },
+    ]);
+
+    const snapshot = room.snapshot(10);
+    expect(snapshot.players).toHaveLength(2);
+    expect(snapshot.players.map((player) => player.highway?.dir)).toEqual([-1, 1]);
+    expect(snapshot.players.every((player) => player.id.startsWith("chain:"))).toBe(true);
+  });
+
+  it("does not duplicate an indexed position advertised by a connected browser", () => {
+    const room = makePresenceRoom({ id: sequentialIds() });
+    const joined = room.join("private-user", hello(), sink().send);
+    if (!joined.ok) throw new Error("expected join to succeed");
+    const highway: ClientHighway = {
+      type: "highway", asset: "SOL", roundPda: "Round1111111111111111111111111111111111",
+      dir: -1, lev: 250, laneSeed: 1, carId: "Orion",
+    };
+    room.highway(joined.id, "BoundWallet111", highway);
+    room.setIndexedHighways([{ ...highway, wallet: "BoundWallet111", carId: "Highway" }]);
+
+    const matching = room.snapshot(10).players.filter(
+      (player) => player.highway?.roundPda === highway.roundPda,
+    );
+    expect(matching).toHaveLength(1);
+    expect(matching[0]?.id).toBe(`chain:${highway.roundPda}`);
+  });
+
   it("caps the room at 32 while keeping public ids distinct", () => {
     const room = makePresenceRoom({ id: sequentialIds() });
     for (let i = 0; i < 32; i++) {

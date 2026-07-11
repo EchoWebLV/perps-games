@@ -2,6 +2,13 @@ import { describe, expect, it } from "vitest";
 import { parseEnv } from "./env.js";
 
 describe("env withdraw send-leg vars", () => {
+  it("enables the MagicBlock Highway indexer with safe defaults", () => {
+    const e = parseEnv({});
+    expect(e.HIGHWAY_INDEXER_ENABLED).toBe(true);
+    expect(e.HIGHWAY_INDEXER_RPC).toBe("https://devnet.magicblock.app");
+    expect(e.HIGHWAY_INDEXER_POLL_MS).toBe(2000);
+  });
+
   it("defaults WITHDRAW_POLL_MS and leaves TREASURY_SECRET undefined", () => {
     const e = parseEnv({});
     expect(e.WITHDRAW_POLL_MS).toBe(4000);

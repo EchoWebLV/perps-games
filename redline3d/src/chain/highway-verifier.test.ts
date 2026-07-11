@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 import { CHAIN } from "./config";
 import {
   deriveHighwayRoundPda,
+  selectRemoteHighwayPlayers,
   verifyHighwayPresence,
   type HighwayRoundRecord,
 } from "./highway-verifier";
@@ -29,6 +30,17 @@ const record = (over: Partial<HighwayRoundRecord> = {}): HighwayRoundRecord => (
 });
 
 describe("verifyHighwayPresence", () => {
+  it("selects the other wallet's same-asset position without duplicating the local car", () => {
+    const other = { ...advertised, wallet: "11111111111111111111111111111111" };
+    const players = [
+      { id: "mine", name: "mine", carId: "Highway", x: 0, z: 0, heading: 0, speed: 0, highway: advertised },
+      { id: "other", name: "other", carId: "Highway", x: 0, z: 0, heading: 0, speed: 0, highway: other },
+      { id: "btc", name: "btc", carId: "Highway", x: 0, z: 0, heading: 0, speed: 0, highway: { ...other, asset: "BTC" as const } },
+    ];
+
+    expect(selectRemoteHighwayPlayers(players, WALLET, "SOL").map(({ id }) => id)).toEqual(["other"]);
+  });
+
   it("accepts only a matching live open-ended Round", async () => {
     const read = vi.fn(async () => record());
     await expect(verifyHighwayPresence(advertised, read)).resolves.toEqual(advertised);
