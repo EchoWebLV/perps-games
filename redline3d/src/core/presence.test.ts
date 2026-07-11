@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { AuthProvider } from "./auth";
 import { apiBaseToWebSocket, createPresenceClient } from "./presence";
+import type { PresenceClientOptions } from "./presence";
 
 type Listener = (event: { data?: unknown }) => void;
 
@@ -73,6 +74,17 @@ function fakeAuth(token: string): AuthProvider {
     async authHeaders() {
       return { authorization: `Bearer ${token}` };
     },
+  };
+}
+
+function clientOptions(overrides: Partial<PresenceClientOptions> = {}): PresenceClientOptions {
+  return {
+    baseUrl: "https://api.example.com",
+    auth: fakeAuth("token"),
+    WebSocket: FakeWebSocket as never,
+    name: () => "alice_1",
+    carId: () => "Orion",
+    ...overrides,
   };
 }
 
@@ -232,44 +244,46 @@ describe("presence client", () => {
     expect(leaves).toEqual(["p1"]);
   });
 
-  it("delivers only complete emote events", async () => {
+  it("rejects legacy and unknown emote kinds", async () => {
     const emotes: unknown[] = [];
-    const client = createPresenceClient({
-      baseUrl: "https://api.example.com",
-      auth: fakeAuth("token"),
-      WebSocket: FakeWebSocket as never,
-      name: () => "alice_1",
-      carId: () => "Orion",
-      onEmote: (event) => emotes.push(event),
-    });
+    const client = createPresenceClient(clientOptions({ onEmote: (event) => emotes.push(event) }));
     client.connect();
     await flush();
     const ws = FakeWebSocket.only();
     ws.open();
     ws.message({ type: "welcome", id: "self", serverTime: 1 });
 
-    ws.message({ type: "emote", id: "p1", kind: "spark" });
-    ws.message({ type: "emote", id: "p1", kind: "spark", nonce: 7 });
-
-    expect(emotes).toEqual([{ id: "p1", kind: "spark", nonce: 7 }]);
+    ws.message({ type: "emote", id: "p1", kind: "spark", nonce: 1 });
+    ws.message({ type: "emote", id: "p1", kind: "wave", nonce: 2 });
+    expect(emotes).toEqual([]);
   });
 
-  it("sends spark emotes only while connected", async () => {
-    const client = createPresenceClient({
-      baseUrl: "https://api.example.com",
-      auth: fakeAuth("token"),
-      WebSocket: FakeWebSocket as never,
-      name: () => "alice_1",
-      carId: () => "Orion",
-    });
+  it("sends each selected emote kind", async () => {
+    const client = createPresenceClient(clientOptions());
     client.connect();
     await flush();
     const ws = FakeWebSocket.only();
-    client.emote();
-    expect(ws.sent).toHaveLength(0);
     ws.open();
-    client.emote();
-    expect(JSON.parse(ws.sent[1]!)).toEqual({ type: "emote", kind: "spark" });
+    client.emote("laugh");
+    client.emote("fire");
+    client.emote("skull");
+    expect(ws.sent.slice(1).map((frame) => JSON.parse(frame))).toEqual([
+      { type: "emote", kind: "laugh" },
+      { type: "emote", kind: "fire" },
+      { type: "emote", kind: "skull" },
+    ]);
+  });
+
+  it.each(["laugh", "fire", "skull"] as const)("delivers a complete %s event", async (kind) => {
+    const emotes: unknown[] = [];
+    const client = createPresenceClient(clientOptions({ onEmote: (event) => emotes.push(event) }));
+    client.connect();
+    await flush();
+    const ws = FakeWebSocket.only();
+    ws.open();
+    ws.message({ type: "welcome", id: "self", serverTime: 1 });
+    ws.message({ type: "emote", id: "p1", kind, nonce: 1 });
+    expect(emotes).toEqual([{ id: "p1", kind, nonce: 1 }]);
   });
 
   it("emits join and leave diffs without treating pose changes as joins", async () => {
@@ -519,7 +533,7 @@ describe("presence client", () => {
     ws.message({ type: "welcome", id: "self", serverTime: 1 });
     ws.failNextSend();
 
-    expect(() => client.emote()).not.toThrow();
+    expect(() => client.emote("laugh")).not.toThrow();
     expect(vi.getTimerCount()).toBe(1);
     await vi.advanceTimersByTimeAsync(500);
     await flush();
@@ -571,7 +585,7 @@ describe("presence client", () => {
     ws.open();
 
     ws.message({ type: "snapshot", players: [player("p1")], serverTime: 1 });
-    ws.message({ type: "emote", id: "p1", kind: "spark", nonce: 1 });
+    ws.message({ type: "emote", id: "p1", kind: "laugh", nonce: 1 });
 
     expect(client.status()).toBe("connecting");
     expect(snapshots).toEqual([]);

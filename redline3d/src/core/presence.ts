@@ -17,9 +17,12 @@ export interface PresencePlayer extends PresencePose {
 
 export type RemotePresencePlayer = PresencePlayer;
 
+export const PRESENCE_EMOTE_KINDS = ["laugh", "fire", "skull"] as const;
+export type PresenceEmoteKind = (typeof PRESENCE_EMOTE_KINDS)[number];
+
 export interface PresenceEmote {
   id: string;
-  kind: "spark";
+  kind: PresenceEmoteKind;
   nonce: number;
 }
 
@@ -67,6 +70,10 @@ function hasExactKeys(value: Record<string, unknown>, keys: string[]): boolean {
   const actual = Object.keys(value).sort();
   const expected = [...keys].sort();
   return actual.length === expected.length && actual.every((key, index) => key === expected[index]);
+}
+
+function isEmoteKind(value: unknown): value is PresenceEmoteKind {
+  return value === "laugh" || value === "fire" || value === "skull";
 }
 
 function parsePlayer(value: unknown): PresencePlayer | null {
@@ -125,9 +132,9 @@ function parseServerMessage(raw: unknown): ParsedServerMessage | null {
     }
     if (value.type === "emote") {
       if (!hasExactKeys(value, ["type", "id", "kind", "nonce"])) return null;
-      if (typeof value.id !== "string" || value.id.length === 0 || value.kind !== "spark") return null;
+      if (typeof value.id !== "string" || value.id.length === 0 || !isEmoteKind(value.kind)) return null;
       if (typeof value.nonce !== "number" || !Number.isSafeInteger(value.nonce) || value.nonce < 1) return null;
-      return { type: "emote", id: value.id, kind: "spark", nonce: value.nonce };
+      return { type: "emote", id: value.id, kind: value.kind, nonce: value.nonce };
     }
     if (value.type === "error") {
       if (!hasExactKeys(value, ["type", "code"])) return null;
@@ -165,7 +172,7 @@ export interface PresenceClient {
   connect(): void;
   disconnect(): void;
   updatePose(pose: PresencePose): void;
-  emote(): void;
+  emote(kind: PresenceEmoteKind): void;
   status(): PresenceStatus;
 }
 
@@ -388,11 +395,11 @@ export function createPresenceClient(options: PresenceClientOptions): PresenceCl
     updatePose(pose) {
       queuePose(pose);
     },
-    emote() {
+    emote(kind) {
       const next = socket;
       if (next?.readyState !== 1) return;
       try {
-        next.send(JSON.stringify({ type: "emote", kind: "spark" }));
+        next.send(JSON.stringify({ type: "emote", kind }));
       } catch {
         reconnectAfterLoss(next, generation, true);
       }
