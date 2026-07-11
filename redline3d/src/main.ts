@@ -2079,8 +2079,7 @@ function accountAccessThenEnter(onDone: () => void) {
 async function claimWelcomeAccount() {
   try {
     const { granted } = await api.claimWelcome();
-    const hasRewardCar = inventory.all().some((id) => id !== "Solana Paper");
-    if (shouldDeliverAccountWelcome(granted, hasRewardCar)) setTimeout(() => crateBox.openGift("wooden"), 0);
+    if (shouldDeliverAccountWelcome(granted)) setTimeout(() => crateBox.openGift("wooden"), 0);
   }
   catch { /* offline: skip — the server is the source of truth for accounts, never fall back to a local flag here */ }
 }

@@ -21,7 +21,7 @@ export function shouldGrantWelcome(freshVisitor: boolean, claimed: boolean): boo
   return freshVisitor && !claimed;
 }
 
-/** Recover a consumed account claim only when no non-starter reward car was ever delivered. */
-export function shouldDeliverAccountWelcome(claimGranted: boolean, hasRewardCar: boolean): boolean {
-  return claimGranted || !hasRewardCar;
+/** Deliver only when the server atomically grants this account's once-ever welcome claim. */
+export function shouldDeliverAccountWelcome(claimGranted: boolean): boolean {
+  return claimGranted;
 }

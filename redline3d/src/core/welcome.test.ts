@@ -32,14 +32,13 @@ describe("welcome flag — durable once-ever claim", () => {
   });
 });
 
-describe("signed-in welcome recovery", () => {
-  test("redelivers only when the server claim was consumed without a reward car", () => {
+describe("signed-in welcome delivery", () => {
+  test("delivers only when the server grants the once-per-account claim", () => {
     const shouldDeliver = (welcomeModule as unknown as {
-      shouldDeliverAccountWelcome?: (claimGranted: boolean, hasRewardCar: boolean) => boolean;
+      shouldDeliverAccountWelcome?: (claimGranted: boolean) => boolean;
     }).shouldDeliverAccountWelcome;
 
-    expect(shouldDeliver?.(true, false)).toBe(true);
-    expect(shouldDeliver?.(false, false)).toBe(true);
-    expect(shouldDeliver?.(false, true)).toBe(false);
+    expect(shouldDeliver?.(true)).toBe(true);
+    expect(shouldDeliver?.(false)).toBe(false);
   });
 });
