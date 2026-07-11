@@ -50,7 +50,14 @@ interface SnapshotMessage {
   serverTime: number;
 }
 
-type ParsedServerMessage = WelcomeMessage | SnapshotMessage | (PresenceEmote & { type: "emote" });
+type ServerErrorCode = "unauthorized" | "lobby_full" | "bad_message" | "rate_limited";
+
+interface ErrorMessage {
+  type: "error";
+  code: ServerErrorCode;
+}
+
+type ParsedServerMessage = WelcomeMessage | SnapshotMessage | (PresenceEmote & { type: "emote" }) | ErrorMessage;
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
@@ -121,6 +128,18 @@ function parseServerMessage(raw: unknown): ParsedServerMessage | null {
       if (typeof value.id !== "string" || value.id.length === 0 || value.kind !== "spark") return null;
       if (typeof value.nonce !== "number" || !Number.isSafeInteger(value.nonce) || value.nonce < 1) return null;
       return { type: "emote", id: value.id, kind: "spark", nonce: value.nonce };
+    }
+    if (value.type === "error") {
+      if (!hasExactKeys(value, ["type", "code"])) return null;
+      if (
+        value.code !== "unauthorized" &&
+        value.code !== "lobby_full" &&
+        value.code !== "bad_message" &&
+        value.code !== "rate_limited"
+      ) {
+        return null;
+      }
+      return { type: "error", code: value.code };
     }
     return null;
   } catch {
@@ -205,12 +224,35 @@ export function createPresenceClient(options: PresenceClientOptions): PresenceCl
     }, delay);
   }
 
+  function reconnectAfterLoss(next: SocketLike, myGeneration: number, closeTransport = false): void {
+    if (!desired || myGeneration !== generation || socket !== next) return;
+    socket = null;
+    clearPoseQueue();
+    clearRemoteState();
+    currentStatus = "connecting";
+    options.onStatus?.("connecting", 0);
+    if (closeTransport) {
+      try {
+        next.close();
+      } catch {
+        // Local teardown and reconnect scheduling still proceed.
+      }
+    }
+    scheduleReconnect(myGeneration);
+  }
+
   function sendPose(): void {
     poseTimer = null;
-    if (socket?.readyState !== 1 || pendingPose === null) return;
+    const next = socket;
+    if (next?.readyState !== 1 || pendingPose === null) return;
     const pose = pendingPose;
     pendingPose = null;
-    socket.send(JSON.stringify({ type: "pose", ...pose }));
+    try {
+      next.send(JSON.stringify({ type: "pose", ...pose }));
+    } catch {
+      reconnectAfterLoss(next, generation, true);
+      return;
+    }
     lastPoseSentAt = Date.now();
   }
 
@@ -248,19 +290,43 @@ export function createPresenceClient(options: PresenceClientOptions): PresenceCl
     socket = next;
     next.addEventListener("open", () => {
       if (!desired || myGeneration !== generation || socket !== next) return;
-      next.send(JSON.stringify({ type: "hello", token, name: options.name(), carId: options.carId() }));
+      try {
+        next.send(JSON.stringify({ type: "hello", token, name: options.name(), carId: options.carId() }));
+      } catch {
+        reconnectAfterLoss(next, myGeneration, true);
+      }
     });
     next.addEventListener("message", (event) => {
       if (!desired || myGeneration !== generation || socket !== next) return;
       const message = parseServerMessage(event.data);
       if (message === null) return;
       if (message.type === "welcome") {
+        if (localId !== null || currentStatus === "live") return;
         localId = message.id;
         reconnectAttempt = 0;
         currentStatus = "live";
         options.onStatus?.("live", 1);
         return;
       }
+      if (message.type === "error") {
+        if (message.code === "bad_message" || message.code === "rate_limited") return;
+        desired = false;
+        generation += 1;
+        if (reconnectTimer !== null) clearTimeout(reconnectTimer);
+        reconnectTimer = null;
+        socket = null;
+        clearPoseQueue();
+        clearRemoteState();
+        currentStatus = "offline";
+        options.onStatus?.("offline", 0);
+        try {
+          next.close();
+        } catch {
+          // The connection is already terminal locally.
+        }
+        return;
+      }
+      if (localId === null || currentStatus !== "live") return;
       if (message.type === "emote") {
         options.onEmote?.({ id: message.id, kind: message.kind, nonce: message.nonce });
         return;
@@ -277,13 +343,7 @@ export function createPresenceClient(options: PresenceClientOptions): PresenceCl
       options.onStatus?.(currentStatus, message.players.length);
     });
     next.addEventListener("close", () => {
-      if (!desired || myGeneration !== generation || socket !== next) return;
-      socket = null;
-      clearPoseQueue();
-      clearRemoteState();
-      currentStatus = "connecting";
-      options.onStatus?.("connecting", 0);
-      scheduleReconnect(myGeneration);
+      reconnectAfterLoss(next, myGeneration);
     });
   }
 
@@ -313,7 +373,13 @@ export function createPresenceClient(options: PresenceClientOptions): PresenceCl
       queuePose(pose);
     },
     emote() {
-      if (socket?.readyState === 1) socket.send(JSON.stringify({ type: "emote", kind: "spark" }));
+      const next = socket;
+      if (next?.readyState !== 1) return;
+      try {
+        next.send(JSON.stringify({ type: "emote", kind: "spark" }));
+      } catch {
+        reconnectAfterLoss(next, generation, true);
+      }
     },
     status() {
       return currentStatus;

@@ -12,6 +12,7 @@ class FakeWebSocket {
   readonly url: string;
   readyState = 0;
   private readonly listeners = new Map<string, Listener[]>();
+  private sendError: Error | null = null;
 
   constructor(url: string) {
     this.url = url;
@@ -34,7 +35,16 @@ class FakeWebSocket {
   }
 
   send(value: string): void {
+    if (this.sendError !== null) {
+      const error = this.sendError;
+      this.sendError = null;
+      throw error;
+    }
     this.sent.push(value);
+  }
+
+  failNextSend(): void {
+    this.sendError = new Error("fake send failed");
   }
 
   open(): void {
@@ -182,6 +192,7 @@ describe("presence client", () => {
   it("rejects a malformed snapshot atomically and filters the local player", async () => {
     const snapshots: Array<{ ids: string[]; localId: string | null }> = [];
     const joins: string[] = [];
+    const leaves: string[] = [];
     const client = createPresenceClient({
       baseUrl: "https://api.example.com",
       auth: fakeAuth("token"),
@@ -190,6 +201,7 @@ describe("presence client", () => {
       carId: () => "Orion",
       onSnapshot: (players, localId) => snapshots.push({ ids: players.map(({ id }) => id), localId }),
       onJoin: ({ id }) => joins.push(id),
+      onLeave: ({ id }) => leaves.push(id),
     });
     client.connect();
     await flush();
@@ -200,6 +212,7 @@ describe("presence client", () => {
 
     expect(snapshots).toEqual([{ ids: ["p1"], localId: "self" }]);
     expect(joins).toEqual(["p1"]);
+    expect(leaves).toEqual([]);
 
     ws.message({
       type: "snapshot",
@@ -208,6 +221,15 @@ describe("presence client", () => {
     });
     expect(snapshots).toEqual([{ ids: ["p1"], localId: "self" }]);
     expect(joins).toEqual(["p1"]);
+    expect(leaves).toEqual([]);
+
+    ws.message({ type: "snapshot", players: [player("self"), player("p2")], serverTime: 4 });
+    expect(snapshots).toEqual([
+      { ids: ["p1"], localId: "self" },
+      { ids: ["p2"], localId: "self" },
+    ]);
+    expect(joins).toEqual(["p1", "p2"]);
+    expect(leaves).toEqual(["p1"]);
   });
 
   it("delivers only complete emote events", async () => {
@@ -224,6 +246,7 @@ describe("presence client", () => {
     await flush();
     const ws = FakeWebSocket.only();
     ws.open();
+    ws.message({ type: "welcome", id: "self", serverTime: 1 });
 
     ws.message({ type: "emote", id: "p1", kind: "spark" });
     ws.message({ type: "emote", id: "p1", kind: "spark", nonce: 7 });
@@ -350,13 +373,249 @@ describe("presence client", () => {
     ws.open();
     ws.message({ type: "welcome", id: "self", serverTime: 1 });
     ws.message({ type: "snapshot", players: [player("self"), player("p1")], serverTime: 2 });
+    client.updatePose({ x: 1, z: 2, heading: 0.1, speed: 3, carId: "Orion" });
+    client.updatePose({ x: 4, z: 5, heading: 0.2, speed: 6, carId: "Banana" });
+    expect(ws.sent).toHaveLength(2);
+    expect(vi.getTimerCount()).toBe(1);
     ws.close();
+    expect(vi.getTimerCount()).toBe(1);
     client.disconnect();
+    expect(vi.getTimerCount()).toBe(0);
 
     await vi.advanceTimersByTimeAsync(10_000);
     await flush();
     expect(FakeWebSocket.instances).toHaveLength(1);
+    expect(ws.sent).toHaveLength(2);
     expect(snapshots).toEqual([["p1"], []]);
     expect(client.status()).toBe("offline");
+  });
+
+  it.each(["unauthorized", "lobby_full"] as const)(
+    "treats %s as terminal until a future explicit connect",
+    async (code) => {
+      vi.useFakeTimers();
+      const snapshots: string[][] = [];
+      const client = createPresenceClient({
+        baseUrl: "https://api.example.com",
+        auth: fakeAuth("token"),
+        WebSocket: FakeWebSocket as never,
+        name: () => "alice_1",
+        carId: () => "Orion",
+        onSnapshot: (players) => snapshots.push(players.map(({ id }) => id)),
+      });
+      client.connect();
+      await flush();
+      const ws = FakeWebSocket.only();
+      ws.open();
+      ws.message({ type: "welcome", id: "self", serverTime: 1 });
+      ws.message({ type: "snapshot", players: [player("self"), player("p1")], serverTime: 2 });
+
+      ws.message({ type: "error", code });
+      ws.close();
+      expect(vi.getTimerCount()).toBe(0);
+      await vi.advanceTimersByTimeAsync(10_000);
+      await flush();
+
+      expect(client.status()).toBe("offline");
+      expect(snapshots).toEqual([["p1"], []]);
+      expect(FakeWebSocket.instances).toHaveLength(1);
+
+      client.connect();
+      await flush();
+      expect(FakeWebSocket.instances).toHaveLength(2);
+    },
+  );
+
+  it("contains a hello send failure and reconnects once", async () => {
+    vi.useFakeTimers();
+    const client = createPresenceClient({
+      baseUrl: "https://api.example.com",
+      auth: fakeAuth("token"),
+      WebSocket: FakeWebSocket as never,
+      name: () => "alice_1",
+      carId: () => "Orion",
+    });
+    client.connect();
+    await flush();
+    const ws = FakeWebSocket.only();
+    ws.failNextSend();
+
+    expect(() => ws.open()).not.toThrow();
+    expect(vi.getTimerCount()).toBe(1);
+    await vi.advanceTimersByTimeAsync(499);
+    expect(FakeWebSocket.instances).toHaveLength(1);
+    await vi.advanceTimersByTimeAsync(1);
+    await flush();
+    expect(FakeWebSocket.instances).toHaveLength(2);
+  });
+
+  it("contains a pose send failure and reconnects once", async () => {
+    vi.useFakeTimers();
+    const client = createPresenceClient({
+      baseUrl: "https://api.example.com",
+      auth: fakeAuth("token"),
+      WebSocket: FakeWebSocket as never,
+      name: () => "alice_1",
+      carId: () => "Orion",
+    });
+    client.connect();
+    await flush();
+    const ws = FakeWebSocket.only();
+    ws.open();
+    ws.message({ type: "welcome", id: "self", serverTime: 1 });
+    ws.failNextSend();
+
+    expect(() =>
+      client.updatePose({ x: 1, z: 2, heading: 0.1, speed: 3, carId: "Orion" }),
+    ).not.toThrow();
+    expect(vi.getTimerCount()).toBe(1);
+    await vi.advanceTimersByTimeAsync(500);
+    await flush();
+    expect(FakeWebSocket.instances).toHaveLength(2);
+  });
+
+  it("contains an emote send failure and reconnects once", async () => {
+    vi.useFakeTimers();
+    const client = createPresenceClient({
+      baseUrl: "https://api.example.com",
+      auth: fakeAuth("token"),
+      WebSocket: FakeWebSocket as never,
+      name: () => "alice_1",
+      carId: () => "Orion",
+    });
+    client.connect();
+    await flush();
+    const ws = FakeWebSocket.only();
+    ws.open();
+    ws.message({ type: "welcome", id: "self", serverTime: 1 });
+    ws.failNextSend();
+
+    expect(() => client.emote()).not.toThrow();
+    expect(vi.getTimerCount()).toBe(1);
+    await vi.advanceTimersByTimeAsync(500);
+    await flush();
+    expect(FakeWebSocket.instances).toHaveLength(2);
+  });
+
+  it("contains a throttled pose send failure from the timer", async () => {
+    vi.useFakeTimers();
+    const client = createPresenceClient({
+      baseUrl: "https://api.example.com",
+      auth: fakeAuth("token"),
+      WebSocket: FakeWebSocket as never,
+      name: () => "alice_1",
+      carId: () => "Orion",
+    });
+    client.connect();
+    await flush();
+    const ws = FakeWebSocket.only();
+    ws.open();
+    ws.message({ type: "welcome", id: "self", serverTime: 1 });
+    client.updatePose({ x: 1, z: 2, heading: 0.1, speed: 3, carId: "Orion" });
+    client.updatePose({ x: 4, z: 5, heading: 0.2, speed: 6, carId: "Banana" });
+    ws.failNextSend();
+
+    await vi.advanceTimersByTimeAsync(100);
+    expect(vi.getTimerCount()).toBe(1);
+    await vi.advanceTimersByTimeAsync(500);
+    await flush();
+    expect(FakeWebSocket.instances).toHaveLength(2);
+  });
+
+  it("ignores snapshots and emotes before welcome", async () => {
+    const snapshots: string[][] = [];
+    const joins: string[] = [];
+    const emotes: unknown[] = [];
+    const client = createPresenceClient({
+      baseUrl: "https://api.example.com",
+      auth: fakeAuth("token"),
+      WebSocket: FakeWebSocket as never,
+      name: () => "alice_1",
+      carId: () => "Orion",
+      onSnapshot: (players) => snapshots.push(players.map(({ id }) => id)),
+      onJoin: ({ id }) => joins.push(id),
+      onEmote: (event) => emotes.push(event),
+    });
+    client.connect();
+    await flush();
+    const ws = FakeWebSocket.only();
+    ws.open();
+
+    ws.message({ type: "snapshot", players: [player("p1")], serverTime: 1 });
+    ws.message({ type: "emote", id: "p1", kind: "spark", nonce: 1 });
+
+    expect(client.status()).toBe("connecting");
+    expect(snapshots).toEqual([]);
+    expect(joins).toEqual([]);
+    expect(emotes).toEqual([]);
+  });
+
+  it("ignores repeated welcome frames", async () => {
+    const statuses: string[] = [];
+    const snapshots: Array<{ ids: string[]; localId: string | null }> = [];
+    const client = createPresenceClient({
+      baseUrl: "https://api.example.com",
+      auth: fakeAuth("token"),
+      WebSocket: FakeWebSocket as never,
+      name: () => "alice_1",
+      carId: () => "Orion",
+      onStatus: (status) => statuses.push(status),
+      onSnapshot: (players, localId) => snapshots.push({ ids: players.map(({ id }) => id), localId }),
+    });
+    client.connect();
+    await flush();
+    const ws = FakeWebSocket.only();
+    ws.open();
+    ws.message({ type: "welcome", id: "self", serverTime: 1 });
+    ws.message({ type: "welcome", id: "replacement", serverTime: 2 });
+    ws.message({ type: "snapshot", players: [player("self"), player("p1")], serverTime: 3 });
+
+    expect(statuses).toEqual(["connecting", "live", "live"]);
+    expect(snapshots).toEqual([{ ids: ["p1"], localId: "self" }]);
+  });
+
+  it("ignores an asynchronous close from a stale socket after reconnect", async () => {
+    vi.useFakeTimers();
+    const client = createPresenceClient({
+      baseUrl: "https://api.example.com",
+      auth: fakeAuth("token"),
+      WebSocket: FakeWebSocket as never,
+      name: () => "alice_1",
+      carId: () => "Orion",
+    });
+    client.connect();
+    await flush();
+    const oldSocket = FakeWebSocket.only();
+    oldSocket.close();
+    await vi.advanceTimersByTimeAsync(500);
+    await flush();
+    expect(FakeWebSocket.instances).toHaveLength(2);
+
+    oldSocket.close();
+    await vi.advanceTimersByTimeAsync(10_000);
+    await flush();
+    expect(FakeWebSocket.instances).toHaveLength(2);
+  });
+
+  it("keeps nonfatal server errors contained", async () => {
+    vi.useFakeTimers();
+    const client = createPresenceClient({
+      baseUrl: "https://api.example.com",
+      auth: fakeAuth("token"),
+      WebSocket: FakeWebSocket as never,
+      name: () => "alice_1",
+      carId: () => "Orion",
+    });
+    client.connect();
+    await flush();
+    const ws = FakeWebSocket.only();
+    ws.open();
+    ws.message({ type: "welcome", id: "self", serverTime: 1 });
+
+    expect(() => ws.message({ type: "error", code: "bad_message" })).not.toThrow();
+    expect(() => ws.message({ type: "error", code: "rate_limited" })).not.toThrow();
+    await vi.advanceTimersByTimeAsync(10_000);
+    expect(client.status()).toBe("live");
+    expect(FakeWebSocket.instances).toHaveLength(1);
   });
 });
