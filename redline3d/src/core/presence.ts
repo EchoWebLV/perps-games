@@ -158,6 +158,7 @@ export interface PresenceClientOptions {
   onLeave?: (player: PresencePlayer) => void;
   onEmote?: (event: PresenceEmote) => void;
   onStatus?: (status: PresenceStatus, count: number) => void;
+  onError?: (code: "unauthorized" | "lobby_full") => void;
 }
 
 export interface PresenceClient {
@@ -215,7 +216,12 @@ export function createPresenceClient(options: PresenceClientOptions): PresenceCl
   }
 
   function scheduleReconnect(myGeneration: number): void {
-    if (!desired || myGeneration !== generation || reconnectTimer !== null) return;
+    if (!desired || myGeneration !== generation) return;
+    if (currentStatus !== "offline") {
+      currentStatus = "offline";
+      options.onStatus?.("offline", 0);
+    }
+    if (reconnectTimer !== null) return;
     const delay = reconnectDelays[Math.min(reconnectAttempt, reconnectDelays.length - 1)]!;
     reconnectAttempt += 1;
     reconnectTimer = setTimeout(() => {
@@ -229,8 +235,6 @@ export function createPresenceClient(options: PresenceClientOptions): PresenceCl
     socket = null;
     clearPoseQueue();
     clearRemoteState();
-    currentStatus = "connecting";
-    options.onStatus?.("connecting", 0);
     if (closeTransport) {
       try {
         next.close();
@@ -323,6 +327,18 @@ export function createPresenceClient(options: PresenceClientOptions): PresenceCl
           next.close();
         } catch {
           // The connection is already terminal locally.
+        }
+        if (message.code === "unauthorized") {
+          try {
+            options.auth.invalidateSession?.();
+          } catch {
+            // The next explicit lobby entry can still retry the provider.
+          }
+        }
+        try {
+          options.onError?.(message.code);
+        } catch {
+          // Presence feedback is best-effort and cannot block local play.
         }
         return;
       }

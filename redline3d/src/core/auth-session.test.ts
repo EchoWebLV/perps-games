@@ -46,6 +46,31 @@ describe("createSessionAuth", () => {
     expect(fetch).not.toHaveBeenCalled();
   });
 
+  it("invalidates an expired stored session so the next request creates a fresh one", async () => {
+    const store = new Map<string, string>([
+      ["redline.session:token", "expired-token"],
+      ["redline.session:user", "expired-user"],
+    ]);
+    const storage: Pick<Storage, "getItem" | "setItem" | "removeItem"> = {
+      getItem: (key) => store.get(key) ?? null,
+      setItem: (key, value) => { store.set(key, value); },
+      removeItem: (key) => { store.delete(key); },
+    };
+    const fetch = vi.fn(async () => new Response(
+      JSON.stringify({ token: "fresh-token", userId: "fresh-user" }),
+      { status: 200 },
+    ));
+    const auth = createSessionAuth({ baseUrl: "http://api", fetch: fetch as any, storage });
+    const invalidatable = auth as typeof auth & { invalidateSession(): void };
+
+    expect(() => invalidatable.invalidateSession()).not.toThrow();
+    expect(store.has("redline.session:token")).toBe(false);
+    expect(store.has("redline.session:user")).toBe(false);
+    await expect(auth.authHeaders()).resolves.toEqual({ authorization: "Bearer fresh-token" });
+    expect(auth.userId()).toBe("fresh-user");
+    expect(fetch).toHaveBeenCalledOnce();
+  });
+
   it("clears stored session state on logout", async () => {
     const store = new Map<string, string>([
       ["redline.session:token", "stored-token"],

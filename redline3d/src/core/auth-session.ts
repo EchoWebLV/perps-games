@@ -38,6 +38,14 @@ export function createSessionAuth(opts: SessionAuthOpts = {}): AuthProvider {
     return init;
   }
 
+  function clearSession(): void {
+    storage.removeItem(TOKEN_KEY);
+    storage.removeItem(USER_KEY);
+    token = null;
+    uid = "";
+    init = null;
+  }
+
   return {
     ready() {
       return startInit();
@@ -56,12 +64,11 @@ export function createSessionAuth(opts: SessionAuthOpts = {}): AuthProvider {
       storage.setItem(TOKEN_KEY, token);
       storage.setItem(USER_KEY, uid);
     },
+    invalidateSession() {
+      clearSession();
+    },
     async logout() {
-      storage.removeItem(TOKEN_KEY);
-      storage.removeItem(USER_KEY);
-      token = null;
-      uid = "";
-      init = null;
+      clearSession();
     },
   };
 }

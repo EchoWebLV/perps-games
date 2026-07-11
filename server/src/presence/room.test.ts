@@ -77,10 +77,10 @@ describe("presence room", () => {
       id: "p1",
       name: "rider_1",
       carId: "Noodler",
-      x: 120,
-      z: -160,
+      x: 180,
+      z: -180,
       heading: -Math.PI,
-      speed: 48,
+      speed: 28,
     });
   });
 

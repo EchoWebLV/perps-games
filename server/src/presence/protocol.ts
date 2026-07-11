@@ -1,10 +1,11 @@
 import { z } from "zod";
 
 export const MAX_MESSAGE_BYTES = 2048;
-export const LOBBY_X = 120;
-export const LOBBY_Z_MIN = -160;
-export const LOBBY_Z_MAX = 160;
-export const MAX_LOBBY_SPEED = 48;
+// Keep these visual-only limits aligned with redline3d's LOT_BOUNDS and DRIVE.MAX_FWD.
+export const LOBBY_X = 180;
+export const LOBBY_Z_MIN = -180;
+export const LOBBY_Z_MAX = 180;
+export const MAX_LOBBY_SPEED = 28;
 export const NAME_RE = /^[a-z0-9_]{3,16}$/;
 export const CAR_ID_RE = /^[\x20-\x7e]{1,64}$/;
 

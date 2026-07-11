@@ -65,10 +65,10 @@ describe("presence protocol", () => {
     );
     expect(parsed?.type).toBe("pose");
     expect(normalizePose(parsed as ClientPose)).toEqual({
-      x: 120,
-      z: -160,
+      x: 180,
+      z: -180,
       heading: -Math.PI,
-      speed: 48,
+      speed: 28,
       carId: "Orion",
     });
   });
@@ -85,7 +85,7 @@ describe("presence protocol", () => {
       }),
     );
 
-    expect(normalizePose(parsed as ClientPose)).toMatchObject({ x: -120, z: 160, speed: 0 });
+    expect(normalizePose(parsed as ClientPose)).toMatchObject({ x: -180, z: 180, speed: 0 });
   });
 
   it("rejects a car id longer than 64 characters", () => {

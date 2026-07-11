@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { RawData, WebSocket } from "ws";
+import type { SessionAuth } from "../auth/session.js";
 import { makeTestDb, type TestCtx } from "../test/harness.js";
 import type { ServerMessage } from "./protocol.js";
 
@@ -176,6 +177,37 @@ describe("presence websocket", () => {
     expect(expireHello).toBeTypeOf("function");
     expireHello?.();
 
+    await expect(error).resolves.toEqual({ type: "error", code: "bad_message" });
+    await closed;
+  });
+
+  it("keeps the hello timeout active while token verification is pending", async () => {
+    let expireHello: (() => void) | undefined;
+    const cancelTimeout = vi.fn();
+    const sessionAuth: SessionAuth = {
+      issueAnonymous: async () => ({ token: "unused", userId: "unused" }),
+      issueForUser: async (userId) => ({ token: "unused", userId }),
+      verifyToken: () => new Promise<string | null>(() => undefined),
+    };
+    const ctx = await setup({
+      sessionAuth,
+      presenceSocketOptions: {
+        setTimeout: ((callback: () => void, delay: number) => {
+          if (delay === 5_000) expireHello = callback;
+          return { delay } as unknown as NodeJS.Timeout;
+        }) as typeof setTimeout,
+        clearTimeout: cancelTimeout as unknown as typeof clearTimeout,
+      },
+    });
+    const socket = await connect(ctx);
+    const error = nextJson(socket);
+    const closed = nextClose(socket);
+
+    socket.send(JSON.stringify({ type: "hello", token: "pending", name: "alice_1", carId: "Orion" }));
+    await new Promise<void>((resolve) => setImmediate(resolve));
+
+    expect(cancelTimeout).not.toHaveBeenCalled();
+    expireHello?.();
     await expect(error).resolves.toEqual({ type: "error", code: "bad_message" });
     await closed;
   });

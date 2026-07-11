@@ -117,14 +117,13 @@ export function registerPresenceSocket(server: FastifyInstance, deps: PresenceSo
         closeWithError(connection, "bad_message");
         return;
       }
+      const userId = await deps.sessionAuth.verifyToken(message.token);
+      const user = userId === null ? undefined : await deps.users.get(userId);
+      if (connection.closed) return;
       if (connection.helloTimer !== undefined) {
         cancelTimeout(connection.helloTimer);
         connection.helloTimer = undefined;
       }
-
-      const userId = await deps.sessionAuth.verifyToken(message.token);
-      const user = userId === null ? undefined : await deps.users.get(userId);
-      if (connection.closed) return;
       if (userId === null || user === undefined) {
         closeWithError(connection, "unauthorized");
         return;

@@ -327,6 +327,29 @@ describe("presence client", () => {
     }
   });
 
+  it("reports offline while waiting to retry an unavailable server", async () => {
+    vi.useFakeTimers();
+    const statuses: string[] = [];
+    const client = createPresenceClient({
+      baseUrl: "https://api.example.com",
+      auth: fakeAuth("token"),
+      WebSocket: FakeWebSocket as never,
+      name: () => "alice_1",
+      carId: () => "Orion",
+      onStatus: (status) => statuses.push(status),
+    });
+    client.connect();
+    await flush();
+
+    FakeWebSocket.only().close();
+
+    expect(client.status()).toBe("offline");
+    expect(statuses).toEqual(["connecting", "offline"]);
+    await vi.advanceTimersByTimeAsync(500);
+    await flush();
+    expect(FakeWebSocket.instances).toHaveLength(2);
+  });
+
   it("resets reconnect backoff after welcome", async () => {
     vi.useFakeTimers();
     const client = createPresenceClient({
@@ -395,13 +418,16 @@ describe("presence client", () => {
     async (code) => {
       vi.useFakeTimers();
       const snapshots: string[][] = [];
+      const errors: string[] = [];
+      const invalidateSession = vi.fn();
       const client = createPresenceClient({
         baseUrl: "https://api.example.com",
-        auth: fakeAuth("token"),
+        auth: { ...fakeAuth("token"), invalidateSession },
         WebSocket: FakeWebSocket as never,
         name: () => "alice_1",
         carId: () => "Orion",
         onSnapshot: (players) => snapshots.push(players.map(({ id }) => id)),
+        onError: (errorCode) => errors.push(errorCode),
       });
       client.connect();
       await flush();
@@ -411,12 +437,15 @@ describe("presence client", () => {
       ws.message({ type: "snapshot", players: [player("self"), player("p1")], serverTime: 2 });
 
       ws.message({ type: "error", code });
+      ws.message({ type: "error", code });
       ws.close();
       expect(vi.getTimerCount()).toBe(0);
       await vi.advanceTimersByTimeAsync(10_000);
       await flush();
 
       expect(client.status()).toBe("offline");
+      expect(errors).toEqual([code]);
+      expect(invalidateSession).toHaveBeenCalledTimes(code === "unauthorized" ? 1 : 0);
       expect(snapshots).toEqual([["p1"], []]);
       expect(FakeWebSocket.instances).toHaveLength(1);
 

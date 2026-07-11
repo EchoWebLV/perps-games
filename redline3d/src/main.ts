@@ -902,6 +902,9 @@ presence = createPresenceClient({
   onLeave: (player) => lobbyHud.toast(`${player.name} rolled out`),
   onEmote: (event) => lobby.emoteRemote(event),
   onStatus: (status, count) => presenceHud.setState(status, count),
+  onError: (code) => {
+    if (code === "lobby_full") lobbyHud.toast("Paddock full");
+  },
 });
 
 function syncPresenceLifecycle(): void {
