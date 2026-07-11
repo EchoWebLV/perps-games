@@ -8,8 +8,11 @@ export const LOBBY_Z_MAX = 180;
 export const MAX_LOBBY_SPEED = 28;
 export const NAME_RE = /^[a-z0-9_]{3,16}$/;
 export const CAR_ID_RE = /^[\x20-\x7e]{1,64}$/;
+export const PRESENCE_EMOTE_KINDS = ["laugh", "fire", "skull"] as const;
+export type PresenceEmoteKind = (typeof PRESENCE_EMOTE_KINDS)[number];
 
 const carIdSchema = z.string().regex(CAR_ID_RE);
+const emoteKindSchema = z.enum(PRESENCE_EMOTE_KINDS);
 
 const clientMessageSchema = z.discriminatedUnion("type", [
   z
@@ -30,7 +33,7 @@ const clientMessageSchema = z.discriminatedUnion("type", [
       carId: carIdSchema,
     })
     .strict(),
-  z.object({ type: z.literal("emote"), kind: z.literal("spark") }).strict(),
+  z.object({ type: z.literal("emote"), kind: emoteKindSchema }).strict(),
 ]);
 
 export type ClientMessage = z.infer<typeof clientMessageSchema>;
@@ -66,7 +69,7 @@ export interface ServerSnapshot {
 export interface ServerEmote {
   type: "emote";
   id: string;
-  kind: "spark";
+  kind: PresenceEmoteKind;
   nonce: number;
 }
 

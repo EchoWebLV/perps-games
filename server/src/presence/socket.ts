@@ -147,7 +147,7 @@ export function registerPresenceSocket(server: FastifyInstance, deps: PresenceSo
     const result =
       message.type === "pose"
         ? deps.room.pose(connection.memberId, message, now())
-        : deps.room.emote(connection.memberId, now());
+        : deps.room.emote(connection.memberId, message.kind, now());
     if (!result.ok) send(connection, { type: "error", code: result.code });
   }
 

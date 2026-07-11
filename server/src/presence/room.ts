@@ -3,6 +3,7 @@ import {
   normalizePose,
   type ClientHello,
   type ClientPose,
+  type PresenceEmoteKind,
   type PresencePose,
   type ServerEmote,
   type ServerSnapshot,
@@ -22,7 +23,7 @@ export interface PresenceRoom {
   join(userId: string, hello: ClientHello, sink: PresenceSink): JoinResult;
   leave(id: string): void;
   pose(id: string, pose: ClientPose, now: number): RateLimitResult;
-  emote(id: string, now: number): RateLimitResult;
+  emote(id: string, kind: PresenceEmoteKind, now: number): RateLimitResult;
   snapshot(serverTime: number): ServerSnapshot;
   broadcastSnapshot(serverTime: number): void;
 }
@@ -94,7 +95,7 @@ export function makePresenceRoom(options: PresenceRoomOptions = {}): PresenceRoo
       return { ok: true };
     },
 
-    emote(id, now) {
+    emote(id, kind, now) {
       const member = members.get(id);
       if (!member || !withinRateLimit(member.emoteTimes, now, MAX_EMOTES_PER_WINDOW)) {
         return { ok: false, code: "rate_limited" };
@@ -103,7 +104,7 @@ export function makePresenceRoom(options: PresenceRoomOptions = {}): PresenceRoo
       const message: ServerEmote = {
         type: "emote",
         id: member.id,
-        kind: "spark",
+        kind,
         nonce: ++emoteNonce,
       };
       for (const recipient of [...members.values()]) recipient.sink(message);

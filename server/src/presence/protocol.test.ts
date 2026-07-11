@@ -37,6 +37,18 @@ describe("presence protocol", () => {
     expect(parseClientMessage(JSON.stringify({ type: "chat", text: "hello" }))).toBeNull();
   });
 
+  it.each(["laugh", "fire", "skull"] as const)("parses the %s emote", (kind) => {
+    expect(parseClientMessage(JSON.stringify({ type: "emote", kind }))).toEqual({
+      type: "emote",
+      kind,
+    });
+  });
+
+  it("rejects legacy and unknown emotes", () => {
+    expect(parseClientMessage(JSON.stringify({ type: "emote", kind: "spark" }))).toBeNull();
+    expect(parseClientMessage(JSON.stringify({ type: "emote", kind: "wave" }))).toBeNull();
+  });
+
   it("rejects a non-finite pose", () => {
     expect(
       parseClientMessage(

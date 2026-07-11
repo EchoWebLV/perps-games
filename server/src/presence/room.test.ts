@@ -105,10 +105,10 @@ describe("presence room", () => {
     const joined = room.join("private-user", hello(), sink().send);
     if (!joined.ok) throw new Error("expected join to succeed");
 
-    expect(room.emote(joined.id, 0)).toEqual({ ok: true });
-    expect(room.emote(joined.id, 0)).toEqual({ ok: true });
-    expect(room.emote(joined.id, 999)).toEqual({ ok: false, code: "rate_limited" });
-    expect(room.emote(joined.id, 1_000)).toEqual({ ok: true });
+    expect(room.emote(joined.id, "fire", 0)).toEqual({ ok: true });
+    expect(room.emote(joined.id, "fire", 0)).toEqual({ ok: true });
+    expect(room.emote(joined.id, "fire", 999)).toEqual({ ok: false, code: "rate_limited" });
+    expect(room.emote(joined.id, "fire", 1_000)).toEqual({ ok: true });
   });
 
   it("broadcasts accepted emotes with a fresh nonce", () => {
@@ -119,12 +119,12 @@ describe("presence room", () => {
     const second = room.join("private-2", hello("rider_2"), secondSink.send);
     if (!first.ok || !second.ok) throw new Error("expected joins to succeed");
 
-    room.emote(first.id, 0);
-    room.emote(second.id, 1_000);
+    room.emote(first.id, "laugh", 0);
+    room.emote(second.id, "skull", 1_000);
 
     expect(firstSink.messages).toEqual([
-      { type: "emote", id: "p1", kind: "spark", nonce: 1 },
-      { type: "emote", id: "p2", kind: "spark", nonce: 2 },
+      { type: "emote", id: "p1", kind: "laugh", nonce: 1 },
+      { type: "emote", id: "p2", kind: "skull", nonce: 2 },
     ]);
     expect(secondSink.messages).toEqual(firstSink.messages);
   });

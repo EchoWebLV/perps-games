@@ -136,6 +136,22 @@ describe("presence websocket", () => {
     });
   });
 
+  it("preserves the selected emote kind through the websocket", async () => {
+    const ctx = await setup();
+    const first = await authenticate(ctx, "alice_1");
+    const second = await authenticate(ctx, "bob_2");
+    const outbound = nextJson(second.socket);
+
+    first.socket.send(JSON.stringify({ type: "emote", kind: "fire" }));
+
+    await expect(outbound).resolves.toMatchObject({
+      type: "emote",
+      id: first.id,
+      kind: "fire",
+      nonce: expect.any(Number),
+    });
+  });
+
   it("removes room membership when a socket closes", async () => {
     const ctx = await setup();
     const { socket } = await authenticate(ctx, "alice_1");
