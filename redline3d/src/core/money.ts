@@ -1,3 +1,5 @@
+import { ACTIVE_STAKE_CURRENCY, formatStakeUnits } from "./stake-currency";
+
 /**
  * Money formatting. The soft-coin ledger is denominated in CENTS — 1 coin = $0.01 —
  * so settlement (`Math.floor(stake * equity * (1-edge))`) keeps cent-level resolution.
@@ -14,7 +16,7 @@ export function usd(coins: number): string {
  * the cents model used — so this is the SOL-native sibling of `usd()`.
  */
 export function sol(units: number): string {
-  return (units / 100).toFixed(2) + " SOL";
+  return formatStakeUnits(units, 2, ACTIVE_STAKE_CURRENCY);
 }
 
 /**
@@ -23,5 +25,5 @@ export function sol(units: number): string {
  * and may be fractional (pass the un-floored value so the extra digit is meaningful).
  */
 export function sol3(units: number): string {
-  return (units / 100).toFixed(3) + " SOL";
+  return formatStakeUnits(units, 3, ACTIVE_STAKE_CURRENCY);
 }

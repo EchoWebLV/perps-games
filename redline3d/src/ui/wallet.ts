@@ -1,4 +1,5 @@
 import { qrMatrix, qrSvg } from "./qr";
+import { ACTIVE_STAKE_CURRENCY, type StakeCurrency } from "../core/stake-currency";
 
 /**
  * Wallet page — a full-screen synthwave overlay opened from the balance chip.
@@ -19,6 +20,7 @@ export interface Wallet {
 }
 
 export interface WalletOpts {
+  currency?: StakeCurrency;
   /** The on-chain session wallet address — CALLED on every open (a Privy wallet only exists
    *  after login). Returns "" before the wallet is ready (pre-login). */
   address: () => string;
@@ -125,6 +127,7 @@ function injectStyles() {
 
 export function createWallet(parent: HTMLElement, opts: WalletOpts): Wallet {
   injectStyles();
+  const currency = opts.currency ?? ACTIVE_STAKE_CURRENCY;
 
   const overlay = document.createElement("div");
   overlay.style.cssText = [
@@ -139,7 +142,7 @@ export function createWallet(parent: HTMLElement, opts: WalletOpts): Wallet {
     `<div class="wlt-head"><span class="lbl">wallet</span><button class="wlt-x" data-act="close" aria-label="Close">✕</button></div>` +
     `<div class="wlt-hero"><div class="wlt-hero-glow"></div>
        <div class="wlt-hero-top">${solCoin(22)}<span class="wlt-hero-lbl">Balance</span></div>
-       <div class="wlt-bal"><span id="wltBal">0.000</span><span class="wlt-bal-cur">SOL</span></div>
+       <div class="wlt-bal"><span id="wltBal">0.000</span><span class="wlt-bal-cur">${currency.symbol}</span></div>
        <div class="wlt-hero-sub">Solana · devnet</div>
      </div>` +
     // recv view is filled live by renderAddressUI() on each open — a Privy address only exists
@@ -157,15 +160,15 @@ export function createWallet(parent: HTMLElement, opts: WalletOpts): Wallet {
     if (!opts.fetchWalletSol) return;
     void opts.fetchWalletSol().then((sol) => {
       if (sol == null) { heroSub.textContent = "Solana · devnet"; return; }
-      const inPlay = opts.onchain.status().playCents / 100;
-      heroSub.textContent = `Solana · devnet · wallet ${fmt(sol)} · in play ${fmt(inPlay)}`;
+      const inPlay = opts.onchain.status().playCents / 10 ** currency.displayUnitDecimals;
+      heroSub.textContent = `Solana · devnet · wallet ${fmt(sol)} ${currency.symbol} · in play ${fmt(inPlay)} ${currency.symbol}`;
     }).catch(() => { /* keep the plain network line */ });
   };
 
   let busy = false;
 
   const renderBalance = (bump = false) => {
-    balEl.textContent = fmt(opts.balance() / 100); // centi-SOL units → SOL
+    balEl.textContent = fmt(opts.balance() / 10 ** currency.displayUnitDecimals);
     if (bump) { balEl.parentElement!.classList.remove("bump"); void balEl.offsetWidth; balEl.parentElement!.classList.add("bump"); }
   };
 
@@ -179,9 +182,9 @@ export function createWallet(parent: HTMLElement, opts: WalletOpts): Wallet {
       const qr = qrSvg(qrMatrix(addr, "M"), { dark: "#0a0820", light: "#ffffff", margin: 3 });
       recv.innerHTML =
         `<div class="wlt-qr-wrap"><div class="wlt-qr">${qr}</div></div>` +
-        `<div class="wlt-net">${solCoin(15)} SOL · Solana devnet</div>` +
+        `<div class="wlt-net">${solCoin(15)} ${currency.symbol} · Solana devnet</div>` +
         `<div class="wlt-addr"><span title="${addr}">${shortAddr(addr)}</span><button class="wlt-copy" id="wltCopy">${svg(ICONS.copy, 13)}Copy</button></div>` +
-        `<div class="wlt-note wlt-warn">Send SOL to this address to fund your wallet. Your first GO wraps it into your play balance.</div>`;
+        `<div class="wlt-note wlt-warn">Send ${currency.symbol} to this address to fund your wallet. Your first GO moves it into your play balance.</div>`;
       const copyBtn = recv.querySelector<HTMLButtonElement>("#wltCopy");
       if (copyBtn) {
         let copyTimer = 0;

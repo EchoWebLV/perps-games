@@ -1,4 +1,5 @@
 import { PublicKey } from "@solana/web3.js";
+import { ACTIVE_STAKE_CURRENCY } from "../core/stake-currency";
 
 // Devnet on-chain constants for the deployed `raider` program. Endpoint defaults
 // mirror onchain/raider/tests/helpers.ts. BASE_WS is pinned to public devnet so any
@@ -30,8 +31,8 @@ export const CHAIN = {
   // Stake mint: wSOL — the mint-agnostic program plays in native SOL (the client wraps on
   // buy-in and unwraps on withdraw, invisibly). The player flow is simply "send SOL → GO".
   // (The legacy stuck-delegated [b"house", wSOL] pot was abandoned by the house2 seed bump.)
-  STAKE_MINT: "So11111111111111111111111111111111111111112",
-  STAKE_DECIMALS: 9,
+  STAKE_MINT: ACTIVE_STAKE_CURRENCY.mint,
+  STAKE_DECIMALS: ACTIVE_STAKE_CURRENCY.decimals,
 } as const;
 
 /** The singleton on-chain feed registry PDA (`[b"feeds"]`) — read by `open` to bind a round to its asset feed. */

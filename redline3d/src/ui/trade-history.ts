@@ -1,4 +1,5 @@
 import type { TradeHistoryItem, TradeHistoryPage } from "../core/api";
+import { ACTIVE_STAKE_CURRENCY, type StakeCurrency } from "../core/stake-currency";
 
 export interface TradeHistoryPanel {
   open(): Promise<void>;
@@ -7,6 +8,7 @@ export interface TradeHistoryPanel {
 }
 
 interface TradeHistoryDependencies {
+  currency?: StakeCurrency;
   signedIn(): boolean;
   flush(): Promise<void>;
   load(cursor?: string): Promise<TradeHistoryPage>;
@@ -143,6 +145,7 @@ export function createTradeHistory(
   deps: TradeHistoryDependencies,
 ): TradeHistoryPanel {
   const doc = parent.ownerDocument;
+  const currency = deps.currency ?? ACTIVE_STAKE_CURRENCY;
   addStyles(doc);
 
   const make = <K extends keyof HTMLElementTagNameMap>(
@@ -188,7 +191,8 @@ export function createTradeHistory(
   let loadedCursors = new Set<string>();
   let returnFocus: HTMLElement | null = null;
 
-  const formatSol = (base: number): string => `${(base / 1e9).toFixed(3)} SOL`;
+  const formatStake = (base: number): string =>
+    `${(base / 10 ** currency.decimals).toFixed(3)} ${currency.symbol}`;
   const formatPrice = (value: number): string => value.toLocaleString(undefined, {
     maximumFractionDigits: 4,
   });
@@ -223,13 +227,13 @@ export function createTradeHistory(
 
     const values = make("div", "trade-history-values");
     values.append(
-      make("span", "trade-history-stake", `Stake ${formatSol(trade.stakeBase)}`),
+      make("span", "trade-history-stake", `Stake ${formatStake(trade.stakeBase)}`),
       make(
         "span",
         "trade-history-prices",
         `${formatPrice(trade.entryPrice)} → ${formatPrice(trade.exitPrice)}`,
       ),
-      make("span", "trade-history-payout", `Payout ${formatSol(trade.payoutBase)}`),
+      make("span", "trade-history-payout", `Payout ${formatStake(trade.payoutBase)}`),
     );
 
     const pnlClass = trade.pnlBase > 0
@@ -241,7 +245,7 @@ export function createTradeHistory(
     values.appendChild(make(
       "span",
       `trade-history-pnl ${pnlClass}`,
-      `P&L ${pnlSign}${formatSol(Math.abs(trade.pnlBase))}`,
+      `P&L ${pnlSign}${formatStake(Math.abs(trade.pnlBase))}`,
     ));
 
     row.append(date, main, values);

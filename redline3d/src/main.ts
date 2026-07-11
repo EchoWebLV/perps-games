@@ -21,6 +21,7 @@ import { createMarketShock } from "./render/market-shock";
 import { RoundEngine } from "./core/round";
 import type { Snapshot } from "./core/types";
 import { sol3 } from "./core/money";
+import { ACTIVE_STAKE_CURRENCY, baseToUnits, unitsToBase } from "./core/stake-currency";
 import { clampInt } from "./core/round-sync";
 import { niceLev, tToLev } from "./core/leverage";
 import { liqPriceOf } from "./core/economics";
@@ -178,10 +179,7 @@ const engine = new RoundEngine();
 // still drives the smooth visual ×; the on-chain Round is the only money truth.
 // The play ledger is denominated in CENTI-SOL units (1 unit = 0.01 SOL). With 9-decimal
 // wSOL this maps a unit to 10^7 lamports — the same ×100 scale the old cents model used.
-const BASE_PER_UNIT = 10 ** (CHAIN.STAKE_DECIMALS - 2); // 9-decimal SOL, 0.01-SOL units → 10_000_000 lamports
-const unitsToBase = (units: number) => units * BASE_PER_UNIT;
-const baseToUnits = (base: bigint) => Number(base / BigInt(BASE_PER_UNIT));
-const BUY_IN_BASE = 100_000_000; // 0.1 SOL auto buy-in float on the first GO (covers one max-stake round)
+const BUY_IN_BASE = ACTIVE_STAKE_CURRENCY.initialBuyInBase;
 let roundActive = false; // a round is open locally (de-dupes finalizeSettled across crank/poll/close)
 let simRound = false;    // guest practice round: engine-only, no wallet, no chain — free to try
 let settling = false;    // a close tx is in flight
@@ -201,12 +199,12 @@ function syncOnchainBalance() {
   // Guests have no wallet — the chip reads "practice" and never renders SOL numbers.
   if (identity?.mode === "guest") { hud.setTryMode(true); return; }
   hud.setTryMode(false);
-  // Un-floored centi-SOL (base lamports / BASE_PER_UNIT) so true 3-decimal SOL survives.
-  const play = Number(session.balance()) / BASE_PER_UNIT;
+  // Keep fractional display units so sub-0.01 SOL payouts remain visible.
+  const play = baseToUnits(session.balance());
   const render = () => { balance = play + walletSolUnits; hud.setBalance(balance); walletUI.setBalance(balance); };
   render();
   // refresh the wallet side in the background (one getBalance; a pre-sign-in call just keeps 0)
-  void session.walletSol().then((sol) => { walletSolUnits = Number(sol) / BASE_PER_UNIT; render(); }).catch(() => {});
+  void session.walletSol().then((sol) => { walletSolUnits = baseToUnits(sol); render(); }).catch(() => {});
 }
 // The game is fully on-chain: the SOL play balance + round loop live in `session` (the ER round).
 // `balance` is the displayed cash chip, sourced only from the on-chain play balance (centi-SOL units).
@@ -304,7 +302,7 @@ addEventListener("pagehide", () => priceSource.stop());
 addEventListener("pageshow", (e) => { if ((e as PageTransitionEvent).persisted) priceSource.restart(); });
 
 // ui
-const hud = createHud(hudRoot);
+const hud = createHud(hudRoot, ACTIVE_STAKE_CURRENCY);
 const tach = createTach(hud.tachMount);
 const controls = createControls(hud.ctrlMount, hud.goMount, hud.pedalMount);
 const minimap = createMinimap(hud.miniCanvas, quality.pixelRatioCap);
@@ -379,6 +377,7 @@ const tradeRecorder = createTradeHistoryRecorder({
 });
 const tradeHistoryBridge = createTradeHistoryBridge(tradeRecorder);
 const tradeHistory = createTradeHistory(hudRoot, {
+  currency: ACTIVE_STAKE_CURRENCY,
   signedIn: () => identity?.mode === "privy" && signedIn,
   flush: () => tradeHistoryBridge.flush(),
   load: (cursor) => api.listTrades(cursor),
@@ -420,11 +419,12 @@ scrap.set(upgrades.scrap(), false);
 
 // wallet page (opened by tapping the balance chip) — shows the player's deposit QR.
 const walletUI = createWallet(hudRoot, {
+  currency: ACTIVE_STAKE_CURRENCY,
   // the wallet shown for funding is the on-chain session wallet (Privy embedded / dev keypair)
   address: () => session.address(),
   balance: () => balance,
   // the wallet's own SOL (lamports → SOL), so a deposit visibly arrives before the first GO
-  fetchWalletSol: async () => { try { return Number(await session.walletSol()) / 1e9; } catch { return null; } },
+  fetchWalletSol: async () => { try { return Number(await session.walletSol()) / 10 ** ACTIVE_STAKE_CURRENCY.decimals; } catch { return null; } },
   onchain: {
     status: () => ({ delegated: session.delegated(), playCents: baseToUnits(session.balance()) }),
     // One player action. "Cash out" quietly undelegates the ER session (if one is live) and THEN
@@ -1046,7 +1046,7 @@ function finalizeSettled(info: { outcome: number; outcomeName: string; payout: b
   if (engine.getPhase() === "live") engine.cashout(price, now); // freeze the visual at the live value
   const finalEq = engine.snapshot(price, now).equity;
   const liq = info.outcome === 2; // 0 cashout · 1 cap · 2 liq · 3 time
-  const payoutUnits = Number(info.payout) / BASE_PER_UNIT; // un-floored centi-SOL → true 3-decimal SOL
+  const payoutUnits = baseToUnits(info.payout);
   nearDeath = false;
   if (liq) deathsDoor.kill(); else deathsDoor.clear(); // Skull: shatter on liq, stand down otherwise (no-op off-Skull)
   autoExit.setLive(false); // Pink Rod panel: unlock for the next round
