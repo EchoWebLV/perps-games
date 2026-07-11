@@ -1,0 +1,109 @@
+import { describe, expect, it } from "vitest";
+import {
+  MAX_MESSAGE_BYTES,
+  normalizePose,
+  parseClientMessage,
+  type ClientPose,
+} from "./protocol.js";
+
+describe("presence protocol", () => {
+  it("parses a valid hello", () => {
+    expect(
+      parseClientMessage(
+        JSON.stringify({
+          type: "hello",
+          token: "session-token",
+          name: "alice_1",
+          carId: "Orion",
+        }),
+      ),
+    ).toEqual({
+      type: "hello",
+      token: "session-token",
+      name: "alice_1",
+      carId: "Orion",
+    });
+  });
+
+  it("rejects an invalid driver name", () => {
+    expect(
+      parseClientMessage(
+        JSON.stringify({ type: "hello", token: "token", name: "Alice!", carId: "Orion" }),
+      ),
+    ).toBeNull();
+  });
+
+  it("rejects an unknown message type", () => {
+    expect(parseClientMessage(JSON.stringify({ type: "chat", text: "hello" }))).toBeNull();
+  });
+
+  it("rejects a non-finite pose", () => {
+    expect(
+      parseClientMessage(
+        JSON.stringify({
+          type: "pose",
+          x: null,
+          z: 0,
+          heading: 0,
+          speed: 0,
+          carId: "Orion",
+        }).replace('"x":null', '"x":1e999'),
+      ),
+    ).toBeNull();
+  });
+
+  it("normalizes a finite pose to lobby limits", () => {
+    const parsed = parseClientMessage(
+      JSON.stringify({
+        type: "pose",
+        x: 999,
+        z: -999,
+        heading: Math.PI * 3,
+        speed: 999,
+        carId: "Orion",
+      }),
+    );
+    expect(parsed?.type).toBe("pose");
+    expect(normalizePose(parsed as ClientPose)).toEqual({
+      x: 120,
+      z: -160,
+      heading: -Math.PI,
+      speed: 48,
+      carId: "Orion",
+    });
+  });
+
+  it("clamps the opposite coordinate and speed limits", () => {
+    const parsed = parseClientMessage(
+      JSON.stringify({
+        type: "pose",
+        x: -999,
+        z: 999,
+        heading: 0,
+        speed: -10,
+        carId: "Orion",
+      }),
+    );
+
+    expect(normalizePose(parsed as ClientPose)).toMatchObject({ x: -120, z: 160, speed: 0 });
+  });
+
+  it("rejects a car id longer than 64 characters", () => {
+    expect(
+      parseClientMessage(
+        JSON.stringify({
+          type: "pose",
+          x: 0,
+          z: 0,
+          heading: 0,
+          speed: 0,
+          carId: "x".repeat(65),
+        }),
+      ),
+    ).toBeNull();
+  });
+
+  it("rejects a message larger than the byte limit", () => {
+    expect(parseClientMessage(" ".repeat(MAX_MESSAGE_BYTES + 1))).toBeNull();
+  });
+});
