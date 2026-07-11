@@ -166,7 +166,7 @@
       // Loading bar runs immediately (before the module bundle). It eases toward
       // 90% while assets load; main.ts calls window.hideSplash() when the scene +
       // car model are ready, which fills to 100% and fades out (min on-screen time
-      // so it never just flashes; 9s safety so the player is never trapped).
+      // so it never just flashes; a bounded 20s fallback keeps the player from being trapped).
       (function () {
         var fill = document.getElementById("splashfill"),
           pct = document.getElementById("splashpct"),
