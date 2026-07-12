@@ -98,7 +98,7 @@ test("paints the clipped sign-in focus ring inside the primary CTA", () => {
 
   expect(signInRule).toBeDefined();
   expect(signInRule ?? "").toContain("outline:none");
-  expect(signInRule ?? "").toMatch(/box-shadow:[^;]*inset[^;]*var\(--cyan\)/);
+  expect(signInRule ?? "").toContain("box-shadow:inset 0 0 0 3px #04130d,inset 0 0 0 5px #eef2ff");
   expect(scopedStyles).toMatch(
     /#idguest\.identity-secondary:focus-visible,\s*#idname:focus-visible\s*\{[^}]*outline:2px solid var\(--cyan\)/,
   );

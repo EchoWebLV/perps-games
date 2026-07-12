@@ -69,7 +69,7 @@ export function createIdentityGate(
     `<style>
   #idsignin.identity-primary:focus-visible {
     outline:none;
-    box-shadow:inset 0 0 0 3px var(--cyan);
+    box-shadow:inset 0 0 0 3px #04130d,inset 0 0 0 5px #eef2ff;
   }
   #idguest.identity-secondary:focus-visible,
   #idname:focus-visible {
