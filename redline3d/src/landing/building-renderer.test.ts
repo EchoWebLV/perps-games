@@ -1,4 +1,6 @@
-import { readFile } from "node:fs/promises";
+import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import packageText from "../../package.json?raw";
 
@@ -20,6 +22,20 @@ type WebPChunk = {
 function assertWebP(condition: unknown, message: string): asserts condition {
   if (!condition) throw new Error(message);
 }
+
+const runDwebp = async (args: string[]) => {
+  const childProcessModule = "node:child_process";
+  const { execFile } = await import(/* @vite-ignore */ childProcessModule) as typeof import("node:child_process");
+  return new Promise<number>((resolve, reject) => {
+    execFile("dwebp", args, (error) => {
+      if (error?.code === "ENOENT") {
+        reject(new Error("dwebp is required on PATH to verify committed WebP decodability"));
+        return;
+      }
+      resolve(typeof error?.code === "number" ? error.code : error ? 1 : 0);
+    });
+  });
+};
 
 const validateBuildingWebP = (bytes: Uint8Array) => {
   assertWebP(bytes.length >= 12, "WebP container is shorter than its RIFF header");
@@ -55,15 +71,21 @@ const validateBuildingWebP = (bytes: Uint8Array) => {
   assertWebP(vp8xChunk !== undefined, "missing VP8X chunk");
   assertWebP(vp8xChunk.payloadSize >= 10, "VP8X payload is too short");
   assertWebP((bytes[vp8xChunk.payloadOffset] & 0x10) === 0x10, "missing alpha flag");
-  assertWebP(readU24(bytes, vp8xChunk.payloadOffset + 4) + 1 === 1024, "unexpected canvas width");
-  assertWebP(readU24(bytes, vp8xChunk.payloadOffset + 7) + 1 === 720, "unexpected canvas height");
+  const canvasWidth = readU24(bytes, vp8xChunk.payloadOffset + 4) + 1;
+  const canvasHeight = readU24(bytes, vp8xChunk.payloadOffset + 7) + 1;
+  assertWebP(canvasWidth === 1024, "unexpected canvas width");
+  assertWebP(canvasHeight === 720, "unexpected canvas height");
 
   const alphChunk = chunks.find((chunk) => chunk.type === "ALPH");
   assertWebP(alphChunk !== undefined, "missing ALPH chunk");
   assertWebP(alphChunk.payloadSize >= 2, "ALPH payload is too short");
   const alphControl = bytes[alphChunk.payloadOffset];
   assertWebP((alphControl & 0xc0) === 0, "ALPH control reserved bits must be zero");
-  assertWebP((alphControl & 0x03) <= 1, "ALPH compression method is unsupported");
+  const alphCompression = alphControl & 0x03;
+  const alphPreprocessing = (alphControl >> 4) & 0x03;
+  assertWebP(alphCompression <= 1, "ALPH compression method is unsupported");
+  assertWebP(alphPreprocessing <= 1, "ALPH preprocessing method is unsupported");
+  if (alphCompression === 0) assertWebP(alphChunk.payloadSize === 1 + (canvasWidth * canvasHeight), "raw ALPH payload size does not match canvas");
 
   const vp8Chunk = chunks.find((chunk) => chunk.type === "VP8 ");
   assertWebP(vp8Chunk !== undefined, "missing VP8 image payload");
@@ -111,8 +133,24 @@ const makeWebPFixture = (chunks: WebPChunkFixture[]) => {
 };
 
 const validVp8xPayload = Uint8Array.of(0x10, 0, 0, 0, 0xff, 0x03, 0, 0xcf, 0x02, 0);
-const validAlphPayload = Uint8Array.of(0, 0);
+const validAlphPayload = Uint8Array.of(1, 0);
 const validVp8Payload = Uint8Array.of(0x30, 0, 0, 0x9d, 0x01, 0x2a, 0, 0x04, 0xd0, 0x02, 0);
+
+const makeBuildingWebPFixture = (alphPayload = validAlphPayload, vp8Payload = validVp8Payload) => makeWebPFixture([
+  { type: "VP8X", payload: validVp8xPayload },
+  { type: "ALPH", payload: alphPayload },
+  { type: "VP8 ", payload: vp8Payload },
+]);
+
+const findChunk = (bytes: Uint8Array, type: string) => {
+  let cursor = 12;
+  while (cursor < bytes.length) {
+    const payloadSize = readU32(bytes, cursor + 4);
+    if (readFourCC(bytes, cursor) === type) return { payloadOffset: cursor + 8, payloadSize };
+    cursor += 8 + payloadSize + (payloadSize % 2);
+  }
+  throw new Error(`missing ${type} fixture chunk`);
+};
 
 describe("landing building renderer", () => {
   it("renders the real game buildings through a transparent orthographic scene", () => {
@@ -145,6 +183,20 @@ describe("landing building renderer", () => {
     for (const building of ["track", "garage", "upgrades", "crates"]) {
       const bytes = await readFile(new URL(`../../public/assets/landing/building-${building}.webp`, import.meta.url));
       expect(() => validateBuildingWebP(bytes)).not.toThrow();
+    }
+  });
+
+  it("decodes every committed building WebP with dwebp", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "perps-rider-dwebp-"));
+    try {
+      for (const building of ["track", "garage", "upgrades", "crates"]) {
+        const input = new URL(`../../public/assets/landing/building-${building}.webp`, import.meta.url).pathname;
+        const output = join(directory, `${building}.pam`);
+        expect(await runDwebp([input, "-pam", "-o", output])).toBe(0);
+        expect((await readFile(output)).length).toBeGreaterThan(0);
+      }
+    } finally {
+      await rm(directory, { recursive: true, force: true });
     }
   });
 
@@ -191,5 +243,83 @@ describe("landing building renderer", () => {
     ]);
 
     expect(() => validateBuildingWebP(bytes)).toThrow("JUNK pad byte must be zero");
+  });
+
+  it("rejects reserved ALPH control bits", () => {
+    const alphPayload = Uint8Array.from(validAlphPayload);
+    alphPayload[0] = 0x41;
+
+    expect(() => validateBuildingWebP(makeBuildingWebPFixture(alphPayload))).toThrow("ALPH control reserved bits must be zero");
+  });
+
+  it("rejects unsupported ALPH compression", () => {
+    const alphPayload = Uint8Array.from(validAlphPayload);
+    alphPayload[0] = 0x02;
+
+    expect(() => validateBuildingWebP(makeBuildingWebPFixture(alphPayload))).toThrow("ALPH compression method is unsupported");
+  });
+
+  it.each([2, 3])("rejects ALPH preprocessing method %i", (preprocessing) => {
+    const alphPayload = Uint8Array.from(validAlphPayload);
+    alphPayload[0] = (preprocessing << 4) | 1;
+
+    expect(() => validateBuildingWebP(makeBuildingWebPFixture(alphPayload))).toThrow("ALPH preprocessing method is unsupported");
+  });
+
+  it("rejects a raw ALPH plane with the wrong length", () => {
+    expect(() => validateBuildingWebP(makeBuildingWebPFixture(Uint8Array.of(0, 0)))).toThrow("raw ALPH payload size does not match canvas");
+  });
+
+  it("rejects a VP8 interframe", () => {
+    const vp8Payload = Uint8Array.from(validVp8Payload);
+    vp8Payload[0] |= 0x01;
+
+    expect(() => validateBuildingWebP(makeBuildingWebPFixture(validAlphPayload, vp8Payload))).toThrow("VP8 payload is not a key frame");
+  });
+
+  it("rejects a bad VP8 key-frame start code", () => {
+    const vp8Payload = Uint8Array.from(validVp8Payload);
+    vp8Payload[3] = 0;
+
+    expect(() => validateBuildingWebP(makeBuildingWebPFixture(validAlphPayload, vp8Payload))).toThrow("VP8 key-frame start code is invalid");
+  });
+
+  it("rejects wrong VP8 frame dimensions", () => {
+    const vp8Payload = Uint8Array.from(validVp8Payload);
+    vp8Payload[6] = 1;
+
+    expect(() => validateBuildingWebP(makeBuildingWebPFixture(validAlphPayload, vp8Payload))).toThrow("unexpected VP8 frame width");
+  });
+
+  it("rejects an empty VP8 first partition", () => {
+    const vp8Payload = Uint8Array.from(validVp8Payload);
+    vp8Payload[0] = 0x10;
+
+    expect(() => validateBuildingWebP(makeBuildingWebPFixture(validAlphPayload, vp8Payload))).toThrow("VP8 first partition is empty");
+  });
+
+  it("rejects an oversized VP8 first partition", () => {
+    const vp8Payload = Uint8Array.from(validVp8Payload);
+    vp8Payload[0] = 0x50;
+
+    expect(() => validateBuildingWebP(makeBuildingWebPFixture(validAlphPayload, vp8Payload))).toThrow("VP8 first partition exceeds payload");
+  });
+
+  it("has dwebp reject a structurally valid WebP with a zeroed compressed ALPH body", async () => {
+    const bytes = await readFile(new URL("../../public/assets/landing/building-track.webp", import.meta.url));
+    const corruptedBytes = Uint8Array.from(bytes);
+    const alphChunk = findChunk(corruptedBytes, "ALPH");
+    corruptedBytes.fill(0, alphChunk.payloadOffset + 1, alphChunk.payloadOffset + alphChunk.payloadSize);
+    expect(() => validateBuildingWebP(corruptedBytes)).not.toThrow();
+
+    const directory = await mkdtemp(join(tmpdir(), "perps-rider-dwebp-corrupt-"));
+    try {
+      const input = join(directory, "corrupt.webp");
+      const output = join(directory, "corrupt.pam");
+      await writeFile(input, corruptedBytes);
+      expect(await runDwebp([input, "-pam", "-o", output])).not.toBe(0);
+    } finally {
+      await rm(directory, { recursive: true, force: true });
+    }
   });
 });
