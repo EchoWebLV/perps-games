@@ -80,7 +80,9 @@ describe("Perps Rider landing shell", () => {
     expect(railwayConfig).toContain('"/redline3d/**"');
   });
 
-  it("ships canonical local MagicBlock and Solana marks", () => {
+  it("ships canonical local MagicBlock and Solana marks", async () => {
+    const nodeCrypto = "node:crypto";
+    const { createHash } = await import(nodeCrypto);
     const magicblock = brandAssets["../../public/assets/brands/magicblock-logo.svg"] as string | undefined;
     const solana = brandAssets["../../public/assets/brands/solana-mark.svg"] as string | undefined;
     const sources = Object.values(brandDocs)[0] as string | undefined;
@@ -91,8 +93,18 @@ describe("Perps Rider landing shell", () => {
     expect(solana).toContain('viewBox="0 0 101 88"');
     expect(solana).toContain('stop-color="#9945FF"');
     expect(solana).toContain('stop-color="#19FB9B"');
+    expect(createHash("sha256").update(magicblock ?? "").digest("hex")).toBe(
+      "adb0d0abd1ba7161d784c222d7a4821667e6b7b343e9810ceed39736fc03017c",
+    );
+    expect(createHash("sha256").update(solana ?? "").digest("hex")).toBe(
+      "3d3401109aa061dec40a8659f1847817a8e647f98de1e65e76e86a95bbe1f08a",
+    );
     expect(sources).toContain("https://www.magicblock.xyz/");
     expect(sources).toContain("https://solana.com/branding");
+    expect(sources).toContain(
+      "https://cdn.prod.website-files.com/67dd3f471f62a240dd544dd8/682efe2b89d00ecb838fa333_Frame%2085.svg",
+    );
+    expect(sources).toContain("https://solana.com/src/img/branding/solanaLogoMark.svg");
     expect(sources).toContain("Retrieved: 2026-07-13");
   });
 
