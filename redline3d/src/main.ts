@@ -40,9 +40,11 @@ import { createInventory } from "./core/inventory";
 import { createSessionAuth } from "./core/auth-session";
 import { ApiError, createApi } from "./core/api";
 import { showLocalEconomyMenu } from "./core/menu-visibility";
+import { highwayAvailable } from "./core/highway-access";
 import { createTradeHistoryRecorder } from "./core/trade-history-recorder";
 import { createTradeHistoryBridge } from "./core/trade-history-live";
 import { createAccountSync } from "./core/account-sync";
+import { accountSignInTransition } from "./core/identity";
 import { createPresenceClient, type PresenceClient, type PresencePlayer, type PresenceHighway } from "./core/presence";
 import { routePresenceEmote } from "./core/presence-emote-route";
 import { presenceHudShouldShow, presenceShouldConnect } from "./core/presence-lifecycle";
@@ -264,14 +266,10 @@ async function ensureSignedIn(fresh = false): Promise<boolean> {
 // Bind the Privy identity to the server and pull coins/scrap/cars. Offline/failure → the game keeps
 // running on the local cache; the next successful sign-in reconciles (server wins).
 //
-// While a GUEST is switching to an account at the gate, the pre-reload bind must offer NOTHING for
-// first-bind migration: the in-memory objects still hold the guest's coins/cars at that moment, and
-// a brand-new (empty) server account would adopt them (api.migrate) — the post-reload hydrate would
-// then pull the guest state right back, defeating the identity-scoped save swap. A zeroed snapshot
-// reads as local-empty (hydrate never migrates); whatever it applies locally is irrelevant because
-// the swap wipes + reloads immediately after. The flag dies with the reload, so the post-reload
-// boot reconnect still migrates the ACCOUNT'S own restored progress up to an empty account.
-let switchingFromGuest = false;
+// A first account bind must not migrate the starter state rendered before identity selection. A
+// guest-to-account bind also must not migrate the guest's coins/cars. Only the real guest save swap
+// reloads the page; a fresh visitor keeps the already-warmed scene and continues in place.
+let zeroLocalSnapshotForSignIn = false;
 async function syncAccount(): Promise<void> {
   try {
     const port = {
@@ -280,7 +278,7 @@ async function syncAccount(): Promise<void> {
     };
     await bindAndHydrate({
       api, auth, port, accountSync,
-      localSnapshot: switchingFromGuest
+      localSnapshot: zeroLocalSnapshotForSignIn
         ? { coins: 0, scrap: 0, cars: {}, levels: { turbo: 0, tank: 0, suspension: 0 } }
         : { coins: upgrades.coins(), scrap: upgrades.scrap(), cars: inventory.snapshot(), levels: upgrades.levels() },
     });
@@ -933,7 +931,14 @@ function triggerBuilding(kind: BuildingKind) {
     case "crates": lobbyHud.hide(); crateBox.open(); break;           // open a crate → pull a car
     case "scrapyard": lobbyHud.toast("ScrapYard — coming soon"); break; // collect scrap, not built yet
     case "track": exitFrom = "track"; exitLobby(); break;            // onto the track — full racing HUD, GO lives there
-    case "highway": exitFrom = "highway"; enterHighway(); break;
+    case "highway":
+      if (!highwayAvailable(globalThis.location?.hostname ?? "")) {
+        lobbyHud.toast("Highway coming soon");
+        break;
+      }
+      exitFrom = "highway";
+      enterHighway();
+      break;
   }
 }
 
@@ -2123,20 +2128,20 @@ function showIdentityGate() {
     },
     async onSignIn(name) {
       // fresh = the account picker ALWAYS opens (a lingering Privy session is signed out
-      // first). Resuming belongs to boot reconnect — the gate is where accounts SWITCH.
-      const wasGuest = !identity || identity.mode === "guest"; // the PRIOR rider, read before overwrite
-      switchingFromGuest = wasGuest; // the pre-reload bind offers a ZEROED snapshot — never the guest's
+      // first). Resuming belongs to boot reconnect; the gate is where accounts switch.
+      const transition = accountSignInTransition(identity);
+      zeroLocalSnapshotForSignIn = transition.zeroLocalSnapshot;
       let ok: boolean;
       try { ok = await ensureSignedIn(true); }
-      finally { switchingFromGuest = false; } // consumed by syncAccount inside; never sticks past the gate
+      finally { zeroLocalSnapshotForSignIn = false; }
       if (ok) {
         identity = { name: name ?? "raider_" + session.address().slice(-4).toLowerCase(), mode: "privy" as const };
         saveIdentity(identity);
         reconnectPresenceForIdentity();
-        if (wasGuest) {
-          // Identity-scoped saves (guest → account ONLY — never on a boot reconnect, which
+        if (transition.reloadForSaveSwap) {
+          // Identity-scoped saves (guest to account only, never on a boot reconnect, which
           // would wipe the account's own live state every boot): guest progress is disposable
-          // by design — wipe it, restore this account's stash from its last logout, reload.
+          // by design. Wipe it, restore this account's stash from its last logout, then reload.
           // The reload IS the rehydration: nothing may run in between, or an in-memory
           // persist() would clobber the restored keys. After the boot, the reconnect path
           // re-applies server-wins hydrate + the access wall + how-to + the welcome claim.
@@ -2187,9 +2192,8 @@ if (identity?.mode === "privy") {
     await syncAccount();                 // hydrate coins/scrap/cars + the account's redeemed-code set
     restoreHighwayPosition();
     reconnectPresenceForIdentity();
-    // The gate's sign-in now RELOADS before its own post-wall flow can run (identity-scoped save
-    // swap), so the boot reconnect completes it: wall → how-to (device flag: no-op if ever seen)
-    // → the once-per-account welcome claim (server-side idempotent — granted only once, ever).
+    // A guest-to-account save swap reloads before its post-wall flow can run, so the boot
+    // reconnect completes it. Fresh account sign-ins continue in place on the warmed scene.
     accountAccessThenEnter(() => { maybeShowHowTo(() => { void offerWelcomeAccount(); }); });
   }).catch(() => {});
 }
