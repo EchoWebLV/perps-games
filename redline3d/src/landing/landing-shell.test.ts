@@ -91,6 +91,17 @@ describe("Perps Rider landing shell", () => {
     expect(entry).toContain("video.play().catch");
   });
 
+  it("offers a persistent motion control that responds to system and page visibility", () => {
+    expect(landingHtml).toContain("data-motion-toggle");
+    expect(landingHtml).toContain('aria-pressed="true"');
+    const entry = Object.values(landingScripts)[0] as string;
+    expect(entry).toContain('"perps-rider:motion-paused"');
+    expect(entry).toContain('reduceMotion.addEventListener("change"');
+    expect(entry).toContain('addEventListener("visibilitychange"');
+    expect(landingHtml).toContain('data-motion-section="tutorial"');
+    expect(landingHtml).toContain('data-motion-section="technology"');
+  });
+
   it("shows real model renders for all four Strip buildings", async () => {
     const nodeFs = "node:fs/promises";
     const { readFile } = await import(nodeFs);
