@@ -185,7 +185,13 @@ export function registerRoutes(server: FastifyInstance, deps: RouteDeps): void {
 
   // First-login welcome crate — granted ONCE PER WALLET-BOUND ACCOUNT. Anonymous browser sessions
   // are intentionally rejected so a refresh cannot mint a fresh "first" claim under a new anon id.
-  server.post("/v1/welcome/claim", { preHandler: requireWalletBoundUser }, async (req) => deps.users.claimWelcome(req.userId!));
+  // An already-consumed claim is an explicit conflict, not a successful false result. This keeps
+  // older clients from applying their former inventory-based fallback to a denied second claim.
+  server.post("/v1/welcome/claim", { preHandler: requireWalletBoundUser }, async (req, reply) => {
+    const claim = await deps.users.claimWelcome(req.userId!);
+    if (!claim.granted) return reply.code(409).send({ error: "welcome_already_claimed" });
+    return claim;
+  });
 
   // Redeem an access code — reward granted ONCE PER (account, code) (server-side, atomic + idempotent).
   // Returns { granted: true } only the first time this account redeems this specific code; every

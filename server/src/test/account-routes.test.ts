@@ -178,8 +178,8 @@ describe("POST /v1/welcome/claim (once per account)", () => {
     expect(first.json()).toEqual({ granted: true });
 
     const second = await ctx.server.inject({ method: "POST", url: "/v1/welcome/claim", headers: H, payload: {} });
-    expect(second.statusCode).toBe(200);
-    expect(second.json()).toEqual({ granted: false });
+    expect(second.statusCode).toBe(409);
+    expect(second.json()).toEqual({ error: "welcome_already_claimed" });
   });
 
   it("grants each distinct account once, independently", async () => {
@@ -191,8 +191,12 @@ describe("POST /v1/welcome/claim (once per account)", () => {
     expect((await ctx.server.inject({ method: "POST", url: "/v1/welcome/claim", headers: A, payload: {} })).json()).toEqual({ granted: true });
     expect((await ctx.server.inject({ method: "POST", url: "/v1/welcome/claim", headers: B, payload: {} })).json()).toEqual({ granted: true });
     // each already claimed → both now false
-    expect((await ctx.server.inject({ method: "POST", url: "/v1/welcome/claim", headers: A, payload: {} })).json()).toEqual({ granted: false });
-    expect((await ctx.server.inject({ method: "POST", url: "/v1/welcome/claim", headers: B, payload: {} })).json()).toEqual({ granted: false });
+    const secondA = await ctx.server.inject({ method: "POST", url: "/v1/welcome/claim", headers: A, payload: {} });
+    const secondB = await ctx.server.inject({ method: "POST", url: "/v1/welcome/claim", headers: B, payload: {} });
+    expect(secondA.statusCode).toBe(409);
+    expect(secondA.json()).toEqual({ error: "welcome_already_claimed" });
+    expect(secondB.statusCode).toBe(409);
+    expect(secondB.json()).toEqual({ error: "welcome_already_claimed" });
   });
 
   it("401s without an auth identity", async () => {
