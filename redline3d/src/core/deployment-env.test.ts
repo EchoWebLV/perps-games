@@ -23,6 +23,12 @@ describe("Railway-only API configuration", () => {
     expect(dockerfile.indexOf("ARG VITE_PRIVY_APP_ID")).toBeLessThan(dockerfile.indexOf("RUN npm run build"));
   });
 
+  it("refreshes the public APK inside Railway's persistent models volume", () => {
+    expect(dockerfile).toContain("/opt/perps-rider.apk");
+    expect(dockerfile).toContain("cp /opt/perps-rider.apk /usr/share/caddy/models/perps-rider.apk");
+    expect(dockerfile).toContain("exec caddy run");
+  });
+
   it("refuses to build a native APK without auth and a WebView-safe Solana RPC", () => {
     expect(apkBuildScript).toContain("require_vite_env VITE_PRIVY_APP_ID");
     expect(apkBuildScript).toContain("require_vite_env VITE_BASE_RPC");
