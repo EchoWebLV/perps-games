@@ -1,4 +1,4 @@
-# Perps Raider — Product Roadmap & MVP — master plan
+# Perps Rider — Product Roadmap & MVP — master plan
 
 **Date:** 2026-06-20
 **Status:** reviewed (7 forks locked) — revised after a 4-lens adversarial review

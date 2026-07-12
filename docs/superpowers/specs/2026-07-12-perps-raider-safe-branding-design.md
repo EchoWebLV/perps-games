@@ -1,8 +1,8 @@
-# Perps Raider Safe Branding Design
+# Perps Rider Safe Branding Design
 
 ## Goal
 
-The active product must be presented as **Perps Raider**, never as the former product name.
+The active product must be presented as **Perps Rider**, never as the former product name.
 
 ## Active Surfaces
 
@@ -27,5 +27,5 @@ The automotive term “redline” also remains where it describes the tachometer
 
 ## Verification
 
-Active user-facing files and wallet-signing tests must use `Perps Raider`. Existing Android and local-storage identifiers must remain byte-for-byte compatible.
+Active user-facing files and wallet-signing tests must use `Perps Rider`. Existing Android and local-storage identifiers must remain byte-for-byte compatible.
 

@@ -1,4 +1,4 @@
-# Building the Perps Raider APK (Seeker / Android)
+# Building the Perps Rider APK (Seeker / Android)
 
 Capacitor wraps the Vite web build into a native Android app. The pipeline is:
 
@@ -20,7 +20,7 @@ npm run apk:install    # build, then `adb install -r` to a USB device (needs USB
 ```
 
 `apk:serve` is the route that works on the Seeker: it prints a
-`http://<your-lan-ip>:8077/perps-raider.apk` URL - open it in the phone's browser
+`http://<your-lan-ip>:8077/perps-rider.apk` URL - open it in the phone's browser
 (same Wi-Fi), download, tap, and allow "install unknown apps". Ctrl+C to stop the
 server. (USB/`adb` needs USB debugging enabled on the phone, which can be fiddly.)
 
@@ -35,7 +35,7 @@ build re-bundles the web app and re-syncs it into the Android project.
    options, then enable **USB debugging**.
 2. Plug it into the Mac, approve the RSA fingerprint prompt on the phone.
 3. `npm run apk:install` (or `adb install -r android/app/build/outputs/apk/debug/app-debug.apk`).
-4. Launch **Perps Raider** from the app drawer.
+4. Launch **Perps Rider** from the app drawer.
 
 **Without a cable:** copy `app-debug.apk` to the phone (AirDrop to Files, a
 USB-C drive, or upload somewhere), tap it, and allow "install from unknown
@@ -70,7 +70,7 @@ export ANDROID_HOME=/opt/homebrew/share/android-commandlinetools
 ## Notes
 
 - **App identity** lives in `capacitor.config.ts` (`appId: xyz.redline.game`,
-  `appName: Perps Raider`). Change the `appId` to a domain you control **before**
+  `appName: Perps Rider`). Change the `appId` to a domain you control **before**
   the first store release — changing it later makes Android treat it as a
   different app.
 - **APK size:** the GLB car models in `public/models/` are bundled into the APK

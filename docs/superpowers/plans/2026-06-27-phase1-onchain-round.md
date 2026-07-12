@@ -1,8 +1,8 @@
-# Phase 1 — Core On-Chain Round (Perps Raider) Implementation Plan
+# Phase 1 — Core On-Chain Round (Perps Rider) Implementation Plan
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** On devnet, prove the full non-custodial money + settlement loop for Perps Raider — buy-in → delegate to the MagicBlock ER → open/close a round settled against on-chain Pyth Lazer → undelegate → owner-only withdraw — with a real SPL token and a TypeScript driver.
+**Goal:** On devnet, prove the full non-custodial money + settlement loop for Perps Rider — buy-in → delegate to the MagicBlock ER → open/close a round settled against on-chain Pyth Lazer → undelegate → owner-only withdraw — with a real SPL token and a TypeScript driver.
 
 **Architecture:** A new Anchor program `raider` holds real USDC in a program-owned vault (L1) and tracks play balances in two delegatable u64 ledgers — per-player `PlayerBalance` and a shared `HouseBalance`. A round opens/closes inside the ER, reading the live Lazer BTC price and moving value between the ledgers via a fixed-point port of `@perps/engine`. The house pre-locks each round's maximum payout at open, so it is provably solvent. Only the owner's wallet can withdraw.
 

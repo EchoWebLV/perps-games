@@ -1,5 +1,5 @@
 // =============================================================================
-// House-economics Monte-Carlo for the leveraged arcade-perp game (Perps Raider).
+// House-economics Monte-Carlo for the leveraged arcade-perp game (Perps Rider).
 //
 // Faithful to packages/engine: imports equityOf + payoutOf DIRECTLY and replicates
 // ONLY the finalize outcome->equity mapping (liq=0, cap=CAP, cashout=equityOf) and

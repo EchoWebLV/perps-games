@@ -85,7 +85,7 @@ On the phone, open **Chrome** → type that `http://<mac-ip>:8077/redline.apk` U
 
 **3. First boot → identity gate.**
 Launch **Redline 3D**. Expect: the game scene loads, then a centered card titled
-**PERPS RAIDER** with a **driver name** box, a green **RIDE AS GUEST** button, and a
+**PERPS RIDER** with a **driver name** box, a green **RIDE AS GUEST** button, and a
 **SIGN IN** button. (Code: `src/main.ts` shows the gate when no saved identity;
 `src/ui/identity.ts` draws it.)
 
@@ -118,7 +118,7 @@ round — no wallet, no chain. Confirm the round opens, the price line moves, an
 **6. Open the sign-in gate.**
 If you're in guest mode, open the menu / tap the identity chip to bring the gate back, then
 tap **SIGN IN**. (You can leave the name blank — sign-in doesn't need one; it'll auto-name you
-`raider_<last4>`.) The button changes to **CONNECTING…**.
+`rider_<last4>`.) The button changes to **CONNECTING…**.
 
 - [ ] Button shows **CONNECTING…**.
 - [ ] Within a few seconds a **Privy login panel** slides up **inside the app** (it is an

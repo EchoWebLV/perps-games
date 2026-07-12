@@ -520,7 +520,7 @@ export function createCarPicker(
         `<div class="gtitle"><span class="gtitle-name" style="color:var(--mut)">${displayName}</span><span class="grarity">${gems(0)}</span></div>` +
         `<div class="gcard-win"><div class="gcard-lock">${icon("lock", 30)}<span>LOCKED</span></div></div>` +
         `<div class="gcard-ab"><span class="gcard-ab-ic">${icon("lock")}</span><span class="gcard-ab-tx"><span class="gcard-ab-name" style="color:var(--mut)">Locked</span><span class="gcard-ab-desc">unlock to reveal</span></span></div>` +
-        `<div class="gfoot"><span class="gfoot-brand" style="color:var(--mut);text-shadow:none">PERPS RAIDER</span><span class="gfoot-no">${series}</span></div>`;
+        `<div class="gfoot"><span class="gfoot-brand" style="color:var(--mut);text-shadow:none">PERPS RIDER</span><span class="gfoot-no">${series}</span></div>`;
     } else {
       const p = c.power;
       const ability = p
@@ -531,7 +531,7 @@ export function createCarPicker(
         `<div class="gtitle"><span class="gtitle-name">${displayName}</span><span class="grarity">${gems(rarity)}</span></div>` +
         `<div class="gcard-win"><img class="gcard-art" alt="${displayName}"><div class="gcard-ld"><i></i></div></div>` +
         `<div class="gcard-ab">${ability}</div>` +
-        `<div class="gfoot"><span class="gfoot-brand">PERPS RAIDER</span><span class="gfoot-no">${series}</span></div>`;
+        `<div class="gfoot"><span class="gfoot-brand">PERPS RIDER</span><span class="gfoot-no">${series}</span></div>`;
       const holo = card.querySelector(".gcard-holo") as HTMLElement;
       card.addEventListener("pointermove", (e) => {
         const r = card.getBoundingClientRect();

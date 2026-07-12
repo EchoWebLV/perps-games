@@ -8,7 +8,7 @@
 
 We are abandoning the off-chain session-bankroll wallet direction (the
 `2026-06-27-session-bankroll-wallet-game-loop-design.md` doc and its private
-Postgres ledger) and rebuilding Perps Raider as a **real on-chain game**.
+Postgres ledger) and rebuilding Perps Rider as a **real on-chain game**.
 
 The pivot is driven by exactly two goals — not sponsor narrative, not on-chain
 for its own sake:

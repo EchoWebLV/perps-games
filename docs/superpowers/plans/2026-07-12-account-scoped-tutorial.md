@@ -251,10 +251,10 @@ $ADB logcat -c
 $ADB shell am force-stop xyz.redline.game
 $ADB shell am start -W -n xyz.redline.game/.MainActivity
 sleep 8
-$ADB logcat -d -t 4000 | rg -i 'Perps Raider render up|FATAL EXCEPTION|Process: xyz.redline.game'
+$ADB logcat -d -t 4000 | rg -i 'Perps Rider render up|FATAL EXCEPTION|Process: xyz.redline.game'
 ```
 
-Expected: `Perps Raider render up` appears and no fatal exception for `xyz.redline.game` appears.
+Expected: `Perps Rider render up` appears and no fatal exception for `xyz.redline.game` appears.
 
 - [ ] **Step 5: Verify Railway and the public endpoint**
 

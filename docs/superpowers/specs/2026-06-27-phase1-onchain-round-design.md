@@ -1,4 +1,4 @@
-# Phase 1 — Core On-Chain Round (Perps Raider) — Design Spec
+# Phase 1 — Core On-Chain Round (Perps Rider) — Design Spec
 
 **Date:** 2026-06-27
 **Branch:** `onchain-er-rebuild`

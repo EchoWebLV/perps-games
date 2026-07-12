@@ -65,7 +65,7 @@ export function createIdentityGate(
   card.innerHTML =
     (opts.onDismiss ? `<button id="idclose" type="button" aria-label="Close"
       style="position:absolute;top:10px;right:10px;width:32px;height:32px;padding:0;display:grid;place-items:center;border-radius:8px;border:1px solid var(--line);background:rgba(12,10,26,.74);color:var(--mut);cursor:pointer;font-size:14px">✕</button>` : "") +
-    `<div class="num" style="font-size:26px;letter-spacing:.14em;color:var(--cyan);text-shadow:0 0 18px rgba(39,231,255,.5)">PERPS RAIDER</div>` +
+    `<div class="num" style="font-size:26px;letter-spacing:.14em;color:var(--cyan);text-shadow:0 0 18px rgba(39,231,255,.5)">PERPS RIDER</div>` +
     `<div class="lbl" style="letter-spacing:.08em;color:#aeb8dc">pick your driver name</div>` +
     `<input id="idname" maxlength="16" autocomplete="off" spellcheck="false" placeholder="e.g. liq_dodger"
       style="width:100%;box-sizing:border-box;padding:13px 14px;border-radius:11px;border:1px solid var(--line);background:rgba(10,8,22,.85);color:#eef1ff;font:700 17px 'Chakra Petch',ui-monospace,monospace;letter-spacing:.06em;text-align:center;outline:none"/>` +

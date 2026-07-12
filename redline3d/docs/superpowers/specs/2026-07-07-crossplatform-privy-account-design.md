@@ -56,7 +56,7 @@ The localStorage stores become a **cache + offline fallback**; the server is the
 ## Workstream A — Cross-platform Privy build
 
 1. **Privy login inside the Seeker APK WebView — the real risk.** Email/SMS one-time-code login is WebView-safe; social (Google) OAuth is commonly blocked in embedded WebViews (`disallowed_useragent`) and must open in the system browser (Capacitor Browser / Android Custom Tabs) or be restricted to OTP. **Must be proven on the actual Seeker.**
-2. **Shell branding** — `capacitor.config.ts` appName + manifest → "Perps Raider" (drop stale "Redline 3D").
+2. **Shell branding** — `capacitor.config.ts` appName + manifest → "Perps Rider" (drop stale "Redline 3D").
 3. **Perf** — validate `platform/perf.ts` `detectQuality()` low tier on the Mali-G615; tune pixelRatio / bloom if frame-rate needs it.
 4. **iPhone PWA** — Add-to-Home-Screen, full touch loop, Privy login on iOS Safari.
 

@@ -7,7 +7,7 @@
 
 Make every settled round **independently verifiable by anyone**, and **anchor a Merkle root of settled rounds on Solana** so settlement history cannot be rewritten. This converts the synthetic house-vault's trust model from *"trust the house"* to *"verify the house."*
 
-This is the cheapest, sharpest differentiator against the market leader. A verified competitor teardown (2026-06-15, re-confirmed 2026-06-20, HIGH confidence) found **Banana Zone** — a synthetic house-vault fixed-odds binary (5s rounds, hardcoded `[6…1.8…6]` odds ladder, server-set prices, MagicBlock ephemeral-rollup custody) — ships **zero** published fairness: no provably-fair, no commit-reveal, no published odds, no "verify this round" tool, no public attestation. Its entire trust mechanism is *"the backend said so."* Anchor proofs put Perps Raider on an axis the market leader has abandoned.
+This is the cheapest, sharpest differentiator against the market leader. A verified competitor teardown (2026-06-15, re-confirmed 2026-06-20, HIGH confidence) found **Banana Zone** — a synthetic house-vault fixed-odds binary (5s rounds, hardcoded `[6…1.8…6]` odds ladder, server-set prices, MagicBlock ephemeral-rollup custody) — ships **zero** published fairness: no provably-fair, no commit-reveal, no published odds, no "verify this round" tool, no public attestation. Its entire trust mechanism is *"the backend said so."* Anchor proofs put Perps Rider on an axis the market leader has abandoned.
 
 ### What this defeats (threat model)
 

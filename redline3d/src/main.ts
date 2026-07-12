@@ -114,7 +114,7 @@ const ctx = createScene(canvas);
 // CPUs (Seeker: 8GB/8-core but Mali-G615); ?perf=low|high overrides for on-device tuning
 const gpu = gpuRendererString(ctx.renderer.getContext());
 const quality = detectQuality({ gpuRenderer: gpu, search: location.search });
-console.log(`Perps Raider quality: ${quality.tier} · bloom ${quality.bloom ? "×" + quality.bloomScale : "off"} · msaa ${quality.postSamples}× · dpr≤${quality.pixelRatioCap} · ${quality.frameCapFps ? quality.frameCapFps + "fps cap" : "uncapped"} · ${quality.detail}${gpu ? ` (${gpu})` : ""}`);
+console.log(`Perps Rider quality: ${quality.tier} · bloom ${quality.bloom ? "×" + quality.bloomScale : "off"} · msaa ${quality.postSamples}× · dpr≤${quality.pixelRatioCap} · ${quality.frameCapFps ? quality.frameCapFps + "fps cap" : "uncapped"} · ${quality.detail}${gpu ? ` (${gpu})` : ""}`);
 ctx.renderer.setPixelRatio(Math.min(quality.pixelRatioCap, window.devicePixelRatio || 1));
 const post = quality.bloom ? createPost(ctx.renderer, ctx.scene, ctx.camera, quality.bloomScale, quality.postSamples) : null;
 // Keep the renderer + bloom composer matched to the live viewport. Relying on the window
@@ -2213,7 +2213,7 @@ function showIdentityGate() {
           } catch { /* Highway will require a confirmed Railway save before entry. */ }
         }
         identity = {
-          name: accountDriverName ?? name ?? "raider_" + session.address().slice(-4).toLowerCase(),
+          name: accountDriverName ?? name ?? "rider_" + session.address().slice(-4).toLowerCase(),
           mode: "privy" as const,
         };
         saveIdentity(identity);
@@ -2281,7 +2281,7 @@ if (identity?.mode === "privy") {
     });
   }).catch(() => {});
 }
-console.log("Perps Raider render up");
+console.log("Perps Rider render up");
 
 // DEV-only hooks so browser verification can jump between modes without driving
 // across the lobby at Preview's throttled frame rate. Stripped from prod builds.

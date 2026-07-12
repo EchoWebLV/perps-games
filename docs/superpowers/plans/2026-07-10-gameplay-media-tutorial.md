@@ -2,7 +2,7 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Replace the six emoji-led tutorial cards with five Perps Raider-styled cards that teach through short recordings of real gameplay, including one quick tour of all four functional lobby buildings.
+**Goal:** Replace the six emoji-led tutorial cards with five Perps Rider-styled cards that teach through short recordings of real gameplay, including one quick tour of all four functional lobby buildings.
 
 **Architecture:** Keep the existing `ui/howto.ts` overlay, triggers, seen flag, and navigation. Card metadata will supply the copy and media paths, while a small renderer inside the same module owns the active video, poster fallback, reduced-motion behavior, and next-card metadata preload. A reproducible FFmpeg script will encode five raw gameplay captures into WebM, MP4, and WebP assets.
 
@@ -776,7 +776,7 @@ Expected: the full Vitest suite passes; TypeScript and Vite build exit 0.
 
 Start the app and open `How to play` from the hamburger menu. Confirm in order:
 
-1. The existing dark blurred overlay and cyan Perps Raider panel remain visually unchanged outside the new media area.
+1. The existing dark blurred overlay and cyan Perps Rider panel remain visually unchanged outside the new media area.
 2. Card one plays the real drive loop and says `Take the wheel`.
 3. Card two plays the real lobby loop and shows TRACK, GARAGE, UPGRADES, and CRATES with their approved colors and copy.
 4. Card three shows Long, Short, play amount, and `GO!`.
@@ -787,7 +787,7 @@ Start the app and open `How to play` from the hamburger menu. Confirm in order:
 
 - [ ] **Step 4: Verify first-run sequencing**
 
-Use a fresh browser profile with no Perps Raider site data. Complete the identity/access gate and confirm the exact order remains:
+Use a fresh browser profile with no Perps Rider site data. Complete the identity/access gate and confirm the exact order remains:
 
 ```text
 identity/access gate -> five-card tutorial -> welcome crate -> lobby

@@ -1,4 +1,4 @@
-# Phase 2 — Continuous Settlement + Mid-Round Actions (Perps Raider) — Design Spec
+# Phase 2 — Continuous Settlement + Mid-Round Actions (Perps Rider) — Design Spec
 
 **Date:** 2026-06-28
 **Branch:** `onchain-er-rebuild`

@@ -13,7 +13,7 @@ Every Highway car must have a driver name the player knowingly chose. Existing a
 - Driver names are normalized to lowercase and are not unique. They are social display labels, not account identifiers.
 - A guest already chose a name at the first-launch identity gate. Editing updates local identity immediately.
 - A signed-in account uses the Railway profile name as truth. Editing saves to Railway, then updates local identity and presence.
-- Legacy signed-in accounts with no Railway profile name may continue using the existing generated `raider_xxxx` label outside Highway, but must confirm or replace it before entering Highway for the first time.
+- Legacy signed-in accounts with no Railway profile name may continue using the existing generated `rider_xxxx` label outside Highway, but must confirm or replace it before entering Highway for the first time.
 - After a required Highway prompt saves successfully, the app continues into Highway automatically. Cancel leaves the player in the lobby.
 - The existing public-host Highway `Coming soon` gate runs first. Public Railway visitors are not asked for a name for a building they cannot enter.
 

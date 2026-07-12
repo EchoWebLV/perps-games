@@ -22,7 +22,7 @@ export function createMobileWalletPort(): SolanaWalletPort {
   const adapter = new SolanaMobileWalletAdapter({
     addressSelector: createDefaultAddressSelector(),
     appIdentity: {
-      name: "Perps Raider",
+      name: "Perps Rider",
       uri: globalThis.location?.origin ?? "http://localhost",
       icon: "/icon-192.png",
     },

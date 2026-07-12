@@ -20,7 +20,7 @@
 
 Follow Privy's current dashboard (exact navigation changes; these are the things you need to end up with):
 
-1. **Create a new app** named e.g. `perps-raider-staging`. Keep it separate from any production app.
+1. **Create a new app** named e.g. `perps-rider-staging`. Keep it separate from any production app.
 2. **Enable server-side wallets / the Wallet API** for the app (so the app secret can create + sign with server wallets). This is the capability the whole rails custody model rides on.
 3. Capture two values:
    - **App ID** (public).

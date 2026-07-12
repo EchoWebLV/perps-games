@@ -1,7 +1,7 @@
-# Perps Raider — MagicBlock Blitz v6 Submission (draft)
+# Perps Rider — MagicBlock Blitz v6 Submission (draft)
 
 **Event:** MagicBlock "Blitz v6" hackathon · Mobile theme ($500 first prize) · July 10–12 2026
-**Entry:** Perps Raider
+**Entry:** Perps Rider
 **Chain:** Solana devnet · Anchor program `raider` `FwUNcUaRbYGiWasHa6DA3xQaQJfZWCgH7UhDeBvoJcBv`, running on a MagicBlock Ephemeral Rollup
 **State:** on-chain round loop GREEN and devnet-verified end-to-end (Phase-1 + Phase-2 `RESULT.md`); native crank settlement wired and GREEN; cross-device account sync shipped; mobile shell (Seeker APK + PWA, Privy email login) built.
 
@@ -15,13 +15,13 @@
 
 **Short pitch (~100 words):**
 
-> Perps Raider is a real perp position you drive. The tachometer is a leverage dial up to 3000×; the live price of BTC, ETH or SOL pushes your car down a synthwave strip, and a liquidation is a wreck. It is not a slot machine and not a simulation — the whole round runs on-chain on a MagicBlock Ephemeral Rollup, settled in-rollup against a real Pyth Lazer price. A native crank settles continuously, so a liquidation costs the player zero transactions. Non-custodial by construction: your Privy wallet holds the stake, and anyone can recompute the payout from on-chain data.
+> Perps Rider is a real perp position you drive. The tachometer is a leverage dial up to 3000×; the live price of BTC, ETH or SOL pushes your car down a synthwave strip, and a liquidation is a wreck. It is not a slot machine and not a simulation — the whole round runs on-chain on a MagicBlock Ephemeral Rollup, settled in-rollup against a real Pyth Lazer price. A native crank settles continuously, so a liquidation costs the player zero transactions. Non-custodial by construction: your Privy wallet holds the stake, and anyone can recompute the payout from on-chain data.
 
 ---
 
 ## 2. Full submission description
 
-**What it is.** Perps Raider is an arcade racer built on a real perpetual-futures position. You pick an asset (BTC, ETH, SOL) and a direction (LONG/SHORT), then set leverage by revving a tachometer that climbs to 3000× (a 1500× car on Nitro Overdrive tops out the dial). The live price drives your car: move your way to bank profit, against you past the liquidation floor and you wreck, cash out first to keep the winnings. Under the synthwave skin every beat is a genuine leveraged position on a live feed, not an animation of one.
+**What it is.** Perps Rider is an arcade racer built on a real perpetual-futures position. You pick an asset (BTC, ETH, SOL) and a direction (LONG/SHORT), then set leverage by revving a tachometer that climbs to 3000× (a 1500× car on Nitro Overdrive tops out the dial). The live price drives your car: move your way to bank profit, against you past the liquidation floor and you wreck, cash out first to keep the winnings. Under the synthwave skin every beat is a genuine leveraged position on a live feed, not an animation of one.
 
 **What runs on MagicBlock, and why it matters.** The entire round loop runs on-chain on a MagicBlock Ephemeral Rollup, not a server. The `raider` program co-delegates the player, house and round accounts into the rollup, `open`s the position against a Pyth Lazer price MagicBlock refreshes *inside* the rollup every 50–200 ms — the oracle-in-ER pattern perp DEXes use — then commits final state to Solana L1. Three properties fall out:
 
@@ -43,7 +43,7 @@ Target total ≈ 82s. Two moments the video **must make legible** are marked ★
 
 | # | Time | On screen | Caption line |
 |---|------|-----------|--------------|
-| 1 | 0:00–0:06 (6s) | Boot on the Seeker — Perps Raider splash on the actual phone. | "Perps Raider, running natively on the Solana Seeker." |
+| 1 | 0:00–0:06 (6s) | Boot on the Seeker — Perps Rider splash on the actual phone. | "Perps Rider, running natively on the Solana Seeker." |
 | 2 | 0:06–0:14 (8s) | Email OTP sign-in: type email → enter the 6-digit code → Privy silently creates a Solana wallet. | "One email code — Privy makes you a Solana wallet. Same login everywhere." |
 | 3 | 0:14–0:24 (10s) | Drive the lobby: the car cruises the synthwave town square past Garage / Crates / Track / Highway. | "The lobby is a drivable hub — garage, crates, and the track." |
 | 4 | 0:24–0:32 (8s) | Open a crate: a Gold crate cracks, a Legendary car reveals and lands in the garage. | "Crates roll cars across five rarities — VRF-ready randomness." |
@@ -52,7 +52,7 @@ Target total ≈ 82s. Two moments the video **must make legible** are marked ★
 | 7 | 0:50–0:58 (8s) | ★ **ON-CHAIN PROOF #1 — the settle beat.** The price crosses the floor; the car wrecks (or you cash out) with no button press. Overlay: "settled on-chain · 0 player transactions." | "Liquidation settles itself on the Ephemeral Rollup — zero transactions from you." |
 | 8 | 0:58–1:08 (10s) | ★ **ON-CHAIN PROOF #2 — the balance / cash-out proof.** Wallet panel shows the wSOL/SOL balance update; a devnet round view / explorer shows the settled round and the recomputed payout. | "Non-custodial payout — recomputable by anyone from on-chain data." |
 | 9 | 1:08–1:16 (8s) | Cross-device beat: the same account opened on desktop shows the same car and balance. | "One identity, one set of stuff — desktop, phone, Seeker." |
-| 10 | 1:16–1:22 (6s) | End card: Perps Raider logo + program id + "Solana devnet · MagicBlock ER." | "Perps Raider — a real perp you drive. Built on MagicBlock." |
+| 10 | 1:16–1:22 (6s) | End card: Perps Rider logo + program id + "Solana devnet · MagicBlock ER." | "Perps Rider — a real perp you drive. Built on MagicBlock." |
 
 **Legibility note for the two proof shots:** Shot 7 must show the settlement happening with the player's hands off the controls (no wallet popup, no signature) — that is the zero-tx crank story. Shot 8 must show a value the viewer can trust: the wallet balance moving *and* an on-chain artifact (round account / explorer) that ties the payout to the settled round.
 

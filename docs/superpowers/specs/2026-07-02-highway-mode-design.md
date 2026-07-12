@@ -6,7 +6,7 @@
 
 ## Summary
 
-A third game mode for Perps Raider, alongside the endless-road **racer** and the
+A third game mode for Perps Rider, alongside the endless-road **racer** and the
 **lobby** economy hub. On a real, static **oval highway** — a *divided* road with a
 median, two lanes per carriageway, and traffic running opposite ways on each side —
 the player picks **LONG or SHORT in the GO panel** (the racer's existing direction

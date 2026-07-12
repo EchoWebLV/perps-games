@@ -849,7 +849,7 @@ Create `redline3d/onchain.html`:
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Perps Raider — on-chain (devnet)</title>
+    <title>Perps Rider — on-chain (devnet)</title>
     <style>
       body { font-family: ui-monospace, monospace; background: #0a0a12; color: #e6e6f0; margin: 0; padding: 16px; }
       .row { margin: 8px 0; } button { font: inherit; padding: 8px 14px; margin-right: 8px; cursor: pointer; }
@@ -858,7 +858,7 @@ Create `redline3d/onchain.html`:
     </style>
   </head>
   <body>
-    <h2>Perps Raider — on-chain round (devnet) <span class="dim">BTC</span></h2>
+    <h2>Perps Rider — on-chain round (devnet) <span class="dim">BTC</span></h2>
     <div class="row dim">wallet: <code id="addr">…</code> · play balance: <code id="bal">…</code> USDC</div>
     <div class="row">
       dir <select id="dir"><option value="1">LONG</option><option value="-1">SHORT</option></select>

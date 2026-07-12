@@ -2,7 +2,7 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Finish the Perps Raider safe branding cleanup and reload the app after signed-in access redemption.
+**Goal:** Finish the Perps Rider safe branding cleanup and reload the app after signed-in access redemption.
 
 **Architecture:** Keep compatibility identifiers stable while replacing active product-brand strings. At the signed-in access-wall boundary, navigate only after redemption has persisted and before stale scene continuations execute.
 
@@ -29,14 +29,14 @@
 - Modify: `redline3d/BUILD_APK.md`
 
 **Interfaces:**
-- Produces: active brand string `Perps Raider`
+- Produces: active brand string `Perps Rider`
 - Preserves: all compatibility identifiers listed in Global Constraints
 
-- [ ] **Step 1: Update the wallet-signing test to expect `Perps Raider wallet binding`**
+- [ ] **Step 1: Update the wallet-signing test to expect `Perps Rider wallet binding`**
 - [ ] **Step 2: Run the focused test and verify it fails on the former brand string**
 - [ ] **Step 3: Replace active branding in wallet text, package metadata, runtime logs, and build documentation**
 - [ ] **Step 4: Run focused server and client checks**
-- [ ] **Step 5: Commit as `chore: finish Perps Raider branding`**
+- [ ] **Step 5: Commit as `chore: finish Perps Rider branding`**
 
 ### Task 2: Reload After Account Access
 

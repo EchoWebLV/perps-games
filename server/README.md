@@ -1,4 +1,4 @@
-# Perps Raider — Backend
+# Perps Rider — Backend
 
 Stateful Node/TypeScript (Fastify) service. Authoritative coin ledger + car inventory.
 

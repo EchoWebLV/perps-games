@@ -1,4 +1,4 @@
-# Perps Raider: Three-Minute MagicBlock Judge Introduction
+# Perps Rider: Three-Minute MagicBlock Judge Introduction
 
 **Audience:** MagicBlock Blitz v6 hackathon judges
 
@@ -10,7 +10,7 @@
 
 Most perpetual exchanges give you charts, order books, and a wall of numbers.
 
-Perps Raider gives you a car.
+Perps Rider gives you a car.
 
 This is a real perpetual-futures position that you drive. You choose Bitcoin, Ethereum, or Solana, decide whether to go long or short, and then rev the tachometer to set your leverage, all the way up to 3,000 times.
 
@@ -28,10 +28,10 @@ The final state is committed back to Solana. Stakes remain in program-controlled
 
 MagicBlock gives us arcade responsiveness without hiding the financial logic on a centralized game server.
 
-Around that core, Perps Raider has a complete game world. Players drive through a synthwave lobby, collect cars, open crates, earn upgrades, and unlock abilities that change how they manage risk. One car can freeze profit and loss for a few seconds. Another adds a stop-loss and take-profit. Another lets steering choose between long and short.
+Around that core, Perps Rider has a complete game world. Players drive through a synthwave lobby, collect cars, open crates, earn upgrades, and unlock abilities that change how they manage risk. One car can freeze profit and loss for a few seconds. Another adds a stop-loss and take-profit. Another lets steering choose between long and short.
 
 The same account works across desktop, an iPhone PWA, and a native Solana Seeker build. Players can sign in with a simple email code through Privy, while still receiving their own Solana wallet.
 
-Perps Raider is not a trading terminal with a game wrapped around it. It turns the position itself into the game: leverage becomes acceleration, price becomes the road, liquidation becomes a wreck, and MagicBlock makes every moment fast, on-chain, and verifiable.
+Perps Rider is not a trading terminal with a game wrapped around it. It turns the position itself into the game: leverage becomes acceleration, price becomes the road, liquidation becomes a wreck, and MagicBlock makes every moment fast, on-chain, and verifiable.
 
-Perps Raider. A real perp you drive, built on MagicBlock.
+Perps Rider. A real perp you drive, built on MagicBlock.

@@ -26,7 +26,7 @@ const message = (root: HTMLElement) => root.querySelector("#awmsg") as HTMLEleme
 describe("access wall — only a code field, nothing else", () => {
   test("shows the title, one code field and UNLOCK — never guest / sign-in / name", () => {
     const { wall } = mount("invalid");
-    expect(wall.el.textContent).toContain("PERPS RAIDER");
+    expect(wall.el.textContent).toContain("PERPS RIDER");
     expect(codeField(wall.el)).toBeTruthy();
     expect(unlockBtn(wall.el).textContent).toContain("UNLOCK");
     // none of the identity gate's doors may leak onto the wall

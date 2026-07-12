@@ -6,7 +6,7 @@
 
 ## Goal
 
-Onboard first-time players of Perps Raider with a short paged walkthrough that explains the
+Onboard first-time players of Perps Rider with a short paged walkthrough that explains the
 game in plain player terms — especially the confusing part: a real leveraged perp skinned as
 arcade racing. Shown once automatically to new players (right after the identity gate, before
 their free Wooden crate) and always available from the hamburger menu.

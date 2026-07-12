@@ -49,7 +49,7 @@ export function createAccessWall(
   card.className = "panel";
   card.style.cssText = "position:relative;width:min(400px,94vw);padding:26px 22px 22px;border-radius:16px;text-align:center;display:flex;flex-direction:column;gap:15px";
   card.innerHTML =
-    `<div class="num" style="font-size:28px;letter-spacing:.14em;color:var(--cyan);text-shadow:0 0 18px rgba(39,231,255,.5)">PERPS RAIDER</div>` +
+    `<div class="num" style="font-size:28px;letter-spacing:.14em;color:var(--cyan);text-shadow:0 0 18px rgba(39,231,255,.5)">PERPS RIDER</div>` +
     `<div class="lbl" style="letter-spacing:.08em;color:#aeb8dc">enter your access code to play</div>` +
     `<input id="awcode" maxlength="24" autocomplete="off" spellcheck="false" placeholder="access code"
       style="width:100%;box-sizing:border-box;padding:14px 15px;border-radius:11px;border:1px solid var(--line);background:rgba(10,8,22,.85);color:#eef1ff;font:700 18px 'Chakra Petch',ui-monospace,monospace;letter-spacing:.12em;text-align:center;outline:none"/>` +

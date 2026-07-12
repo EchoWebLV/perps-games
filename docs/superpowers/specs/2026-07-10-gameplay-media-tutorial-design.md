@@ -10,7 +10,7 @@
 
 ## Decision
 
-Replace the current six-card, emoji-led "How to Play" walkthrough with five concise cards built around short recordings of the real game. Keep the existing Perps Raider tutorial shell, controls, colors, typography, and first-run/menu triggers.
+Replace the current six-card, emoji-led "How to Play" walkthrough with five concise cards built around short recordings of the real game. Keep the existing Perps Rider tutorial shell, controls, colors, typography, and first-run/menu triggers.
 
 The recordings should behave like GIFs, but ship as muted looping video. Use WebM first with MP4 fallback for smaller downloads, smoother playback, and broad browser support.
 
@@ -18,7 +18,7 @@ The recordings should behave like GIFs, but ship as muted looping video. Use Web
 
 - Show each action instead of describing it abstractly.
 - Make every card understandable in one viewing and one short sentence.
-- Match the current Perps Raider UI exactly.
+- Match the current Perps Rider UI exactly.
 - Explain the four functional lobby buildings in one quick card.
 - Keep the walkthrough short, skippable, replayable, and inexpensive to load.
 
@@ -143,7 +143,7 @@ Do not thread tutorial media state into `main.ts`. `main.ts` continues to create
 
 ### Visual and interaction
 
-- Verify desktop and narrow mobile layouts against the existing Perps Raider panel.
+- Verify desktop and narrow mobile layouts against the existing Perps Rider panel.
 - Verify all five real clips are legible, loop cleanly, and match their copy.
 - Verify the four lobby building labels use the real building colors.
 - Verify Skip, back, next, swipe, arrow keys, Escape, and menu replay.
@@ -154,5 +154,5 @@ Do not thread tutorial media state into `main.ts`. `main.ts` continues to create
 
 - A new player can identify driving, the four lobby destinations, Long versus Short, leverage, and Cash Out by watching rather than decoding a paragraph.
 - No card contains more than one primary lesson.
-- The redesign reads as the existing Perps Raider UI, not a separate onboarding product.
+- The redesign reads as the existing Perps Rider UI, not a separate onboarding product.
 - The full tutorial media payload stays below 7.5 MB across both source formats, excluding posters.

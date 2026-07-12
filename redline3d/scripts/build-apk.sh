@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Perps Raider APK build pipeline (Capacitor + Android Gradle).
+# Perps Rider APK build pipeline (Capacitor + Android Gradle).
 #
 #   ./scripts/build-apk.sh            build a debug APK
 #   ./scripts/build-apk.sh --install  build + adb install -r to a USB device (needs USB debugging)
@@ -59,16 +59,16 @@ if [ "$INSTALL" = "1" ]; then
     exit 1
   fi
   adb install -r "$APK"
-  echo "✅ installed. Launch 'Perps Raider' from the Seeker app drawer."
+  echo "✅ installed. Launch 'Perps Rider' from the Seeker app drawer."
 fi
 
 if [ "$SERVE" = "1" ]; then
   IP="$(ipconfig getifaddr en0 2>/dev/null || ipconfig getifaddr en1 2>/dev/null || echo 'YOUR-LAN-IP')"
   DIR="$(mktemp -d)"
-  cp "$APK" "$DIR/perps-raider.apk"
+  cp "$APK" "$DIR/perps-rider.apk"
   echo ""
   echo "📲 On the phone (same Wi-Fi) open Chrome and go to:"
-  echo "      http://$IP:$SERVE_PORT/perps-raider.apk"
+  echo "      http://$IP:$SERVE_PORT/perps-rider.apk"
   echo "   Download → tap → allow 'install unknown apps' → Install."
   echo "   (Ctrl+C to stop the server once it's installed.)"
   echo ""

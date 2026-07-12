@@ -3,7 +3,7 @@
 **Status:** Design (approved direction; hardened by adversarial review). Awaiting user sign-off before plan.
 **Date:** 2026-06-23
 **Branch:** `real-money-rails`
-**Pillar:** Real-money USDC deposit / withdraw / treasury for Perps Raider (codename redline).
+**Pillar:** Real-money USDC deposit / withdraw / treasury for Perps Rider (codename redline).
 
 > This design was hardened by a 66-agent adversarial security review (run `wf_abc2e8bd-0aa`): 56 confirmed findings (9 critical / 14 high / 21 medium / 12 low), 15 must-fixes, 18 completeness gaps. Every must-fix is folded into the design below, not appended. Where the review flagged a capability as **unverified-against-code**, it is called out explicitly and gated behind Phase 0.
 

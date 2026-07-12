@@ -38,7 +38,7 @@ export function createWalletBinding(deps: {
     exp: number;
   }) =>
     [
-      "Perps Raider wallet binding",
+      "Perps Rider wallet binding",
       `Wallet: ${p.wallet}`,
       `Session: ${p.userId}`,
       `Nonce: ${p.nonce}`,
