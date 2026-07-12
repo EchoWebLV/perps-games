@@ -254,4 +254,18 @@ describe("signed-in access wall wiring", () => {
     expect(accountGate).toContain("accountSync.accessCodes().length > 0");
     expect(accountGate).not.toContain("anyRedeemed()");
   });
+
+  test("reloads after signed-in redemption without changing the guest continuation", async () => {
+    const main = await readFile(new URL("../main.ts", import.meta.url), "utf8");
+    const guestStart = main.indexOf("function guestAccessThenEnter");
+    const accountStart = main.indexOf("function accountAccessThenEnter", guestStart);
+    const accountEnd = main.indexOf("async function offerWelcomeAccount", accountStart);
+    const guestGate = main.slice(guestStart, accountStart);
+    const accountGate = main.slice(accountStart, accountEnd);
+
+    expect(accountGate).toContain("onUnlocked: () => location.reload()");
+    expect(accountGate).not.toContain("onUnlocked: onDone");
+    expect(guestGate).toContain("onUnlocked: onDone");
+    expect(guestGate).not.toContain("location.reload()");
+  });
 });

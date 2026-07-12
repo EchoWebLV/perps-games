@@ -2158,7 +2158,9 @@ function accountAccessThenEnter(onDone: () => void) {
       api, accountId, rosterIds: accessPorts.rosterIds, owns: accessPorts.owns,
       grantCar: accessPorts.grantCar, credit: accessPorts.credit,
     }),
-    onUnlocked: onDone,
+    // Account switches leave a scene that was initialized around the previous identity. Redemption
+    // is durable before this callback fires, so reboot into the new account instead of resuming it.
+    onUnlocked: () => location.reload(),
   });
 }
 // Check the signed-in welcome without consuming it. The atomic claim runs only after VRF returns,
