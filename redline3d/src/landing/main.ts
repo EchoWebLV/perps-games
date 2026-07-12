@@ -10,7 +10,10 @@
   const toggle = document.querySelector<HTMLButtonElement>("[data-motion-toggle]");
   const motionBackground = document.querySelector<HTMLElement>("[data-motion-bg]");
   const tutorialVideos = document.querySelectorAll<HTMLVideoElement>("[data-tutorial-video]");
-  let motionState = initialMotionState(sessionStorage.getItem(MOTION_STORAGE_KEY) === "true", reduceMotion.matches);
+  let motionState = reduceMotionState(
+    initialMotionState(sessionStorage.getItem(MOTION_STORAGE_KEY) === "true", reduceMotion.matches),
+    { type: "document-visible", visible: !document.hidden },
+  );
   let motionFrame = 0;
   let motionX = 0;
   let motionY = 0;
@@ -59,12 +62,18 @@
   reduceMotion.addEventListener("change", (event) => dispatchMotion({ type: "system-reduced", reduced: event.matches }));
   document.addEventListener("visibilitychange", () => dispatchMotion({ type: "document-visible", visible: !document.hidden }));
 
-  const sectionObserver = new IntersectionObserver((entries) => entries.forEach((entry) => {
-    const section = (entry.target as HTMLElement).dataset.motionSection;
-    if (section === "tutorial") dispatchMotion({ type: "tutorial-visible", visible: entry.isIntersecting });
-    if (section === "technology") dispatchMotion({ type: "technology-visible", visible: entry.isIntersecting });
-  }), { threshold: 0.12 });
-  document.querySelectorAll<HTMLElement>("[data-motion-section]").forEach((section) => sectionObserver.observe(section));
+  const supportsIntersectionObserver = typeof IntersectionObserver !== "undefined";
+  if (supportsIntersectionObserver) {
+    const sectionObserver = new IntersectionObserver((entries) => entries.forEach((entry) => {
+      const section = (entry.target as HTMLElement).dataset.motionSection;
+      if (section === "tutorial") dispatchMotion({ type: "tutorial-visible", visible: entry.isIntersecting });
+      if (section === "technology") dispatchMotion({ type: "technology-visible", visible: entry.isIntersecting });
+    }), { threshold: 0.12 });
+    document.querySelectorAll<HTMLElement>("[data-motion-section]").forEach((section) => sectionObserver.observe(section));
+  } else {
+    dispatchMotion({ type: "tutorial-visible", visible: true });
+    dispatchMotion({ type: "technology-visible", visible: true });
+  }
   renderMotionState();
 
   if (motionBackground) {
@@ -106,7 +115,7 @@
   });
 
   const reveals = document.querySelectorAll<HTMLElement>("[data-reveal]");
-  if (!motionEnabled(motionState) || !("IntersectionObserver" in window)) {
+  if (!motionEnabled(motionState) || !supportsIntersectionObserver) {
     reveals.forEach((element) => element.classList.add("is-visible"));
   } else {
     const observer = new IntersectionObserver((entries) => {

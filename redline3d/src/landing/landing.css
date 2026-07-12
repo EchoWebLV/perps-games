@@ -276,6 +276,16 @@ html:not(.tech-motion-active) .tech-scene * {
   animation-play-state: paused !important;
 }
 
+html.motion-paused {
+  scroll-behavior: auto;
+}
+
+html.motion-paused.landing-ready [data-reveal] {
+  opacity: 1;
+  transform: none;
+  transition: none;
+}
+
 .site-nav {
   display: flex;
   align-items: center;
