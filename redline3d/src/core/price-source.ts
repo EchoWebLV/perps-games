@@ -8,6 +8,9 @@ export interface PriceTransport {
 export interface PriceSource {
   price(): number;
   live(): boolean;
+  /** Replace the current asset atomically. A cached real price becomes live immediately;
+   *  null clears the previous asset and blocks money rounds until its first tick. */
+  switchTo(realPrice: number | null): void;
   stop(): void;
   /** Re-subscribe after a suspend (bfcache restore): resumes real ticks AND forces live()=false
    *  until a fresh real tick lands. Without the reset, a page restored within the stale window
@@ -51,6 +54,15 @@ export function createPriceSource(t: PriceTransport): PriceSource {
   return {
     price: () => target,
     live: () => now() - last <= staleMs && last > 0,
+    switchTo: (realPrice) => {
+      if (realPrice !== null && Number.isFinite(realPrice) && realPrice > 0) {
+        target = realPrice;
+        last = now();
+      } else {
+        target = 0;
+        last = 0;
+      }
+    },
     stop,
     restart: () => { stop(); start(); },
   };

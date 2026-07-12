@@ -1,4 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { readFile } from "node:fs/promises";
 import { createPriceSource } from "./price-source";
 
 beforeEach(() => vi.useFakeTimers());
@@ -56,5 +57,30 @@ describe("price source", () => {
     vi.advanceTimersByTime(5000);
     expect(ps.price()).toBe(frozen);    // no drift once stopped
     expect(ps.live()).toBe(false);
+  });
+
+  it("atomically switches to a cached real asset price or invalidates the old asset", () => {
+    const ps = createPriceSource({ connect: (cb) => { cb(65_000); return () => {}; } });
+
+    ps.switchTo(172.5);
+    expect(ps.price()).toBe(172.5);
+    expect(ps.live()).toBe(true);
+
+    ps.switchTo(null);
+    expect(ps.price()).toBe(0);
+    expect(ps.live()).toBe(false);
+  });
+
+  it("snaps asset switches and removes price-driven world elevation and shock effects", async () => {
+    const main = await readFile(new URL("../main.ts", import.meta.url), "utf8");
+
+    expect(main).toContain("latestAssetPrices.set(key, v)");
+    expect(main).toContain("priceSource.switchTo(selectedPrice)");
+    expect(main).toContain("lastLivePrice = selectedPrice ?? 0");
+    expect(main).toContain("world.update(dt, speed, 0)");
+    expect(main).not.toContain("createMarketPulse");
+    expect(main).not.toContain("createMarketShock");
+    expect(main).not.toContain("terrainGrade({");
+    expect(main).not.toContain("__marketPulse");
   });
 });

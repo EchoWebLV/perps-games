@@ -16,9 +16,6 @@ import { createHighwayControls } from "./ui/highway-controls";
 import { connectFeed } from "./core/feed";
 import { createBootReveal } from "./core/boot-reveal";
 import { createPriceSource } from "./core/price-source";
-import { CALM_MARKET_PULSE, createMarketPulse, type MarketDirection, type MarketPulseFrame } from "./core/market-pulse";
-import { terrainGrade } from "./core/market-road";
-import { createMarketShock } from "./render/market-shock";
 import { RoundEngine } from "./core/round";
 import type { Snapshot } from "./core/types";
 import { sol3 } from "./core/money";
@@ -173,14 +170,6 @@ car.group.position.set(0, 0, -12);
 car.group.rotation.order = "YXZ";
 ctx.scene.add(car.group);
 const chase = createChaseCam();
-const marketShock = createMarketShock({
-  detail: quality.detail,
-  reducedMotion: globalThis.matchMedia?.("(prefers-reduced-motion: reduce)")?.matches ?? false,
-  surfaceY: world.surfaceY,
-  onWorldPulse: (amount, direction) => world.setMarketShock(amount, direction),
-  onCameraShake: (amount) => chase.shake(amount),
-});
-ctx.scene.add(marketShock.group);
 const pickups = createPickups();
 ctx.scene.add(pickups.group);
 const fireTrail = createFireTrail(); // DeLorean flux: burning tire traces while the freeze is on
@@ -309,9 +298,14 @@ const ASSETS = [
   { key: "SOL", lz: 6, hx: "ef0d8b6fda2ceba41da15d4095d1da392a0d2f8ed0c6c7bc0f4cfac8c280b56d", expo: -8 },
 ];
 let asset: "BTC" | "ETH" | "SOL" = "SOL"; // the active tab; open() binds the round to this asset's registered Lazer feed
+const latestAssetPrices = new Map<"BTC" | "ETH" | "SOL", number>();
 const priceSource = createPriceSource({
   connect: (onPrice) => {
-    const h = connectFeed({ feeds: ASSETS, onPrice: (k, v) => { if (k === asset) onPrice(v); } });
+    const h = connectFeed({ feeds: ASSETS, onPrice: (k, v) => {
+      const key = k as "BTC" | "ETH" | "SOL";
+      if (v > 0) latestAssetPrices.set(key, v);
+      if (key === asset) onPrice(v);
+    } });
     return () => h.stop();
   },
 });
@@ -808,9 +802,9 @@ garageRoom.setCar(equippedCar);
 // flags, compile, restore — nothing renders in between, so the player never sees the flip.
 function precompileModes(): void {
   const showroom = garageRoom?.group;
-  const groups = [world.group, marketShock.group, pickups.group, fireTrail.group, lobby.group, oval.group, ...(showroom ? [showroom] : [])];
+  const groups = [world.group, pickups.group, fireTrail.group, lobby.group, oval.group, ...(showroom ? [showroom] : [])];
   const configs = [
-    [world.group, marketShock.group, pickups.group, fireTrail.group], // race road
+    [world.group, pickups.group, fireTrail.group], // race road
     [lobby.group],                                 // the strip
     [oval.group],                                  // highway
     showroom ? [showroom] : [],                    // garage showroom
@@ -889,7 +883,6 @@ function enterLobby() {
   car.group.visible = true; // restore the drivable car (the garage showroom may have hidden it)
   lobbyCam.reset();
   world.group.visible = false;
-  marketShock.reset(visualShockId);
   pickups.group.visible = false;
   fireTrail.group.visible = false;
   lobby.show();
@@ -909,7 +902,6 @@ function exitLobby() {
   lobbyHud.hide();
   lobbyHud.setPrompt(null);
   world.group.visible = true;
-  marketShock.group.visible = false; // the renderer reveals it only for a fresh shock
   pickups.group.visible = true;
   fireTrail.group.visible = true;
   mapBtn.setVisible(true);
@@ -1148,14 +1140,6 @@ const GAS = 52, BRAKE = 78, COAST = 6;
 const game = { lev: niceLev(tToLev(throttle)), equity: 1 };
 let lastLivePrice = 0;
 let solSmooth = 0; // eased display price → a flowing minimap curve (raw price drives economics)
-let solEMA = 0;    // slow average; price vs this drives the terrain elevation
-const marketPulse = createMarketPulse();
-let marketFrame: MarketPulseFrame = { ...CALM_MARKET_PULSE };
-let debugMomentum: number | null = null;
-let seenMarketShockId = 0;
-let visualShockId = 0;
-let debugShock: { strength: number; direction: MarketDirection } | null = null;
-let debugShockPreview = 0;
 
 // price history (minimap), lateral steering, and the active round's entry
 const priceHist: number[] = [];
@@ -1179,17 +1163,11 @@ const _popNdc = new THREE.Vector3();   // coin-pop screen projection scratch
 hud.onAsset((a) => {
   if (opening || engine.getPhase() === "live") return; // locked while live AND while a GO is in flight (open reads `asset` after awaits)
   asset = a as "BTC" | "ETH" | "SOL";
+  const selectedPrice = latestAssetPrices.get(asset) ?? null;
+  priceSource.switchTo(selectedPrice);
+  lastLivePrice = selectedPrice ?? 0;
   solSmooth = 0;
-  solEMA = 0;
   priceHist.length = 0;
-  marketPulse.reset();
-  marketFrame = { ...CALM_MARKET_PULSE };
-  debugMomentum = null;
-  seenMarketShockId = 0;
-  visualShockId = 0;
-  debugShock = null;
-  debugShockPreview = 0;
-  marketShock.reset();
   hud.setActiveAsset(a);
 });
 hud.setActiveAsset(asset);
@@ -1699,7 +1677,6 @@ function samplePrice(): number {
   const live = priceSource.live();
   if (live && price > 0) lastLivePrice = price;
   if (price > 0) solSmooth = solSmooth ? solSmooth + (price - solSmooth) * 0.1 : price;
-  if (solSmooth > 0) solEMA = solEMA ? solEMA + (solSmooth - solEMA) * 0.012 : solSmooth;
   hud.setPrice(solSmooth || price, live);
   if (solSmooth > 0) { priceHist.push(solSmooth); if (priceHist.length > 300) priceHist.shift(); }
   return live ? price : lastLivePrice || price;
@@ -1918,7 +1895,6 @@ function frame(now: number) {
 
   const roundPrice = samplePrice();
   const drivable = engine.getPhase() === "live"; // you can only drive while a round is live
-  let liveBuffer = 1;
 
   // accelerator with momentum — only while playing; the showroom car stays parked
   const gasOn = drivable && (controls.gas() || touchGas);
@@ -1948,7 +1924,6 @@ function frame(now: number) {
       if (simRound) finalizePractice(snap);
     } else {
       game.equity = snap.equity;
-      liveBuffer = snap.buffer;
       hud.setMultiplier(Math.max(0, snap.equity), "live");
       controls.setBuffer(Math.max(0, Math.min(1, snap.buffer)));
       // Skull "Death's Door": arm as equity nears the liq floor, disarm once clearly recovered.
@@ -1991,40 +1966,6 @@ function frame(now: number) {
   }
 
   const live2 = drivable;
-  // Market Pulse adds sustained direction to the existing price-displacement terrain:
-  // a trend climbs/descends even before the slow average has moved far, without touching P&L.
-  marketFrame = marketPulse.update({
-    price: roundPrice,
-    live: priceSource.live(),
-    roundLive: drivable,
-    buffer: liveBuffer,
-    dt,
-  });
-  let shockStrength = marketFrame.shock;
-  let shockDirection = marketFrame.shockDirection;
-  if (marketFrame.shockId > seenMarketShockId) {
-    seenMarketShockId = marketFrame.shockId;
-    visualShockId += 1;
-  }
-  if (debugShock) {
-    shockStrength = debugShock.strength;
-    shockDirection = debugShock.direction;
-    visualShockId += 1;
-    debugShockPreview = 0.8;
-    debugShock = null;
-  }
-  marketShock.update({
-    active: drivable || debugShockPreview > 0,
-    shockId: visualShockId,
-    strength: shockStrength,
-    direction: shockDirection,
-  }, dt);
-  debugShockPreview = Math.max(0, debugShockPreview - dt);
-  const grade = terrainGrade({
-    smoothPrice: solSmooth,
-    emaPrice: solEMA,
-    momentum: debugMomentum ?? marketFrame.momentum,
-  });
   const speed = roadSpeed(throttle / 100, game.equity, live2) * boost; // Nitro: road rips by 2× faster
   // lane-drive physics (7H): PD-with-momentum chases the target; the accel budget scales
   // with road speed (flat-out darts, idle is lazy). Parked pins speedFrac to 0 — the road
@@ -2032,7 +1973,7 @@ function frame(now: number) {
   const speedFrac = drivable ? Math.min(1, speed / ROAD_SPEED_MAX) : 0;
   const previousLaneX = lane.x;
   lane = laneStep(lane, carXTarget, speedFrac, dt);
-  world.update(dt, speed, grade);
+  world.update(dt, speed, 0);
 
   // car hugs the road: ride the surface height + pitch to the local slope, lean into turns
   const carY = world.surfaceY(CAR_Z);
@@ -2330,22 +2271,6 @@ if (import.meta.env.DEV) {
   // on-chain probe (GO-path fault injection for browser verification) — e.g. wrap
   // session.open with a one-shot 6005 throw to prove the same-press table rebuild
   (window as any).__chain = { session };
-  // Market Pulse probe: force visual slices without altering Round or settlement state.
-  // Call momentum() with no value to hand terrain control back to the feed.
-  (window as any).__marketPulse = {
-    state: () => ({ ...marketFrame, momentumOverride: debugMomentum, shockOverride: debugShock }),
-    momentum: (value?: number) => {
-      debugMomentum = value === undefined
-        ? null
-        : Math.max(-1, Math.min(1, Number(value) || 0));
-    },
-    shock: (direction = 1, strength = 1) => {
-      debugShock = {
-        direction: Number(direction) < 0 ? -1 : 1,
-        strength: Math.max(0, Math.min(1, Number(strength) || 0)),
-      };
-    },
-  };
   // racer lane-drive telemetry (7H browser verification) — reads the live physics state;
   // setTarget writes the same INPUT variable the pointer drag does (nothing below it)
   (window as any).__race = {
