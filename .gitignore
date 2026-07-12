@@ -1,5 +1,6 @@
 # Brainstorming / visual companion working files
 .superpowers/
+.worktrees/
 
 # Node
 node_modules/
