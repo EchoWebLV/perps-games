@@ -1,6 +1,6 @@
 // Identity-scoped saves — the swap that makes "guest" and "account" feel like different players.
 // The live game-state keys stay the plain names every consumer already reads/writes; this module
-// only STASHES them into a per-account namespace at logout, WIPES them, and RESTORES them at
+// only STASHES them into a per-identity namespace at transitions, WIPES them, and RESTORES them at
 // sign-in (then the caller reloads, so the app boots into the restored world).
 //
 // IDENTITY_KEYS is the single source of truth for what is player progress. Everything else is
@@ -19,6 +19,9 @@ import { type KvStore } from "./identity";
 export interface VaultStore extends KvStore {
   remove(key: string): void;
 }
+
+/** Stable local namespace for the guest rider. Account namespaces use their wallet address. */
+export const GUEST_SAVE_NAMESPACE = "guest";
 
 /** localStorage-backed store, safe in non-DOM/blocked contexts */
 export const browserVaultStore: VaultStore = {

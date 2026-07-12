@@ -80,7 +80,7 @@ import { createPresenceHud } from "./ui/presence";
 import { createAccessWall } from "./ui/access-wall";
 import { anyAccountRedeemed, anyRedeemed, redeem, redeemForAccount, type RedeemPorts } from "./core/access-code";
 import { offerPendingAccountWelcome, shouldGrantWelcome, welcomeClaimed, markWelcome } from "./core/welcome";
-import { restoreSave, stashSave, wipeSave } from "./core/save-vault";
+import { GUEST_SAVE_NAMESPACE, restoreSave, stashSave, wipeSave } from "./core/save-vault";
 import { createMapButton } from "./ui/mapbutton";
 import { createLobbyHud } from "./ui/lobbyhud";
 import { step as driveStep, DRIVE, type DriveState, type DriveTune } from "./core/freedrive";
@@ -628,9 +628,8 @@ const garage = createCarPicker(hudRoot, CAR_DEFS, (c) => { car.setModel(c.url, c
   if (roundActive || engine.getPhase() === "live") { hud.setStatus("Finish this run before signing out."); return; }
   if (identity?.mode === "privy" || signedIn) {
     // signed-in → a real log-out: sign the wallet out, forget the rider, fresh gate (no ✕).
-    // Identity-scoped saves: this account's offline progress is STASHED under its wallet
-    // address (captured now — the teardown drops the port), the live keys are wiped, and the
-    // reload boots a clean slate to the gate — the next guest starts from zero by design.
+    // Identity-scoped saves: this account's offline progress is stashed under its wallet
+    // address. The live keys are then replaced with the guest checkpoint before reloading.
     const stashNs = session.address() || "account";
     try { presence?.disconnect(); } catch { /* logout still proceeds without presence */ }
     void session.logout().then(() => {
@@ -643,7 +642,11 @@ const garage = createCarPicker(hudRoot, CAR_DEFS, (c) => { car.setModel(c.url, c
       clearIdentity();
       stashSave(stashNs);
       wipeSave();
+      restoreSave(GUEST_SAVE_NAMESPACE);
       location.reload(); // boots to the identity gate; replaces the in-place gate redraw
+    }).catch((error) => {
+      console.error("sign-out failed", error);
+      hud.setStatus("Sign-out failed. Check your connection and try again.");
     });
   } else {
     // guest → "Sign in / switch driver": keep who they are until they COMMIT to a new
@@ -846,8 +849,8 @@ let steerNorm = 0; // steering from the pointer drag (-1..1), shared with the lo
 // price, timer, tach, call/amount, GO) lives exactly as it always did.
 function setChrome(state: "cruise" | "race") {
   hud.setMinimal(state === "cruise");
-  coins.setVisible(state === "race");
-  scrap.setVisible(state === "race");
+  coins.setVisible(true);
+  scrap.setVisible(true);
   garage.setMenuTop(state === "cruise"); // strip: hamburger rides the top row (price chip's slot)
 }
 
@@ -2226,6 +2229,9 @@ function showIdentityGate() {
       // fresh = the account picker ALWAYS opens (a lingering Privy session is signed out
       // first). Resuming belongs to boot reconnect; the gate is where accounts switch.
       const transition = accountSignInTransition(identity);
+      // Account hydration writes server truth into the live save. Preserve the guest save first
+      // so logout can restore the exact coins, scrap, cars, upgrades, and cosmetic selections.
+      if (transition.reloadForSaveSwap) stashSave(GUEST_SAVE_NAMESPACE);
       zeroLocalSnapshotForSignIn = transition.zeroLocalSnapshot;
       let ok: boolean;
       try { ok = await ensureSignedIn(true); }
@@ -2245,8 +2251,8 @@ function showIdentityGate() {
         reconnectPresenceForIdentity();
         if (transition.reloadForSaveSwap) {
           // Identity-scoped saves (guest to account only, never on a boot reconnect, which
-          // would wipe the account's own live state every boot): guest progress is disposable
-          // by design. Wipe it, restore this account's stash from its last logout, then reload.
+          // would wipe the account's own live state every boot): wipe the hydrated live cache,
+          // restore this account's stash from its last logout, then reload.
           // The reload IS the rehydration: nothing may run in between, or an in-memory
           // persist() would clobber the restored keys. After the boot, the reconnect path
           // re-applies server-wins hydrate + the access wall + how-to + the welcome claim.

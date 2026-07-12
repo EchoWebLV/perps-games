@@ -39,6 +39,32 @@ describe("first account sign-in transition", () => {
     expect(signIn).toContain("if (transition.reloadForSaveSwap)");
     expect(signIn).not.toContain("const wasGuest = !identity");
   });
+
+  it("checkpoints guest progress before account hydration and restores it on logout", async () => {
+    const main = await readFile(new URL("../main.ts", import.meta.url), "utf8");
+    const signInStart = main.indexOf("async onSignIn(name)");
+    const signInEnd = main.indexOf("return ok;", signInStart);
+    const signIn = main.slice(signInStart, signInEnd);
+    const logoutStart = main.indexOf('if (identity?.mode === "privy" || signedIn)');
+    const logoutEnd = main.indexOf("} else {", logoutStart);
+    const logout = main.slice(logoutStart, logoutEnd);
+
+    expect(signIn.indexOf("stashSave(GUEST_SAVE_NAMESPACE)")).toBeGreaterThanOrEqual(0);
+    expect(signIn.indexOf("stashSave(GUEST_SAVE_NAMESPACE)")).toBeLessThan(signIn.indexOf("ensureSignedIn(true)"));
+    expect(logout).toContain("stashSave(stashNs)");
+    expect(logout).toContain("wipeSave()");
+    expect(logout).toContain("restoreSave(GUEST_SAVE_NAMESPACE)");
+  });
+
+  it("keeps both economy counters visible while cruising the lobby", async () => {
+    const main = await readFile(new URL("../main.ts", import.meta.url), "utf8");
+    const start = main.indexOf('function setChrome(state: "cruise" | "race")');
+    const end = main.indexOf("}\n", start);
+    const chrome = main.slice(start, end);
+
+    expect(chrome).toContain("coins.setVisible(true)");
+    expect(chrome).toContain("scrap.setVisible(true)");
+  });
 });
 
 describe("driver name application wiring", () => {

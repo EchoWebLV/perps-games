@@ -1,5 +1,12 @@
 import { describe, expect, test } from "vitest";
-import { IDENTITY_KEYS, stashSave, restoreSave, wipeSave, type VaultStore } from "./save-vault";
+import {
+  GUEST_SAVE_NAMESPACE,
+  IDENTITY_KEYS,
+  stashSave,
+  restoreSave,
+  wipeSave,
+  type VaultStore,
+} from "./save-vault";
 
 const memStore = (): VaultStore & { dump(): Map<string, string> } => {
   const m = new Map<string, string>();
@@ -30,6 +37,10 @@ const fillIdentityState = (store: VaultStore) => {
 };
 
 describe("IDENTITY_KEYS — the single source of truth for what swaps with identity", () => {
+  test("uses a stable namespace for guest progress", () => {
+    expect(GUEST_SAVE_NAMESPACE).toBe("guest");
+  });
+
   test("classifies exactly the player-progress keys", () => {
     expect([...IDENTITY_KEYS].sort()).toEqual([
       "raider.raceSkin",    // selected world skin
@@ -146,5 +157,23 @@ describe("namespace isolation", () => {
     wipeSave(store);
     expect(restoreSave("WalletB", store)).toBe(true);
     expect(store.get("redline.owned.v1")).toBe("B-cars");
+  });
+
+  test("guest and account balances survive a login then logout round-trip", () => {
+    const store = memStore();
+    store.set("redline.garage.v1", '{"coins":17,"scrap":9}');
+    stashSave(GUEST_SAVE_NAMESPACE, store);
+
+    wipeSave(store);
+    store.set("redline.garage.v1", '{"coins":120,"scrap":44}');
+    stashSave("WalletA", store);
+
+    wipeSave(store);
+    expect(restoreSave(GUEST_SAVE_NAMESPACE, store)).toBe(true);
+    expect(store.get("redline.garage.v1")).toBe('{"coins":17,"scrap":9}');
+
+    wipeSave(store);
+    expect(restoreSave("WalletA", store)).toBe(true);
+    expect(store.get("redline.garage.v1")).toBe('{"coins":120,"scrap":44}');
   });
 });
