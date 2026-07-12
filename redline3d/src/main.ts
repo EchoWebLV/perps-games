@@ -433,6 +433,7 @@ const upgrades = createUpgrades(hudRoot, {
   onCoins: (n) => coins.set(n),
   onScrap: (n) => scrap.set(n),
   onApply: () => tach.rebuild(effRmax()),
+  leverageValue: (upgradedRmax) => effRmax(upgradedRmax),
   economicEffects: true,
   onClose: () => { if (mode === "lobby") lobbyHud.show(); }, // returning to the lobby town → restore the back button
   onMutate: (ev) => {

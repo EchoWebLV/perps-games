@@ -132,7 +132,7 @@ function injectStyles() {
 
 export function createUpgrades(
   parent: HTMLElement,
-  opts: { onCoins?: (n: number) => void; onScrap?: (n: number) => void; onApply?: () => void; economicEffects?: boolean; onClose?: () => void; onMutate?: (ev: { kind: "coinsEarn" | "coinsSpend" | "scrapEarn" | "scrapSpend"; amount: number } | { kind: "levelBought"; track: Track; cost: number }) => void } = {},
+  opts: { onCoins?: (n: number) => void; onScrap?: (n: number) => void; onApply?: () => void; leverageValue?: (upgradedRmax: number) => number; economicEffects?: boolean; onClose?: () => void; onMutate?: (ev: { kind: "coinsEarn" | "coinsSpend" | "scrapEarn" | "scrapSpend"; amount: number } | { kind: "levelBought"; track: Track; cost: number }) => void } = {},
 ): Upgrades {
   injectStyles();
   const saved = loadSaved();
@@ -172,13 +172,15 @@ export function createUpgrades(
       </div>`).join("");
 
   const coinsEl = panel.querySelector("#upgCoins") as HTMLElement;
+  const shownValue = (track: TrackDef, value: number) =>
+    track.key === "turbo" && opts.leverageValue ? opts.leverageValue(value) : value;
 
   const render = () => {
     coinsEl.textContent = String(saved.coins);
     for (const t of ACTIVE) {
       const lvl = saved.levels[t.key];
       const val = trackValue(base[t.field], t.step, lvl);
-      (panel.querySelector(`[data-val="${t.key}"]`) as HTMLElement).textContent = t.fmt(val);
+      (panel.querySelector(`[data-val="${t.key}"]`) as HTMLElement).textContent = t.fmt(shownValue(t, val));
       const pips = panel.querySelectorAll(`[data-bar="${t.key}"] .upg-pip`);
       pips.forEach((p, i) => p.classList.toggle("on", i < lvl));
       const nextEl = panel.querySelector(`[data-next="${t.key}"]`) as HTMLElement;
@@ -189,7 +191,7 @@ export function createUpgrades(
       } else {
         const cost = upgradeCost(lvl);
         const nextVal = trackValue(base[t.field], t.step, lvl + 1);
-        nextEl.innerHTML = `Lv ${lvl}/${MAX_LEVEL} → <b>${t.fmt(nextVal)}</b> · ${cost} ◈`;
+        nextEl.innerHTML = `Lv ${lvl}/${MAX_LEVEL} → <b>${t.fmt(shownValue(t, nextVal))}</b> · ${cost} ◈`;
         buy.textContent = `${cost} ◈`; buy.classList.remove("max");
         buy.disabled = saved.coins < cost;
       }

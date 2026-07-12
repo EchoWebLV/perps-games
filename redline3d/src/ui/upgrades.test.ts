@@ -80,6 +80,15 @@ describe("scrap sink + finishes", () => {
 describe("upgrade levels sync (server-authoritative buys)", () => {
   beforeEach(() => localStorage.clear());
 
+  it("shows selected-car leverage for the current and next Turbo level", () => {
+    const root = document.createElement("div");
+    const up = createUpgrades(root, { leverageValue: (rmax) => rmax + 500 });
+    up.open();
+
+    expect(root.querySelector('[data-val="turbo"]')?.textContent).toBe("1500×");
+    expect(root.querySelector('[data-next="turbo"]')?.textContent).toContain("1550×");
+  });
+
   it("buy reports levelBought with track+cost — NOT coinsSpend (the server buy debits itself)", () => {
     const root = document.createElement("div");
     const events: { kind: string }[] = [];
