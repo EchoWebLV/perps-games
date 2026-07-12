@@ -2,7 +2,7 @@
 
 **Audience:** MagicBlock Blitz v6 judges
 
-**Target:** Approximately four minutes at a clear presentation pace
+**Target:** Approximately five minutes at a clear presentation pace
 
 ## Script
 
@@ -14,7 +14,7 @@ Hey everyone, this is Perps Rider, a mobile arcade driving game powered by real 
 
 This is the home world of Perps Rider. Players drive freely, see other drivers, and choose what to do by entering different buildings.
 
-The Track contains the main trading game. The Garage holds the player's car collection. Upgrades improve those cars, Crates unlock new ones, and the upcoming Highway introduces a longer, open-ended driving mode.
+The Track contains the main trading game. The Garage holds the player's car collection. Upgrades improve those cars, Crates unlock new ones, and the upcoming Highway introduces a longer, open-ended driving mode. Long positions drive on one side of the road and short positions drive on the other, turning market direction into a shared social experience.
 
 The lobby is also the foundation for a larger competitive world. Future buildings will introduce head-to-head games, cooperative trading challenges, team-based market events, and other social experiences.
 
@@ -44,11 +44,13 @@ When I press GO, the live Pyth price begins driving the game. If the market move
 
 This makes concepts like direction, leverage, profit, and liquidation understandable through driving instead of charts and order books.
 
-[Show a cash-out or automatic liquidation]
+[Show the MagicBlock integration graph]
 
-This is our first MagicBlock integration.
+This graph shows how MagicBlock powers both sides of Perps Rider. On the Track, the player's position runs inside the Ephemeral Rollup, where the live Pyth price and native crank drive settlement. In Crates, MagicBlock VRF produces verified randomness before the car is revealed. One integration makes trading fast and automatic, while the other makes rewards provably fair.
 
-The position runs on-chain inside a MagicBlock Ephemeral Rollup. This gives the game the speed and low cost needed to read fresh prices and settle continuously.
+[Highlight the Track flow, then show a cash-out or automatic liquidation]
+
+Starting with the Track, the position runs on-chain inside a MagicBlock Ephemeral Rollup. This gives the game the speed and low cost needed to read fresh prices and settle continuously.
 
 A native MagicBlock crank checks the position after it opens. If the market crosses the liquidation level, the program settles automatically. There is no additional wallet popup, liquidation button, or game operator deciding the result.
 
@@ -75,3 +77,29 @@ Perps Rider is not a trading terminal with a game placed on top. The position it
 MagicBlock makes the Track fast and continuously settled. Its VRF makes rewards provably fair. The lobby brings everything together inside a world built to grow into many cooperative and competitive trading games.
 
 Perps Rider is a real perp you drive, built on MagicBlock.
+
+## MagicBlock Integration Graph
+
+```mermaid
+flowchart TB
+    player["Player / Privy wallet"]
+
+    subgraph track["TRACK: continuous settlement"]
+        direction LR
+        position["Choose market, side, and leverage"] --> er["MagicBlock Ephemeral Rollup"]
+        pyth["Pyth Lazer live price"] --> er
+        crank["Native MagicBlock crank"] --> er
+        er --> settlement["Automatic on-chain settlement"]
+    end
+
+    subgraph crates["CRATES: provably fair rewards"]
+        direction LR
+        open["Open signed-in crate"] --> crateProgram["crate_roll program"]
+        crateProgram --> vrf["MagicBlock VRF"]
+        vrf --> verified["Verified randomness"]
+        verified --> reveal["Car revealed"]
+    end
+
+    player --> position
+    player --> open
+```
