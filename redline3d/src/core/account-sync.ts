@@ -85,6 +85,7 @@ export function createAccountSync(opts: AccountSyncOpts): AccountSync {
       if (serverEmpty && localHasState) {
         try {
           await api.migrate({ coins: local.coins, scrap: local.scrap, cars: local.cars, levels: local.levels });
+          opts.applyServer(local); // a vault-backed migration must become the live UI immediately
           on = true;
           return "seeded";
         } catch (e) {

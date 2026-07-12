@@ -3,6 +3,7 @@ import {
   GUEST_SAVE_NAMESPACE,
   IDENTITY_KEYS,
   stashSave,
+  readSaveSnapshot,
   restoreSave,
   wipeSave,
   type VaultStore,
@@ -53,6 +54,25 @@ describe("IDENTITY_KEYS — the single source of truth for what swaps with ident
 });
 
 describe("stash → wipe → restore", () => {
+  test("reads an account stash as a migration snapshot without restoring another identity live", () => {
+    const store = memStore();
+    store.set("vault:WalletA:redline.garage.v1", JSON.stringify({
+      coins: 920,
+      scrap: 44,
+      levels: { turbo: 3, tank: 2, suspension: 1 },
+    }));
+    store.set("vault:WalletA:redline.owned.v1", JSON.stringify({ Orion: 1, Dragon: 2 }));
+
+    expect(readSaveSnapshot("WalletA", store)).toEqual({
+      coins: 920,
+      scrap: 44,
+      cars: { Orion: 1, Dragon: 2 },
+      levels: { turbo: 3, tank: 2, suspension: 1 },
+    });
+    expect(store.get("redline.garage.v1")).toBeNull();
+    expect(readSaveSnapshot("WalletB", store)).toBeNull();
+  });
+
   test("round-trips every identity key", () => {
     const store = memStore();
     const values = fillIdentityState(store);

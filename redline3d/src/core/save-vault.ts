@@ -15,6 +15,7 @@
 // a stash/wipe can't exist without deletion).
 
 import { type KvStore } from "./identity";
+import type { AccountSnapshot } from "./account-sync";
 
 export interface VaultStore extends KvStore {
   remove(key: string): void;
@@ -40,6 +41,47 @@ export const IDENTITY_KEYS: readonly string[] = [
 ];
 
 const vaultKey = (ns: string, key: string) => `vault:${ns}:${key}`;
+
+const nonNegativeInt = (value: unknown): number => Math.max(0, Math.floor(Number(value) || 0));
+
+/** Read only the economy portion of one identity's stash for first-bind migration. This never
+ * restores keys into the live namespace, so another wallet's or the guest's state cannot leak. */
+export function readSaveSnapshot(ns: string, store: VaultStore = browserVaultStore): AccountSnapshot | null {
+  let garage: Record<string, unknown> | null = null;
+  let owned: unknown = null;
+  try {
+    const raw = store.get(vaultKey(ns, "redline.garage.v1"));
+    if (raw) garage = JSON.parse(raw) as Record<string, unknown>;
+  } catch { /* malformed stash contributes no garage state */ }
+  try {
+    const raw = store.get(vaultKey(ns, "redline.owned.v1"));
+    if (raw) owned = JSON.parse(raw);
+  } catch { /* malformed stash contributes no inventory */ }
+  if (!garage && owned === null) return null;
+
+  const cars: Record<string, number> = {};
+  if (Array.isArray(owned)) {
+    for (const id of owned) if (typeof id === "string") cars[id] = Math.max(cars[id] ?? 0, 1);
+  } else if (owned && typeof owned === "object") {
+    for (const [id, count] of Object.entries(owned as Record<string, unknown>)) {
+      const normalized = nonNegativeInt(count);
+      if (normalized > 0) cars[id] = normalized;
+    }
+  }
+  const levels = garage?.levels && typeof garage.levels === "object"
+    ? garage.levels as Record<string, unknown>
+    : {};
+  return {
+    coins: nonNegativeInt(garage?.coins),
+    scrap: nonNegativeInt(garage?.scrap),
+    cars,
+    levels: {
+      turbo: nonNegativeInt(levels.turbo),
+      tank: nonNegativeInt(levels.tank),
+      suspension: nonNegativeInt(levels.suspension),
+    },
+  };
+}
 
 /** Copy the live identity keys into `ns`'s stash. A live key that no longer exists clears its
  *  stashed copy too — stashing twice never leaves stale leftovers. */

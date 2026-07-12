@@ -37,6 +37,8 @@ describe("first account sign-in transition", () => {
     expect(end).toBeGreaterThan(start);
     expect(signIn).toContain("accountSignInTransition(identity)");
     expect(signIn).toContain("if (transition.reloadForSaveSwap)");
+    expect(main).toContain("readSaveSnapshot(session.address())");
+    expect(main).toContain("await syncAccount(fresh, accountStash ?? undefined)");
     expect(signIn).not.toContain("const wasGuest = !identity");
   });
 

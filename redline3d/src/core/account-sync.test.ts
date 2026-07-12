@@ -38,10 +38,13 @@ describe("createAccountSync", () => {
 
   it("seeds the server from local when the account is empty", async () => {
     const api = fakeApi();
-    const sync = createAccountSync({ api, nonce: "t", applyServer: () => {} });
-    const outcome = await sync.hydrate({ coins: 250, scrap: 30, cars: { orion: 1, clowncar: 2 } });
+    const applyServer = vi.fn();
+    const sync = createAccountSync({ api, nonce: "t", applyServer });
+    const local = { coins: 250, scrap: 30, cars: { orion: 1, clowncar: 2 } };
+    const outcome = await sync.hydrate(local);
     expect(outcome).toBe("seeded");
-    expect(api.migrate).toHaveBeenCalledWith({ coins: 250, scrap: 30, cars: { orion: 1, clowncar: 2 } });
+    expect(api.migrate).toHaveBeenCalledWith(local);
+    expect(applyServer).toHaveBeenCalledWith(local);
   });
 
   it("overwrites the local cache from server truth when the account is non-empty", async () => {

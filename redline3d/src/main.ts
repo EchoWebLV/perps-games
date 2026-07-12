@@ -42,7 +42,7 @@ import { showLocalEconomyMenu } from "./core/menu-visibility";
 import { highwayEntryDecision } from "./core/highway-access";
 import { createTradeHistoryRecorder } from "./core/trade-history-recorder";
 import { createTradeHistoryBridge } from "./core/trade-history-live";
-import { createAccountSync } from "./core/account-sync";
+import { createAccountSync, type AccountSnapshot } from "./core/account-sync";
 import { accountSignInTransition, browserStore } from "./core/identity";
 import { createPresenceClient, type PresenceClient, type PresencePlayer, type PresenceHighway } from "./core/presence";
 import { routePresenceEmote } from "./core/presence-emote-route";
@@ -78,7 +78,7 @@ import { createPresenceHud } from "./ui/presence";
 import { createAccessWall } from "./ui/access-wall";
 import { anyAccountRedeemed, anyRedeemed, redeem, redeemForAccount, type RedeemPorts } from "./core/access-code";
 import { offerPendingAccountWelcome, shouldGrantWelcome, welcomeClaimed, markWelcome } from "./core/welcome";
-import { GUEST_SAVE_NAMESPACE, restoreSave, stashSave, wipeSave } from "./core/save-vault";
+import { GUEST_SAVE_NAMESPACE, readSaveSnapshot, restoreSave, stashSave, wipeSave } from "./core/save-vault";
 import { createMapButton } from "./ui/mapbutton";
 import { createLobbyHud } from "./ui/lobbyhud";
 import { step as driveStep, DRIVE, type DriveState, type DriveTune } from "./core/freedrive";
@@ -256,7 +256,10 @@ async function ensureSignedIn(fresh = false): Promise<boolean> {
       await session.init();
     }
     syncOnchainBalance();
-    await syncAccount(fresh); // a fresh identity cannot continue until Railway restores the account
+    // A prior account logout may have checkpointed progress locally before wallet binding existed.
+    // Offer only THIS wallet's stash to Railway; a non-empty server account still wins in hydrate().
+    const accountStash = fresh ? readSaveSnapshot(session.address()) : null;
+    await syncAccount(fresh, accountStash ?? undefined);
     signedIn = true;
     restoreHighwayPosition();
     void syncTableCap(); // clamp the bet stepper to the live table limit right away
@@ -281,7 +284,7 @@ async function ensureSignedIn(fresh = false): Promise<boolean> {
 // guest-to-account bind also must not migrate the guest's coins/cars. Only the real guest save swap
 // reloads the page; a fresh visitor keeps the already-warmed scene and continues in place.
 let zeroLocalSnapshotForSignIn = false;
-async function syncAccount(required = false): Promise<void> {
+async function syncAccount(required = false, snapshotOverride?: AccountSnapshot): Promise<void> {
   try {
     const port = {
       connect: async () => ({ address: session.address() }),
@@ -289,9 +292,9 @@ async function syncAccount(required = false): Promise<void> {
     };
     await bindAndHydrate({
       api, auth, port, accountSync,
-      localSnapshot: zeroLocalSnapshotForSignIn
+      localSnapshot: snapshotOverride ?? (zeroLocalSnapshotForSignIn
         ? { coins: 0, scrap: 0, cars: {}, levels: { turbo: 0, tank: 0, suspension: 0 } }
-        : { coins: upgrades.coins(), scrap: upgrades.scrap(), cars: inventory.snapshot(), levels: upgrades.levels() },
+        : { coins: upgrades.coins(), scrap: upgrades.scrap(), cars: inventory.snapshot(), levels: upgrades.levels() }),
       requireServerHydration: required,
     });
     const serverDriverName = accountSync.driverName();
