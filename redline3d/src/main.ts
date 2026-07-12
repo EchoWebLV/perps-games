@@ -45,7 +45,7 @@ import { highwayEntryDecision } from "./core/highway-access";
 import { createTradeHistoryRecorder } from "./core/trade-history-recorder";
 import { createTradeHistoryBridge } from "./core/trade-history-live";
 import { createAccountSync } from "./core/account-sync";
-import { accountSignInTransition } from "./core/identity";
+import { accountSignInTransition, browserStore } from "./core/identity";
 import { createPresenceClient, type PresenceClient, type PresencePlayer, type PresenceHighway } from "./core/presence";
 import { routePresenceEmote } from "./core/presence-emote-route";
 import { presenceHudShouldShow, presenceShouldConnect } from "./core/presence-lifecycle";
@@ -2124,9 +2124,9 @@ function maybeWelcomeGift() {
 }
 // Show the how-to walkthrough once to a new player, THEN run the follow-up (the welcome gift).
 // A returning player (flag already set) skips straight to `after`.
-function maybeShowHowTo(after: () => void) {
-  if (howToSeen()) { after(); return; }
-  howto.open(() => { markHowToSeen(); after(); });
+function maybeShowHowTo(after: () => void, namespace?: string) {
+  if (howToSeen(browserStore, namespace)) { after(); return; }
+  howto.open(() => { markHowToSeen(browserStore, namespace); after(); });
 }
 // The access wall's grant seams — HOISTED so both identity paths (and the reconnect block) can wire
 // their own redeem into the same wall. "magic" grants all cars + 1,000 coins through the exact seams
@@ -2236,7 +2236,9 @@ function showIdentityGate() {
         // accountSync.accessCodes() is populated — the wall shows only if THIS account hasn't redeemed.
         // The welcome crate (ONCE PER ACCOUNT, server-side) fires AFTER the wall clears so its reveal
         // isn't drawn behind the wall.
-        accountAccessThenEnter(() => { maybeShowHowTo(() => { void offerWelcomeAccount(); }); });
+        accountAccessThenEnter(() => {
+          maybeShowHowTo(() => { void offerWelcomeAccount(); }, session.address());
+        });
       }
       return ok;
     },
@@ -2274,7 +2276,9 @@ if (identity?.mode === "privy") {
     reconnectPresenceForIdentity();
     // A guest-to-account save swap reloads before its post-wall flow can run, so the boot
     // reconnect completes it. Fresh account sign-ins continue in place on the warmed scene.
-    accountAccessThenEnter(() => { maybeShowHowTo(() => { void offerWelcomeAccount(); }); });
+    accountAccessThenEnter(() => {
+      maybeShowHowTo(() => { void offerWelcomeAccount(); }, session.address());
+    });
   }).catch(() => {});
 }
 console.log("Perps Raider render up");
