@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { describe, expect, it, test } from "vitest";
+import { describe, expect, it, test, vi } from "vitest";
 import { createCarPicker, setHudMenuMode, type CarOption } from "./carpicker";
 import { createTradeHistory } from "./trade-history";
 
@@ -185,6 +185,27 @@ describe("hamburger product menu", () => {
     expect(parent.querySelector('[data-act="history"]')).not.toBeNull();
     expect(parent.querySelector('[data-go="garage"]')).toBeNull();
     expect(parent.querySelector('[data-act="upgrades"]')).toBeNull();
+  });
+
+  it("shows and refreshes Driver Name, then invokes its edit action", () => {
+    const parent = document.createElement("div");
+    let current: string | null = null;
+    const edit = vi.fn();
+    createCarPicker(parent, oneCar, () => {}, undefined, [], undefined, undefined, undefined, undefined, {
+      driverName: { current: () => current, edit },
+    });
+    const hamburger = parent.querySelector<HTMLButtonElement>('button[aria-label="Open menu"]')!;
+
+    hamburger.click();
+    const row = parent.querySelector<HTMLButtonElement>('[data-act="driver-name"]')!;
+    expect(row).not.toBeNull();
+    expect(row.querySelector("small")?.textContent).toBe("choose your name");
+    row.click();
+    expect(edit).toHaveBeenCalledTimes(1);
+
+    current = "road_king";
+    hamburger.click();
+    expect(parent.querySelector('[data-driver-name]')?.textContent).toBe("road_king");
   });
 
   it("closes before History, focuses the hamburger, and lets the panel restore there", async () => {

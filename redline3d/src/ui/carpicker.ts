@@ -293,6 +293,10 @@ export interface WorldPicker {
 export interface MenuFeatures {
   showGarageAndUpgrades?: boolean;
   onHistory?: () => void;
+  driverName?: {
+    current(): string | null;
+    edit(): void;
+  };
 }
 
 export function createCarPicker(
@@ -389,12 +393,25 @@ export function createCarPicker(
     });
   }
 
-  // account section — Log out (only for a real signed-in account; dev/guest passes no onLogout)
-  if (onLogout && gmenu) {
+  // account section — social identity first, then Sign in / Log out.
+  if ((menuFeatures.driverName || onLogout) && gmenu) {
     const sep = document.createElement("div");
     sep.textContent = "account";
     sep.style.cssText = "margin:8px 4px 2px;font:700 10px/1 'Chakra Petch',ui-monospace,monospace;letter-spacing:.16em;color:var(--mut)";
     gmenu.appendChild(sep);
+    if (menuFeatures.driverName) {
+      const nameButton = document.createElement("button");
+      nameButton.className = "gmenu-item";
+      nameButton.dataset.act = "driver-name";
+      nameButton.innerHTML =
+        `<span class="gmenu-ic">${icon("target", 20)}</span>` +
+        `<span class="gmenu-tx"><b>Driver Name</b><small data-driver-name="1">choose your name</small></span>` +
+        `<span class="gmenu-arr">${icon("chevron", 16)}</span>`;
+      gmenu.appendChild(nameButton);
+    }
+  }
+  // Sign in / Log out exists when the caller supplies its account action.
+  if (onLogout && gmenu) {
     const b = document.createElement("button");
     b.className = "gmenu-item";
     b.dataset.act = "logout";
@@ -415,6 +432,8 @@ export function createCarPicker(
       if (label) label.textContent = info.label;
       if (sub) sub.textContent = info.sub;
     }
+    const driverName = menuPanel.querySelector("[data-driver-name]") as HTMLElement | null;
+    if (driverName) driverName.textContent = menuFeatures.driverName?.current() ?? "choose your name";
     // reflect the current Music/SFX volumes (they can change elsewhere) on every menu open
     sliders.forEach((sl, i) => {
       const el = sliderEls[i];
@@ -768,6 +787,7 @@ export function createCarPicker(
     if (!t) return;
     if (t.dataset.world !== undefined) { if (t.classList.contains("locked")) return; worlds?.set(t.dataset.world); renderWorlds(); return; } // switch level skin (sealed skins ignore the tap), stay open
     if (t.dataset.act === "history") { close("chain"); menuButton.focus(); menuFeatures.onHistory?.(); return; }
+    if (t.dataset.act === "driver-name") { close("chain"); menuButton.focus(); menuFeatures.driverName?.edit(); return; }
     if (t.dataset.act === "close") close();
     else if (t.dataset.act === "back") setView("menu");
     else if (t.dataset.act === "upgrades") { close("chain"); onUpgrades?.(); }
