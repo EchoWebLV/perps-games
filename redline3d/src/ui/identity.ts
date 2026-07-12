@@ -65,15 +65,40 @@ export function createIdentityGate(
   card.innerHTML =
     (opts.onDismiss ? `<button id="idclose" type="button" aria-label="Close"
       style="position:absolute;top:10px;right:10px;width:32px;height:32px;padding:0;display:grid;place-items:center;border-radius:8px;border:1px solid var(--line);background:rgba(12,10,26,.74);color:var(--mut);cursor:pointer;font-size:14px">✕</button>` : "") +
+    `<style>
+  #idsignin.identity-primary:focus-visible,
+  #idguest.identity-secondary:focus-visible,
+  #idname:focus-visible {
+    outline:2px solid var(--cyan);
+    outline-offset:3px;
+  }
+  #idguest.identity-secondary {
+    width:100%;
+    padding:11px 13px;
+    border-radius:11px;
+    border:1px solid rgba(39,231,255,.34);
+    background:rgba(12,10,26,.74);
+    color:#aeb8dc;
+    cursor:pointer;
+    font:700 12px 'Chakra Petch',ui-monospace,monospace;
+    letter-spacing:.1em;
+    box-shadow:inset 0 1px 0 rgba(255,255,255,.04);
+  }
+  #idguest.identity-secondary:active { transform:translateY(1px); }
+  #idsignin:disabled,
+  #idguest:disabled { cursor:progress;filter:saturate(.55); }
+</style>` +
     `<div class="num" style="font-size:26px;letter-spacing:.14em;color:var(--cyan);text-shadow:0 0 18px rgba(39,231,255,.5)">PERPS RIDER</div>` +
-    `<div class="lbl" style="letter-spacing:.08em;color:#aeb8dc">pick your driver name</div>` +
+    `<div class="lbl" style="letter-spacing:.08em;color:#aeb8dc">driver name · optional for sign in</div>` +
     `<input id="idname" maxlength="16" autocomplete="off" spellcheck="false" placeholder="e.g. liq_dodger"
       style="width:100%;box-sizing:border-box;padding:13px 14px;border-radius:11px;border:1px solid var(--line);background:rgba(10,8,22,.85);color:#eef1ff;font:700 17px 'Chakra Petch',ui-monospace,monospace;letter-spacing:.06em;text-align:center;outline:none"/>` +
     `<div id="idmsg" class="lbl" style="min-height:13px;color:#ff9db1"></div>` +
-    `<button id="idguest" class="cta" style="width:100%"><span></span><span>RIDE AS GUEST</span></button>` +
-    `<button id="idsignin" class="panel" type="button"
-      style="width:100%;padding:13px;border-radius:11px;cursor:pointer;background:rgba(12,10,26,.74);color:var(--cyan);font:700 14px 'Chakra Petch',ui-monospace,monospace;letter-spacing:.1em">SIGN IN</button>` +
-    `<div class="lbl" style="opacity:.75;line-height:1.6">guests race in <b style="color:#2ee6a6">practice mode</b> — free, no wallet<br>sign in (no name needed) to play for real SOL<br>hold the road to drive · park at <b style="color:#14f195">TRACK</b> to race</div>`;
+    `<button id="idsignin" class="cta identity-primary" type="button" style="width:100%"><span></span><span>SIGN IN</span></button>` +
+    `<div class="lbl" style="color:#2ee6a6;letter-spacing:.1em;line-height:1.45">save progress · collect cars · play for real SOL</div>` +
+    `<div style="height:1px;background:linear-gradient(90deg,transparent,rgba(132,150,224,.26),transparent);margin:1px 0"></div>` +
+    `<button id="idguest" class="identity-secondary" type="button">RIDE AS GUEST</button>` +
+    `<div class="lbl" style="color:#8d9ac4;letter-spacing:.1em">practice mode · no wallet required</div>` +
+    `<div class="lbl" style="opacity:.75;line-height:1.6">driver name required for guests<br>hold the road to drive · park at <b style="color:#14f195">TRACK</b> to race</div>`;
   el.appendChild(card);
   parent.appendChild(el);
 
