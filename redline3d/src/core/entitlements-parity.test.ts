@@ -1,5 +1,6 @@
 import { describe, it, expect } from "vitest";
-import { perkEnvelope, carPerk } from "@perps/engine/entitlements";
+import { readFile } from "node:fs/promises";
+import { perkEnvelope, carLeverageCeiling, carPerk } from "@perps/engine/entitlements";
 import { trackValue } from "../ui/upgrades";
 import { CONFIG } from "./config";
 
@@ -56,6 +57,18 @@ describe("perkEnvelope parity with the client's live formulas", () => {
 
   it("Cybertruck at level 0: baseLev floors the ceiling at 1500 (main.ts CAR_DEFS + effRmax's Math.max)", () => {
     expect(perkEnvelope(L(), carPerk("Cybertruck")).maxLev).toBe(1500);
+  });
+
+  it("Cybertruck Turbo level 1 is 1550x in shared and live client math", () => {
+    const upgraded = trackValue(CONFIG.RMAX, 50, 1);
+    const client = carLeverageCeiling(upgraded, 1500);
+    expect(perkEnvelope(L(1), carPerk("Cybertruck")).maxLev).toBe(client);
+    expect(client).toBe(1550);
+  });
+
+  it("main uses the shared additive car ceiling", async () => {
+    const main = await readFile(new URL("../main.ts", import.meta.url), "utf8");
+    expect(main).toContain("carLeverageCeiling(upgradedRmax, carBaseLev)");
   });
 
   it("Orion nitro grants ×2 transient headroom over the stock ceiling (ui/nitro.ts NITRO_MULT)", () => {

@@ -29,6 +29,7 @@ import { liqPriceOf } from "./core/economics";
 import { reconcileFlip } from "./core/flip-reconcile";
 import { createUpgrades } from "./ui/upgrades";
 import { CONFIG } from "./core/config";
+import { carLeverageCeiling } from "@perps/engine/entitlements";
 import { createMinimap } from "./ui/minimap";
 import { CART_COIN_RATE, createPickups } from "./render/pickups";
 import { createFireTrail } from "./render/firetrail";
@@ -382,15 +383,17 @@ const barrelRoll = createBarrelRoll(hudRoot, () => {
   chase.shake(0.6); navigator.vibrate?.([0, 30, 40, 30]);
 });
 hud.setBalance(balance);
-// Effective leverage ceiling = the upgrade-driven CONFIG.RMAX, raised to a car's base if higher
-// (the Cybertruck starts at 1500). Nitro (Orion) then doubles the live leverage on top of this.
+// Effective leverage ceiling = the car's starting ceiling plus every earned Turbo step.
+// Cybertruck starts at 1500, so Turbo level 1 raises it immediately to 1550.
 let carBaseLev = 0;
 let ability: CarAbility | undefined;
 // Six Wheeler "Heavy Load": hauls more, revs slower — 0.25 SOL max bet, +50% round time, half
 // the tach ceiling. Pure client trade: `open` passes the longer dur (the program clamps it
 // ≤180s) and the lower ceiling only caps what leverage the throttle can reach.
 const HEAVY_PLAY_CAP = 25, HEAVY_DUR = 1.5, HEAVY_LEV = 0.5;
-const effRmax = () => Math.round(Math.max(CONFIG.RMAX, carBaseLev) * (ability === "sixWheeler" ? HEAVY_LEV : 1));
+const effRmax = (upgradedRmax = CONFIG.RMAX) => Math.round(
+  carLeverageCeiling(upgradedRmax, carBaseLev) * (ability === "sixWheeler" ? HEAVY_LEV : 1),
+);
 const effMaxSec = () => Math.round(CONFIG.MAXSEC * (ability === "sixWheeler" ? HEAVY_DUR : 1));
 // Server account: coins/scrap/cars live on @perps/server keyed by the Privy identity. The auth
 // provider holds the wallet-bound session token; `api` talks to the server; `accountSync` reconciles
