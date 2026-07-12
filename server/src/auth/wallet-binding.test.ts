@@ -10,6 +10,7 @@ describe("createWalletBinding", () => {
     const wallet = bs58.encode(publicKey);
     const binding = createWalletBinding({ secret: "b".repeat(32), now: () => 1000 });
     const challenge = binding.createChallenge({ userId: "user-1", wallet });
+    expect(challenge.message).toMatch(/^Perps Raider wallet binding\n/);
     const signatureBase58 = bs58.encode(
       await ed.signAsync(new TextEncoder().encode(challenge.message), secretKey),
     );

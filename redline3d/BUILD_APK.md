@@ -20,7 +20,7 @@ npm run apk:install    # build, then `adb install -r` to a USB device (needs USB
 ```
 
 `apk:serve` is the route that works on the Seeker: it prints a
-`http://<your-lan-ip>:8077/redline.apk` URL — open it in the phone's browser
+`http://<your-lan-ip>:8077/perps-raider.apk` URL - open it in the phone's browser
 (same Wi-Fi), download, tap, and allow "install unknown apps". Ctrl+C to stop the
 server. (USB/`adb` needs USB debugging enabled on the phone, which can be fiddly.)
 

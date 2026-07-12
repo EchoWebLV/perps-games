@@ -114,7 +114,7 @@ const ctx = createScene(canvas);
 // CPUs (Seeker: 8GB/8-core but Mali-G615); ?perf=low|high overrides for on-device tuning
 const gpu = gpuRendererString(ctx.renderer.getContext());
 const quality = detectQuality({ gpuRenderer: gpu, search: location.search });
-console.log(`redline3d quality: ${quality.tier} · bloom ${quality.bloom ? "×" + quality.bloomScale : "off"} · msaa ${quality.postSamples}× · dpr≤${quality.pixelRatioCap} · ${quality.frameCapFps ? quality.frameCapFps + "fps cap" : "uncapped"} · ${quality.detail}${gpu ? ` (${gpu})` : ""}`);
+console.log(`Perps Raider quality: ${quality.tier} · bloom ${quality.bloom ? "×" + quality.bloomScale : "off"} · msaa ${quality.postSamples}× · dpr≤${quality.pixelRatioCap} · ${quality.frameCapFps ? quality.frameCapFps + "fps cap" : "uncapped"} · ${quality.detail}${gpu ? ` (${gpu})` : ""}`);
 ctx.renderer.setPixelRatio(Math.min(quality.pixelRatioCap, window.devicePixelRatio || 1));
 const post = quality.bloom ? createPost(ctx.renderer, ctx.scene, ctx.camera, quality.bloomScale, quality.postSamples) : null;
 // Keep the renderer + bloom composer matched to the live viewport. Relying on the window
@@ -2271,7 +2271,7 @@ if (identity?.mode === "privy") {
     accountAccessThenEnter(() => { maybeShowHowTo(() => { void offerWelcomeAccount(); }); });
   }).catch(() => {});
 }
-console.log("redline3d render up");
+console.log("Perps Raider render up");
 
 // DEV-only hooks so browser verification can jump between modes without driving
 // across the lobby at Preview's throttled frame rate. Stripped from prod builds.

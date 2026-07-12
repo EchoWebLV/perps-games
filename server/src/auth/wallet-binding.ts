@@ -38,7 +38,7 @@ export function createWalletBinding(deps: {
     exp: number;
   }) =>
     [
-      "Redline wallet binding",
+      "Perps Raider wallet binding",
       `Wallet: ${p.wallet}`,
       `Session: ${p.userId}`,
       `Nonce: ${p.nonce}`,
