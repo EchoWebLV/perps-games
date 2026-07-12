@@ -19,6 +19,7 @@ export function validateName(raw: string): string | null {
 }
 
 const IDENT_KEY = "raider.identity";
+const NAME_ERROR = "3-16 characters: letters, numbers, underscores";
 
 export function loadIdentity(): Identity | null {
   try {
@@ -92,7 +93,7 @@ export function createIdentityGate(
     `<div class="num" style="font-size:26px;letter-spacing:.14em;color:var(--cyan);text-shadow:0 0 18px rgba(39,231,255,.5)">PERPS RIDER</div>` +
     `<label for="idname" class="lbl" style="letter-spacing:.08em;color:#aeb8dc">driver name · optional for sign in</label>` +
     `<input id="idname" maxlength="16" autocomplete="off" spellcheck="false" aria-describedby="idmsg" placeholder="e.g. liq_dodger"
-      style="width:100%;box-sizing:border-box;padding:13px 14px;border-radius:11px;border:1px solid var(--line);background:rgba(10,8,22,.85);color:#eef1ff;font:700 17px 'Chakra Petch',ui-monospace,monospace;letter-spacing:.06em;text-align:center;outline:none"/>` +
+      style="width:100%;box-sizing:border-box;padding:13px 14px;border-radius:11px;border:1px solid var(--line);background:rgba(10,8,22,.85);color:#eef1ff;font:700 17px 'Chakra Petch',ui-monospace,monospace;letter-spacing:.06em;text-align:center"/>` +
     `<div id="idmsg" class="lbl" role="status" aria-live="polite" style="min-height:13px;color:#ff9db1"></div>` +
     `<button id="idsignin" class="cta identity-primary" type="button" style="width:100%"><span></span><span id="idsigninlabel">SIGN IN</span></button>` +
     `<div class="lbl" style="color:#2ee6a6;letter-spacing:.1em;line-height:1.45">save progress · collect cars · play for real SOL</div>` +
@@ -112,7 +113,7 @@ export function createIdentityGate(
   const takeName = (): string | null => {
     const name = validateName(input.value);
     if (!name) {
-      msg.textContent = "3-16 characters: letters, numbers, underscores";
+      msg.textContent = NAME_ERROR;
       input.focus();
       return null;
     }
@@ -148,6 +149,7 @@ export function createIdentityGate(
       name = takeName();
       if (!name) return;
     }
+    msg.textContent = "";
     setBusy(true);
     try {
       if (await opts.onSignIn(name)) { close(); return; }
@@ -157,6 +159,9 @@ export function createIdentityGate(
     }
     setBusy(false);
   };
+  input.addEventListener("input", () => {
+    if (msg.textContent === NAME_ERROR && (!input.value.trim() || validateName(input.value))) msg.textContent = "";
+  });
   input.addEventListener("keydown", (e) => { if (e.key === "Enter") guestBtn.click(); e.stopPropagation(); });
   input.addEventListener("keyup", (e) => e.stopPropagation());
   if (opts.prefill) input.value = opts.prefill;

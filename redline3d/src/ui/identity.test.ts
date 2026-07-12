@@ -74,6 +74,69 @@ test("associates the driver-name label and live status with the input", () => {
   expect(message.getAttribute("aria-live")).toBe("polite");
 });
 
+test("lets the scoped keyboard-focus outline render on the name input", () => {
+  const gate = createIdentityGate(document.body, {
+    onGuest: vi.fn(),
+    onSignIn: vi.fn().mockResolvedValue(false),
+  });
+
+  const input = gate.el.querySelector<HTMLInputElement>("#idname")!;
+  const scopedStyles = gate.el.querySelector<HTMLStyleElement>("style")!.textContent;
+
+  expect(input.style.outline).toBe("");
+  expect(scopedStyles).toMatch(/#idname:focus-visible\s*\{/);
+});
+
+test("clears stale validation when the name becomes valid or empty", () => {
+  const gate = createIdentityGate(document.body, {
+    onGuest: vi.fn(),
+    onSignIn: vi.fn().mockResolvedValue(false),
+  });
+  const input = gate.el.querySelector<HTMLInputElement>("#idname")!;
+  const guest = gate.el.querySelector<HTMLButtonElement>("#idguest")!;
+  const message = gate.el.querySelector<HTMLElement>("#idmsg")!;
+
+  input.value = "ab";
+  guest.click();
+  expect(message.textContent).toBe("3-16 characters: letters, numbers, underscores");
+
+  input.value = "neon_rider";
+  input.dispatchEvent(new Event("input", { bubbles: true }));
+  expect(message.textContent).toBe("");
+
+  input.value = "ab";
+  guest.click();
+  input.value = "";
+  input.dispatchEvent(new Event("input", { bubbles: true }));
+  expect(message.textContent).toBe("");
+});
+
+test("clears stale validation while a corrected sign-in is pending", async () => {
+  let finishSignIn!: (result: boolean) => void;
+  const onSignIn = vi.fn(() => new Promise<boolean>((resolve) => { finishSignIn = resolve; }));
+  const gate = createIdentityGate(document.body, {
+    onGuest: vi.fn(),
+    onSignIn,
+  });
+  const input = gate.el.querySelector<HTMLInputElement>("#idname")!;
+  const signIn = gate.el.querySelector<HTMLButtonElement>("#idsignin")!;
+  const message = gate.el.querySelector<HTMLElement>("#idmsg")!;
+
+  input.value = "ab";
+  signIn.click();
+  expect(message.textContent).toBe("3-16 characters: letters, numbers, underscores");
+
+  input.value = "neon_rider";
+  signIn.click();
+  expect(onSignIn).toHaveBeenCalledWith("neon_rider");
+  expect(message.textContent).toBe("");
+
+  finishSignIn(false);
+  await vi.waitFor(() => {
+    expect(message.textContent).toBe("Sign-in didn't finish — try again, or ride as guest.");
+  });
+});
+
 test("gives the guest action a 44px minimum touch target", () => {
   const gate = createIdentityGate(document.body, {
     onGuest: vi.fn(),
