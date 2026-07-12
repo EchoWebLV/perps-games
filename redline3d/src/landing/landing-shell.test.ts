@@ -193,7 +193,7 @@ describe("Perps Rider landing shell", () => {
       expect(landingHtml).toContain(`style="--tech-delay: ${delay}"`);
     }
     expect(landingStylesheet).toMatch(
-      /html\.motion-paused \.tech-scene \*,\s*html:not\(\.tech-motion-active\) \.tech-scene \* \{[^}]*animation-play-state: paused !important;/,
+      /:where\(html\.motion-paused, html:not\(\.tech-motion-active\)\) \.tech-scene \*:not\(\.tech-brand\) \{[^}]*animation-play-state: paused !important;/,
     );
     expect(landingStylesheet).toMatch(/\.tech-grid \{[^}]*grid-template-columns: repeat\(4, 1fr\);/);
     expect(landingStylesheet).toMatch(
@@ -204,8 +204,60 @@ describe("Perps Rider landing shell", () => {
     );
     expect(landingStylesheet).toMatch(/\.car-b \{[^}]*--tech-phase-delay: 1\.2s;/);
     expect(landingStylesheet).toMatch(
-      /\.tech-scene \* \{[^}]*animation-delay: calc\(var\(--tech-delay, 0s\) \+ var\(--tech-phase-delay, 0s\)\);/,
+      /\.tech-scene \*:not\(\.tech-brand\) \{[^}]*animation-delay: calc\(var\(--tech-delay, 0s\) \+ var\(--tech-phase-delay, 0s\)\);/,
     );
+  });
+
+  it("keeps branded scenes deterministic, unfiltered, and correctly staggered", async () => {
+    const nodeFs = "node:fs/promises";
+    const { readFile } = await import(nodeFs);
+    const stylesheet = await readFile(new URL("./landing.css", import.meta.url), "utf8");
+
+    expect(stylesheet).toMatch(
+      /:where\(html\.motion-paused, html:not\(\.tech-motion-active\)\) \.tech-scene \*:not\(\.tech-brand\) \{[^}]*animation-play-state: paused !important;[^}]*animation: none !important;/,
+    );
+    expect(stylesheet).toMatch(
+      /:where\(html\.motion-paused, html:not\(\.tech-motion-active\)\) \.pipeline-pulse \{[^}]*animation-play-state: paused !important;[^}]*animation: none !important;/,
+    );
+
+    const staticStateRule = stylesheet.match(
+      /:where\(html\.motion-paused, html:not\(\.tech-motion-active\)\) \.tech-scene :is\(([\s\S]*?)\) \{([^}]*)\}/,
+    );
+    expect(staticStateRule).not.toBeNull();
+    for (const hook of [
+      ".price-ticker b",
+      ".rollup-pressure",
+      ".tx-shard",
+      ".settlement-rail",
+      ".settlement-seal",
+      ".world-destination i",
+      ".city-windows rect",
+      ".driver",
+    ]) {
+      expect(staticStateRule?.[1]).toContain(hook);
+    }
+    expect(staticStateRule?.[2]).toContain("opacity: 1;");
+    expect(staticStateRule?.[2]).toContain("transform: none;");
+
+    const hoverRule = stylesheet.match(/\.tech-grid article:hover \{([^}]*)\}/);
+    expect(hoverRule?.[1]).not.toMatch(/(?:^|[;\s])filter\s*:/);
+    expect(hoverRule?.[1]).toContain("box-shadow:");
+    expect(stylesheet).not.toMatch(/\.tech-grid article \{[^}]*transition:[^;}]*filter/);
+
+    expect(stylesheet).not.toMatch(/\.tech-scene \* \{[^}]*animation-delay:/);
+    for (const selector of ["tech-brand", "tech-brand-magicblock", "tech-brand-solana"]) {
+      const rule = stylesheet.match(new RegExp(`\\.${selector} \\{([^}]*)\\}`));
+      expect(rule?.[1]).not.toContain("animation");
+    }
+
+    for (const [card, delay] of [[2, "0.08s"], [3, "0.16s"], [4, "0.24s"]] as const) {
+      expect(stylesheet).toMatch(
+        new RegExp(`\\.tech-grid article:nth-of-type\\(${card}\\)\\[data-reveal\\] \\{[^}]*transition-delay: ${delay};`),
+      );
+    }
+    expect(stylesheet).toContain("calc(min(84vw, 991px) - 52px)");
+    expect(stylesheet).not.toContain("calc(84vw - 110px)");
+    expect(stylesheet).not.toContain("calc(84vw - 80px)");
   });
 
   it("shows real model renders for all four Strip buildings", async () => {
