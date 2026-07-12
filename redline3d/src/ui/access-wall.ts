@@ -35,9 +35,12 @@ export function createAccessWall(
     onRedeem(code: string): RedeemResult | Promise<RedeemResult>;
     /** fired exactly once when a valid code unlocks the wall — the caller lands the player in-world. */
     onUnlocked(): void;
+    /** Present only for the voluntary in-game redemption dialog. The boot gate remains mandatory. */
+    onDismiss?: () => void;
   },
 ): AccessWall {
   const el = document.createElement("div");
+  el.dataset.accessWall = "1";
   el.style.cssText = [
     "position:fixed", "inset:0", "z-index:40", "display:flex", "align-items:center", "justify-content:center",
     // near-opaque + blur: the world is HIDDEN behind the wall (a wall, not the gate's peek-through gauze)
@@ -49,6 +52,9 @@ export function createAccessWall(
   card.className = "panel";
   card.style.cssText = "position:relative;width:min(400px,94vw);padding:26px 22px 22px;border-radius:16px;text-align:center;display:flex;flex-direction:column;gap:15px";
   card.innerHTML =
+    (opts.onDismiss
+      ? `<button data-access-dismiss="1" aria-label="Close" style="position:absolute;top:10px;right:10px;border:0;background:transparent;color:#aeb8dc;font:700 18px/1 ui-sans-serif;cursor:pointer;padding:8px">✕</button>`
+      : "") +
     `<div class="num" style="font-size:28px;letter-spacing:.14em;color:var(--cyan);text-shadow:0 0 18px rgba(39,231,255,.5)">PERPS RIDER</div>` +
     `<div class="lbl" style="letter-spacing:.08em;color:#aeb8dc">enter your access code to play</div>` +
     `<input id="awcode" maxlength="24" autocomplete="off" spellcheck="false" placeholder="access code"
@@ -65,6 +71,12 @@ export function createAccessWall(
   let unlocked = false;
   let busy = false; // true while an async (account) redeem is in flight — blocks a concurrent re-submit
   const close = () => { el.remove(); };
+
+  card.querySelector<HTMLButtonElement>('[data-access-dismiss="1"]')?.addEventListener("click", () => {
+    if (busy || unlocked) return;
+    opts.onDismiss?.();
+    close();
+  });
 
   // React to a resolved outcome: a valid code (granted OR already) drops the wall and hands back to
   // boot; an invalid code shows a brief inline note and stays walled for a retry.

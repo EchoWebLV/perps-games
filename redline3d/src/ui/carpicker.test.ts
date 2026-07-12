@@ -187,6 +187,24 @@ describe("hamburger product menu", () => {
     expect(parent.querySelector('[data-act="upgrades"]')).toBeNull();
   });
 
+  it("always exposes access-code redemption and invokes its action", () => {
+    const parent = document.createElement("div");
+    document.body.appendChild(parent);
+    const onAccessCode = vi.fn();
+    createCarPicker(parent, oneCar, () => {}, undefined, [], undefined, undefined, undefined, undefined, {
+      onAccessCode,
+    });
+    const hamburger = parent.querySelector<HTMLButtonElement>('button[aria-label="Open menu"]')!;
+    hamburger.click();
+
+    const row = parent.querySelector<HTMLButtonElement>('[data-act="access-code"]');
+    expect(row?.textContent).toContain("Redeem access code");
+    row?.click();
+    expect(onAccessCode).toHaveBeenCalledTimes(1);
+    expect(document.activeElement).toBe(hamburger);
+    parent.remove();
+  });
+
   it("shows and refreshes Driver Name, then invokes its edit action", () => {
     const parent = document.createElement("div");
     let current: string | null = null;

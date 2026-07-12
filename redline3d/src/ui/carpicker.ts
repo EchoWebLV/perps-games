@@ -50,6 +50,7 @@ const ICONS: Record<string, string> = {
   chute: '<path d="M3 11a9 9 0 0 1 18 0H3z"/><path d="M3 11l9 9 9-9M8.5 11l3.5 9M15.5 11l-3.5 9"/>',
   swap: '<path d="M4 9h13M14 6l3 3-3 3"/><path d="M20 15H7M10 18l-3-3 3-3"/>',
   lock: '<rect x="5" y="11" width="14" height="9" rx="2"/><path d="M8 11V8a4 4 0 0 1 8 0v3"/>',
+  key: '<circle cx="8" cy="12" r="3.5"/><path d="M11.5 12H21M17 12v3M20 12v2"/>',
   car: '<path d="M4 13l1.6-4.2A2.5 2.5 0 0 1 8 7h8a2.5 2.5 0 0 1 2.4 1.8L20 13v5h-2.4v-1.6h-11.2V18H4z"/><circle cx="7.6" cy="14.8" r="1.4"/><circle cx="16.4" cy="14.8" r="1.4"/>',
   help: '<circle cx="12" cy="12" r="9"/><path d="M9.6 9.2a2.4 2.4 0 1 1 3.4 2.2c-.8.4-1.1.9-1.1 1.7"/><path d="M12 16.4h.01"/>',
   chevron: '<path d="M9 6l6 6-6 6"/>',
@@ -293,6 +294,7 @@ export interface WorldPicker {
 export interface MenuFeatures {
   showGarageAndUpgrades?: boolean;
   onHistory?: () => void;
+  onAccessCode?: () => void;
   driverName?: {
     current(): string | null;
     edit(): void;
@@ -343,9 +345,11 @@ export function createCarPicker(
       <button class="gmenu-item" data-act="upgrades"><span class="gmenu-ic">${icon("level", 20)}</span><span class="gmenu-tx"><b>Upgrades</b><small>tune your car</small></span><span class="gmenu-arr">${icon("chevron", 16)}</span></button>`;
   const historyRow = `
       <button class="gmenu-item" data-act="history"><span class="gmenu-ic">${icon("clock", 20)}</span><span class="gmenu-tx"><b>History</b><small>your settled trades</small></span><span class="gmenu-arr">${icon("chevron", 16)}</span></button>`;
+  const accessCodeRow = `
+      <button class="gmenu-item" data-act="access-code"><span class="gmenu-ic">${icon("key", 20)}</span><span class="gmenu-tx"><b>Redeem access code</b><small>unlock entry and rewards</small></span><span class="gmenu-arr">${icon("chevron", 16)}</span></button>`;
   menuPanel.innerHTML =
     `<div class="ghead"><span class="lbl">menu</span><button class="gicon-btn" data-act="close" aria-label="Close">✕</button></div>` +
-    `<div class="gmenu">${localRows}${historyRow}
+    `<div class="gmenu">${localRows}${historyRow}${accessCodeRow}
       <button class="gmenu-item" data-act="howto"><span class="gmenu-ic">${icon("help", 20)}</span><span class="gmenu-tx"><b>How to play</b><small>controls &amp; the bet</small></span><span class="gmenu-arr">${icon("chevron", 16)}</span></button>
     </div>`;
 
@@ -787,6 +791,7 @@ export function createCarPicker(
     if (!t) return;
     if (t.dataset.world !== undefined) { if (t.classList.contains("locked")) return; worlds?.set(t.dataset.world); renderWorlds(); return; } // switch level skin (sealed skins ignore the tap), stay open
     if (t.dataset.act === "history") { close("chain"); menuButton.focus(); menuFeatures.onHistory?.(); return; }
+    if (t.dataset.act === "access-code") { close("chain"); menuButton.focus(); menuFeatures.onAccessCode?.(); return; }
     if (t.dataset.act === "driver-name") { close("chain"); menuButton.focus(); menuFeatures.driverName?.edit(); return; }
     if (t.dataset.act === "close") close();
     else if (t.dataset.act === "back") setView("menu");

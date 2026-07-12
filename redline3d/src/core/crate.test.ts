@@ -51,7 +51,7 @@ describe("CRATES config", () => {
     expect([w.priceCoins, s.priceCoins, g.priceCoins]).toEqual([250, 1000, 3000]);
     expect([w.scrap, s.scrap, g.scrap]).toEqual([25, 300, 800]);
     expect([w.levelChance, s.levelChance, g.levelChance]).toEqual([0.05, 0.25, 0.75]);
-    expect([w.priceUsd, s.priceUsd, g.priceUsd]).toEqual([0.99, 4.99, 9.99]);
+    expect([w.priceSol, s.priceSol, g.priceSol]).toEqual([undefined, 0.1, 0.2]);
     expect(Object.values(w.tierWeights).reduce((a, b) => a + b, 0)).toBe(100);
     expect(Object.values(s.tierWeights).reduce((a, b) => a + b, 0)).toBe(100);
     expect(Object.values(g.tierWeights).reduce((a, b) => a + b, 0)).toBe(100);

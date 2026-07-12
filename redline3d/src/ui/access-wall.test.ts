@@ -44,6 +44,28 @@ describe("access wall — only a code field, nothing else", () => {
     expect(wall.el.style.pointerEvents).toBe("auto");
     expect(wall.el.style.zIndex).toBe("40"); // above the identity gate (30)
   });
+
+  test("optionally exposes a dismiss control for the in-game redemption dialog", () => {
+    const parent = document.createElement("div");
+    document.body.appendChild(parent);
+    const onDismiss = vi.fn();
+    const wall = createAccessWall(parent, {
+      onRedeem: () => "invalid",
+      onUnlocked: () => {},
+      onDismiss,
+    });
+
+    const dismiss = wall.el.querySelector<HTMLButtonElement>('[data-access-dismiss="1"]');
+    expect(dismiss).not.toBeNull();
+    dismiss?.click();
+    expect(onDismiss).toHaveBeenCalledTimes(1);
+    expect(parent.contains(wall.el)).toBe(false);
+  });
+
+  test("keeps the mandatory boot gate non-dismissible", () => {
+    const { wall } = mount("invalid");
+    expect(wall.el.querySelector('[data-access-dismiss="1"]')).toBeNull();
+  });
 });
 
 describe("access wall — redeeming a code", () => {

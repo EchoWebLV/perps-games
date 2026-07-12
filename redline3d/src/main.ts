@@ -98,6 +98,7 @@ import { createGameSession } from "./chain/game-session";
 import { HIGHWAY_DURATION_SENTINEL, isHighwayRound, roundKey, type RoundSnap } from "./chain/chain-round";
 import { selectChainWalletPort } from "./chain/wallet-select";
 import { createCrateRollDraws, makeCrateRollIo } from "./chain/crate-roll";
+import { payDevnetSol } from "./chain/sol-payment";
 import {
   createHighwayRoundReader,
   deriveHighwayRoundPda,
@@ -107,6 +108,7 @@ import {
 
 const canvas = document.getElementById("gl") as HTMLCanvasElement;
 const hudRoot = document.getElementById("hud") as HTMLElement;
+const CRATE_TREASURY = (import.meta.env.VITE_CRATE_TREASURY_PUBKEY as string | undefined) ?? "";
 
 const ctx = createScene(canvas);
 
@@ -669,6 +671,7 @@ const garage = createCarPicker(hudRoot, CAR_DEFS, (c) => { car.setModel(c.url, c
 }, {
   showGarageAndUpgrades,
   onHistory: () => { void tradeHistory.open(); },
+  onAccessCode: () => openAccessCodeDialog(),
   driverName: {
     current: () => identity?.name ?? null,
     edit: () => openDriverNameDialog(false),
@@ -689,7 +692,12 @@ const crateBox = createCrateBox(hudRoot, {
   grantLevel: (key) => { levels.grant(key); },
   levelInfo: (key) => { const t = themeOf(key); return { name: t.name, sky: [t.sky[0], t.sky[1]], disc: t.celestialColors[0], grid: [t.grid[0], t.grid[1]] }; },
   lowTier: quality.tier === "low",
-  onBuyUsd: () => lobbyHud.toast("Card payment coming soon — use coins for now"),
+  buyWithSol: async (_crateKey, priceSol) => {
+    if (identity?.mode !== "privy") throw new Error("sol_payment_requires_sign_in");
+    const wallet = session.anchorWallet();
+    if (!wallet) throw new Error("sol_payment_wallet_unavailable");
+    return payDevnetSol(wallet, CRATE_TREASURY, priceSol);
+  },
   // MagicBlock VRF (signed-in only): one randomness request per pull, signed by the same
   // session wallet as rounds. Guests fall through to client RNG (practice parity).
   vrfDraws: () => {
@@ -2139,6 +2147,23 @@ const accessPorts: RedeemPorts = {
   grantCar: (id) => { inventory.grant(id); garage.grant(id); }, // bank it (+ server sync) AND flip its garage card
   credit: (n) => upgrades.addCoins(n),
 };
+
+// The first-run access wall remains mandatory. This menu entry is intentionally dismissible so a
+// returning rider can redeem a second code, including the reward code, without clearing app data.
+function openAccessCodeDialog() {
+  if (hudRoot.querySelector('[data-access-wall="1"]')) return;
+  const accountId = identity?.mode === "privy" ? session.address() : null;
+  createAccessWall(hudRoot, {
+    onRedeem: accountId
+      ? (code) => redeemForAccount(code, {
+          api, accountId, rosterIds: accessPorts.rosterIds, owns: accessPorts.owns,
+          grantCar: accessPorts.grantCar, credit: accessPorts.credit,
+        })
+      : (code) => redeem(code, accessPorts),
+    onUnlocked: () => lobbyHud.toast("Access code redeemed."),
+    onDismiss: () => {},
+  });
+}
 // The access wall is a HARD gate that now sits AFTER the identity choice, one per CONTEXT:
 //  • GUEST — redeem is LOCAL (a durable per-browser flag). A browser that already redeemed skips it.
 //  • ACCOUNT — redeem is pinned SERVER-SIDE (follows the player across devices). A hydrated account

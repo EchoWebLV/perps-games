@@ -16,21 +16,21 @@ export interface CrateCar {
 }
 
 // A crate tier. `tierWeights` is the per-crate car-rarity distribution — a tier absent from the map
-// can't drop from that crate. `priceUsd` is the real-money option (deferred behind the payment rail).
+// can't drop from that crate. `priceSol` is the confirmed native devnet SOL purchase option.
 export interface CrateType {
   key: "wooden" | "silver" | "gold";
   name: string;
   color: string;                          // UI accent (crate identity)
   priceCoins: number;
-  priceUsd?: number;
+  priceSol?: number;
   scrap: number;                          // guaranteed scrap per open
   levelChance: number;                    // chance (0..1) to also unlock a random locked level skin
   tierWeights: Partial<Record<Rarity, number>>;
 }
 export const CRATES: readonly CrateType[] = [
-  { key: "wooden", name: "Wooden Crate", color: "#b07a45", priceCoins: 250,  priceUsd: 0.99, scrap: 25,   levelChance: 0.05, tierWeights: { 1: 50, 2: 30, 3: 20 } },
-  { key: "silver", name: "Silver Crate", color: "#c3ccd8", priceCoins: 1000, priceUsd: 4.99, scrap: 300,  levelChance: 0.25, tierWeights: { 1: 40, 2: 30, 3: 16, 4: 10, 5: 4 } },
-  { key: "gold",   name: "Gold Crate",   color: "#ffcf5a", priceCoins: 3000, priceUsd: 9.99, scrap: 800, levelChance: 0.75, tierWeights: { 3: 40, 4: 35, 5: 25 } },
+  { key: "wooden", name: "Wooden Crate", color: "#b07a45", priceCoins: 250, scrap: 25, levelChance: 0.05, tierWeights: { 1: 50, 2: 30, 3: 20 } },
+  { key: "silver", name: "Silver Crate", color: "#c3ccd8", priceCoins: 1000, priceSol: 0.1, scrap: 300, levelChance: 0.25, tierWeights: { 1: 40, 2: 30, 3: 16, 4: 10, 5: 4 } },
+  { key: "gold",   name: "Gold Crate",   color: "#ffcf5a", priceCoins: 3000, priceSol: 0.2, scrap: 800, levelChance: 0.75, tierWeights: { 3: 40, 4: 35, 5: 25 } },
 ];
 export const crateByKey = (key: string): CrateType => CRATES.find((c) => c.key === key) ?? CRATES[0];
 

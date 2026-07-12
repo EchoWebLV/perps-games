@@ -9,7 +9,7 @@ import { scrapPileHtml, levelPosterHtml, type LevelPoster } from "./reveal-bits"
 // The Crate Shop: pick one of three crates (Wooden / Silver / Gold), buy with coins → roll a car by
 // that crate's rarity odds + bank the crate's scrap → reveal. A NEW car unlocks in the garage; a
 // DUPLICATE adds bonus scrap. Randomness is a RandomnessProvider (client RNG now, MagicBlock VRF
-// behind the same port later). The $ price is stubbed until a payment rail is wired.
+// behind the same port later). Silver and Gold can also be bought with confirmed devnet SOL.
 export interface CrateBoxDeps {
   cars: () => CrateCar[];               // the roster to roll from (owned + not-yet-owned)
   grantCar: (name: string) => boolean;  // inventory.grant → true if NEWLY owned, false if a dupe
@@ -21,7 +21,8 @@ export interface CrateBoxDeps {
   grantLevel: (key: string) => void;    // unlock a level skin
   levelInfo: (key: string) => LevelPoster;   // theme palette for the reward poster
   lowTier: boolean;                          // weak-GPU tier → static car image instead of a live canvas
-  onBuyUsd?: (crateKey: string) => void; // real-money option (stubbed → toast for now)
+  /** Submit and confirm native devnet SOL before a paid VRF pull begins. */
+  buyWithSol?: (crateKey: string, priceSol: number) => Promise<string>;
   onClose?: () => void;
   rng?: RandomnessProvider;
   /** signed-in VRF draws: () => null (guest / not connected) | draws(n) that resolves n uniform
@@ -83,6 +84,20 @@ export function vrfFailureMessage(error: unknown, coinsHeld = true): string {
   return `The verified crate open failed. Try again.${suffix}`;
 }
 
+/** Translate wallet and devnet failures into useful payment messages without granting a reward. */
+export function solPaymentFailureMessage(error: unknown, priceSol: number): string {
+  const text = error instanceof Error ? `${error.name} ${error.message}` : String(error);
+  if (/reject|denied|cancel/i.test(text)) return "Payment cancelled. Your wallet was not charged.";
+  if (/insufficient|0x1|debit/i.test(text)) {
+    return `Your wallet needs at least ${priceSol} devnet SOL plus a network fee.`;
+  }
+  if (/unconfirmed|block height|expired/i.test(text)) {
+    return "The devnet payment was not confirmed, so no crate was opened.";
+  }
+  if (/treasury_not_configured/i.test(text)) return "SOL crate payments are temporarily unavailable.";
+  return "The devnet SOL payment failed. No crate was opened.";
+}
+
 const gems = (r: number) => {
   const c = tierOf(r).color;
   return Array.from({ length: r }, () => `<span class="cb-gem" style="background:${c};box-shadow:0 0 6px ${c}"></span>`).join("");
@@ -137,7 +152,7 @@ function injectStyles() {
     .cb-coin{border:0;border-radius:9px;padding:9px 4px;cursor:pointer;font:800 12px/1 'Chakra Petch',ui-monospace,monospace;white-space:nowrap;width:100%;
       color:#04130d;background:linear-gradient(180deg,#48f0b6,#14c78c);box-shadow:0 3px 10px rgba(46,230,166,.32)}
     .cb-coin:disabled{cursor:not-allowed;color:var(--mut);background:rgba(255,255,255,.08);box-shadow:none}
-    .cb-usd{border:1px solid rgba(255,209,102,.4);border-radius:9px;padding:7px 4px;cursor:pointer;font:800 11px/1 'Chakra Petch',ui-monospace,monospace;width:100%;
+    .cb-sol{border:1px solid rgba(255,209,102,.4);border-radius:9px;padding:7px 4px;cursor:pointer;font:800 11px/1 'Chakra Petch',ui-monospace,monospace;width:100%;
       color:var(--amb);background:rgba(255,209,102,.1)}
     /* reveal */
     .cb-stage{display:none;flex-direction:column;align-items:center;gap:14px;padding:6px 0 2px;position:relative;min-height:230px;justify-content:center}
@@ -218,11 +233,11 @@ export function createCrateBox(parent: HTMLElement, deps: CrateBoxDeps): CrateBo
       <div class="cb-col-scrap">+${c.scrap} scrap</div>
       <div class="cb-col-buy">
         <button class="cb-coin" data-open="${c.key}">${c.priceCoins} ◈</button>
-        ${c.priceUsd ? `<button class="cb-usd" data-usd="${c.key}">$${c.priceUsd.toFixed(2)}</button>` : ""}
+        ${c.priceSol ? `<button class="cb-sol" data-sol="${c.key}">${c.priceSol} SOL</button>` : ""}
       </div>
     </div>`).join("");
   panel.innerHTML =
-    `<div class="cb-head"><span class="lbl">crate shop</span><span class="cb-coins">◈ <span data-cb="coins">0</span></span><button class="cb-x" data-cb="close" aria-label="Close">✕</button></div>` +
+    `<div class="cb-head"><span class="lbl">crate shop · devnet</span><span class="cb-coins">◈ <span data-cb="coins">0</span></span><button class="cb-x" data-cb="close" aria-label="Close">✕</button></div>` +
     `<div class="cb-cols" data-cb="rows">${rowsHtml}</div>` +
     `<div class="cb-stage" data-cb="stage"></div>` +
     `<div class="cb-btns" data-cb="btns" style="display:none"></div>`;
@@ -233,6 +248,7 @@ export function createCrateBox(parent: HTMLElement, deps: CrateBoxDeps): CrateBo
   const coinsEl = q("coins"), rows = q("rows"), stage = q("stage"), btns = q("btns");
   const revealCar = createRevealCar({ lowTier: deps.lowTier });
   let opening = false, giftMode = false; // giftMode: the free welcome open → its reveal "Done" closes to the strip
+  let pendingSol: { crateKey: string; signature: string } | null = null;
 
   // ---- render the 3D crate GLBs to images once (transient renderer, disposed after) → used for the
   // shop icons + the opening animation. Mirrors the car-card render in carpicker.ts. ----
@@ -356,7 +372,7 @@ export function createCrateBox(parent: HTMLElement, deps: CrateBoxDeps): CrateBo
     return true;
   };
 
-  const doOpen = (crate: CrateType, free = false) => {
+  const doOpen = (crate: CrateType, free = false, payment: "coins" | "sol" = "coins") => {
     if (opening) return;
     if (!free) giftMode = false; // a paid open ends the welcome flow → its reveal returns to the shop
     const vrfRequired = deps.vrfRequired?.() ?? false;
@@ -368,6 +384,51 @@ export function createCrateBox(parent: HTMLElement, deps: CrateBoxDeps): CrateBo
       return;
     }
     const vrfProvider = randomnessMode === "vrf" ? availableVrf : null;
+
+    if (payment === "sol") {
+      if (!crate.priceSol || !deps.buyWithSol) {
+        deps.onVrfFail?.("SOL crate payments are temporarily unavailable.");
+        return;
+      }
+      if (!vrfProvider || !vrfRequired) {
+        deps.onVrfFail?.("Sign in with your wallet to buy crates with devnet SOL.");
+        return;
+      }
+      if (pendingSol && pendingSol.crateKey !== crate.key) {
+        const pendingName = crateByKey(pendingSol.crateKey).name;
+        deps.onVrfFail?.(`Finish your paid ${pendingName} pull before buying another crate.`);
+        return;
+      }
+
+      opening = true;
+      giftMode = false;
+      showCrateAnim(crate, true);
+      void (async () => {
+        if (!pendingSol) {
+          const signature = await deps.buyWithSol!(crate.key, crate.priceSol!);
+          pendingSol = { crateKey: crate.key, signature };
+        }
+        const draws = await vrfProvider(4);
+        const revealed = resolveAndReveal(crate, draws, true);
+        if (revealed) {
+          pendingSol = null;
+          return;
+        }
+        opening = false;
+        showShop();
+        deps.onVrfFail?.(`Your ${crate.name} payment is confirmed. Retry this pull without another charge.`);
+      })().catch((error) => {
+        opening = false;
+        console.warn("[crate] SOL open failed:", error);
+        if (pendingSol?.crateKey === crate.key) {
+          deps.onVrfFail?.(`SOL payment confirmed. Retry your ${crate.name} pull without another charge.`);
+        } else {
+          deps.onVrfFail?.(solPaymentFailureMessage(error, crate.priceSol!));
+        }
+        showShop();
+      });
+      return;
+    }
 
     if (!vrfProvider) {
       // ── guest / not connected: the existing sync client-RNG path, verbatim behavior ──
@@ -422,10 +483,10 @@ export function createCrateBox(parent: HTMLElement, deps: CrateBoxDeps): CrateBo
   };
 
   panel.addEventListener("click", (e) => {
-    const el = (e.target as HTMLElement).closest("[data-open],[data-usd],[data-cb]") as HTMLElement | null;
+    const el = (e.target as HTMLElement).closest("[data-open],[data-sol],[data-cb]") as HTMLElement | null;
     if (!el) return;
     if (el.dataset.open) { const c = CRATES.find((x) => x.key === el.dataset.open); if (c) doOpen(c); return; }
-    if (el.dataset.usd) { deps.onBuyUsd?.(el.dataset.usd); return; }
+    if (el.dataset.sol) { const c = CRATES.find((x) => x.key === el.dataset.sol); if (c) doOpen(c, false, "sol"); return; }
     const k = el.dataset.cb;
     if (k === "done") { if (giftMode) { giftMode = false; close(); } else showShop(); }
     else if (k === "close") close();

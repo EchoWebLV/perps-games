@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { describe, expect, test } from "vitest";
+import { describe, expect, test, vi } from "vitest";
 import { createCrateBox, type CrateBoxDeps } from "./cratebox";
 import * as crateboxModule from "./cratebox";
 import { CRATES } from "../core/crate";
@@ -54,6 +54,84 @@ describe("crate shop odds disclosure", () => {
     expect(styles).toMatch(/\.cb-col-odds\{[^}]*min-height:21px/);
     expect(styles).toMatch(/\.cb-col-odds\{[^}]*align-content:center/);
     expect(styles).toMatch(/\.cb-col-buy\{[^}]*margin-top:auto/);
+  });
+
+  test("offers Silver for 0.1 SOL and Gold for 0.2 SOL, with no SOL Wooden option", () => {
+    const parent = document.createElement("div");
+    createCrateBox(parent, stubDeps());
+
+    expect(parent.querySelector('[data-sol="wooden"]')).toBeNull();
+    expect(parent.querySelector('[data-sol="silver"]')?.textContent).toBe("0.1 SOL");
+    expect(parent.querySelector('[data-sol="gold"]')?.textContent).toBe("0.2 SOL");
+    expect(parent.querySelector("[data-usd]")).toBeNull();
+  });
+});
+
+describe("SOL crate purchases", () => {
+  const paidDeps = (overrides: Partial<CrateBoxDeps> = {}): CrateBoxDeps => ({
+    ...stubDeps(),
+    cars: () => [{ name: "Common", rarity: 1, url: "/common.glb" }],
+    vrfRequired: () => true,
+    vrfDraws: () => async () => [0, 0, 1, 0],
+    buyWithSol: async () => "confirmed-signature",
+    ...overrides,
+  });
+
+  test("does not ask a guest wallet to pay", () => {
+    const parent = document.createElement("div");
+    const buyWithSol = vi.fn(async () => "must-not-run");
+    const onVrfFail = vi.fn();
+    createCrateBox(parent, paidDeps({
+      vrfRequired: () => false,
+      vrfDraws: () => null,
+      buyWithSol,
+      onVrfFail,
+    }));
+
+    parent.querySelector<HTMLButtonElement>('[data-sol="silver"]')?.click();
+
+    expect(buyWithSol).not.toHaveBeenCalled();
+    expect(onVrfFail).toHaveBeenCalledWith(expect.stringContaining("Sign in"));
+  });
+
+  test("grants only after the SOL transfer confirms and VRF resolves", async () => {
+    const parent = document.createElement("div");
+    const events: string[] = [];
+    const buyWithSol = vi.fn(async () => { events.push("paid"); return "confirmed-signature"; });
+    const grantCar = vi.fn(() => { events.push("granted"); return true; });
+    createCrateBox(parent, paidDeps({ buyWithSol, grantCar }));
+
+    parent.querySelector<HTMLButtonElement>('[data-sol="silver"]')?.click();
+    await vi.waitFor(() => expect(grantCar).toHaveBeenCalledTimes(1));
+
+    expect(buyWithSol).toHaveBeenCalledWith("silver", 0.1);
+    expect(events).toEqual(["paid", "granted"]);
+  });
+
+  test("retries a paid VRF pull without charging a second time", async () => {
+    const parent = document.createElement("div");
+    const buyWithSol = vi.fn(async () => "confirmed-signature");
+    const grantCar = vi.fn(() => true);
+    const onVrfFail = vi.fn();
+    let attempts = 0;
+    createCrateBox(parent, paidDeps({
+      buyWithSol,
+      grantCar,
+      onVrfFail,
+      vrfDraws: () => async () => {
+        attempts++;
+        if (attempts === 1) throw new Error("vrf_timeout");
+        return [0, 0, 1, 0];
+      },
+    }));
+
+    const buy = parent.querySelector<HTMLButtonElement>('[data-sol="silver"]')!;
+    buy.click();
+    await vi.waitFor(() => expect(onVrfFail).toHaveBeenCalledWith(expect.stringContaining("without another charge")));
+    buy.click();
+    await vi.waitFor(() => expect(grantCar).toHaveBeenCalledTimes(1));
+
+    expect(buyWithSol).toHaveBeenCalledTimes(1);
   });
 });
 
