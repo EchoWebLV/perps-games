@@ -3,10 +3,17 @@ import { browserStore, type KvStore } from "../core/identity";
 // First-run onboarding walkthrough: a 5-card paged explainer in plain player terms, reusing the
 // game's real on-screen labels. Shown once to new players (flag below) and from the hamburger menu.
 const KEY = "raider.howto.v1";
-/** true once the walkthrough has been shown/skipped (persists across reload / logout). */
-export function howToSeen(store: KvStore = browserStore): boolean { return store.get(KEY) === "1"; }
-/** mark the walkthrough as seen (also grandfathers a returning player). */
-export function markHowToSeen(store: KvStore = browserStore): void { store.set(KEY, "1"); }
+const seenKey = (namespace?: string): string => namespace ? `${KEY}:${namespace}` : KEY;
+
+/** true once this guest device or signed-in account has seen/skipped the walkthrough. */
+export function howToSeen(store: KvStore = browserStore, namespace?: string): boolean {
+  return store.get(seenKey(namespace)) === "1";
+}
+
+/** mark this guest device or signed-in account as having seen the walkthrough. */
+export function markHowToSeen(store: KvStore = browserStore, namespace?: string): void {
+  store.set(seenKey(namespace), "1");
+}
 
 interface LobbyStop {
   key: "track" | "garage" | "upgrades" | "crates";

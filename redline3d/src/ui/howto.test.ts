@@ -26,17 +26,29 @@ function openHowTo(options?: HowToOptions) {
   return { host, howto, panel };
 }
 
-describe("how-to seen flag — durable once-ever", () => {
-  test("starts unseen, stays seen after marking", () => {
+describe("how-to seen flag", () => {
+  test("keeps the guest flag once per device", () => {
     const store = memStore();
     expect(howToSeen(store)).toBe(false);
     markHowToSeen(store);
     expect(howToSeen(store)).toBe(true);
   });
-  test("the seen mark persists across a fresh reader of the same store", () => {
+
+  test("keeps separate completion flags for separate signed-in accounts", () => {
     const store = memStore();
-    markHowToSeen(store);
-    expect(howToSeen(store)).toBe(true);
+    markHowToSeen(store, "WalletAccountA");
+
+    expect(howToSeen(store, "WalletAccountA")).toBe(true);
+    expect(howToSeen(store, "WalletAccountB")).toBe(false);
+    expect(howToSeen(store)).toBe(false);
+  });
+
+  test("preserves case-sensitive Solana wallet namespaces", () => {
+    const store = memStore();
+    markHowToSeen(store, "AbCd123");
+
+    expect(howToSeen(store, "AbCd123")).toBe(true);
+    expect(howToSeen(store, "abcd123")).toBe(false);
   });
 });
 
