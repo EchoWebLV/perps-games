@@ -28,7 +28,7 @@ The final state is committed back to Solana. Stakes remain in program-controlled
 
 MagicBlock gives us arcade responsiveness without hiding the financial logic on a centralized game server.
 
-Around that core, Perps Rider has a complete game world. Players drive through a synthwave lobby, collect cars, open crates, earn upgrades, and unlock abilities that change how they manage risk. One car can freeze profit and loss for a few seconds. Another adds a stop-loss and take-profit. Another lets steering choose between long and short.
+Perps Rider also has an open-world layer. Players drive through a synthwave lobby connecting the garage, crates, and track, while the upcoming Highway expands that world into a longer drive. Cars are not only collectibles: their abilities change how players manage risk. One can freeze profit and loss, another adds stop-loss and take-profit, and another lets steering choose long or short.
 
 The same account works across desktop, an iPhone PWA, and a native Solana Seeker build. Players can sign in with a simple email code through Privy, while still receiving their own Solana wallet.
 
