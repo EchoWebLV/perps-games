@@ -6,9 +6,16 @@ const rendererHtmlFiles = import.meta.glob("../../building-renderer.html", { eag
 const rendererSourceFiles = import.meta.glob("./building-renderer.ts", { eager: true, import: "default", query: "?raw" });
 const captureSourceFiles = import.meta.glob("../../scripts/render-landing-buildings.mjs", { eager: true, import: "default", query: "?raw" });
 
+const readU16 = (bytes: Uint8Array, offset: number) => bytes[offset] | (bytes[offset + 1] << 8);
 const readU24 = (bytes: Uint8Array, offset: number) => bytes[offset] | (bytes[offset + 1] << 8) | (bytes[offset + 2] << 16);
 const readU32 = (bytes: Uint8Array, offset: number) => bytes[offset] + (bytes[offset + 1] * 0x100) + (bytes[offset + 2] * 0x10000) + (bytes[offset + 3] * 0x1000000);
 const readFourCC = (bytes: Uint8Array, offset: number) => String.fromCharCode(...bytes.subarray(offset, offset + 4));
+
+type WebPChunk = {
+  type: string;
+  payloadOffset: number;
+  payloadSize: number;
+};
 
 function assertWebP(condition: unknown, message: string): asserts condition {
   if (!condition) throw new Error(message);
@@ -22,10 +29,8 @@ const validateBuildingWebP = (bytes: Uint8Array) => {
   const declaredSize = readU32(bytes, 4);
   assertWebP(declaredSize + 8 === bytes.length, "RIFF size does not match file length");
 
-  const chunkTypes = new Set<string>();
+  const chunks: WebPChunk[] = [];
   let cursor = 12;
-  let vp8xPayloadOffset: number | undefined;
-  let vp8xPayloadSize = 0;
 
   while (cursor < bytes.length) {
     const payloadOffset = cursor + 8;
@@ -38,24 +43,76 @@ const validateBuildingWebP = (bytes: Uint8Array) => {
 
     const paddedEnd = payloadEnd + (payloadSize % 2);
     assertWebP(paddedEnd <= bytes.length, `${chunkType} padded boundary exceeds file length`);
+    if (payloadSize % 2 === 1) assertWebP(bytes[payloadEnd] === 0, `${chunkType} pad byte must be zero`);
 
-    chunkTypes.add(chunkType);
-    if (chunkType === "VP8X" && vp8xPayloadOffset === undefined) {
-      vp8xPayloadOffset = payloadOffset;
-      vp8xPayloadSize = payloadSize;
-    }
+    chunks.push({ type: chunkType, payloadOffset, payloadSize });
     cursor = paddedEnd;
   }
 
   assertWebP(cursor === bytes.length, "RIFF chunks do not end at file length");
-  assertWebP(vp8xPayloadOffset !== undefined, "missing VP8X chunk");
-  assertWebP(vp8xPayloadSize >= 10, "VP8X payload is too short");
-  assertWebP(chunkTypes.has("ALPH"), "missing ALPH chunk");
-  assertWebP(chunkTypes.has("VP8 ") || chunkTypes.has("VP8L"), "missing VP8 image payload");
-  assertWebP((bytes[vp8xPayloadOffset] & 0x10) === 0x10, "missing alpha flag");
-  assertWebP(readU24(bytes, vp8xPayloadOffset + 4) + 1 === 1024, "unexpected canvas width");
-  assertWebP(readU24(bytes, vp8xPayloadOffset + 7) + 1 === 720, "unexpected canvas height");
+
+  const vp8xChunk = chunks.find((chunk) => chunk.type === "VP8X");
+  assertWebP(vp8xChunk !== undefined, "missing VP8X chunk");
+  assertWebP(vp8xChunk.payloadSize >= 10, "VP8X payload is too short");
+  assertWebP((bytes[vp8xChunk.payloadOffset] & 0x10) === 0x10, "missing alpha flag");
+  assertWebP(readU24(bytes, vp8xChunk.payloadOffset + 4) + 1 === 1024, "unexpected canvas width");
+  assertWebP(readU24(bytes, vp8xChunk.payloadOffset + 7) + 1 === 720, "unexpected canvas height");
+
+  const alphChunk = chunks.find((chunk) => chunk.type === "ALPH");
+  assertWebP(alphChunk !== undefined, "missing ALPH chunk");
+  assertWebP(alphChunk.payloadSize >= 2, "ALPH payload is too short");
+  const alphControl = bytes[alphChunk.payloadOffset];
+  assertWebP((alphControl & 0xc0) === 0, "ALPH control reserved bits must be zero");
+  assertWebP((alphControl & 0x03) <= 1, "ALPH compression method is unsupported");
+
+  const vp8Chunk = chunks.find((chunk) => chunk.type === "VP8 ");
+  assertWebP(vp8Chunk !== undefined, "missing VP8 image payload");
+  assertWebP(vp8Chunk.payloadSize >= 10, "VP8 payload is too short");
+  const frameTag = readU24(bytes, vp8Chunk.payloadOffset);
+  assertWebP((frameTag & 0x01) === 0, "VP8 payload is not a key frame");
+  assertWebP(bytes[vp8Chunk.payloadOffset + 3] === 0x9d && bytes[vp8Chunk.payloadOffset + 4] === 0x01 && bytes[vp8Chunk.payloadOffset + 5] === 0x2a, "VP8 key-frame start code is invalid");
+  assertWebP((readU16(bytes, vp8Chunk.payloadOffset + 6) & 0x3fff) === 1024, "unexpected VP8 frame width");
+  assertWebP((readU16(bytes, vp8Chunk.payloadOffset + 8) & 0x3fff) === 720, "unexpected VP8 frame height");
+  const firstPartitionLength = frameTag >>> 5;
+  assertWebP(firstPartitionLength > 0, "VP8 first partition is empty");
+  assertWebP(firstPartitionLength <= vp8Chunk.payloadSize - 10, "VP8 first partition exceeds payload");
 };
+
+type WebPChunkFixture = {
+  type: string;
+  payload: Uint8Array;
+  padByte?: number;
+};
+
+const writeFourCC = (bytes: Uint8Array, offset: number, value: string) => {
+  for (let index = 0; index < 4; index += 1) bytes[offset + index] = value.charCodeAt(index);
+};
+
+const makeWebPFixture = (chunks: WebPChunkFixture[]) => {
+  const byteLength = 12 + chunks.reduce((length, chunk) => length + 8 + chunk.payload.length + (chunk.payload.length % 2), 0);
+  const bytes = new Uint8Array(byteLength);
+  const view = new DataView(bytes.buffer);
+  writeFourCC(bytes, 0, "RIFF");
+  view.setUint32(4, byteLength - 8, true);
+  writeFourCC(bytes, 8, "WEBP");
+
+  let cursor = 12;
+  for (const chunk of chunks) {
+    writeFourCC(bytes, cursor, chunk.type);
+    view.setUint32(cursor + 4, chunk.payload.length, true);
+    bytes.set(chunk.payload, cursor + 8);
+    cursor += 8 + chunk.payload.length;
+    if (chunk.payload.length % 2 === 1) {
+      bytes[cursor] = chunk.padByte ?? 0;
+      cursor += 1;
+    }
+  }
+  return bytes;
+};
+
+const validVp8xPayload = Uint8Array.of(0x10, 0, 0, 0, 0xff, 0x03, 0, 0xcf, 0x02, 0);
+const validAlphPayload = Uint8Array.of(0, 0);
+const validVp8Payload = Uint8Array.of(0x30, 0, 0, 0x9d, 0x01, 0x2a, 0, 0x04, 0xd0, 0x02, 0);
 
 describe("landing building renderer", () => {
   it("renders the real game buildings through a transparent orthographic scene", () => {
@@ -103,5 +160,36 @@ describe("landing building renderer", () => {
     new DataView(truncatedBytes.buffer).setUint32(4, truncatedBytes.length - 8, true);
 
     expect(() => validateBuildingWebP(truncatedBytes)).toThrow("missing ALPH chunk");
+  });
+
+  it("rejects a zero-byte ALPH payload", () => {
+    const bytes = makeWebPFixture([
+      { type: "VP8X", payload: validVp8xPayload },
+      { type: "ALPH", payload: new Uint8Array() },
+      { type: "VP8 ", payload: validVp8Payload },
+    ]);
+
+    expect(() => validateBuildingWebP(bytes)).toThrow("ALPH payload is too short");
+  });
+
+  it("rejects a zero-byte VP8 payload", () => {
+    const bytes = makeWebPFixture([
+      { type: "VP8X", payload: validVp8xPayload },
+      { type: "ALPH", payload: validAlphPayload },
+      { type: "VP8 ", payload: new Uint8Array() },
+    ]);
+
+    expect(() => validateBuildingWebP(bytes)).toThrow("VP8 payload is too short");
+  });
+
+  it("rejects a nonzero odd-chunk pad byte", () => {
+    const bytes = makeWebPFixture([
+      { type: "VP8X", payload: validVp8xPayload },
+      { type: "JUNK", payload: Uint8Array.of(0), padByte: 1 },
+      { type: "ALPH", payload: validAlphPayload },
+      { type: "VP8 ", payload: validVp8Payload },
+    ]);
+
+    expect(() => validateBuildingWebP(bytes)).toThrow("JUNK pad byte must be zero");
   });
 });
