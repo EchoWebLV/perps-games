@@ -85,4 +85,13 @@ describe("Perps Rider landing shell", () => {
     expect(landingHtml).not.toMatch(/<div class="step-media"><img/);
   });
 
+  it("renders four distinct decorative buildings on the Strip", () => {
+    for (const building of ["track", "garage", "upgrades", "crates"]) {
+      expect(landingHtml).toContain(`class="strip-building building-${building}"`);
+      expect(landingHtml).toContain(`data-building="${building}"`);
+    }
+    expect(landingHtml.match(/data-building=/g)).toHaveLength(4);
+    expect(landingHtml.match(/class="strip-building[^>]+aria-hidden="true"/g)).toHaveLength(4);
+  });
+
 });
