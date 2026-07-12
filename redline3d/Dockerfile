@@ -6,6 +6,9 @@ COPY redline3d/package.json redline3d/package-lock.json ./
 RUN npm ci --legacy-peer-deps
 COPY redline3d/ .
 COPY packages/engine/ /app/packages/engine/
+ARG VITE_PRIVY_APP_ID
+ARG VITE_WALLET
+ARG VITE_SOLANA_CLUSTER
 RUN npm run build
 
 FROM caddy:2-alpine
