@@ -25,3 +25,14 @@ export function shouldGrantWelcome(freshVisitor: boolean, claimed: boolean): boo
 export function shouldDeliverAccountWelcome(claimGranted: boolean): boolean {
   return claimGranted;
 }
+
+/** Offer an account welcome gift without consuming it. Completion happens after VRF. */
+export async function offerPendingAccountWelcome(
+  readStatus: () => Promise<{ pending: boolean }>,
+  openGift: () => void,
+): Promise<boolean> {
+  const { pending } = await readStatus();
+  if (!pending) return false;
+  openGift();
+  return true;
+}

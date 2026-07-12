@@ -42,3 +42,19 @@ describe("signed-in welcome delivery", () => {
     expect(shouldDeliver?.(false)).toBe(false);
   });
 });
+
+describe("pending signed-in welcome offer", () => {
+  test("opens only when the read-only server status is pending", async () => {
+    const offer = (welcomeModule as unknown as {
+      offerPendingAccountWelcome?: (
+        readStatus: () => Promise<{ pending: boolean }>,
+        openGift: () => void,
+      ) => Promise<boolean>;
+    }).offerPendingAccountWelcome!;
+    let opens = 0;
+
+    await expect(offer(async () => ({ pending: true }), () => { opens++; })).resolves.toBe(true);
+    await expect(offer(async () => ({ pending: false }), () => { opens++; })).resolves.toBe(false);
+    expect(opens).toBe(1);
+  });
+});

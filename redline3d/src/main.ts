@@ -38,7 +38,7 @@ import { createHowTo, howToSeen, markHowToSeen } from "./ui/howto";
 import { createTradeHistory } from "./ui/trade-history";
 import { createInventory } from "./core/inventory";
 import { createSessionAuth } from "./core/auth-session";
-import { createApi } from "./core/api";
+import { ApiError, createApi } from "./core/api";
 import { showLocalEconomyMenu } from "./core/menu-visibility";
 import { createTradeHistoryRecorder } from "./core/trade-history-recorder";
 import { createTradeHistoryBridge } from "./core/trade-history-live";
@@ -75,7 +75,7 @@ import { clearIdentity, createIdentityGate, loadIdentity, saveIdentity, type Ide
 import { createPresenceHud } from "./ui/presence";
 import { createAccessWall } from "./ui/access-wall";
 import { anyAccountRedeemed, anyRedeemed, redeem, redeemForAccount, type RedeemPorts } from "./core/access-code";
-import { shouldDeliverAccountWelcome, shouldGrantWelcome, welcomeClaimed, markWelcome } from "./core/welcome";
+import { offerPendingAccountWelcome, shouldGrantWelcome, welcomeClaimed, markWelcome } from "./core/welcome";
 import { restoreSave, stashSave, wipeSave } from "./core/save-vault";
 import { createMapButton } from "./ui/mapbutton";
 import { createLobbyHud } from "./ui/lobbyhud";
@@ -623,7 +623,8 @@ const garage = createCarPicker(hudRoot, CAR_DEFS, (c) => { car.setModel(c.url, c
 });
 
 // Crate Shop (lobby Crates building): buy a crate → roll a car by rarity odds → reveal. A NEW car
-// unlocks in the garage; a DUPLICATE melts to Scrap. Client RNG now, MagicBlock VRF behind the port later.
+// unlocks in the garage; a DUPLICATE melts to Scrap. Account crates use MagicBlock VRF; only guests
+// use client RNG for local practice.
 const crateBox = createCrateBox(hudRoot, {
   cars: () => CAR_DEFS,
   grantCar: (name) => inventory.grant(name),
@@ -643,6 +644,15 @@ const crateBox = createCrateBox(hudRoot, {
     const w = session.anchorWallet();
     if (!w) return null;
     return createCrateRollDraws(makeCrateRollIo(w));
+  },
+  vrfRequired: () => identity?.mode === "privy",
+  completeGift: async () => {
+    try {
+      return (await api.claimWelcome()).granted;
+    } catch (error) {
+      if (error instanceof ApiError && error.bodyError === "welcome_already_claimed") return false;
+      throw error;
+    }
   },
   holdCoins: (n) => upgrades.holdCoins(n),
   settleHold: (n, commit) => upgrades.settleHold(n, commit),
@@ -2081,14 +2091,16 @@ function accountAccessThenEnter(onDone: () => void) {
     onUnlocked: onDone,
   });
 }
-// The signed-in welcome crate is ONCE PER ACCOUNT (server-side). Extracted so it fires AFTER the
-// access wall clears — otherwise the crate reveal would draw behind the wall.
-async function claimWelcomeAccount() {
+// Check the signed-in welcome without consuming it. The atomic claim runs only after VRF returns,
+// immediately before the crate reward is applied.
+async function offerWelcomeAccount() {
   try {
-    const { granted } = await api.claimWelcome();
-    if (shouldDeliverAccountWelcome(granted)) setTimeout(() => crateBox.openGift("wooden"), 0);
+    await offerPendingAccountWelcome(
+      () => api.welcomeStatus(),
+      () => setTimeout(() => crateBox.openGift("wooden"), 0),
+    );
   }
-  catch { /* offline: skip — the server is the source of truth for accounts, never fall back to a local flag here */ }
+  catch { /* Railway is account truth. Never fall back to a local signed-in gift. */ }
 }
 let gateUp = false;
 function showIdentityGate() {
@@ -2139,7 +2151,7 @@ function showIdentityGate() {
         // accountSync.accessCodes() is populated — the wall shows only if THIS account hasn't redeemed.
         // The welcome crate (ONCE PER ACCOUNT, server-side) fires AFTER the wall clears so its reveal
         // isn't drawn behind the wall.
-        accountAccessThenEnter(() => { maybeShowHowTo(() => { void claimWelcomeAccount(); }); });
+        accountAccessThenEnter(() => { maybeShowHowTo(() => { void offerWelcomeAccount(); }); });
       }
       return ok;
     },
@@ -2178,7 +2190,7 @@ if (identity?.mode === "privy") {
     // The gate's sign-in now RELOADS before its own post-wall flow can run (identity-scoped save
     // swap), so the boot reconnect completes it: wall → how-to (device flag: no-op if ever seen)
     // → the once-per-account welcome claim (server-side idempotent — granted only once, ever).
-    accountAccessThenEnter(() => { maybeShowHowTo(() => { void claimWelcomeAccount(); }); });
+    accountAccessThenEnter(() => { maybeShowHowTo(() => { void offerWelcomeAccount(); }); });
   }).catch(() => {});
 }
 console.log("redline3d render up");
