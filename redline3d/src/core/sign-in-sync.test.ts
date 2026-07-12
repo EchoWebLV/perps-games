@@ -43,4 +43,24 @@ describe("bindAndHydrate", () => {
     expect(adoptSession).not.toHaveBeenCalled();
     expect(outcome).toBe("server");
   });
+
+  it("does not complete a fresh sign-in when the account cannot be hydrated", async () => {
+    const api = {
+      bindWalletChallenge: vi.fn(async (wallet: string) => ({ challenge: "c", message: "m", wallet, expiresAt: "t" })),
+      bindWallet: vi.fn(async () => ({ wallet: "Addr", token: "tok", userId: "uid" })),
+    };
+    const port = {
+      connect: vi.fn(async () => ({ address: "Addr" })),
+      signMessage: vi.fn(async () => new Uint8Array([1])),
+    };
+
+    await expect(bindAndHydrate({
+      api,
+      auth: { adoptSession: vi.fn() },
+      port,
+      accountSync: { hydrate: vi.fn(async () => "offline" as const) } as any,
+      localSnapshot: { coins: 0, scrap: 0, cars: {} },
+      requireServerHydration: true,
+    })).rejects.toThrow("account_hydration_failed");
+  });
 });

@@ -6,7 +6,7 @@
 import { createElement, useEffect } from "react";
 import { createRoot } from "react-dom/client";
 import { PrivyProvider, usePrivy, useLogin, type PrivyClientConfig } from "@privy-io/react-auth";
-import { useWallets, useSignTransaction, useCreateWallet } from "@privy-io/react-auth/solana";
+import { useWallets, useSignMessage, useSignTransaction, useCreateWallet } from "@privy-io/react-auth/solana";
 
 type SolanaChain = "solana:mainnet" | "solana:devnet" | "solana:testnet";
 const CLUSTER: SolanaChain =
@@ -16,6 +16,8 @@ const CLUSTER: SolanaChain =
 export interface PrivyIsland {
   /** Trigger Privy login (if needed), wait for the embedded wallet, resolve its address. */
   connect(): Promise<string>;
+  /** Sign an account-binding challenge with the embedded Solana wallet. */
+  signMessage(message: Uint8Array): Promise<Uint8Array>;
   /** Sign a wire tx (base64) with the embedded wallet; resolves the signed wire tx (base64). */
   signTransaction(txBase64: string): Promise<string>;
   currentAddress(): string | null;
@@ -44,6 +46,7 @@ interface Live {
   logout: () => Promise<void>;
   createWallet: (() => Promise<unknown>) | null;
   address: string | null;
+  signMessage: ((message: Uint8Array) => Promise<Uint8Array>) | null;
   sign: ((txBase64: string) => Promise<string>) | null;
 }
 let live: Live = {
@@ -53,6 +56,7 @@ let live: Live = {
   logout: async () => {},
   createWallet: null,
   address: null,
+  signMessage: null,
   sign: null,
 };
 let resolveReady: (() => void) | null = null;
@@ -69,6 +73,7 @@ function Bridge() {
     onError: (code) => { loginError = String(code); },
   });
   const { wallets } = useWallets();
+  const { signMessage } = useSignMessage();
   const { signTransaction } = useSignTransaction();
   const { createWallet } = useCreateWallet();
   // Pick the EMBEDDED wallet explicitly — index 0 is Privy-first only by implementation
@@ -84,6 +89,16 @@ function Bridge() {
       logout: () => p.logout(),
       createWallet: () => createWallet(),
       address: wallet?.address ?? null,
+      signMessage: wallet
+        ? async (message: Uint8Array) => {
+            const signed = await signMessage({
+              message,
+              wallet,
+              options: { uiOptions: { showWalletUIs: false } },
+            });
+            return signed.signature;
+          }
+        : null,
       sign: wallet
         ? async (txBase64: string) => {
             const { signedTransaction } = await signTransaction({
@@ -138,6 +153,10 @@ const facade: PrivyIsland = {
   async signTransaction(txBase64: string) {
     if (!live.sign) throw new Error("privy_wallet_not_ready");
     return live.sign(txBase64);
+  },
+  async signMessage(message: Uint8Array) {
+    if (!live.signMessage) throw new Error("privy_wallet_not_ready");
+    return live.signMessage(message);
   },
   currentAddress() {
     return live.address;

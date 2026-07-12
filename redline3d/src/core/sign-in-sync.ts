@@ -13,8 +13,12 @@ export async function bindAndHydrate(input: {
   port: Pick<SolanaWalletPort, "connect" | "signMessage">;
   accountSync: Pick<AccountSync, "hydrate">;
   localSnapshot: AccountSnapshot;
+  /** Identity-gate sign-ins must not continue as an empty local account when Railway is offline. */
+  requireServerHydration?: boolean;
 }): Promise<"seeded" | "server" | "offline"> {
   const bound = await connectAndBindWallet({ port: input.port as SolanaWalletPort, api: input.api });
   if (bound.session) input.auth.adoptSession?.(bound.session);
-  return input.accountSync.hydrate(input.localSnapshot);
+  const outcome = await input.accountSync.hydrate(input.localSnapshot);
+  if (input.requireServerHydration && outcome === "offline") throw new Error("account_hydration_failed");
+  return outcome;
 }

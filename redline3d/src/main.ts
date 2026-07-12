@@ -256,8 +256,8 @@ async function ensureSignedIn(fresh = false): Promise<boolean> {
       await session.init();
     }
     syncOnchainBalance();
+    await syncAccount(fresh); // a fresh identity cannot continue until Railway restores the account
     signedIn = true;
-    await syncAccount(); // bind Privy → server + hydrate coins/scrap/cars
     restoreHighwayPosition();
     void syncTableCap(); // clamp the bet stepper to the live table limit right away
     return true;
@@ -281,7 +281,7 @@ async function ensureSignedIn(fresh = false): Promise<boolean> {
 // guest-to-account bind also must not migrate the guest's coins/cars. Only the real guest save swap
 // reloads the page; a fresh visitor keeps the already-warmed scene and continues in place.
 let zeroLocalSnapshotForSignIn = false;
-async function syncAccount(): Promise<void> {
+async function syncAccount(required = false): Promise<void> {
   try {
     const port = {
       connect: async () => ({ address: session.address() }),
@@ -292,6 +292,7 @@ async function syncAccount(): Promise<void> {
       localSnapshot: zeroLocalSnapshotForSignIn
         ? { coins: 0, scrap: 0, cars: {}, levels: { turbo: 0, tank: 0, suspension: 0 } }
         : { coins: upgrades.coins(), scrap: upgrades.scrap(), cars: inventory.snapshot(), levels: upgrades.levels() },
+      requireServerHydration: required,
     });
     const serverDriverName = accountSync.driverName();
     accountDriverName = serverDriverName;
@@ -303,6 +304,7 @@ async function syncAccount(): Promise<void> {
     void tradeHistoryBridge.flush();
   } catch (e) {
     console.error("account sync failed", e); // cache-only until next sign-in
+    if (required) throw e;
   }
 }
 

@@ -17,6 +17,23 @@ export ANDROID_SDK_ROOT="$ANDROID_HOME"
 export PATH="$JAVA_HOME/bin:$ANDROID_HOME/platform-tools:$PATH"
 SERVE_PORT="${SERVE_PORT:-8077}"
 
+# Vite silently falls back when an ignored .env file is missing. That is unsafe for the APK:
+# Solana's anonymous devnet RPC rejects Capacitor's https://localhost origin, and a missing Privy
+# id leaves native sign-in unusable. Fail before building instead of producing a broken release.
+require_vite_env() {
+  local name="$1"
+  if [ -n "${!name:-}" ]; then return 0; fi
+  local env_file
+  for env_file in .env .env.local .env.production .env.production.local; do
+    if [ -f "$env_file" ] && grep -Eq "^${name}=.+$" "$env_file"; then return 0; fi
+  done
+  echo "Missing $name: refusing to build a native APK with incomplete sign-in configuration." >&2
+  exit 1
+}
+
+require_vite_env VITE_PRIVY_APP_ID
+require_vite_env VITE_BASE_RPC
+
 INSTALL=0
 SERVE=0
 for arg in "$@"; do

@@ -3,6 +3,7 @@ import type { SolanaWalletPort } from "../core/solana-wallet";
 /** The minimal island surface the port needs (privy-island.ts publishes this). */
 export interface PrivyIsland {
   connect(): Promise<string>; // triggers Privy login, ensures an embedded wallet, returns its address
+  signMessage(message: Uint8Array): Promise<Uint8Array>;
   signTransaction(txBase64: string): Promise<string>;
   currentAddress(): string | null;
   reconnect(): Promise<string | null>; // silent restore of a persisted login; never opens the modal
@@ -35,8 +36,8 @@ export function createPrivyPort(deps: { island: PrivyIsland }): SolanaWalletPort
     currentAddress() {
       return island.currentAddress() ?? (address || null);
     },
-    async signMessage() {
-      throw new Error("privy_sign_message_unsupported");
+    async signMessage(message: Uint8Array) {
+      return island.signMessage(message);
     },
     async signTransaction(txBase64: string) {
       return island.signTransaction(txBase64);

@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import developmentEnv from "../../.env.development?raw";
 import productionEnv from "../../.env.production?raw";
 import dockerfile from "../../Dockerfile?raw";
+import apkBuildScript from "../../scripts/build-apk.sh?raw";
 
 function apiBase(env: string): string | undefined {
   return env.match(/^VITE_API_BASE=(.+)$/m)?.[1]?.trim();
@@ -20,5 +21,10 @@ describe("Railway-only API configuration", () => {
     expect(dockerfile).toContain("ARG VITE_WALLET");
     expect(dockerfile).toContain("ARG VITE_SOLANA_CLUSTER");
     expect(dockerfile.indexOf("ARG VITE_PRIVY_APP_ID")).toBeLessThan(dockerfile.indexOf("RUN npm run build"));
+  });
+
+  it("refuses to build a native APK without auth and a WebView-safe Solana RPC", () => {
+    expect(apkBuildScript).toContain("require_vite_env VITE_PRIVY_APP_ID");
+    expect(apkBuildScript).toContain("require_vite_env VITE_BASE_RPC");
   });
 });
