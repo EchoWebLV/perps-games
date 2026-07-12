@@ -2,8 +2,10 @@ import { coinLabel, coinPulseClass } from "../core/coins";
 
 export interface CoinCounter {
   set(total: number, animate?: boolean): void;
-  /** the chip is race chrome — hidden while cruising/betting on the strip */
+  /** Show or hide the counter. */
   setVisible(visible: boolean): void;
+  /** Lobby: tuck directly below the balance chip. Race: stay below the chart. */
+  setLobbyPosition(lobby: boolean): void;
 }
 
 let stylesInjected = false;
@@ -72,5 +74,10 @@ export function createCoinCounter(parent: HTMLElement): CoinCounter {
       previous = total;
     },
     setVisible(visible) { wrap.style.display = visible ? "flex" : "none"; },
+    setLobbyPosition(lobby) {
+      wrap.style.top = lobby
+        ? "calc(max(10px,env(safe-area-inset-top)) + 48px)"
+        : "calc(max(10px,env(safe-area-inset-top)) + 134px)";
+    },
   };
 }

@@ -79,4 +79,16 @@ describe("createCoinCounter", () => {
     expect(css).toContain("env(safe-area-inset-top)");
     expect(css).toContain("134px");
   });
+
+  test("moves directly below the balance chip in lobby mode", () => {
+    installFakeDocument();
+    const parent = new FakeElement();
+
+    const counter = createCoinCounter(parent as unknown as HTMLElement);
+    counter.setLobbyPosition(true);
+
+    expect((parent.children[0].style as { top?: string }).top).toContain("48px");
+    counter.setLobbyPosition(false);
+    expect((parent.children[0].style as { top?: string }).top).toContain("134px");
+  });
 });

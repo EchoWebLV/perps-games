@@ -12,6 +12,7 @@ Keep coins and scrap across login and logout while preserving separate guest and
 - On logout, checkpoint the account cache, clear the live identity keys, restore the guest checkpoint, then reload into the identity gate.
 - If no guest checkpoint exists, logout correctly returns to a fresh guest economy.
 - Keep the current coin and scrap counter components mounted and visible in both lobby cruise and race modes.
+- In the lobby, place coins immediately below the SOL balance and scrap immediately below coins. Restore the below-graph positions on the race screen to avoid covering the chart.
 
 ## Verification
 

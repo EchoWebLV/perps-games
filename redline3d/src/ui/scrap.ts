@@ -5,8 +5,10 @@ import { coinLabel } from "../core/coins";
 // it's spent later at the Scrap Yard, never on the leverage upgrades.
 export interface ScrapCounter {
   set(total: number, animate?: boolean): void;
-  /** the chip is race chrome — hidden while cruising/betting on the strip (mirrors coins) */
+  /** Show or hide the counter. */
   setVisible(visible: boolean): void;
+  /** Lobby: stack below coins and the balance. Race: stay below the chart. */
+  setLobbyPosition(lobby: boolean): void;
 }
 
 let stylesInjected = false;
@@ -73,5 +75,10 @@ export function createScrapCounter(parent: HTMLElement): ScrapCounter {
       previous = total;
     },
     setVisible(visible) { wrap.style.display = visible ? "flex" : "none"; },
+    setLobbyPosition(lobby) {
+      wrap.style.top = lobby
+        ? "calc(max(10px,env(safe-area-inset-top)) + 98px)"
+        : "calc(max(10px,env(safe-area-inset-top)) + 184px)";
+    },
   };
 }

@@ -851,6 +851,8 @@ function setChrome(state: "cruise" | "race") {
   hud.setMinimal(state === "cruise");
   coins.setVisible(true);
   scrap.setVisible(true);
+  coins.setLobbyPosition(state === "cruise");
+  scrap.setLobbyPosition(state === "cruise");
   garage.setMenuTop(state === "cruise"); // strip: hamburger rides the top row (price chip's slot)
 }
 

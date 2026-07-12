@@ -64,6 +64,8 @@ describe("first account sign-in transition", () => {
 
     expect(chrome).toContain("coins.setVisible(true)");
     expect(chrome).toContain("scrap.setVisible(true)");
+    expect(chrome).toContain('coins.setLobbyPosition(state === "cruise")');
+    expect(chrome).toContain('scrap.setLobbyPosition(state === "cruise")');
   });
 });
 
