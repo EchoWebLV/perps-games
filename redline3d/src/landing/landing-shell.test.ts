@@ -255,7 +255,17 @@ describe("Perps Rider landing shell", () => {
         new RegExp(`\\.tech-grid article:nth-of-type\\(${card}\\)\\[data-reveal\\] \\{[^}]*transition-delay: ${delay};`),
       );
     }
-    expect(stylesheet).toContain("calc(min(84vw, 991px) - 52px)");
+    const expectedConnectorTravel = (viewportWidth: number) => (
+      0.84 * Math.min(1180, viewportWidth - 48) - 52
+    );
+    const cssPulseTravel = (viewportWidth: number) => (
+      Math.min(0.84 * viewportWidth - 40.32, 991.2) - 52
+    );
+    for (const viewportWidth of [1101, 1180, 1200, 1228, 1440, 1920]) {
+      expect(Math.abs(cssPulseTravel(viewportWidth) - expectedConnectorTravel(viewportWidth))).toBeLessThan(0.001);
+    }
+    expect(stylesheet).toContain("calc(min(calc(84vw - 40.32px), 991.2px) - 52px)");
+    expect(stylesheet).not.toContain("calc(min(84vw, 991px) - 52px)");
     expect(stylesheet).not.toContain("calc(84vw - 110px)");
     expect(stylesheet).not.toContain("calc(84vw - 80px)");
   });
