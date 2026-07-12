@@ -8,11 +8,25 @@
 
 ## Script
 
-[Open with the game running on a phone]
+[Open with the game running in the lobby on a phone]
 
-Hey, this is Perps Rider. It is an arcade driving game where the car is powered by a real perpetual-futures position.
+Hey, this is Perps Rider, an arcade driving game powered by a real perpetual-futures position. Instead of a menu, every player starts here in a shared synthwave lobby.
 
-I know that sounds a little unusual, so let me show you how it works.
+[Drive around the lobby and pass the buildings]
+
+This is the game's home world. I can drive around, see other players, and enter buildings. The Track leads to the main perp game. The Garage holds my collection, Upgrades improve my cars, Crates unlock new ones, and the upcoming Highway adds a longer-form driving mode.
+
+The lobby is the foundation for a larger shared world. Over time, new buildings will open into new games where players compete against each other.
+
+[Enter the Garage and show different cars]
+
+Before we race, let me show you the cars. They are more than visual skins. Different cars have abilities that change how you manage a position. One can freeze profit and loss, another can set a stop-loss and take-profit, and another lets steering choose between long and short.
+
+The car collection currently lives with the player's game account. Our next step is to bring these cars on-chain as Solana NFT collectibles, so players can truly own and trade the cars they unlock.
+
+[Leave the Garage and drive into the Track]
+
+Now I am entering the Track, where the main game happens.
 
 [Show the market and direction controls]
 
@@ -20,7 +34,7 @@ First, I choose a market: Bitcoin, Ethereum, or Solana. Then I decide whether I 
 
 [Show the tachometer]
 
-This tachometer is not just showing the speed of the car. It controls my leverage. The harder I rev, the more risk I take and the more violently the car reacts to the market.
+This tachometer is not just showing speed. It controls my leverage. The harder I rev, the more risk I take and the more violently the car reacts to the market.
 
 [Start the round]
 
@@ -32,21 +46,9 @@ This is where MagicBlock matters. The round runs on-chain inside a MagicBlock Ep
 
 A native crank keeps checking the position. If the price crosses my liquidation level, the program settles it automatically. There is no extra wallet popup, no liquidation button, and no game operator choosing whether I win or lose. The outcome comes from the authenticated price and deterministic on-chain math.
 
-[Drive through the lobby]
-
-Outside the main race, players can freely drive around a shared synthwave lobby. The buildings are how you enter different parts of the game: the Track, Garage, Upgrades, Crates, and soon the Highway.
-
-The Highway is our next longer-form mode, and the lobby is the foundation for a larger shared competitive world. In the future, new buildings will introduce new games where players can meet and compete against each other.
-
-[Show the Garage and different cars]
-
-Cars are more than visual skins. Different cars have different abilities that change how you manage a position. One can freeze profit and loss, another can set a stop-loss and take-profit, and another lets steering choose between long and short.
-
-The car collection currently lives with the player's game account. Our next step is to bring those cars on-chain as Solana NFT collectibles, so players can truly own and trade the cars they unlock.
-
 [Show the game on the Seeker and desktop]
 
-Perps Rider works on desktop, as an iPhone PWA, and as a native Solana Seeker app. Players can sign in with a simple email code through Privy and receive their own Solana wallet, with the same identity and collection available across devices.
+Perps Rider works on desktop, as an iPhone PWA, and as a native Solana Seeker app. A simple Privy email login creates a Solana wallet, with the same identity and collection across devices.
 
 [End on the car racing]
 
