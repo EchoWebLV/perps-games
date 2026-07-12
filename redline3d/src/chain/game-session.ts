@@ -496,12 +496,15 @@ export function createGameSession(opts: {
       // init() shows the login modal — enabling account switch) and drop the local session so
       // init() reconnects fresh. Any live ER session persists on-chain (settle/reclaim via the
       // wallet panel); no on-chain state is touched here.
-      try { await port?.disconnect(); } catch (e) { console.warn("wallet disconnect failed:", e); }
-      chain = opts.injectChain ?? null;
-      isDelegated = false;
-      armed = false;
-      bal = 0n;
-      liveSnap = null;
+      try {
+        await port?.disconnect();
+      } finally {
+        chain = opts.injectChain ?? null;
+        isDelegated = false;
+        armed = false;
+        bal = 0n;
+        liveSnap = null;
+      }
     },
   };
 }

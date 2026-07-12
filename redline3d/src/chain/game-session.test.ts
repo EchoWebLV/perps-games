@@ -471,7 +471,7 @@ describe("createGameSession", () => {
     expect(s.balance()).toBe(0n);
   });
 
-  it("logout() still resets state when the port disconnect fails", async () => {
+  it("logout() reports a Privy disconnect failure instead of pretending sign-out completed", async () => {
     const port = {
       kind: "web-standard" as const,
       connect: vi.fn(async () => ({ address: "PrivyAddr1111" })),
@@ -481,7 +481,7 @@ describe("createGameSession", () => {
       signTransaction: vi.fn(async (b64: string) => b64),
     };
     const s = createGameSession({ mint: MINT, onSettled: vi.fn(), port });
-    await expect(s.logout()).resolves.toBeUndefined();
+    await expect(s.logout()).rejects.toThrow("privy_down");
     expect(port.disconnect).toHaveBeenCalled();
     expect(s.balance()).toBe(0n);
   });

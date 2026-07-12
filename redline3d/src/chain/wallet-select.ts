@@ -51,17 +51,24 @@ function hasPrivySession(): boolean {
   }
 }
 
-function createLazyPrivyPort(): SolanaWalletPort {
+export function createLazyPrivyPort(deps: {
+  load?: () => Promise<SolanaWalletPort>;
+  hasPersistedSession?: () => boolean;
+} = {}): SolanaWalletPort {
   let inner: SolanaWalletPort | null = null;
   let loading: Promise<SolanaWalletPort> | null = null;
+  const load = deps.load ?? (async () => {
+    const [{ mountPrivyIsland }, { createPrivyPort }] = await Promise.all([
+      import("./privy-island"),
+      import("./privy-wallet-port"),
+    ]);
+    return createPrivyPort({ island: await mountPrivyIsland() });
+  });
+  const hasPersistedSession = deps.hasPersistedSession ?? hasPrivySession;
   const ensure = (): Promise<SolanaWalletPort> => {
     if (inner) return Promise.resolve(inner);
     loading ??= (async () => {
-      const [{ mountPrivyIsland }, { createPrivyPort }] = await Promise.all([
-        import("./privy-island"),
-        import("./privy-wallet-port"),
-      ]);
-      inner = createPrivyPort({ island: await mountPrivyIsland() });
+      inner = await load();
       return inner;
     })();
     return loading;
@@ -72,15 +79,13 @@ function createLazyPrivyPort(): SolanaWalletPort {
     async reconnect() {
       // Boot-time silent restore. Skip mounting the island entirely unless Privy left a
       // session in localStorage — fresh visitors keep the react chunk out of their boot.
-      if (!inner && !hasPrivySession()) return null;
+      if (!inner && !hasPersistedSession()) return null;
       const p = await ensure();
       return p.reconnect ? p.reconnect() : null;
     },
     async disconnect() {
-      // A Privy session can outlive the island (mount failed, or sign-out before any
-      // connect this boot) — mount on demand so sign-out REALLY clears it. Skipping here
-      // would let the next connect() silently resume the account just signed out of.
-      if (!inner && !hasPrivySession()) return;
+      // Explicit logout must never trust the localStorage probe. Privy sessions can live in
+      // cookies or IndexedDB, so mount the provider and ask Privy to clear its real auth state.
       await (await ensure()).disconnect();
     },
     currentAddress() { return inner?.currentAddress() ?? null; },
