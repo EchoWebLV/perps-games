@@ -9,12 +9,12 @@ COPY packages/engine/ /app/packages/engine/
 ARG VITE_PRIVY_APP_ID
 ARG VITE_WALLET
 ARG VITE_SOLANA_CLUSTER
-RUN npm run build
+RUN npm run build && mv dist/models/perps-rider.apk /tmp/perps-rider.apk
 
 FROM caddy:2-alpine
 COPY redline3d/Caddyfile /etc/caddy/Caddyfile
 COPY --from=build /app/redline3d/dist /usr/share/caddy
 # Railway mounts persistent car assets over /usr/share/caddy/models. Keep the newly built APK
 # outside that mount, then refresh the public copy every time this release starts.
-COPY --from=build /app/redline3d/dist/models/perps-rider.apk /opt/perps-rider.apk
+COPY --from=build /tmp/perps-rider.apk /opt/perps-rider.apk
 CMD ["sh", "-c", "cp /opt/perps-rider.apk /usr/share/caddy/models/perps-rider.apk && exec caddy run --config /etc/caddy/Caddyfile --adapter caddyfile"]
