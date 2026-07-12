@@ -187,6 +187,30 @@ describe("redeemForAccount — the signed-in path (server-first, account-scoped 
     expect(isAccountRedeemed("acct-a", "magic", h.store)).toBe(true);
   });
 
+  test("waits for the granted reward to persist before redemption completes", async () => {
+    const h = harness();
+    let finishFlush!: () => void;
+    const flush = vi.fn(() => new Promise<void>((resolve) => { finishFlush = resolve; }));
+    const ports = {
+      ...h.ports,
+      api: { redeemAccess: vi.fn(async () => ({ granted: true })) },
+      accountId: "acct-a",
+      flush,
+    };
+
+    let completed = false;
+    const redemption = redeemForAccount("magic", ports).then((result) => {
+      completed = true;
+      return result;
+    });
+    await Promise.resolve();
+    expect(flush).toHaveBeenCalledTimes(1);
+    expect(completed).toBe(false);
+
+    finishFlush();
+    await expect(redemption).resolves.toBe("granted");
+  });
+
   test("a browser flag left by another rider cannot bypass this account's server redemption", async () => {
     const h = harness();
     h.store.set("raider.access.magic.v1", "1");

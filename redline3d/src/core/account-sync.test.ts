@@ -81,6 +81,33 @@ describe("createAccountSync", () => {
     await Promise.resolve();
   });
 
+  it("flush waits for every in-flight account write before a reload boundary", async () => {
+    let finishWrite!: () => void;
+    const pendingWrite = new Promise<void>((resolve) => { finishWrite = resolve; });
+    const api = fakeApi({ coinsEarn: vi.fn(() => pendingWrite.then(() => ({ coins: 10 }))) });
+    const sync = createAccountSync({ api, nonce: "t", applyServer: () => {} });
+    await sync.hydrate(empty);
+
+    sync.coinsEarned(10);
+    let flushed = false;
+    const flush = sync.flush().then(() => { flushed = true; });
+    await Promise.resolve();
+    expect(flushed).toBe(false);
+
+    finishWrite();
+    await flush;
+    expect(flushed).toBe(true);
+  });
+
+  it("flush rejects when an account write failed so callers do not reload over unsaved state", async () => {
+    const api = fakeApi({ coinsEarn: vi.fn(async () => { throw new Error("network"); }) });
+    const sync = createAccountSync({ api, nonce: "t", applyServer: () => {} });
+    await sync.hydrate(empty);
+
+    sync.coinsEarned(10);
+    await expect(sync.flush()).rejects.toThrow("account_save_failed:coinsEarn");
+  });
+
   it("passes server upgrade levels through to applyServer (server wins)", async () => {
     const applyServer = vi.fn();
     const api = fakeApi({

@@ -158,6 +158,9 @@ export function createApi(opts: ApiOpts = {}): Api {
           headers: { ...(await headers()), ...requestHeaders, "content-type": "application/json" },
           body: body === undefined ? undefined : JSON.stringify(body),
           signal: ctrl.signal,
+          // Browsers may otherwise cancel account mutations when the player closes or reloads the
+          // page. These JSON payloads are tiny and fit comfortably within fetch keepalive limits.
+          keepalive: method === "POST",
         });
       } catch {
         throw new ApiError("network", 0);            // offline, or an abort (timeout) fired

@@ -18,6 +18,23 @@ describe("createApi", () => {
     expect((seen!.init.headers as Record<string,string>)["x-dev-user"]).toBe("web-test");
   });
 
+  it("keeps account POST writes alive if the web page is closing", async () => {
+    const calls: RequestInit[] = [];
+    const api = createApi({
+      baseUrl: "http://x", userId: "web-test",
+      fetch: async (_url, init) => {
+        calls.push(init ?? {});
+        return res(200, calls.length === 1 ? { coins: 1 } : { userId: "u", balance: 0, cars: [], openRoundId: null });
+      },
+    });
+
+    await api.coinsEarn({ amount: 1, ref: "e1" });
+    await api.me();
+
+    expect(calls[0].keepalive).toBe(true);
+    expect(calls[1].keepalive).toBe(false);
+  });
+
   it("uses the page hostname for the API when opened from a LAN dev URL", async () => {
     const oldLocation = Object.getOwnPropertyDescriptor(globalThis, "location");
     Object.defineProperty(globalThis, "location", {

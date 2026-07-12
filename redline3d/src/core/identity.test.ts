@@ -54,6 +54,8 @@ describe("first account sign-in transition", () => {
     expect(signIn.indexOf("stashSave(GUEST_SAVE_NAMESPACE)")).toBeGreaterThanOrEqual(0);
     expect(signIn.indexOf("stashSave(GUEST_SAVE_NAMESPACE)")).toBeLessThan(signIn.indexOf("ensureSignedIn(true)"));
     expect(logout).toContain("stashSave(stashNs)");
+    expect(logout.indexOf("stashSave(stashNs)")).toBeLessThan(logout.indexOf("await accountSync.flush()"));
+    expect(logout.indexOf("await accountSync.flush()")).toBeLessThan(logout.indexOf("await session.logout()"));
     expect(logout).toContain("wipeSave()");
     expect(logout).toContain("restoreSave(GUEST_SAVE_NAMESPACE)");
   });

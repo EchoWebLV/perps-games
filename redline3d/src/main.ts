@@ -645,22 +645,28 @@ const garage = createCarPicker(hudRoot, CAR_DEFS, (c) => { car.setModel(c.url, c
     // Identity-scoped saves: this account's offline progress is stashed under its wallet
     // address. The live keys are then replaced with the guest checkpoint before reloading.
     const stashNs = session.address() || "account";
-    try { presence?.disconnect(); } catch { /* logout still proceeds without presence */ }
-    void session.logout().then(() => {
+    // Checkpoint synchronously before the first async boundary. Then wait for every Railway write
+    // before disconnecting Privy or reloading, otherwise a fast logout aborts fresh progress.
+    stashSave(stashNs);
+    void (async () => {
+      await accountSync.flush();
+      await session.logout();
       signedIn = false;
       identity = null;
       accountDriverName = null;
+      try { presence?.disconnect(); } catch { /* logout still proceeds without presence */ }
       syncPresenceLifecycle();
       accountSync.disable();
       void auth.logout?.(); // clears its keys synchronously — done before the reload below
       clearIdentity();
-      stashSave(stashNs);
       wipeSave();
       restoreSave(GUEST_SAVE_NAMESPACE);
       location.reload(); // boots to the identity gate; replaces the in-place gate redraw
-    }).catch((error) => {
+    })().catch((error) => {
       console.error("sign-out failed", error);
-      hud.setStatus("Sign-out failed. Check your connection and try again.");
+      hud.setStatus(String((error as Error)?.message ?? error).includes("account_save_failed")
+        ? "Saving your progress failed. You are still signed in. Check your connection and try again."
+        : "Sign-out failed. Check your connection and try again.");
     });
   } else {
     // guest → "Sign in / switch driver": keep who they are until they COMMIT to a new
@@ -2135,7 +2141,7 @@ function openAccessCodeDialog() {
     onRedeem: accountId
       ? (code) => redeemForAccount(code, {
           api, accountId, rosterIds: accessPorts.rosterIds, owns: accessPorts.owns,
-          grantCar: accessPorts.grantCar, credit: accessPorts.credit,
+          grantCar: accessPorts.grantCar, credit: accessPorts.credit, flush: () => accountSync.flush(),
         })
       : (code) => redeem(code, accessPorts),
     onUnlocked: () => lobbyHud.toast("Access code redeemed."),
@@ -2163,7 +2169,7 @@ function accountAccessThenEnter(onDone: () => void) {
   createAccessWall(hudRoot, {
     onRedeem: (code) => redeemForAccount(code, {
       api, accountId, rosterIds: accessPorts.rosterIds, owns: accessPorts.owns,
-      grantCar: accessPorts.grantCar, credit: accessPorts.credit,
+      grantCar: accessPorts.grantCar, credit: accessPorts.credit, flush: () => accountSync.flush(),
     }),
     // Account switches leave a scene that was initialized around the previous identity. Redemption
     // is durable before this callback fires, so reboot into the new account instead of resuming it.

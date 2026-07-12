@@ -24,6 +24,9 @@ export interface AccountSync {
   driverName(): string | null;
   /** drop server authority (logout / account switch); forwarders no-op again. */
   disable(): void;
+  /** Wait until every account mutation already started by this page has reached Railway.
+   * Reload and logout boundaries must await this or the browser can abort the writes. */
+  flush(): Promise<void>;
   coinsEarned(n: number): void;
   coinsSpent(n: number): void;
   scrapEarned(n: number): void;
@@ -49,19 +52,35 @@ export interface AccountSyncOpts {
 export function createAccountSync(opts: AccountSyncOpts): AccountSync {
   let on = false;
   let seq = 0;
+  let writeFailure: { where: string; error: unknown } | null = null;
+  const pending = new Set<Promise<void>>();
   let access: string[] = []; // the account's redeemed access-code ids, refreshed on each hydrate
   let profileName: string | null = null;
   const ref = (kind: string) => `${opts.nonce}:${kind}:${seq++}`;
   const swallow = (where: string) => (err: unknown) => opts.onError?.(where, err);
-  // Best-effort fire-and-forget: the local cache already updated the UI, so a failed server write
-  // reconciles on the next sign-in load (server wins). Never throws into the caller.
-  const fire = (where: string, p: Promise<unknown> | undefined) => { void p?.catch(swallow(where)); };
+  // Mutations remain non-blocking during play, but every promise is retained so destructive page
+  // boundaries can wait for Railway. A rejected write is remembered: reloading after one would let
+  // the older server snapshot overwrite newer local progress on the next login.
+  const fire = (where: string, p: Promise<unknown> | undefined) => {
+    if (!p) return;
+    let tracked!: Promise<void>;
+    tracked = p.then(() => undefined).catch((error) => {
+      writeFailure = { where, error };
+      swallow(where)(error);
+    }).finally(() => { pending.delete(tracked); });
+    pending.add(tracked);
+  };
 
   return {
     enabled: () => on,
     accessCodes: () => access,
     driverName: () => profileName,
     disable: () => { on = false; access = []; profileName = null; },
+    async flush() {
+      // New writes can be added while an earlier batch settles, so drain until stable.
+      while (pending.size > 0) await Promise.all([...pending]);
+      if (writeFailure) throw new Error(`account_save_failed:${writeFailure.where}`);
+    },
 
     async hydrate(local) {
       const api = opts.api;
@@ -76,6 +95,7 @@ export function createAccountSync(opts: AccountSyncOpts): AccountSync {
       }
       access = me.access ?? []; // surface the account's redeemed codes for the access wall (default [])
       profileName = me.driverName ?? null;
+      writeFailure = null;
       // Mirrors the server's /v1/migrate emptiness semantics: any non-zero level blocks seeding
       // (missing levels — an old server — counts as all-zero).
       const serverEmpty = (me.coins ?? 0) === 0 && (me.scrap ?? 0) === 0 && (me.cars?.length ?? 0) === 0

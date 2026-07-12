@@ -115,6 +115,8 @@ export async function redeemForAccount(
     owns(id: string): boolean;
     grantCar(id: string): void;
     credit(n: number): void;
+    /** Wait for reward writes before a caller is allowed to reload or leave the account. */
+    flush?: () => Promise<void>;
     store?: KvStore;
   },
 ): Promise<RedeemResult> {
@@ -129,11 +131,9 @@ export async function redeemForAccount(
     }
     if (reward.coins > 0) ports.credit(reward.coins);
   };
+  let granted: boolean;
   try {
-    const { granted } = await ports.api.redeemAccess(codeId);
-    if (granted) applyReward(); // server: first time for this account → grant once
-    store.set(accountFlagKey(ports.accountId, codeId), "1");
-    return granted ? "granted" : "already";
+    ({ granted } = await ports.api.redeemAccess(codeId));
   } catch {
     // Server unreachable — never lock the player out. Best-effort local grant; the account record
     // reconciles on the next online redeem (owned cars are skipped, so no duplicate copies).
@@ -141,4 +141,10 @@ export async function redeemForAccount(
     store.set(accountFlagKey(ports.accountId, codeId), "1");
     return "granted";
   }
+  if (granted) {
+    applyReward(); // server: first time for this account → grant once
+    await ports.flush?.();
+  }
+  store.set(accountFlagKey(ports.accountId, codeId), "1");
+  return granted ? "granted" : "already";
 }
