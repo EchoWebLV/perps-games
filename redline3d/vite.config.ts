@@ -21,5 +21,13 @@ export default defineConfig({
     ],
   },
   test: { globals: true, environment: "node" },
-  build: { target: "es2020" },
+  build: {
+    target: "es2020",
+    rollupOptions: {
+      input: {
+        landing: fileURLToPath(new URL("index.html", import.meta.url)),
+        play: fileURLToPath(new URL("play/index.html", import.meta.url)),
+      },
+    },
+  },
 });

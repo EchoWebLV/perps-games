@@ -2,7 +2,7 @@
   "name": "Perps Rider",
   "short_name": "Perps Rider",
   "description": "Synthwave perp-racing arcade.",
-  "start_url": "/",
+  "start_url": "/play/",
   "scope": "/",
   "display": "standalone",
   "background_color": "#05030d",
