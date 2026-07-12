@@ -15,4 +15,11 @@ describe("main SOL crate payment wiring", () => {
     expect(source).toContain("payDevnetSol(wallet, CRATE_TREASURY, priceSol)");
     expect(source).not.toContain("onBuyUsd:");
   });
+
+  test("renders a confirmed crate debit immediately instead of waiting for RPC", () => {
+    expect(source).toContain('import { applyConfirmedWalletSpend } from "./core/wallet-balance-model"');
+    expect(source).toContain("walletSolUnits = applyConfirmedWalletSpend(");
+    const purchase = source.slice(source.indexOf("buyWithSol: async"), source.indexOf("// MagicBlock VRF", source.indexOf("buyWithSol: async")));
+    expect(purchase.indexOf("renderKnownBalance();")).toBeGreaterThan(purchase.indexOf("await payDevnetSol"));
+  });
 });

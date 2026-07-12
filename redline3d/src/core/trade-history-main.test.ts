@@ -79,6 +79,15 @@ describe("main trade history wiring", () => {
     expect(between("setInterval(async () =>", "// Warm every mode")).toContain("finalizeSettled(snap)");
   });
 
+  it("renders the settlement balance before starting background RPC reconciliation", () => {
+    const finalize = between("function finalizeSettled", "// ── guest practice rounds");
+    const immediateRender = finalize.indexOf("renderKnownBalance();");
+    const rpcRefresh = finalize.indexOf("session.refreshBalance");
+
+    expect(immediateRender).toBeGreaterThanOrEqual(0);
+    expect(rpcRefresh).toBeGreaterThan(immediateRender);
+  });
+
   it("retries the outbox only after successful account hydration", () => {
     const sync = between("async function syncAccount", "// price feeds");
     const hydrate = sync.indexOf("await bindAndHydrate({");

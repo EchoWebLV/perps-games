@@ -20,6 +20,7 @@ import { RoundEngine } from "./core/round";
 import type { Snapshot } from "./core/types";
 import { sol3 } from "./core/money";
 import { ACTIVE_STAKE_CURRENCY, baseToUnits, unitsToBase } from "./core/stake-currency";
+import { applyConfirmedWalletSpend } from "./core/wallet-balance-model";
 import { clampInt } from "./core/round-sync";
 import { niceLev, tToLev } from "./core/leverage";
 import { liqPriceOf } from "./core/economics";
@@ -198,16 +199,30 @@ const session = createGameSession({
 // money between wallet and play (buy-in / cash-out) barely moves it; wins and losses do.
 // Display-only: money logic reads `session.balance()` (base units) directly.
 let walletSolUnits = 0; // last-read wallet SOL (centi-SOL units)
+let walletSolRequest = 0;
+function renderKnownBalance() {
+  const play = baseToUnits(session.balance());
+  balance = play + walletSolUnits;
+  hud.setBalance(balance);
+  walletUI.setBalance(balance);
+}
+function reconcileWalletSol() {
+  const request = ++walletSolRequest;
+  // Reconcile silently after event-driven updates. Read the current play balance again when the
+  // RPC resolves so a slow wallet response cannot restore a stale pre-settlement snapshot.
+  void session.walletSol().then((sol) => {
+    if (request !== walletSolRequest) return;
+    walletSolUnits = baseToUnits(sol);
+    renderKnownBalance();
+  }).catch(() => {});
+}
 function syncOnchainBalance() {
   // Guests have no wallet — the chip reads "practice" and never renders SOL numbers.
   if (identity?.mode === "guest") { hud.setTryMode(true); return; }
   hud.setTryMode(false);
-  // Keep fractional display units so sub-0.01 SOL payouts remain visible.
-  const play = baseToUnits(session.balance());
-  const render = () => { balance = play + walletSolUnits; hud.setBalance(balance); walletUI.setBalance(balance); };
-  render();
-  // refresh the wallet side in the background (one getBalance; a pre-sign-in call just keeps 0)
-  void session.walletSol().then((sol) => { walletSolUnits = baseToUnits(sol); render(); }).catch(() => {});
+  // Render cached chain state immediately, then reconcile the wallet side in the background.
+  renderKnownBalance();
+  reconcileWalletSol();
 }
 // The game is fully on-chain: the SOL play balance + round loop live in `session` (the ER round).
 // `balance` is the displayed cash chip, sourced only from the on-chain play balance (centi-SOL units).
@@ -693,7 +708,16 @@ const crateBox = createCrateBox(hudRoot, {
     if (identity?.mode !== "privy") throw new Error("sol_payment_requires_sign_in");
     const wallet = session.anchorWallet();
     if (!wallet) throw new Error("sol_payment_wallet_unavailable");
-    return payDevnetSol(wallet, CRATE_TREASURY, priceSol);
+    const signature = await payDevnetSol(wallet, CRATE_TREASURY, priceSol);
+    walletSolUnits = applyConfirmedWalletSpend(
+      walletSolUnits,
+      priceSol,
+      ACTIVE_STAKE_CURRENCY.displayUnitDecimals,
+    );
+    walletSolRequest++; // invalidate any pre-payment wallet read still in flight
+    renderKnownBalance();
+    reconcileWalletSol();
+    return signature;
   },
   // MagicBlock VRF (signed-in only): one randomness request per pull, signed by the same
   // session wallet as rounds. Guests fall through to client RNG (practice parity).
@@ -1328,6 +1352,9 @@ function finalizeSettled(info: { outcome: number; outcomeName: string; payout: b
     );
     fx.confetti(); audio.cashout(); navigator.vibrate?.(jackpot > 0 ? [35, 60, 35, 60, 120] : 35);
   }
+  // Settlement responses carry the authoritative play balance. Show it now; RPC is only a
+  // background reconciliation path for delayed chain indexing or older settlement fallbacks.
+  renderKnownBalance();
   void session.refreshBalance(session.delegated()).then(() => syncOnchainBalance()).catch(() => {});
   void syncTableCap(); // a settle moved money between player and till — re-clamp the bet cap
   // your run goes up in lights — the board leads with real settles over the demo feed

@@ -199,6 +199,7 @@ export function createGameSession(opts: {
         // after open can fetch the PREVIOUS round's settled corpse. Only a settle carrying
         // THIS round's identity may end the round (phantom "Settled at ×…" live-hit).
         if (curKey && roundKey(res, ownerId()) !== curKey) { console.warn("[session] ignored stale settle (lever raced a fresh open)"); return; }
+        bal = res.balance;
         liveSnap = null;
         opts.onSettled(res);
       } else {
@@ -450,7 +451,7 @@ export function createGameSession(opts: {
           return { settled: false as const, banked: fresh.banked, dir: fresh.dir, lev: fresh.lev, entryHuman: fresh.entryHuman };
         }
       }
-      if (res.settled) liveSnap = null;
+      if (res.settled) { bal = res.balance; liveSnap = null; }
       else {
         const fresh = await need().readRound(true).catch(() => null);
         if (fresh?.status === 1) liveSnap = fresh;

@@ -23,3 +23,13 @@ export function payoutWalletBalanceFloor(input: PayoutWalletBalanceFloorInput): 
   if (input.preCloseWalletBalance == null || input.payoutCoins <= 0) return undefined;
   return input.preCloseWalletBalance + input.payoutCoins;
 }
+
+/** Apply a confirmed native-SOL debit to the last known wallet display balance. */
+export function applyConfirmedWalletSpend(
+  knownWalletUnits: number,
+  priceSol: number,
+  displayUnitDecimals: number,
+): number {
+  const spentUnits = Math.round(priceSol * 10 ** displayUnitDecimals);
+  return Math.max(0, knownWalletUnits - spentUnits);
+}

@@ -248,7 +248,29 @@ describe("createGameSession", () => {
     s.noteLeverage(2000);
     await tick(); await tick();
     expect(observedExit).toBe(60000);
+    expect(s.balance()).toBe(4_000_000n);
     expect(onSettled).toHaveBeenCalledWith(expect.objectContaining({ outcome: 2, outcomeName: "liq", payout: 0n, exitHuman: 60000 }));
+  });
+
+  it("caches a terminal flip balance without another RPC read", async () => {
+    const chain = fakeChain({
+      flip: vi.fn(async () => ({
+        settled: true as const,
+        outcome: 0,
+        outcomeName: "cashout",
+        payout: 2_000_000n,
+        exitRaw: 60_500n,
+        exitHuman: 60_500,
+        balance: 6_000_000n,
+        deadlineTs: 0,
+      })),
+    });
+    const s = createGameSession({ mint: MINT, onSettled: vi.fn(), injectChain: chain, injectAddress: "Fake111" });
+    await s.init();
+
+    await s.flip(-1);
+
+    expect(s.balance()).toBe(6_000_000n);
   });
 
   it("close caches the settled balance", async () => {

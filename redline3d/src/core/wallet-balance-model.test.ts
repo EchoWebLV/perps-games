@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { displayCashBalance, payoutWalletBalanceFloor } from "./wallet-balance-model";
+import { applyConfirmedWalletSpend, displayCashBalance, payoutWalletBalanceFloor } from "./wallet-balance-model";
 
 describe("displayCashBalance", () => {
   it("sums the on-chain wallet and the in-game balance so no pocket is ever hidden", () => {
@@ -24,5 +24,15 @@ describe("payoutWalletBalanceFloor", () => {
   it("does not set a wallet floor when there is no payout or no wallet read", () => {
     expect(payoutWalletBalanceFloor({ preCloseWalletBalance: 86, payoutCoins: 0 })).toBeUndefined();
     expect(payoutWalletBalanceFloor({ preCloseWalletBalance: null, payoutCoins: 23 })).toBeUndefined();
+  });
+});
+
+describe("confirmed native SOL spending", () => {
+  it("subtracts an exact confirmed crate price in display units", () => {
+    expect(applyConfirmedWalletSpend(1_000, 0.2, 2)).toBe(980);
+  });
+
+  it("never renders a negative wallet balance when the known value is stale", () => {
+    expect(applyConfirmedWalletSpend(5, 0.1, 2)).toBe(0);
   });
 });
