@@ -40,3 +40,29 @@ describe("first account sign-in transition", () => {
     expect(signIn).not.toContain("const wasGuest = !identity");
   });
 });
+
+describe("driver name application wiring", () => {
+  it("hydrates Railway names, exposes Settings editing, and guards Highway entry", async () => {
+    const main = await readFile(new URL("../main.ts", import.meta.url), "utf8");
+
+    expect(main).toContain('import { createDriverNameDialog } from "./ui/driver-name";');
+    expect(main).toContain('import { highwayEntryDecision } from "./core/highway-access";');
+    expect(main).toContain("const serverDriverName = accountSync.driverName();");
+    expect(main).toContain("api.setDriverName(name)");
+    expect(main).toContain("driverName: {");
+    expect(main).toContain("current: () => identity?.name ?? null");
+    expect(main).toContain("edit: () => openDriverNameDialog(false)");
+    expect(main).toContain("highwayEntryDecision(globalThis.location?.hostname ?? \"\", driverNameConfirmed())");
+    expect(main).toContain("openDriverNameDialog(true, enterHighwayFromLobby)");
+  });
+
+  it("clears the previous account name before switching accounts", async () => {
+    const main = await readFile(new URL("../main.ts", import.meta.url), "utf8");
+    const start = main.indexOf("async function ensureSignedIn");
+    const end = main.indexOf("async function syncAccount", start);
+    const signIn = main.slice(start, end);
+
+    expect(signIn).toContain("accountDriverName = null;");
+    expect(signIn).toContain("accountSync.disable();");
+  });
+});

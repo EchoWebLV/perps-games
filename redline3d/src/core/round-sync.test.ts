@@ -83,6 +83,7 @@ function fakeApi(over: Partial<Api> = {}): Api {
     welcomeStatus: async () => ({ pending: false }),
     claimWelcome: async () => ({ granted: false }),
     redeemAccess: async () => ({ granted: false }),
+    setDriverName: async (name) => ({ driverName: name }),
     openRound: async (p) => ({ roundId: "R", asset: p.asset, dir: p.dir, lev: p.lev, stake: p.stake, entryRaw: 100, entryTsUs: 5_000_000 }),
     roundAction: async () => {},
     closeRound: async () => ({ outcome: "cashout", payoutCoins: 7, pnlCoins: 2, equity: 1.4, exitRaw: 101, balance: 107 }),

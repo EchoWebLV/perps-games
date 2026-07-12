@@ -41,7 +41,7 @@ import { createInventory } from "./core/inventory";
 import { createSessionAuth } from "./core/auth-session";
 import { ApiError, createApi } from "./core/api";
 import { showLocalEconomyMenu } from "./core/menu-visibility";
-import { highwayAvailable } from "./core/highway-access";
+import { highwayEntryDecision } from "./core/highway-access";
 import { createTradeHistoryRecorder } from "./core/trade-history-recorder";
 import { createTradeHistoryBridge } from "./core/trade-history-live";
 import { createAccountSync } from "./core/account-sync";
@@ -75,6 +75,7 @@ import { createStripCars, lightestSpecs } from "./render/stripcars";
 import { createStripBillboard } from "./render/billboard";
 import { createCruisers } from "./render/cruisers";
 import { clearIdentity, createIdentityGate, loadIdentity, saveIdentity, type Identity } from "./ui/identity";
+import { createDriverNameDialog } from "./ui/driver-name";
 import { createPresenceHud } from "./ui/presence";
 import { createAccessWall } from "./ui/access-wall";
 import { anyAccountRedeemed, anyRedeemed, redeem, redeemForAccount, type RedeemPorts } from "./core/access-code";
@@ -225,6 +226,7 @@ let balance = 0;
 // the returning rider is loaded or a new rider is chosen, so presence must remain offline until
 // one of those identity paths completes.
 let identity: Identity | null = null;
+let accountDriverName: string | null = null;
 
 // Lazy sign-in — there is NO login gate. The game boots straight into the scene; the wallet
 // connects on the FIRST money action (GO or the wallet panel). Under Privy that's the moment
@@ -241,6 +243,8 @@ async function ensureSignedIn(fresh = false): Promise<boolean> {
   try {
     if (fresh) {
       signedIn = false; // the old session is going away even if the new login fails
+      accountDriverName = null;
+      accountSync.disable();
       await session.loginFresh();
     } else {
       await session.init();
@@ -283,6 +287,13 @@ async function syncAccount(): Promise<void> {
         ? { coins: 0, scrap: 0, cars: {}, levels: { turbo: 0, tank: 0, suspension: 0 } }
         : { coins: upgrades.coins(), scrap: upgrades.scrap(), cars: inventory.snapshot(), levels: upgrades.levels() },
     });
+    const serverDriverName = accountSync.driverName();
+    accountDriverName = serverDriverName;
+    if (serverDriverName && identity?.mode === "privy" && identity.name !== serverDriverName) {
+      identity = { ...identity, name: serverDriverName };
+      saveIdentity(identity);
+      reconnectPresenceForIdentity();
+    }
     void tradeHistoryBridge.flush();
   } catch (e) {
     console.error("account sync failed", e); // cache-only until next sign-in
@@ -427,6 +438,41 @@ const accountSync = createAccountSync({
     inventory.hydrate(snap.cars);
   },
 });
+function driverNameConfirmed(): boolean {
+  return identity?.mode === "guest" || (identity?.mode === "privy" && accountDriverName !== null);
+}
+
+async function persistDriverName(name: string): Promise<void> {
+  if (!identity) throw new Error("driver_identity_missing");
+
+  let savedName = name;
+  if (identity.mode === "privy") {
+    if (!signedIn && !(await ensureSignedIn())) throw new Error("driver_sign_in_failed");
+    const saved = await api.setDriverName(name);
+    savedName = saved.driverName;
+    accountDriverName = savedName;
+  }
+
+  identity = { ...identity, name: savedName };
+  saveIdentity(identity);
+  reconnectPresenceForIdentity();
+}
+
+let driverNameDialog: ReturnType<typeof createDriverNameDialog> | null = null;
+function openDriverNameDialog(requiredForHighway: boolean, afterSave?: () => void): void {
+  if (!identity) { showIdentityGate(); return; }
+  driverNameDialog?.close();
+  driverNameDialog = createDriverNameDialog(hudRoot, {
+    currentName: identity.name,
+    requiredForHighway,
+    onSave: async (name) => {
+      await persistDriverName(name);
+      driverNameDialog = null;
+      afterSave?.();
+    },
+    onCancel: () => { driverNameDialog = null; },
+  });
+}
 // persistent coin balance + the upgrade tree; buying spends coins. Turbo Kit (max leverage) and
 // Long-Range Tank (round time) apply live now that the on-chain program honors both.
 const upgrades = createUpgrades(hudRoot, {
@@ -588,6 +634,7 @@ const garage = createCarPicker(hudRoot, CAR_DEFS, (c) => { car.setModel(c.url, c
     void session.logout().then(() => {
       signedIn = false;
       identity = null;
+      accountDriverName = null;
       syncPresenceLifecycle();
       accountSync.disable();
       void auth.logout?.(); // clears its keys synchronously — done before the reload below
@@ -622,6 +669,10 @@ const garage = createCarPicker(hudRoot, CAR_DEFS, (c) => { car.setModel(c.url, c
 }, {
   showGarageAndUpgrades,
   onHistory: () => { void tradeHistory.open(); },
+  driverName: {
+    current: () => identity?.name ?? null,
+    edit: () => openDriverNameDialog(false),
+  },
 });
 
 // Crate Shop (lobby Crates building): buy a crate → roll a car by rarity odds → reveal. A NEW car
@@ -888,6 +939,11 @@ function enterHighway(restoring = false) {
   audio.resume(); radio.resume();
 }
 
+function enterHighwayFromLobby(): void {
+  exitFrom = "highway";
+  enterHighway();
+}
+
 function exitHighwayToLobby() {
   if (modeSwitchBlocked({ opening, phase: engine.getPhase(), roundActive })) return;
   oval.hide();
@@ -935,14 +991,19 @@ function triggerBuilding(kind: BuildingKind) {
     case "crates": lobbyHud.hide(); crateBox.open(); break;           // open a crate → pull a car
     case "scrapyard": lobbyHud.toast("ScrapYard — coming soon"); break; // collect scrap, not built yet
     case "track": exitFrom = "track"; exitLobby(); break;            // onto the track — full racing HUD, GO lives there
-    case "highway":
-      if (!highwayAvailable(globalThis.location?.hostname ?? "")) {
+    case "highway": {
+      const decision = highwayEntryDecision(globalThis.location?.hostname ?? "", driverNameConfirmed());
+      if (decision === "coming-soon") {
         lobbyHud.toast("Highway coming soon");
         break;
       }
-      exitFrom = "highway";
-      enterHighway();
+      if (decision === "driver-name") {
+        openDriverNameDialog(true, enterHighwayFromLobby);
+        break;
+      }
+      enterHighwayFromLobby();
       break;
+    }
   }
 }
 
@@ -2139,7 +2200,16 @@ function showIdentityGate() {
       try { ok = await ensureSignedIn(true); }
       finally { zeroLocalSnapshotForSignIn = false; }
       if (ok) {
-        identity = { name: name ?? "raider_" + session.address().slice(-4).toLowerCase(), mode: "privy" as const };
+        if (name && !accountDriverName) {
+          try {
+            const saved = await api.setDriverName(name);
+            accountDriverName = saved.driverName;
+          } catch { /* Highway will require a confirmed Railway save before entry. */ }
+        }
+        identity = {
+          name: accountDriverName ?? name ?? "raider_" + session.address().slice(-4).toLowerCase(),
+          mode: "privy" as const,
+        };
         saveIdentity(identity);
         reconnectPresenceForIdentity();
         if (transition.reloadForSaveSwap) {

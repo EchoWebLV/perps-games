@@ -1,6 +1,6 @@
 import { readFile } from "node:fs/promises";
 import { describe, expect, it } from "vitest";
-import { highwayAvailable } from "./highway-access";
+import { highwayAvailable, highwayEntryDecision } from "./highway-access";
 
 describe("highwayAvailable", () => {
   it.each(["localhost", "127.0.0.1", "::1", "[::1]"])("allows loopback host %s", (hostname) => {
@@ -11,6 +11,12 @@ describe("highwayAvailable", () => {
     expect(highwayAvailable(hostname)).toBe(false);
   });
 
+  it("prioritizes the public gate, then requires a confirmed local driver name", () => {
+    expect(highwayEntryDecision("redline-web-production.up.railway.app", false)).toBe("coming-soon");
+    expect(highwayEntryDecision("localhost", false)).toBe("driver-name");
+    expect(highwayEntryDecision("localhost", true)).toBe("enter");
+  });
+
   it("gates only the Highway building branch", async () => {
     const main = await readFile(new URL("../main.ts", import.meta.url), "utf8");
     const start = main.indexOf('case "highway"');
@@ -19,8 +25,9 @@ describe("highwayAvailable", () => {
 
     expect(start).toBeGreaterThanOrEqual(0);
     expect(end).toBeGreaterThan(start);
-    expect(branch).toContain("highwayAvailable");
+    expect(branch).toContain("highwayEntryDecision");
     expect(branch).toContain('lobbyHud.toast("Highway coming soon")');
+    expect(branch).toContain("openDriverNameDialog(true, enterHighwayFromLobby)");
     expect(main).toContain('case "track": exitFrom = "track"; exitLobby();');
   });
 });
