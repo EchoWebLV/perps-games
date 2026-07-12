@@ -91,7 +91,11 @@ describe("Perps Rider landing shell", () => {
     expect(entry).toContain("video.play().catch");
   });
 
-  it("shows real model renders for all four Strip buildings", () => {
+  it("shows real model renders for all four Strip buildings", async () => {
+    const nodeFs = "node:fs/promises";
+    const { readFile } = await import(nodeFs);
+    const landingStylesheet = await readFile(new URL("./landing.css", import.meta.url), "utf8");
+
     for (const building of ["track", "garage", "upgrades", "crates"]) {
       expect(landingHtml).toContain(`src="/assets/landing/building-${building}.webp"`);
     }
@@ -101,6 +105,16 @@ describe("Perps Rider landing shell", () => {
     expect(landingHtml).not.toContain("building-shell");
     expect(landingHtml).not.toContain("building-coil");
     expect(landingHtml).not.toContain("crate-stack");
+    expect(landingStylesheet).toContain("--building-render-scale: 1.28;");
+    expect(landingStylesheet).toMatch(
+      /\.strip-building img \{[^}]*transform: scale\(var\(--building-render-scale\)\);[^}]*\}/,
+    );
+    expect(landingStylesheet).toMatch(
+      /\.stop-grid article:hover \.strip-building img \{[^}]*translateY\(-5px\) scale\(calc\(var\(--building-render-scale\) \* 1\.035\)\)[^}]*\}/,
+    );
+    expect(landingStylesheet).toMatch(
+      /@media \(prefers-reduced-motion: reduce\) \{[\s\S]*\.stop-grid article:hover \.strip-building img \{[^}]*transform: scale\(var\(--building-render-scale\)\);[^}]*\}/,
+    );
   });
 
   it("provides a dependency-free reactive motion field", () => {

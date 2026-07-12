@@ -813,6 +813,7 @@ img {
 }
 
 .strip-building {
+  --building-render-scale: 1.28;
   position: relative;
   display: grid;
   width: calc(100% + 24px);
@@ -842,6 +843,7 @@ img {
   height: 100%;
   object-fit: contain;
   filter: drop-shadow(0 22px 24px rgba(0, 0, 0, 0.6));
+  transform: scale(var(--building-render-scale));
   transition: filter 0.3s ease, transform 0.35s cubic-bezier(0.2, 0.8, 0.2, 1);
 }
 
@@ -856,7 +858,7 @@ img {
 
 .stop-grid article:hover .strip-building img {
   filter: brightness(1.12) drop-shadow(0 25px 28px rgba(0, 0, 0, 0.7));
-  transform: translateY(-5px) scale(1.035);
+  transform: translateY(-5px) scale(calc(var(--building-render-scale) * 1.035));
 }
 
 .stop-grid b {
@@ -1344,8 +1346,11 @@ html.landing-ready [data-reveal].is-visible {
   }
 
   .step-card:hover .step-media video,
-  .stop-grid article:hover .strip-building img,
   .launch-button:hover {
     transform: none;
+  }
+
+  .stop-grid article:hover .strip-building img {
+    transform: scale(var(--building-render-scale));
   }
 }
