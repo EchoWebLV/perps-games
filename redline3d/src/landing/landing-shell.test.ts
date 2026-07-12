@@ -320,4 +320,26 @@ describe("Perps Rider landing shell", () => {
     expect(entry).not.toContain('from "three"');
   });
 
+  it("keeps ambient compositor motion continuous across loop boundaries", async () => {
+    const nodeFs = "node:fs/promises";
+    const { readFile } = await import(nodeFs);
+    const stylesheet = await readFile(new URL("./landing.css", import.meta.url), "utf8");
+
+    for (const layer of ["grid", "streaks", "particles"]) {
+      expect(stylesheet).toMatch(
+        new RegExp(`\\.motion-${layer} > span \\{[^}]*animation: ambient-${layer} [^;]* infinite alternate;`),
+      );
+    }
+  });
+
+  it("resets pointer parallax on all motion layers for reduced motion", async () => {
+    const nodeFs = "node:fs/promises";
+    const { readFile } = await import(nodeFs);
+    const stylesheet = await readFile(new URL("./landing.css", import.meta.url), "utf8");
+
+    expect(stylesheet).toMatch(
+      /@media \(prefers-reduced-motion: reduce\) \{[\s\S]*?\.motion-plasma,\s*\.motion-grid,\s*\.motion-streaks,\s*\.motion-particles \{[^}]*transform: none;/,
+    );
+  });
+
 });

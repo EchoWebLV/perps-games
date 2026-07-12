@@ -96,7 +96,7 @@ body {
   filter: drop-shadow(0 0 5px rgba(39, 231, 255, 0.18));
   mask-image: linear-gradient(to top, #000 22%, rgba(0, 0, 0, 0.7) 58%, transparent 96%);
   transform-origin: bottom;
-  animation: ambient-grid 8s linear infinite;
+  animation: ambient-grid 8s linear infinite alternate;
 }
 
 .motion-streaks {
@@ -108,7 +108,7 @@ body {
   background: repeating-linear-gradient(116deg, transparent 0 76px, rgba(39, 231, 255, 0.13) 77px, transparent 79px 148px, rgba(255, 57, 192, 0.11) 149px, transparent 151px 230px);
   filter: drop-shadow(0 0 7px rgba(39, 231, 255, 0.28));
   mix-blend-mode: screen;
-  animation: ambient-streaks 14s linear infinite;
+  animation: ambient-streaks 14s linear infinite alternate;
 }
 
 .motion-particles {
@@ -122,7 +122,7 @@ body {
     radial-gradient(circle, rgba(39, 231, 255, 0.75) 0 1px, transparent 1.5px);
   background-position: 0 0, 37px 61px;
   background-size: 137px 137px, 193px 193px;
-  animation: ambient-particles 24s linear infinite;
+  animation: ambient-particles 24s linear infinite alternate;
 }
 
 html:not(.motion-paused) .motion-layer,
@@ -1944,6 +1944,7 @@ html.landing-ready [data-reveal].is-visible {
   }
 
   .motion-plasma,
+  .motion-grid,
   .motion-streaks,
   .motion-particles {
     transform: none;
