@@ -1,7 +1,7 @@
 [build]
 builder = "RAILPACK"
 buildCommand = "npm --workspace @perps/server run build"
-watchPatterns = ["/server/**", "/packages/engine/**", "/package.json", "/package-lock.json", "/railway.toml"]
+watchPatterns = ["/server/**", "/packages/engine/**", "/redline3d/**", "/package.json", "/package-lock.json", "/railway.toml"]
 
 [deploy]
 preDeployCommand = ["npm --workspace @perps/server run db:migrate"]

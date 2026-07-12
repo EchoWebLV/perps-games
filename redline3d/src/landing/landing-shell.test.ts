@@ -3,6 +3,7 @@ import landingHtml from "../../index.html?raw";
 import manifestText from "../../public/manifest.webmanifest?raw";
 import viteConfig from "../../vite.config.ts?raw";
 import caddyfileText from "../../Caddyfile?raw";
+import railwayConfig from "../../../railway.toml?raw";
 
 const gamePages = import.meta.glob("../../play/index.html", {
   eager: true,
@@ -63,6 +64,10 @@ describe("Perps Rider landing shell", () => {
   it("routes the public play path to the game document", () => {
     expect(caddyfileText).toContain("@playRoot path /play /play/");
     expect(caddyfileText).toContain("rewrite @playRoot /play/index.html");
+  });
+
+  it("makes frontend changes eligible for Railway deployment", () => {
+    expect(railwayConfig).toContain('"/redline3d/**"');
   });
 
 });
