@@ -113,6 +113,32 @@ describe("Perps Rider landing shell", () => {
     expect(landingHtml).not.toContain("<canvas");
   });
 
+  it("locks technology scenes to the responsive motion contract", async () => {
+    const nodeFs = "node:fs/promises";
+    const { readFile } = await import(nodeFs);
+    const landingStylesheet = await readFile(new URL("./landing.css", import.meta.url), "utf8");
+    const decorativeScenes = landingHtml.match(/<div class="tech-scene[^>]*aria-hidden="true">/g) ?? [];
+
+    expect(decorativeScenes).toHaveLength(4);
+    for (const delay of ["0s", ".35s", ".7s", "1.05s"]) {
+      expect(landingHtml).toContain(`style="--tech-delay: ${delay}"`);
+    }
+    expect(landingStylesheet).toMatch(
+      /html\.motion-paused \.tech-scene \*,\s*html:not\(\.tech-motion-active\) \.tech-scene \* \{[^}]*animation-play-state: paused !important;/,
+    );
+    expect(landingStylesheet).toMatch(/\.tech-grid \{[^}]*grid-template-columns: repeat\(4, 1fr\);/);
+    expect(landingStylesheet).toMatch(
+      /@media \(max-width: 1100px\) \{[\s\S]*?\.tech-grid \{[^}]*grid-template-columns: repeat\(2, 1fr\);/,
+    );
+    expect(landingStylesheet).toMatch(
+      /@media \(max-width: 760px\) \{[\s\S]*?\.tech-grid \{[^}]*grid-template-columns: 1fr;/,
+    );
+    expect(landingStylesheet).toMatch(/\.car-b \{[^}]*--tech-phase-delay: 1\.2s;/);
+    expect(landingStylesheet).toMatch(
+      /\.tech-scene \* \{[^}]*animation-delay: calc\(var\(--tech-delay, 0s\) \+ var\(--tech-phase-delay, 0s\)\);/,
+    );
+  });
+
   it("shows real model renders for all four Strip buildings", async () => {
     const nodeFs = "node:fs/promises";
     const { readFile } = await import(nodeFs);

@@ -1131,7 +1131,8 @@ html.motion-paused.landing-ready [data-reveal] {
 }
 
 .car-b {
-  animation: car-route 3.8s ease-in-out 1.2s infinite reverse;
+  --tech-phase-delay: 1.2s;
+  animation: car-route 3.8s ease-in-out infinite reverse;
 }
 
 .presence-ping {
@@ -1140,7 +1141,7 @@ html.motion-paused.landing-ready [data-reveal] {
 }
 
 .tech-scene * {
-  animation-delay: var(--tech-delay, 0s);
+  animation-delay: calc(var(--tech-delay, 0s) + var(--tech-phase-delay, 0s));
 }
 
 @keyframes price-scan {
