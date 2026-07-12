@@ -9,7 +9,7 @@ export type CarAbility = "laneBet" | "nitro" | "rainbow" | "skull" | "pinkRod" |
 /** card-face display of the car's power (the ability shown on the card) */
 export interface CarPower { name: string; desc: string; icon: string }
 export interface CarOption {
-  name: string; url: string; scale?: number; yaw?: number;
+  name: string; displayName?: string; url: string; scale?: number; yaw?: number;
   ability?: CarAbility; power?: CarPower;
   baseLev?: number;         // car's base max leverage (raises the dial ceiling, e.g. Cybertruck 1500)
   rarity?: Rarity;          // collectible tier 1–5 (Common→Legendary); colored gems on the card
@@ -17,6 +17,7 @@ export interface CarOption {
   locked?: boolean;         // not yet owned → shown sealed in the collection
   comingSoon?: boolean;     // ability still in the shop → card shown taped off, can't be picked
 }
+export const carDisplayName = (car: CarOption): string => car.displayName ?? car.name;
 export interface Garage {
   /** the wrap element (hamburger button + overlay) — lets the lobby toggle its chrome */
   el: HTMLElement;
@@ -492,11 +493,12 @@ export function createCarPicker(
   // so grant() can flip a card from LOCKED to owned after a crate pull without duplicating the build.
   const fillCard = (card: HTMLElement, c: CarOption, i: number): Card => {
     card.className = "gcard" + (c.locked ? " locked" : "") + (c.comingSoon ? " soon" : "");
+    const displayName = carDisplayName(c);
     const series = `${String(i + 1).padStart(2, "0")} / ${String(cars.length).padStart(2, "0")}`;
     const rarity = c.rarity ?? 1;
     if (c.locked) {
       card.innerHTML =
-        `<div class="gtitle"><span class="gtitle-name" style="color:var(--mut)">${c.name}</span><span class="grarity">${gems(0)}</span></div>` +
+        `<div class="gtitle"><span class="gtitle-name" style="color:var(--mut)">${displayName}</span><span class="grarity">${gems(0)}</span></div>` +
         `<div class="gcard-win"><div class="gcard-lock">${icon("lock", 30)}<span>LOCKED</span></div></div>` +
         `<div class="gcard-ab"><span class="gcard-ab-ic">${icon("lock")}</span><span class="gcard-ab-tx"><span class="gcard-ab-name" style="color:var(--mut)">Locked</span><span class="gcard-ab-desc">unlock to reveal</span></span></div>` +
         `<div class="gfoot"><span class="gfoot-brand" style="color:var(--mut);text-shadow:none">PERPS RAIDER</span><span class="gfoot-no">${series}</span></div>`;
@@ -507,8 +509,8 @@ export function createCarPicker(
         : `<span class="gcard-ab-tx"><span class="gcard-ab-name" style="color:var(--mut)">Stock</span><span class="gcard-ab-desc">no special ability</span></span>`;
       card.innerHTML =
         `<div class="gcard-holo"></div>` +
-        `<div class="gtitle"><span class="gtitle-name">${c.name}</span><span class="grarity">${gems(rarity)}</span></div>` +
-        `<div class="gcard-win"><img class="gcard-art" alt="${c.name}"><div class="gcard-ld"><i></i></div></div>` +
+        `<div class="gtitle"><span class="gtitle-name">${displayName}</span><span class="grarity">${gems(rarity)}</span></div>` +
+        `<div class="gcard-win"><img class="gcard-art" alt="${displayName}"><div class="gcard-ld"><i></i></div></div>` +
         `<div class="gcard-ab">${ability}</div>` +
         `<div class="gfoot"><span class="gfoot-brand">PERPS RAIDER</span><span class="gfoot-no">${series}</span></div>`;
       const holo = card.querySelector(".gcard-holo") as HTMLElement;
@@ -681,6 +683,7 @@ export function createCarPicker(
     if (detailPoll) { clearInterval(detailPoll); detailPoll = 0; }
   };
   const openDetail = (c: CarOption, i: number, gridEl: HTMLElement) => {
+    const displayName = carDisplayName(c);
     const rarity = c.rarity ?? 1;
     const t = tierOf(rarity);
     const p = c.power;
@@ -692,9 +695,9 @@ export function createCarPicker(
       `<div class="gdcard-face">` +
         `<div class="gdcard-glare"></div>` +
         `<button class="gdcard-x" data-dact="close" aria-label="Back">${backIcon(18)}</button>` +
-        `<div class="gdcard-head"><span class="gdcard-name">${c.name}</span><span class="gdcard-rar">${gems(rarity)}</span></div>` +
+        `<div class="gdcard-head"><span class="gdcard-name">${displayName}</span><span class="gdcard-rar">${gems(rarity)}</span></div>` +
         `<div class="gdcard-tier" style="color:${t.color}"><span>${t.name}</span></div>` +
-        `<div class="gdcard-win">${holo}<img class="gdcard-art" alt="${c.name}"></div>` +
+        `<div class="gdcard-win">${holo}<img class="gdcard-art" alt="${displayName}"></div>` +
         `<div class="gdcard-ab">${ab}</div>` +
         `<button class="gdcard-equip${busy ? " dis" : ""}" data-dact="equip">${busy ? "ROUND LIVE — CASH OUT TO SWITCH" : "EQUIP"}</button>` +
       `</div>`;

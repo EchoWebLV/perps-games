@@ -551,7 +551,7 @@ const CAR_DEFS: CarOption[] = [
   // pulls, comingSoon:true taps it off the pickable rotation. Its GLB, card art, and any already-
   // owned copies stay intact — an owner just sees a COMING SOON card they can't equip.
   { name: "Cook Wagon", url: "/models/breaking_rv.glb", rarity: 1, scale: 1.7, pool: false, comingSoon: true, power: { name: "Cooking", desc: "99.1% pure horsepower", icon: "flame" } },
-  { name: "Solana Paper", url: "/models/trabant.glb", rarity: 1, pool: false, yaw: Math.PI / 2, power: { name: "Two-Stroke", desc: "0–60, eventually", icon: "clock" } },
+  { name: "Solana Paper", displayName: "Trabant", url: "/models/trabant.glb", rarity: 1, pool: false, yaw: Math.PI / 2, power: { name: "Two-Stroke", desc: "0–60, eventually", icon: "clock" } },
   { name: "Big Frank", url: "/models/wiener.glb", rarity: 1, yaw: Math.PI / 2, power: { name: "Relish It", desc: "ketchup sold separately", icon: "flame" } },
   { name: "Dragon", url: "/models/dragon.glb", rarity: 1, yaw: Math.PI / 2, power: { name: "Fire Breather", desc: "runs on spicy noodles", icon: "flame" } },
   { name: "Homewrecker", url: "/models/house.glb", rarity: 1, yaw: Math.PI / 2, power: { name: "Full House", desc: "mortgage not included", icon: "weight" } },

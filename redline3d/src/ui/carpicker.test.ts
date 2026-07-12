@@ -32,6 +32,17 @@ describe("createCarPicker initial selection", () => {
     createCarPicker(document.createElement("div"), cars([{ locked: true }]), (c) => picks.push(c.name));
     expect(picks).toEqual(["Solana Paper"]);
   });
+
+  test("shows Trabant while preserving Solana Paper as the selected inventory ID", () => {
+    const parent = document.createElement("div");
+    const picks: string[] = [];
+    createCarPicker(parent, [
+      { name: "Solana Paper", displayName: "Trabant", url: "/models/trabant.glb" },
+    ], (car) => picks.push(car.name));
+
+    expect(parent.querySelector(".gtitle-name")?.textContent).toBe("Trabant");
+    expect(picks).toEqual(["Solana Paper"]);
+  });
 });
 
 describe("coming-soon construction tape", () => {
