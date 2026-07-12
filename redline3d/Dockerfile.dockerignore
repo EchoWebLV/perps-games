@@ -1,0 +1,12 @@
+*
+
+!redline3d/
+!redline3d/**
+!packages/
+!packages/engine/
+!packages/engine/**
+
+redline3d/node_modules/
+redline3d/dist/
+redline3d/android/
+redline3d/public/models/
