@@ -20,6 +20,16 @@ const landingStyles = import.meta.glob("./landing.css", {
   import: "default",
   query: "?raw",
 });
+const brandAssets = import.meta.glob("../../public/assets/brands/*.svg", {
+  eager: true,
+  import: "default",
+  query: "?raw",
+});
+const brandDocs = import.meta.glob("../../public/assets/brands/README.md", {
+  eager: true,
+  import: "default",
+  query: "?raw",
+});
 
 describe("Perps Rider landing shell", () => {
   it("makes root the landing page with a direct game link", () => {
@@ -68,6 +78,22 @@ describe("Perps Rider landing shell", () => {
 
   it("makes frontend changes eligible for Railway deployment", () => {
     expect(railwayConfig).toContain('"/redline3d/**"');
+  });
+
+  it("ships canonical local MagicBlock and Solana marks", () => {
+    const magicblock = brandAssets["../../public/assets/brands/magicblock-logo.svg"] as string | undefined;
+    const solana = brandAssets["../../public/assets/brands/solana-mark.svg"] as string | undefined;
+    const sources = Object.values(brandDocs)[0] as string | undefined;
+
+    expect(Object.keys(brandAssets)).toHaveLength(2);
+    expect(magicblock).toContain('viewBox="0 0 162 32"');
+    expect(magicblock).toContain('fill="white"');
+    expect(solana).toContain('viewBox="0 0 101 88"');
+    expect(solana).toContain('stop-color="#9945FF"');
+    expect(solana).toContain('stop-color="#19FB9B"');
+    expect(sources).toContain("https://www.magicblock.xyz/");
+    expect(sources).toContain("https://solana.com/branding");
+    expect(sources).toContain("Retrieved: 2026-07-13");
   });
 
   it("uses resilient native video loops for every tutorial step", () => {
