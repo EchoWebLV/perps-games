@@ -37,6 +37,46 @@ describe("GET /v1/me account state", () => {
     expect(res.statusCode).toBe(200);
     expect(res.json().access).toEqual(["gold"]);
   });
+
+  it("returns null then the saved normalized driver name from /v1/me", async () => {
+    ctx = await makeTestDb({ signupFaucet: false });
+
+    const before = await ctx.server.inject({ method: "GET", url: "/v1/me", headers: H });
+    expect(before.statusCode).toBe(200);
+    expect(before.json().driverName).toBeNull();
+
+    const save = await ctx.server.inject({
+      method: "POST",
+      url: "/v1/profile/driver-name",
+      headers: H,
+      payload: { name: "  Road_King " },
+    });
+    expect(save.statusCode).toBe(200);
+    expect(save.json()).toEqual({ driverName: "road_king" });
+
+    const after = await ctx.server.inject({ method: "GET", url: "/v1/me", headers: H });
+    expect(after.json().driverName).toBe("road_king");
+  });
+
+  it("rejects invalid and anonymous driver-name writes", async () => {
+    ctx = await makeTestDb({ signupFaucet: false });
+
+    const invalid = await ctx.server.inject({
+      method: "POST",
+      url: "/v1/profile/driver-name",
+      headers: H,
+      payload: { name: "no spaces" },
+    });
+    expect(invalid.statusCode).toBe(400);
+    expect(invalid.json()).toEqual({ error: "invalid_driver_name" });
+
+    const anonymous = await ctx.server.inject({
+      method: "POST",
+      url: "/v1/profile/driver-name",
+      payload: { name: "road_king" },
+    });
+    expect(anonymous.statusCode).toBe(401);
+  });
 });
 
 describe("coins earn/spend", () => {

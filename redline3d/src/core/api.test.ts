@@ -251,6 +251,29 @@ describe("createApi", () => {
     expect(seen[4].url).toBe("http://x/v1/migrate");
   });
 
+  it("saves the account driver name through the profile endpoint", async () => {
+    let seen: { url: string; method: string; body: unknown } | null = null;
+    const api = createApi({
+      baseUrl: "http://x",
+      userId: "u",
+      fetch: async (url, init) => {
+        seen = {
+          url: String(url),
+          method: String(init?.method),
+          body: init?.body ? JSON.parse(String(init.body)) : undefined,
+        };
+        return res(200, { driverName: "road_king" });
+      },
+    });
+
+    await expect(api.setDriverName("road_king")).resolves.toEqual({ driverName: "road_king" });
+    expect(seen).toEqual({
+      url: "http://x/v1/profile/driver-name",
+      method: "POST",
+      body: { name: "road_king" },
+    });
+  });
+
   it("reads welcome status before posting the atomic claim", async () => {
     const calls: Array<{ url: string; method: string; body: unknown }> = [];
     const api = createApi({

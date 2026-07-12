@@ -46,6 +46,7 @@ const CoinDelta = z.object({ amount: z.number().int().positive().max(1_000_000_0
 const GrantCar = z.object({ carId: z.string().min(1) });
 const CarRef = z.object({ carId: z.string().min(1) });
 const RedeemAccess = z.object({ code: z.string().trim().min(1).max(24) });
+const DriverNameBody = z.object({ name: z.string() });
 const WalletBindChallengeBody = z.object({ wallet: z.string().min(32).max(44) });
 const WalletBindBody = z.object({
   challenge: z.string().min(1),
@@ -252,13 +253,26 @@ export function registerRoutes(server: FastifyInstance, deps: RouteDeps): void {
     return { seeded: true };
   });
 
+  server.post("/v1/profile/driver-name", { preHandler: requireUser }, async (req, reply) => {
+    const parsed = DriverNameBody.safeParse(req.body);
+    if (!parsed.success) return reply.code(400).send({ error: "invalid_driver_name" });
+    try {
+      return { driverName: await deps.users.setDriverName(req.userId!, parsed.data.name) };
+    } catch (error: any) {
+      if (error?.message === "invalid_driver_name") {
+        return reply.code(400).send({ error: "invalid_driver_name" });
+      }
+      throw error;
+    }
+  });
+
   server.get("/v1/me", { preHandler: requireUser }, async (req) => {
     const userId = req.userId!;
     // soft-coin seeding: idempotent on (signup_faucet, userId) — safe to attempt every call
     if (deps.signupFaucet) {
       await deps.ledger.credit(userId, "coin", deps.startBalance, "signup_faucet", userId);
     }
-    const [balance, coins, scrap, rows, openRoundId, access, levels] = await Promise.all([
+    const [balance, coins, scrap, rows, openRoundId, access, levels, driverName] = await Promise.all([
       deps.ledger.balance(userId, deps.stakeAsset),
       deps.ledger.balance(userId, "coin"),
       deps.ledger.balance(userId, "scrap"),
@@ -266,6 +280,7 @@ export function registerRoutes(server: FastifyInstance, deps: RouteDeps): void {
       deps.rounds.getOpenRoundId(userId),
       deps.users.accessCodes(userId),
       deps.upgrades.get(userId),
+      deps.users.driverName(userId),
     ]);
     return {
       userId,
@@ -276,6 +291,7 @@ export function registerRoutes(server: FastifyInstance, deps: RouteDeps): void {
       openRoundId,
       access,
       levels,
+      driverName,
     };
   });
 
