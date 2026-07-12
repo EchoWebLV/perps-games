@@ -1,7 +1,17 @@
 :8080 {
   root * /usr/share/caddy
   encode zstd gzip
-  try_files {path} /index.html
-  file_server
-}
 
+  handle /downloads/perps-rider.apk {
+    header Content-Type application/vnd.android.package-archive
+    header Content-Disposition "attachment; filename=perps-rider.apk"
+    header X-Content-Type-Options nosniff
+    rewrite * /models/perps-rider.apk
+    file_server
+  }
+
+  handle {
+    try_files {path} /index.html
+    file_server
+  }
+}

@@ -294,7 +294,7 @@ img {
 .hero-actions {
   display: flex;
   align-items: center;
-  gap: 28px;
+  gap: 18px;
   margin-top: 36px;
 }
 
@@ -338,6 +338,35 @@ img {
 
 .launch-button:hover {
   filter: brightness(1.08);
+  transform: translateY(-2px);
+}
+
+.apk-button {
+  display: inline-flex;
+  min-height: 62px;
+  align-items: center;
+  gap: 16px;
+  padding: 0 20px;
+  border: 1px solid rgba(78, 225, 255, 0.5);
+  background: rgba(10, 21, 42, 0.72);
+  box-shadow: inset 0 0 24px rgba(78, 225, 255, 0.06);
+  color: #b9f4ff;
+  clip-path: polygon(10px 0, 100% 0, 100% calc(100% - 10px), calc(100% - 10px) 100%, 0 100%, 0 10px);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  transition: border-color 0.18s ease, background 0.18s ease, transform 0.18s ease;
+}
+
+.apk-button b {
+  color: var(--cyan);
+  font-size: 18px;
+}
+
+.apk-button:hover {
+  border-color: var(--cyan);
+  background: rgba(20, 48, 74, 0.8);
   transform: translateY(-2px);
 }
 
@@ -853,6 +882,12 @@ img {
   text-transform: uppercase;
 }
 
+.footer-links {
+  display: flex;
+  justify-content: flex-end;
+  gap: 22px;
+}
+
 .site-footer .wordmark {
   justify-self: start;
   font-size: 17px;
@@ -1019,6 +1054,11 @@ html.landing-ready [data-reveal].is-visible {
 
   .launch-button {
     width: min(100%, 350px);
+  }
+
+  .apk-button {
+    width: min(100%, 350px);
+    justify-content: space-between;
   }
 
   .proof-row {

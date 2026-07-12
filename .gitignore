@@ -7,3 +7,6 @@ dist/
 .next/
 .env
 .env.local
+
+# Release APKs are staged locally for Railway uploads, never committed.
+redline3d/public/downloads/*.apk

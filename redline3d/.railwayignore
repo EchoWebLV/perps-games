@@ -8,6 +8,8 @@
 !index.html
 !lobby-preview.html
 !onchain.html
+!play/
+!play/**
 !package.json
 !package-lock.json
 !railway.json

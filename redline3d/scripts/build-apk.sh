@@ -36,13 +36,16 @@ fi
 # Gradle locates the SDK via local.properties (gitignored); write it if missing.
 [ -f android/local.properties ] || echo "sdk.dir=$ANDROID_HOME" > android/local.properties
 
-echo "▶ 1/3  building web bundle (vite)…"
+echo "▶ 1/4  building web bundle (vite)…"
 npm run build
 
-echo "▶ 2/3  syncing web assets into the android project…"
+echo "▶ 2/4  making the game the native root…"
+node scripts/prepare-native-assets.mjs dist
+
+echo "▶ 3/4  syncing game-only web assets into the android project…"
 npx --yes cap sync android
 
-echo "▶ 3/3  assembling debug APK (gradle)…"
+echo "▶ 4/4  assembling debug APK (gradle)…"
 ( cd android && ./gradlew --console=plain assembleDebug )
 
 APK="android/app/build/outputs/apk/debug/app-debug.apk"

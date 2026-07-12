@@ -30,6 +30,11 @@ describe("Perps Rider landing shell", () => {
     expect(html).not.toContain('/src/main.ts');
   });
 
+  it("offers judges a direct Seeker APK download", () => {
+    expect(landingHtml).toContain('href="/downloads/perps-rider.apk"');
+    expect(landingHtml).toContain("Download Seeker APK");
+  });
+
   it("keeps the game shell at play and starts installed experiences there", () => {
     expect(Object.keys(gamePages)).toHaveLength(1);
     const gameHtml = Object.values(gamePages)[0] as string | undefined;
@@ -37,11 +42,12 @@ describe("Perps Rider landing shell", () => {
     expect(JSON.parse(manifestText).start_url).toBe("/play/");
   });
 
-  it("uses a lightweight landing bundle with a native game bypass", () => {
+  it("keeps the web-only landing bundle separate from the native app", () => {
     expect(Object.keys(landingScripts)).toHaveLength(1);
     expect(Object.keys(landingStyles)).toHaveLength(1);
     const entry = Object.values(landingScripts)[0] as string | undefined;
-    expect(entry).toContain('location.replace("/play/")');
+    expect(entry).not.toContain("@capacitor/core");
+    expect(entry).not.toContain("location.replace");
     expect(entry).not.toContain('from "three"');
     expect(entry).not.toContain('from "../main"');
     expect(landingHtml).toContain('/src/landing/landing.css');

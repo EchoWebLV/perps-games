@@ -1,8 +1,3 @@
-import { Capacitor } from "@capacitor/core";
-
-if (Capacitor.isNativePlatform()) {
-  location.replace("/play/");
-} else {
   const root = document.documentElement;
   const header = document.querySelector<HTMLElement>("[data-site-header]");
   const menu = document.querySelector<HTMLElement>("[data-menu]");
@@ -49,4 +44,3 @@ if (Capacitor.isNativePlatform()) {
     }, { rootMargin: "0px 0px -8%", threshold: 0.12 });
     reveals.forEach((element) => observer.observe(element));
   }
-}
