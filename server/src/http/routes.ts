@@ -183,9 +183,9 @@ export function registerRoutes(server: FastifyInstance, deps: RouteDeps): void {
     return { cars: rows.map((r) => ({ carId: r.carId, count: r.count, acquiredAt: r.acquiredAt })) };
   });
 
-  // First-login welcome crate — granted ONCE PER ACCOUNT (server-side, atomic + idempotent).
-  // Returns { granted: true } only on the first-ever call for this user; every later call → false.
-  server.post("/v1/welcome/claim", { preHandler: requireUser }, async (req) => deps.users.claimWelcome(req.userId!));
+  // First-login welcome crate — granted ONCE PER WALLET-BOUND ACCOUNT. Anonymous browser sessions
+  // are intentionally rejected so a refresh cannot mint a fresh "first" claim under a new anon id.
+  server.post("/v1/welcome/claim", { preHandler: requireWalletBoundUser }, async (req) => deps.users.claimWelcome(req.userId!));
 
   // Redeem an access code — reward granted ONCE PER (account, code) (server-side, atomic + idempotent).
   // Returns { granted: true } only the first time this account redeems this specific code; every

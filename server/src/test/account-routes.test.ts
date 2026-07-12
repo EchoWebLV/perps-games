@@ -172,6 +172,7 @@ describe("POST /v1/welcome/claim (once per account)", () => {
   // mirror that by posting `payload: {}`; the handler ignores the body.
   it("grants the welcome crate on the first call and never again for the same account", async () => {
     ctx = await makeTestDb({ signupFaucet: false });
+    await bindDevWallet(ctx, "alice");
     const first = await ctx.server.inject({ method: "POST", url: "/v1/welcome/claim", headers: H, payload: {} });
     expect(first.statusCode).toBe(200);
     expect(first.json()).toEqual({ granted: true });
@@ -183,6 +184,8 @@ describe("POST /v1/welcome/claim (once per account)", () => {
 
   it("grants each distinct account once, independently", async () => {
     ctx = await makeTestDb({ signupFaucet: false });
+    await bindDevWallet(ctx, "welcomeA");
+    await bindDevWallet(ctx, "welcomeB");
     const A = { "x-dev-user": "welcomeA", "content-type": "application/json" };
     const B = { "x-dev-user": "welcomeB", "content-type": "application/json" };
     expect((await ctx.server.inject({ method: "POST", url: "/v1/welcome/claim", headers: A, payload: {} })).json()).toEqual({ granted: true });
@@ -196,6 +199,18 @@ describe("POST /v1/welcome/claim (once per account)", () => {
     ctx = await makeTestDb({ signupFaucet: false });
     const res = await ctx.server.inject({ method: "POST", url: "/v1/welcome/claim", headers: { "content-type": "application/json" }, payload: {} });
     expect(res.statusCode).toBe(401);
+  });
+
+  it("rejects an anonymous session without consuming the wallet account's claim", async () => {
+    ctx = await makeTestDb({ signupFaucet: false });
+    const anonymous = await ctx.server.inject({ method: "POST", url: "/v1/welcome/claim", headers: H, payload: {} });
+    expect(anonymous.statusCode).toBe(403);
+    expect(anonymous.json()).toEqual({ error: "wallet_required" });
+
+    await bindDevWallet(ctx, "alice");
+    const firstAccountClaim = await ctx.server.inject({ method: "POST", url: "/v1/welcome/claim", headers: H, payload: {} });
+    expect(firstAccountClaim.statusCode).toBe(200);
+    expect(firstAccountClaim.json()).toEqual({ granted: true });
   });
 });
 
