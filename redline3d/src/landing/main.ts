@@ -4,6 +4,14 @@
   const menuToggle = document.querySelector<HTMLButtonElement>("[data-menu-toggle]");
   const heroArt = document.querySelector<HTMLImageElement>("[data-hero-art]");
   const reducedMotion = matchMedia("(prefers-reduced-motion: reduce)").matches;
+  const tutorialVideos = document.querySelectorAll<HTMLVideoElement>("[data-tutorial-video]");
+
+  if (reducedMotion) {
+    tutorialVideos.forEach((video) => {
+      video.autoplay = false;
+      video.pause();
+    });
+  }
 
   root.classList.add("landing-ready");
 

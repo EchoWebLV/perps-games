@@ -70,4 +70,19 @@ describe("Perps Rider landing shell", () => {
     expect(railwayConfig).toContain('"/redline3d/**"');
   });
 
+  it("uses resilient native video loops for every tutorial step", () => {
+    const videos = landingHtml.match(/<video\b[\s\S]*?<\/video>/g) ?? [];
+
+    expect(videos).toHaveLength(3);
+    for (const video of videos) {
+      expect(video).toContain("data-tutorial-video");
+      expect(video).toMatch(/autoplay[^>]*loop[^>]*muted[^>]*playsinline/);
+      expect(video).toMatch(/poster="\/tutorial\/(market-side|leverage|cash-out)\.webp"/);
+      expect(video).toContain('type="video/webm"');
+      expect(video).toContain('type="video/mp4"');
+      expect(video).toContain('aria-hidden="true"');
+    }
+    expect(landingHtml).not.toMatch(/<div class="step-media"><img/);
+  });
+
 });
