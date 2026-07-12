@@ -15,6 +15,12 @@
   --amber: #ffd166;
   --shell: min(1180px, calc(100vw - 48px));
   --font: "Chakra Petch", ui-monospace, monospace;
+  --motion-x: 0px;
+  --motion-y: 0px;
+  --motion-far-x: 0px;
+  --motion-far-y: 0px;
+  --motion-near-x: 0px;
+  --motion-near-y: 0px;
 }
 
 * {
@@ -30,27 +36,103 @@ body {
   margin: 0;
   min-width: 320px;
   overflow-x: clip;
-  background:
-    radial-gradient(circle at 78% 8%, rgba(255, 57, 192, 0.12), transparent 26rem),
-    radial-gradient(circle at 18% 18%, rgba(39, 231, 255, 0.09), transparent 30rem),
-    var(--bg);
+  background: var(--bg);
   color: var(--ink);
   font-family: var(--font);
   font-weight: 500;
 }
 
-body::before {
+.motion-bg {
   position: fixed;
   inset: 0;
-  z-index: -2;
+  z-index: 0;
+  overflow: hidden;
+  background: #05030d;
+  pointer-events: none;
+}
+
+.motion-bg::after {
+  position: absolute;
+  inset: 0;
+  z-index: 5;
+  background:
+    radial-gradient(circle at 50% 22%, transparent 0 24%, rgba(5, 3, 13, 0.16) 56%, rgba(5, 3, 13, 0.72) 100%),
+    linear-gradient(180deg, transparent, rgba(5, 3, 13, 0.56));
+  content: "";
+}
+
+.motion-layer {
+  position: absolute;
+  inset: -18%;
+  will-change: background-position, transform;
+}
+
+.motion-plasma {
+  background:
+    radial-gradient(circle at 74% 15%, rgba(255, 57, 192, 0.34), transparent 24%),
+    radial-gradient(circle at 18% 32%, rgba(39, 231, 255, 0.29), transparent 27%),
+    radial-gradient(circle at 62% 74%, rgba(92, 42, 255, 0.28), transparent 23%),
+    radial-gradient(circle at 8% 88%, rgba(46, 230, 166, 0.14), transparent 21%);
+  background-position: 0 0;
+  background-size: 120% 120%;
+  filter: blur(30px) saturate(1.35);
+  transform: translate3d(var(--motion-x), var(--motion-y), 0) scale(1.05);
+  animation: plasma-drift 18s ease-in-out infinite alternate;
+}
+
+.motion-grid {
+  inset: 41% -25% -45%;
+  background:
+    repeating-linear-gradient(90deg, rgba(39, 231, 255, 0.17) 0 1px, transparent 1px 64px),
+    repeating-linear-gradient(0deg, rgba(255, 57, 192, 0.14) 0 1px, transparent 1px 46px);
+  filter: drop-shadow(0 0 5px rgba(39, 231, 255, 0.18));
+  mask-image: linear-gradient(to top, #000 22%, rgba(0, 0, 0, 0.7) 58%, transparent 96%);
+  transform: perspective(420px) rotateX(62deg) translate3d(var(--motion-far-x), var(--motion-far-y), 0);
+  transform-origin: bottom;
+  animation: grid-rush 8s linear infinite;
+}
+
+.motion-streaks {
+  background: repeating-linear-gradient(116deg, transparent 0 76px, rgba(39, 231, 255, 0.13) 77px, transparent 79px 148px, rgba(255, 57, 192, 0.11) 149px, transparent 151px 230px);
+  filter: drop-shadow(0 0 7px rgba(39, 231, 255, 0.28));
+  mix-blend-mode: screen;
+  opacity: 0.76;
+  transform: translate3d(var(--motion-far-x), var(--motion-far-y), 0);
+  animation: streak-slide 14s linear infinite;
+}
+
+.motion-particles {
   background-image:
-    radial-gradient(circle, rgba(255, 255, 255, 0.6) 0 1px, transparent 1.5px),
-    radial-gradient(circle, rgba(39, 231, 255, 0.5) 0 1px, transparent 1.5px);
+    radial-gradient(circle, rgba(255, 255, 255, 0.72) 0 1px, transparent 1.5px),
+    radial-gradient(circle, rgba(39, 231, 255, 0.75) 0 1px, transparent 1.5px);
   background-position: 0 0, 37px 61px;
   background-size: 137px 137px, 193px 193px;
-  content: "";
-  opacity: 0.16;
-  pointer-events: none;
+  opacity: 0.28;
+  transform: translate3d(var(--motion-near-x), var(--motion-near-y), 0);
+  animation: particles-float 24s linear infinite;
+}
+
+@keyframes plasma-drift {
+  from { background-position: 0 0; }
+  to { background-position: 9% -6%; }
+}
+
+@keyframes grid-rush {
+  to { background-position: 64px 92px; }
+}
+
+@keyframes streak-slide {
+  to { background-position: 230px -150px; }
+}
+
+@keyframes particles-float {
+  to { background-position: 137px 137px, 230px 254px; }
+}
+
+main,
+.site-footer {
+  position: relative;
+  z-index: 1;
 }
 
 body::after {
@@ -674,7 +756,7 @@ img {
   border-block: 1px solid var(--line);
   background:
     linear-gradient(90deg, rgba(39, 231, 255, 0.04), transparent 45%, rgba(255, 57, 192, 0.05)),
-    #080612;
+    rgba(8, 6, 18, 0.84);
 }
 
 .strip-section::before {
@@ -1202,6 +1284,14 @@ html.landing-ready [data-reveal].is-visible {
     --shell: min(100% - 32px, 620px);
   }
 
+  .motion-grid {
+    opacity: 0.65;
+  }
+
+  .motion-streaks {
+    opacity: 0.55;
+  }
+
   .site-header {
     width: calc(100vw - 20px);
     min-height: 64px;
@@ -1410,6 +1500,21 @@ html.landing-ready [data-reveal].is-visible {
   html.landing-ready [data-reveal] {
     opacity: 1;
     transform: none;
+  }
+
+  .motion-layer {
+    animation: none !important;
+    will-change: auto;
+  }
+
+  .motion-plasma,
+  .motion-streaks,
+  .motion-particles {
+    transform: none;
+  }
+
+  .motion-grid {
+    transform: perspective(420px) rotateX(62deg);
   }
 
   .step-card:hover .step-media video,

@@ -85,6 +85,12 @@ describe("Perps Rider landing shell", () => {
     expect(landingHtml).not.toMatch(/<div class="step-media"><img/);
   });
 
+  it("actively starts tutorial loops when motion is allowed", () => {
+    const entry = Object.values(landingScripts)[0] as string;
+
+    expect(entry).toContain("video.play().catch");
+  });
+
   it("renders four distinct decorative buildings on the Strip", () => {
     for (const building of ["track", "garage", "upgrades", "crates"]) {
       expect(landingHtml).toContain(`class="strip-building building-${building}"`);
@@ -92,6 +98,21 @@ describe("Perps Rider landing shell", () => {
     }
     expect(landingHtml.match(/data-building=/g)).toHaveLength(4);
     expect(landingHtml.match(/class="strip-building[^>]+aria-hidden="true"/g)).toHaveLength(4);
+  });
+
+  it("provides a dependency-free reactive motion field", () => {
+    for (const layer of ["plasma", "grid", "streaks", "particles"]) {
+      expect(landingHtml).toContain(`motion-layer motion-${layer}`);
+    }
+    expect(landingHtml).toContain("data-motion-bg");
+
+    const entry = Object.values(landingScripts)[0] as string;
+    expect(entry).toContain('addEventListener("pointermove"');
+    expect(entry).toContain('addEventListener("deviceorientation"');
+    expect(entry).toContain("requestAnimationFrame");
+    expect(entry).toContain('setProperty("--motion-x"');
+    expect(entry).toContain('setProperty("--motion-y"');
+    expect(entry).not.toContain('from "three"');
   });
 
 });
