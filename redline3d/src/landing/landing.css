@@ -333,6 +333,54 @@ html.motion-paused.landing-ready [data-reveal] {
   transition: none;
 }
 
+html.motion-paused .skip-link {
+  transition: none;
+}
+
+html.motion-paused .launch-button {
+  transition-property: filter;
+}
+
+html.motion-paused .apk-button {
+  transition-property: border-color, background;
+}
+
+html.motion-paused .step-media video {
+  transition-property: filter;
+}
+
+html.motion-paused .stop-grid article::before {
+  transition-property: opacity;
+}
+
+html.motion-paused .strip-building {
+  transition: none;
+}
+
+html.motion-paused .strip-building img {
+  transition-property: filter;
+}
+
+html.motion-paused .launch-button:hover {
+  transform: none;
+}
+
+html.motion-paused .apk-button:hover {
+  transform: none;
+}
+
+html.motion-paused .step-card:hover .step-media video {
+  transform: none;
+}
+
+html.motion-paused .stop-grid article:hover::before {
+  transform: none;
+}
+
+html.motion-paused .stop-grid article:hover .strip-building img {
+  transform: scale(var(--building-render-scale));
+}
+
 .site-nav {
   display: flex;
   align-items: center;
@@ -1938,6 +1986,10 @@ html.landing-ready [data-reveal].is-visible {
     transform: none;
   }
 
+  .skip-link {
+    transition: none;
+  }
+
   .motion-layer > span {
     animation: none !important;
     will-change: auto;
@@ -1954,8 +2006,43 @@ html.landing-ready [data-reveal].is-visible {
     transform: perspective(420px) rotateX(62deg);
   }
 
-  .step-card:hover .step-media video,
+  .launch-button {
+    transition-property: filter;
+  }
+
+  .apk-button {
+    transition-property: border-color, background;
+  }
+
+  .step-media video {
+    transition-property: filter;
+  }
+
+  .stop-grid article::before {
+    transition-property: opacity;
+  }
+
+  .strip-building {
+    transition: none;
+  }
+
+  .strip-building img {
+    transition-property: filter;
+  }
+
   .launch-button:hover {
+    transform: none;
+  }
+
+  .apk-button:hover {
+    transform: none;
+  }
+
+  .step-card:hover .step-media video {
+    transform: none;
+  }
+
+  .stop-grid article:hover::before {
     transform: none;
   }
 

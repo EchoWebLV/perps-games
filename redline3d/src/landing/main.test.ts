@@ -20,6 +20,25 @@ const intersectionObservers: FakeIntersectionObserver[] = [];
 let playVideo: ReturnType<typeof vi.spyOn>;
 let pauseVideo: ReturnType<typeof vi.spyOn>;
 
+class ThrowingStorage implements Storage {
+  readonly #values = new Map<string, string>();
+
+  constructor(private readonly failure: "read" | "write") {}
+
+  get length() { return this.#values.size; }
+  clear() { this.#values.clear(); }
+  key(index: number) { return [...this.#values.keys()][index] ?? null; }
+  removeItem(key: string) { this.#values.delete(key); }
+  getItem(key: string) {
+    if (this.failure === "read") throw new DOMException("Storage unavailable", "SecurityError");
+    return this.#values.get(key) ?? null;
+  }
+  setItem(key: string, value: string) {
+    if (this.failure === "write") throw new DOMException("Storage unavailable", "SecurityError");
+    this.#values.set(key, value);
+  }
+}
+
 function mediaQueryList(matches = false): MediaQueryList {
   const events = new EventTarget();
   return {
@@ -41,7 +60,7 @@ function mountLanding(hidden = false) {
   document.body.innerHTML = `
     <div data-motion-bg></div>
     <header data-site-header>
-      <button type="button" aria-pressed="true" data-motion-toggle>MOTION ON</button>
+      <button type="button" aria-label="Motion" aria-pressed="true" data-motion-toggle>MOTION ON</button>
       <button type="button" aria-expanded="false" data-menu-toggle>Menu</button>
       <nav data-menu><a href="#tutorial">Tutorial</a></nav>
     </header>
@@ -88,6 +107,46 @@ afterEach(() => {
 });
 
 describe("landing motion runtime", () => {
+  it("initializes when reading motion preference from storage throws", async () => {
+    vi.stubGlobal("sessionStorage", new ThrowingStorage("read"));
+
+    await expect(loadLanding()).resolves.toBeDefined();
+
+    expect(document.documentElement.classList.contains("landing-ready")).toBe(true);
+    expect(document.documentElement.classList.contains("motion-paused")).toBe(false);
+  });
+
+  it("updates motion state when writing the preference to storage throws", async () => {
+    vi.stubGlobal("sessionStorage", new ThrowingStorage("write"));
+    await loadLanding();
+
+    const motionToggle = document.querySelector<HTMLButtonElement>("[data-motion-toggle]")!;
+    expect(() => motionToggle.click()).not.toThrow();
+
+    expect(document.documentElement.classList.contains("motion-paused")).toBe(true);
+    expect(motionToggle.getAttribute("aria-pressed")).toBe("false");
+    expect(motionToggle.textContent).toBe("MOTION OFF");
+  });
+
+  it("keeps the motion toggle accessible name stable while its state text changes", async () => {
+    const nodeFs = "node:fs/promises";
+    const { readFile } = await import(nodeFs);
+    const landingHtml = await readFile("index.html", "utf8");
+    expect(landingHtml).toContain('aria-label="Motion"');
+
+    await loadLanding();
+    const motionToggle = document.querySelector<HTMLButtonElement>("[data-motion-toggle]")!;
+    expect(motionToggle.getAttribute("aria-label")).toBe("Motion");
+
+    motionToggle.click();
+    expect(motionToggle.textContent).toBe("MOTION OFF");
+    expect(motionToggle.getAttribute("aria-label")).toBe("Motion");
+
+    motionToggle.click();
+    expect(motionToggle.textContent).toBe("MOTION ON");
+    expect(motionToggle.getAttribute("aria-label")).toBe("Motion");
+  });
+
   it("applies reduced-motion behavior when the user pauses motion", async () => {
     await loadLanding();
     markSectionVisible("tutorial");

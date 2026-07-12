@@ -10,8 +10,14 @@
   const toggle = document.querySelector<HTMLButtonElement>("[data-motion-toggle]");
   const motionBackground = document.querySelector<HTMLElement>("[data-motion-bg]");
   const tutorialVideos = document.querySelectorAll<HTMLVideoElement>("[data-tutorial-video]");
+  const storedMotionPaused = () => {
+    try { return sessionStorage.getItem(MOTION_STORAGE_KEY) === "true"; } catch { return false; }
+  };
+  const storeMotionPaused = (paused: boolean) => {
+    try { sessionStorage.setItem(MOTION_STORAGE_KEY, String(paused)); } catch { /* storage is optional */ }
+  };
   let motionState = reduceMotionState(
-    initialMotionState(sessionStorage.getItem(MOTION_STORAGE_KEY) === "true", reduceMotion.matches),
+    initialMotionState(storedMotionPaused(), reduceMotion.matches),
     { type: "document-visible", visible: !document.hidden },
   );
   let motionFrame = 0;
@@ -52,7 +58,7 @@
 
   toggle?.addEventListener("click", () => {
     const paused = !motionState.userPaused;
-    sessionStorage.setItem(MOTION_STORAGE_KEY, String(paused));
+    storeMotionPaused(paused);
     dispatchMotion({ type: "user-paused", paused });
   });
   reduceMotion.addEventListener("change", (event) => dispatchMotion({ type: "system-reduced", reduced: event.matches }));

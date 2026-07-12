@@ -304,6 +304,65 @@ describe("Perps Rider landing shell", () => {
     );
   });
 
+  it("suppresses every hover transform when motion is paused or reduced", async () => {
+    const nodeFs = "node:fs/promises";
+    const { readFile } = await import(nodeFs);
+    const stylesheet = await readFile(new URL("./landing.css", import.meta.url), "utf8");
+    const reducedMotionStart = stylesheet.lastIndexOf("@media (prefers-reduced-motion: reduce)");
+    const reducedMotionStyles = stylesheet.slice(reducedMotionStart);
+    const ruleFor = (styles: string, selector: string) => {
+      const start = styles.indexOf(`${selector} {`);
+      expect(start, `missing CSS rule for ${selector}`).toBeGreaterThanOrEqual(0);
+      const open = styles.indexOf("{", start);
+      return styles.slice(open + 1, styles.indexOf("}", open));
+    };
+
+    const transitionContracts = [
+      [".launch-button", "transition-property: filter;"],
+      [".apk-button", "transition-property: border-color, background;"],
+      [".step-media video", "transition-property: filter;"],
+      [".stop-grid article::before", "transition-property: opacity;"],
+      [".strip-building", "transition: none;"],
+      [".strip-building img", "transition-property: filter;"],
+    ] as const;
+    for (const [selector, declaration] of transitionContracts) {
+      expect(ruleFor(stylesheet, `html.motion-paused ${selector}`)).toContain(declaration);
+      expect(ruleFor(reducedMotionStyles, selector)).toContain(declaration);
+    }
+
+    for (const selector of [
+      ".launch-button:hover",
+      ".apk-button:hover",
+      ".step-card:hover .step-media video",
+      ".stop-grid article:hover::before",
+    ]) {
+      expect(ruleFor(stylesheet, `html.motion-paused ${selector}`)).toContain("transform: none;");
+      expect(ruleFor(reducedMotionStyles, selector)).toContain("transform: none;");
+    }
+    expect(ruleFor(stylesheet, "html.motion-paused .stop-grid article:hover .strip-building img"))
+      .toContain("transform: scale(var(--building-render-scale));");
+    expect(ruleFor(reducedMotionStyles, ".stop-grid article:hover .strip-building img"))
+      .toContain("transform: scale(var(--building-render-scale));");
+
+    expect(ruleFor(stylesheet, "\n.launch-button:hover")).toContain("filter: brightness(1.08);");
+    expect(ruleFor(stylesheet, "\n.apk-button:hover")).toContain("border-color: var(--cyan);");
+    expect(ruleFor(stylesheet, "\n.step-card:hover .step-media video")).toContain("filter: saturate(1.15)");
+    expect(ruleFor(stylesheet, "\n.stop-grid article:hover")).toContain("background:");
+    expect(ruleFor(stylesheet, "\n.stop-grid article:hover::before")).toContain("opacity: 0.85;");
+    expect(ruleFor(stylesheet, "\n.stop-grid article:hover .strip-building img")).toContain("filter: brightness(1.12)");
+  });
+
+  it("keeps skip-link focus positioning functional without transition motion", async () => {
+    const nodeFs = "node:fs/promises";
+    const { readFile } = await import(nodeFs);
+    const stylesheet = await readFile(new URL("./landing.css", import.meta.url), "utf8");
+    const reducedMotionStyles = stylesheet.slice(stylesheet.lastIndexOf("@media (prefers-reduced-motion: reduce)"));
+
+    expect(stylesheet).toMatch(/\.skip-link:focus \{[^}]*transform: translateY\(0\);[^}]*\}/);
+    expect(stylesheet).toMatch(/html\.motion-paused \.skip-link \{[^}]*transition: none;[^}]*\}/);
+    expect(reducedMotionStyles).toMatch(/\.skip-link \{[^}]*transition: none;[^}]*\}/);
+  });
+
   it("provides a dependency-free compositor motion field with normalized input", () => {
     for (const layer of ["plasma", "grid", "streaks", "particles"]) {
       expect(landingHtml).toMatch(
