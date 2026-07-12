@@ -7,6 +7,13 @@ import packageText from "../../package.json?raw";
 const rendererHtmlFiles = import.meta.glob("../../building-renderer.html", { eager: true, import: "default", query: "?raw" });
 const rendererSourceFiles = import.meta.glob("./building-renderer.ts", { eager: true, import: "default", query: "?raw" });
 const captureSourceFiles = import.meta.glob("../../scripts/render-landing-buildings.mjs", { eager: true, import: "default", query: "?raw" });
+const loadNodeUrl = () => {
+  const nodeUrlModule = "node:url";
+  return import(/* @vite-ignore */ nodeUrlModule) as Promise<typeof import("node:url")>;
+};
+const fileUrlPath = async (url: URL) => (await loadNodeUrl()).fileURLToPath(url);
+const filePathUrl = async (path: string) => (await loadNodeUrl()).pathToFileURL(path);
+const buildingAssetPath = (building: string) => fileUrlPath(new URL(`../../public/assets/landing/building-${building}.webp`, import.meta.url));
 
 const readU16 = (bytes: Uint8Array, offset: number) => bytes[offset] | (bytes[offset + 1] << 8);
 const readU24 = (bytes: Uint8Array, offset: number) => bytes[offset] | (bytes[offset + 1] << 8) | (bytes[offset + 2] << 16);
@@ -181,7 +188,7 @@ describe("landing building renderer", () => {
 
   it("commits decodable alpha WebPs at the required dimensions", async () => {
     for (const building of ["track", "garage", "upgrades", "crates"]) {
-      const bytes = await readFile(new URL(`../../public/assets/landing/building-${building}.webp`, import.meta.url));
+      const bytes = await readFile(await buildingAssetPath(building));
       expect(() => validateBuildingWebP(bytes)).not.toThrow();
     }
   });
@@ -190,7 +197,7 @@ describe("landing building renderer", () => {
     const directory = await mkdtemp(join(tmpdir(), "perps-rider-dwebp-"));
     try {
       for (const building of ["track", "garage", "upgrades", "crates"]) {
-        const input = new URL(`../../public/assets/landing/building-${building}.webp`, import.meta.url).pathname;
+        const input = await buildingAssetPath(building);
         const output = join(directory, `${building}.pam`);
         expect(await runDwebp([input, "-pam", "-o", output])).toBe(0);
         expect((await readFile(output)).length).toBeGreaterThan(0);
@@ -200,14 +207,30 @@ describe("landing building renderer", () => {
     }
   });
 
+  it("decodes a WebP from a file URL whose path contains spaces", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "perps rider dwebp "));
+    try {
+      const input = join(directory, "building track.webp");
+      const output = join(directory, "building track.pam");
+      await writeFile(input, await readFile(await buildingAssetPath("track")));
+      const inputUrl = await filePathUrl(input);
+      const decoderInput = await fileUrlPath(inputUrl);
+
+      expect(await runDwebp([decoderInput, "-pam", "-o", output])).toBe(0);
+      expect(decoderInput).toBe(input);
+    } finally {
+      await rm(directory, { recursive: true, force: true });
+    }
+  });
+
   it("rejects a 30-byte header-only WebP using the declared RIFF size", async () => {
-    const bytes = await readFile(new URL("../../public/assets/landing/building-track.webp", import.meta.url));
+    const bytes = await readFile(await buildingAssetPath("track"));
 
     expect(() => validateBuildingWebP(bytes.subarray(0, 30))).toThrow("RIFF size does not match file length");
   });
 
   it("rejects a 30-byte WebP with a forged RIFF size and no image chunks", async () => {
-    const bytes = await readFile(new URL("../../public/assets/landing/building-track.webp", import.meta.url));
+    const bytes = await readFile(await buildingAssetPath("track"));
     const truncatedBytes = Uint8Array.from(bytes.subarray(0, 30));
     new DataView(truncatedBytes.buffer).setUint32(4, truncatedBytes.length - 8, true);
 
@@ -245,16 +268,23 @@ describe("landing building renderer", () => {
     expect(() => validateBuildingWebP(bytes)).toThrow("JUNK pad byte must be zero");
   });
 
-  it("rejects reserved ALPH control bits", () => {
+  it("rejects reserved ALPH control bit 0x40", () => {
     const alphPayload = Uint8Array.from(validAlphPayload);
-    alphPayload[0] = 0x41;
+    alphPayload[0] = 0x40 | 1;
 
     expect(() => validateBuildingWebP(makeBuildingWebPFixture(alphPayload))).toThrow("ALPH control reserved bits must be zero");
   });
 
-  it("rejects unsupported ALPH compression", () => {
+  it("rejects reserved ALPH control bit 0x80", () => {
     const alphPayload = Uint8Array.from(validAlphPayload);
-    alphPayload[0] = 0x02;
+    alphPayload[0] = 0x80 | 1;
+
+    expect(() => validateBuildingWebP(makeBuildingWebPFixture(alphPayload))).toThrow("ALPH control reserved bits must be zero");
+  });
+
+  it.each([2, 3])("rejects unsupported ALPH compression method %i", (compression) => {
+    const alphPayload = Uint8Array.from(validAlphPayload);
+    alphPayload[0] = compression;
 
     expect(() => validateBuildingWebP(makeBuildingWebPFixture(alphPayload))).toThrow("ALPH compression method is unsupported");
   });
@@ -277,9 +307,9 @@ describe("landing building renderer", () => {
     expect(() => validateBuildingWebP(makeBuildingWebPFixture(validAlphPayload, vp8Payload))).toThrow("VP8 payload is not a key frame");
   });
 
-  it("rejects a bad VP8 key-frame start code", () => {
+  it.each([[0, 3], [1, 4], [2, 5]])("rejects bad VP8 key-frame start-code byte %i", (_startCodeIndex, payloadOffset) => {
     const vp8Payload = Uint8Array.from(validVp8Payload);
-    vp8Payload[3] = 0;
+    vp8Payload[payloadOffset] = 0;
 
     expect(() => validateBuildingWebP(makeBuildingWebPFixture(validAlphPayload, vp8Payload))).toThrow("VP8 key-frame start code is invalid");
   });
@@ -289,6 +319,13 @@ describe("landing building renderer", () => {
     vp8Payload[6] = 1;
 
     expect(() => validateBuildingWebP(makeBuildingWebPFixture(validAlphPayload, vp8Payload))).toThrow("unexpected VP8 frame width");
+  });
+
+  it("rejects a wrong VP8 frame height", () => {
+    const vp8Payload = Uint8Array.from(validVp8Payload);
+    vp8Payload[8] = 0xd1;
+
+    expect(() => validateBuildingWebP(makeBuildingWebPFixture(validAlphPayload, vp8Payload))).toThrow("unexpected VP8 frame height");
   });
 
   it("rejects an empty VP8 first partition", () => {
@@ -306,7 +343,7 @@ describe("landing building renderer", () => {
   });
 
   it("has dwebp reject a structurally valid WebP with a zeroed compressed ALPH body", async () => {
-    const bytes = await readFile(new URL("../../public/assets/landing/building-track.webp", import.meta.url));
+    const bytes = await readFile(await buildingAssetPath("track"));
     const corruptedBytes = Uint8Array.from(bytes);
     const alphChunk = findChunk(corruptedBytes, "ALPH");
     corruptedBytes.fill(0, alphChunk.payloadOffset + 1, alphChunk.payloadOffset + alphChunk.payloadSize);
