@@ -67,7 +67,10 @@ export function createIdentityGate(
     (opts.onDismiss ? `<button id="idclose" type="button" aria-label="Close"
       style="position:absolute;top:10px;right:10px;width:32px;height:32px;padding:0;display:grid;place-items:center;border-radius:8px;border:1px solid var(--line);background:rgba(12,10,26,.74);color:var(--mut);cursor:pointer;font-size:14px">✕</button>` : "") +
     `<style>
-  #idsignin.identity-primary:focus-visible,
+  #idsignin.identity-primary:focus-visible {
+    outline:none;
+    box-shadow:inset 0 0 0 3px var(--cyan);
+  }
   #idguest.identity-secondary:focus-visible,
   #idname:focus-visible {
     outline:2px solid var(--cyan);

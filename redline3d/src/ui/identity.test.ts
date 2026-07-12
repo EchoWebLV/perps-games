@@ -87,6 +87,23 @@ test("lets the scoped keyboard-focus outline render on the name input", () => {
   expect(scopedStyles).toMatch(/#idname:focus-visible\s*\{/);
 });
 
+test("paints the clipped sign-in focus ring inside the primary CTA", () => {
+  const gate = createIdentityGate(document.body, {
+    onGuest: vi.fn(),
+    onSignIn: vi.fn().mockResolvedValue(false),
+  });
+
+  const scopedStyles = gate.el.querySelector<HTMLStyleElement>("style")!.textContent;
+  const signInRule = scopedStyles.match(/#idsignin\.identity-primary:focus-visible\s*\{([^}]*)\}/)?.[1];
+
+  expect(signInRule).toBeDefined();
+  expect(signInRule ?? "").toContain("outline:none");
+  expect(signInRule ?? "").toMatch(/box-shadow:[^;]*inset[^;]*var\(--cyan\)/);
+  expect(scopedStyles).toMatch(
+    /#idguest\.identity-secondary:focus-visible,\s*#idname:focus-visible\s*\{[^}]*outline:2px solid var\(--cyan\)/,
+  );
+});
+
 test("clears stale validation when the name becomes valid or empty", () => {
   const gate = createIdentityGate(document.body, {
     onGuest: vi.fn(),
