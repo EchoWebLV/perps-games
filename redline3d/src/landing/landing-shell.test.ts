@@ -102,6 +102,17 @@ describe("Perps Rider landing shell", () => {
     expect(landingHtml).toContain('data-motion-section="technology"');
   });
 
+  it("presents a four-stage animated technology pipeline", () => {
+    for (const scene of ["price", "execution", "settlement", "world"]) {
+      expect(landingHtml).toContain(`data-tech-scene="${scene}"`);
+    }
+    expect(landingHtml.match(/class="tech-scene/g)).toHaveLength(4);
+    expect(landingHtml.match(/<svg/g)).toHaveLength(4);
+    expect(landingHtml).toContain("Social Open World");
+    expect(landingHtml).toContain("Drive the Strip with other traders, show off your garage, and enter shared destinations together.");
+    expect(landingHtml).not.toContain("<canvas");
+  });
+
   it("shows real model renders for all four Strip buildings", async () => {
     const nodeFs = "node:fs/promises";
     const { readFile } = await import(nodeFs);
