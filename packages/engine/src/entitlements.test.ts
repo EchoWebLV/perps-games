@@ -24,6 +24,11 @@ describe("perkEnvelope", () => {
   it("Cybertruck baseLev floors leverage at 1500 with no turbo", () => {
     expect(perkEnvelope(L0, { baseLev: 1500 }).maxLev).toBe(1500);
   });
+  it("adds every Turbo level above Cybertruck's 1500x base", () => {
+    expect(perkEnvelope({ turbo: 0, tank: 0, suspension: 0 }, { baseLev: 1500 }).maxLev).toBe(1500);
+    expect(perkEnvelope({ turbo: 1, tank: 0, suspension: 0 }, { baseLev: 1500 }).maxLev).toBe(1550);
+    expect(perkEnvelope({ turbo: 10, tank: 0, suspension: 0 }, { baseLev: 1500 }).maxLev).toBe(2000);
+  });
   it("Orion nitro doubles the ceiling (transient headroom the co-sign must allow)", () => {
     expect(perkEnvelope(LMAX, { ability: "nitro" }).maxLev).toBe(3000);
   });

@@ -41,6 +41,12 @@ export interface PerkEnvelope {
 const clampLevel = (n: number) => Math.max(0, Math.min(MAX_UPGRADE_LEVEL, Math.floor(Number(n) || 0)));
 const clampInt = (v: number, lo: number, hi: number) => Math.max(lo, Math.min(hi, Math.round(v)));
 
+/** Add the earned Turbo bonus above whichever starting ceiling is higher. */
+export function carLeverageCeiling(upgradedRmax: number, carBaseLev = 0): number {
+  const turboBonus = Math.max(0, upgradedRmax - BASE_CONFIG.RMAX);
+  return Math.max(BASE_CONFIG.RMAX, carBaseLev) + turboBonus;
+}
+
 /** The perk envelope a player is entitled to, from their upgrade levels + one car's perks.
  *  Mirrors the client's live computation (upgrades.ts + main.ts effRmax/effMaxSec) so a legit
  *  client request always validates, and is the authority the server signs against in Phase 2. */
@@ -51,7 +57,7 @@ export function perkEnvelope(levels: UpgradeLevels, car: CarPerk): PerkEnvelope 
   const heavy = car.ability === "sixWheeler";
 
   const rmax = BASE_CONFIG.RMAX + UPGRADE_STEP.turbo * turbo;
-  const ceil = Math.max(rmax, car.baseLev ?? 0);
+  const ceil = carLeverageCeiling(rmax, car.baseLev);
   const nitro = car.ability === "nitro" ? NITRO_MULT : 1;
   const maxLev = clampInt(ceil * (heavy ? HEAVY.levMult : 1) * nitro, ONCHAIN.RMIN, ONCHAIN.RMAX);
 
