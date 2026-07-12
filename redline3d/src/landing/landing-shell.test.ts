@@ -91,13 +91,16 @@ describe("Perps Rider landing shell", () => {
     expect(entry).toContain("video.play().catch");
   });
 
-  it("renders four distinct decorative buildings on the Strip", () => {
+  it("shows real model renders for all four Strip buildings", () => {
     for (const building of ["track", "garage", "upgrades", "crates"]) {
-      expect(landingHtml).toContain(`class="strip-building building-${building}"`);
-      expect(landingHtml).toContain(`data-building="${building}"`);
+      expect(landingHtml).toContain(`src="/assets/landing/building-${building}.webp"`);
     }
-    expect(landingHtml.match(/data-building=/g)).toHaveLength(4);
-    expect(landingHtml.match(/class="strip-building[^>]+aria-hidden="true"/g)).toHaveLength(4);
+    expect(landingHtml.match(/class="strip-building"/g)).toHaveLength(4);
+    expect(landingHtml.match(/width="1024" height="720"/g)).toHaveLength(4);
+    expect(landingHtml.match(/loading="lazy" decoding="async" alt=""/g)).toHaveLength(4);
+    expect(landingHtml).not.toContain("building-shell");
+    expect(landingHtml).not.toContain("building-coil");
+    expect(landingHtml).not.toContain("crate-stack");
   });
 
   it("provides a dependency-free reactive motion field", () => {
