@@ -9,4 +9,5 @@
 redline3d/node_modules/
 redline3d/dist/
 redline3d/android/
-redline3d/public/models/
+redline3d/public/models/*
+!redline3d/public/models/perps-rider.apk
