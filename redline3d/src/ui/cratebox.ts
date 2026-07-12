@@ -129,11 +129,11 @@ function injectStyles() {
     .cb-col-crate{position:relative;width:82px;height:74px;background-size:contain;background-repeat:no-repeat;background-position:center;
       filter:drop-shadow(0 4px 10px color-mix(in srgb,var(--cc) 60%,transparent));animation:cbBob 3.4s ease-in-out infinite}
     .cb-col-nm{position:relative;font:800 15px/1 'Chakra Petch',ui-monospace,monospace;color:#fff;letter-spacing:.04em;text-shadow:0 0 10px color-mix(in srgb,var(--cc) 75%,transparent)}
-    .cb-col-odds{display:flex;flex-wrap:wrap;justify-content:center;gap:3px 8px}
+    .cb-col-odds{display:flex;flex-wrap:wrap;justify-content:center;align-content:center;gap:3px 8px;min-height:21px}
     .cb-col-od{display:inline-flex;align-items:center;gap:3px;font:700 9px/1 'Chakra Petch',ui-monospace,monospace;color:rgba(226,230,255,.82)}
     .cb-col-od i{width:6px;height:6px;border-radius:50%;background:var(--tc);box-shadow:0 0 5px var(--tc);flex:none}
     .cb-col-scrap{font:700 11px/1 'Chakra Petch',ui-monospace,monospace;color:#c2cad6}
-    .cb-col-buy{position:relative;display:flex;flex-direction:column;gap:5px;width:100%;margin-top:4px}
+    .cb-col-buy{position:relative;display:flex;flex-direction:column;gap:5px;width:100%;margin-top:auto}
     .cb-coin{border:0;border-radius:9px;padding:9px 4px;cursor:pointer;font:800 12px/1 'Chakra Petch',ui-monospace,monospace;white-space:nowrap;width:100%;
       color:#04130d;background:linear-gradient(180deg,#48f0b6,#14c78c);box-shadow:0 3px 10px rgba(46,230,166,.32)}
     .cb-coin:disabled{cursor:not-allowed;color:var(--mut);background:rgba(255,255,255,.08);box-shadow:none}

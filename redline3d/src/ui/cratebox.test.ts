@@ -43,6 +43,18 @@ describe("crate shop odds disclosure", () => {
     const shown = [...gold.querySelectorAll(".cb-col-od")].map((o) => o.textContent);
     expect(shown).toContain("25%"); // the headline gold number a buyer is paying for
   });
+
+  test("keeps purchase controls aligned when crate odds wrap", () => {
+    const parent = document.createElement("div");
+    createCrateBox(parent, stubDeps());
+    const styles = [...document.head.querySelectorAll("style")]
+      .map((style) => style.textContent ?? "")
+      .find((text) => text.includes(".cb-col-odds")) ?? "";
+
+    expect(styles).toMatch(/\.cb-col-odds\{[^}]*min-height:21px/);
+    expect(styles).toMatch(/\.cb-col-odds\{[^}]*align-content:center/);
+    expect(styles).toMatch(/\.cb-col-buy\{[^}]*margin-top:auto/);
+  });
 });
 
 describe("crate randomness policy", () => {
