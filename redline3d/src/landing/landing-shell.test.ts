@@ -151,6 +151,37 @@ describe("Perps Rider landing shell", () => {
     expect(landingHtml).not.toContain("<canvas");
   });
 
+  it("anchors the cinematic pipeline with canonical technology marks", async () => {
+    const nodeFs = "node:fs/promises";
+    const { readFile } = await import(nodeFs);
+    const stylesheet = await readFile(new URL("./landing.css", import.meta.url), "utf8");
+
+    expect(landingHtml).toContain('src="/assets/brands/magicblock-logo.svg"');
+    expect(landingHtml).toContain('data-tech-brand="magicblock"');
+    expect(landingHtml).toContain('src="/assets/brands/solana-mark.svg"');
+    expect(landingHtml).toContain('data-tech-brand="solana"');
+    expect(landingHtml.match(/class="pipeline-pulse"/g)).toHaveLength(1);
+    for (const hook of ["price-ticker", "rollup-chamber", "settlement-gate", "world-destination"]) {
+      expect(landingHtml).toContain(`class="${hook}`);
+    }
+    expect(landingHtml.match(/class="tech-brand/g)).toHaveLength(2);
+    expect(landingHtml.match(/class="tech-scene/g)).toHaveLength(4);
+    expect(landingHtml.match(/<svg/g)).toHaveLength(4);
+    expect(stylesheet).toContain("@keyframes tx-ingest");
+    expect(stylesheet).toContain("@keyframes settlement-converge");
+    expect(stylesheet).toContain("@keyframes world-arrival");
+    expect(stylesheet).toContain("@keyframes pipeline-travel");
+    expect(stylesheet).toMatch(/\.tech-brand-solana \{[^}]*filter: none;/);
+    expect(stylesheet).toMatch(
+      /@media \(max-width: 760px\) \{[\s\S]*?\.tx-shard-b,[\s\S]*?\.tx-shard-c \{[^}]*display: none;/,
+    );
+    expect(stylesheet).toMatch(
+      /@media \(max-width: 760px\) \{[\s\S]*?\.driver-a \{[^}]*--driver-x: -38px;/,
+    );
+    expect(stylesheet).not.toMatch(/@keyframes[^}]*background-position/);
+    expect(landingHtml).not.toContain("<canvas");
+  });
+
   it("locks technology scenes to the responsive motion contract", async () => {
     const nodeFs = "node:fs/promises";
     const { readFile } = await import(nodeFs);

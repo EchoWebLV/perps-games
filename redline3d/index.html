@@ -158,10 +158,12 @@
           <p>The game stays fast without turning the position into pretend money or a hidden server result.</p>
         </div>
         <div class="tech-grid">
+          <i class="pipeline-pulse" aria-hidden="true"></i>
           <article style="--tech-delay: 0s" data-reveal>
             <span>01</span>
             <div class="tech-scene scene-price" data-tech-scene="price" aria-hidden="true">
-              <svg viewBox="0 0 280 130"><path class="scene-grid" d="M0 25H280M0 65H280M0 105H280M55 0V130M140 0V130M225 0V130"/><path class="price-trace" d="M8 96L48 78L82 86L119 43L157 58L198 29L236 48L272 18"/><g class="price-nodes"><circle cx="48" cy="78" r="4"/><circle cx="119" cy="43" r="4"/><circle cx="198" cy="29" r="4"/><circle cx="272" cy="18" r="4"/></g><rect class="price-laser" x="0" y="0" width="3" height="130"/></svg>
+              <svg viewBox="0 0 280 130"><path class="scene-grid" d="M0 24H280M0 56H280M0 88H280M0 120H280M52 0V130M112 0V130M172 0V130M232 0V130"/><path class="price-ghost" d="M6 103L36 97L62 107L91 71L119 79L147 53L178 64L208 30L239 45L274 16"/><path class="price-trace" d="M6 103L36 97L62 107L91 71L119 79L147 53L178 64L208 30L239 45L274 16"/><g class="price-nodes"><circle cx="91" cy="71" r="4"/><circle cx="147" cy="53" r="4"/><circle cx="208" cy="30" r="4"/><circle cx="274" cy="16" r="4"/></g><path class="price-crosshair" d="M201 30H215M208 23V37"/><rect class="price-laser" x="0" y="0" width="3" height="130"/></svg>
+              <div class="price-ticker"><b>$142.87</b><small>+4.26%</small><i>LIVE</i></div>
               <span class="scene-status">BTC · ETH · SOL / LIVE</span>
             </div>
             <div><small>PRICE</small><h3>Pyth Lazer</h3><p>Live market prices shape the road and your position.</p></div>
@@ -169,7 +171,12 @@
           <article style="--tech-delay: .35s" data-reveal>
             <span>02</span>
             <div class="tech-scene scene-execution" data-tech-scene="execution" aria-hidden="true">
-              <svg viewBox="0 0 280 130"><g class="rollup-blocks"><rect x="25" y="20" width="64" height="22"/><rect x="25" y="54" width="64" height="22"/><rect x="25" y="88" width="64" height="22"/></g><path class="execution-lane" d="M100 65H238"/><circle class="execution-packet" cx="105" cy="65" r="7"/><rect class="rollup-core" x="188" y="34" width="62" height="62" rx="8"/><path class="execution-check" d="M205 65L220 79L239 50"/></svg>
+              <svg viewBox="0 0 280 130"><path class="execution-rail rail-top" d="M4 25H92L112 45H276"/><path class="execution-rail rail-mid" d="M4 65H276"/><path class="execution-rail rail-bottom" d="M4 105H92L112 85H276"/><g class="execution-ticks"><path d="M22 18V32M43 18V32M64 18V32M22 98V112M43 98V112M64 98V112"/></g><path class="execution-chevron" d="M248 55L260 65L248 75"/></svg>
+              <div class="rollup-chamber">
+                <span class="rollup-pressure"></span>
+                <img class="tech-brand tech-brand-magicblock" data-tech-brand="magicblock" src="/assets/brands/magicblock-logo.svg" width="162" height="32" alt="" />
+              </div>
+              <i class="tx-shard tx-shard-a"></i><i class="tx-shard tx-shard-b"></i><i class="tx-shard tx-shard-c"></i><i class="confirmed-bolt"></i>
               <span class="scene-status">EPHEMERAL ROLLUP / CONFIRMED</span>
             </div>
             <div><small>EXECUTION</small><h3>MagicBlock</h3><p>Fast on-chain rounds through an Ephemeral Rollup.</p></div>
@@ -177,7 +184,12 @@
           <article style="--tech-delay: .7s" data-reveal>
             <span>03</span>
             <div class="tech-scene scene-settlement" data-tech-scene="settlement" aria-hidden="true">
-              <svg viewBox="0 0 280 130"><circle class="signature-ring ring-a" cx="140" cy="63" r="47"/><circle class="signature-ring ring-b" cx="140" cy="63" r="31"/><rect class="wallet-core" x="111" y="42" width="58" height="42" rx="7"/><path class="wallet-signature" d="M120 72C130 46 137 84 147 57S158 74 164 53"/><circle class="settlement-seal" cx="202" cy="91" r="18"/><path class="seal-check" d="M193 91L200 98L212 83"/></svg>
+              <svg viewBox="0 0 280 130"><circle class="signature-ring ring-a" cx="140" cy="63" r="52"/><circle class="signature-ring ring-b" cx="140" cy="63" r="39"/><path class="signature-axis" d="M140 4V17M140 109V122M81 63H94M186 63H199"/><path class="settlement-horizon" d="M8 116H272"/><g class="settlement-coordinates"><path d="M21 111V121M43 111V121M237 111V121M259 111V121"/></g></svg>
+              <div class="settlement-gate">
+                <span class="settlement-rail rail-a"></span><span class="settlement-rail rail-b"></span><span class="settlement-rail rail-c"></span>
+                <span class="solana-plinth"><img class="tech-brand tech-brand-solana" data-tech-brand="solana" src="/assets/brands/solana-mark.svg" width="101" height="88" alt="" /></span>
+                <i class="settlement-seal"></i>
+              </div>
               <span class="scene-status">SIGNED / SETTLED</span>
             </div>
             <div><small>SETTLEMENT</small><h3>Solana</h3><p>Your signed-in wallet holds the SOL you bring to play.</p></div>
@@ -185,7 +197,9 @@
           <article style="--tech-delay: 1.05s" data-reveal>
             <span>04</span>
             <div class="tech-scene scene-world" data-tech-scene="world" aria-hidden="true">
-              <svg viewBox="0 0 280 130"><path class="world-grid" d="M18 108L140 15L262 108M55 108L140 40L225 108M18 108H262M45 84H235M73 62H207"/><g class="world-nodes"><circle cx="55" cy="84" r="5"/><circle cx="140" cy="40" r="5"/><circle cx="225" cy="84" r="5"/><circle cx="140" cy="108" r="5"/></g><rect class="world-car car-a" x="77" y="73" width="18" height="9" rx="3"/><rect class="world-car car-b" x="187" y="72" width="18" height="9" rx="3"/><circle class="presence-ping" cx="140" cy="40" r="12"/></svg>
+              <svg viewBox="0 0 280 130"><path class="world-grid" d="M4 122L140 19L276 122M39 122L140 45L241 122M77 122L140 74L203 122M4 122H276M35 99H245M68 76H212"/><path class="city-silhouette" d="M66 95V50H91V35H116V95M164 95V29H192V51H215V95"/><g class="city-windows"><rect x="74" y="58" width="6" height="7"/><rect x="97" y="45" width="6" height="7"/><rect x="74" y="75" width="6" height="7"/><rect x="173" y="39" width="7" height="7"/><rect x="173" y="58" width="7" height="7"/><rect x="199" y="60" width="7" height="7"/><rect x="199" y="78" width="7" height="7"/></g><g class="world-nodes"><circle cx="39" cy="99" r="4"/><circle cx="140" cy="45" r="4"/><circle cx="241" cy="99" r="4"/></g><rect class="world-car car-a" x="42" y="108" width="18" height="8" rx="3"/><rect class="world-car car-b" x="220" y="108" width="18" height="8" rx="3"/></svg>
+              <div class="world-destination"><i></i><b>THE STRIP</b></div>
+              <span class="driver driver-a"></span><span class="driver driver-b"></span><span class="driver driver-c"></span>
               <span class="scene-status">DRIVERS ONLINE / SHARED STRIP</span>
             </div>
             <div><small>WORLD</small><h3>Social Open World</h3><p>Drive the Strip with other traders, show off your garage, and enter shared destinations together.</p></div>
