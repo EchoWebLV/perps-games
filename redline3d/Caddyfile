@@ -2,6 +2,9 @@
   root * /usr/share/caddy
   encode zstd gzip
 
+  @playRoot path /play /play/
+  rewrite @playRoot /play/index.html
+
   handle /downloads/perps-rider.apk {
     header Content-Type application/vnd.android.package-archive
     header Content-Disposition "attachment; filename=perps-rider.apk"

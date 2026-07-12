@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import landingHtml from "../../index.html?raw";
 import manifestText from "../../public/manifest.webmanifest?raw";
 import viteConfig from "../../vite.config.ts?raw";
+import caddyfileText from "../../Caddyfile?raw";
 
 const gamePages = import.meta.glob("../../play/index.html", {
   eager: true,
@@ -57,6 +58,11 @@ describe("Perps Rider landing shell", () => {
   it("registers landing and play as explicit Vite entries", () => {
     expect(viteConfig).toContain('landing: fileURLToPath(new URL("index.html"');
     expect(viteConfig).toContain('play: fileURLToPath(new URL("play/index.html"');
+  });
+
+  it("routes the public play path to the game document", () => {
+    expect(caddyfileText).toContain("@playRoot path /play /play/");
+    expect(caddyfileText).toContain("rewrite @playRoot /play/index.html");
   });
 
 });
