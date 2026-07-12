@@ -212,7 +212,7 @@ Run:
 test -f README.md
 git diff --check
 rg -n 'Perps Raider|TBD|PLACEHOLDER|—' README.md
-for path in redline3d/public/loadingscreen.png server/README.md redline3d/BUILD_APK.md onchain/raider/RESULT.md docs/superpowers/submission/2026-07-hackathon-submission-draft.md sim/README.md; do test -e "$path"; done
+for target in redline3d/public/loadingscreen.png server/README.md redline3d/BUILD_APK.md onchain/raider/RESULT.md docs/superpowers/submission/2026-07-hackathon-submission-draft.md sim/README.md; do test -e "$target"; done
 ```
 
 Expected: `test` and the path loop exit 0; `git diff --check` prints nothing; `rg` returns no matches.
