@@ -80,6 +80,8 @@ Perps Rider is a real perp you drive, built on MagicBlock.
 
 ## MagicBlock Integration Graph
 
+![Neon MagicBlock integration graph](../../../redline3d/public/assets/diagrams/magicblock-integration-neon.png)
+
 ```mermaid
 flowchart TB
     player["Player / Privy wallet"]
