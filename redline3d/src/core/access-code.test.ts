@@ -246,7 +246,7 @@ describe("signed-in access wall wiring", () => {
   test("a device-wide guest redemption cannot bypass a fresh signed-in account", async () => {
     const main = await readFile(new URL("../main.ts", import.meta.url), "utf8");
     const start = main.indexOf("function accountAccessThenEnter");
-    const end = main.indexOf("// The signed-in welcome crate", start);
+    const end = main.indexOf("async function offerWelcomeAccount", start);
     const accountGate = main.slice(start, end);
 
     expect(start).toBeGreaterThanOrEqual(0);
