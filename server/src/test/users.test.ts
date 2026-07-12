@@ -25,6 +25,34 @@ describe("users service", () => {
     expect(got?.id).toBe(a.id);
   });
 
+  it("stores a normalized driver name and allows later renames", async () => {
+    const user = await ctx.users.upsertByExternalId("dev:named");
+
+    expect(await ctx.users.driverName(user.id)).toBeNull();
+    expect(await ctx.users.setDriverName(user.id, "  Liq_Dodger ")).toBe("liq_dodger");
+    expect(await ctx.users.setDriverName(user.id, "new_driver")).toBe("new_driver");
+    expect(await ctx.users.driverName(user.id)).toBe("new_driver");
+  });
+
+  it.each(["", "ab", "spaces fail", "way_too_long_driver_name"])(
+    "rejects invalid driver name %j",
+    async (name) => {
+      const user = await ctx.users.upsertByExternalId("dev:invalid");
+      await expect(ctx.users.setDriverName(user.id, name)).rejects.toThrow("invalid_driver_name");
+    },
+  );
+
+  it("keeps driver names isolated per account", async () => {
+    const a = await ctx.users.upsertByExternalId("dev:name-a");
+    const b = await ctx.users.upsertByExternalId("dev:name-b");
+
+    await ctx.users.setDriverName(a.id, "road_king");
+    await ctx.users.setDriverName(b.id, "liq_dodger");
+
+    expect(await ctx.users.driverName(a.id)).toBe("road_king");
+    expect(await ctx.users.driverName(b.id)).toBe("liq_dodger");
+  });
+
   it("claimWelcome grants exactly once per account, then never again", async () => {
     const a = await ctx.users.upsertByExternalId("dev:alice");
     expect(await ctx.users.claimWelcome(a.id)).toEqual({ granted: true });

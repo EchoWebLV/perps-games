@@ -8,6 +8,11 @@ function isUniqueViolation(error: unknown): boolean {
   return code === "23505" || /unique|duplicate/i.test(message);
 }
 
+function normalizeDriverName(raw: string): string | null {
+  const name = raw.trim().toLowerCase();
+  return /^[a-z0-9_]{3,16}$/.test(name) ? name : null;
+}
+
 export function makeUsers(db: any) {
   return {
     /** find-or-create a user by external identity */
@@ -31,6 +36,25 @@ export function makeUsers(db: any) {
     async getByWalletPublicKey(address: string): Promise<User | undefined> {
       const rows = await db.select().from(users).where(eq(users.walletPublicKey, address)).limit(1);
       return rows[0];
+    },
+    async driverName(id: string): Promise<string | null> {
+      const rows = await db
+        .select({ driverName: users.driverName })
+        .from(users)
+        .where(eq(users.id, id))
+        .limit(1);
+      return rows[0]?.driverName ?? null;
+    },
+    async setDriverName(id: string, raw: string): Promise<string> {
+      const driverName = normalizeDriverName(raw);
+      if (!driverName) throw new Error("invalid_driver_name");
+      const rows = await db
+        .update(users)
+        .set({ driverName })
+        .where(eq(users.id, id))
+        .returning({ driverName: users.driverName });
+      if (!rows[0]?.driverName) throw new Error("user_not_found");
+      return rows[0].driverName;
     },
     /**
      * Bind the user's payout wallet — SET-ONCE. Only writes when currently null.

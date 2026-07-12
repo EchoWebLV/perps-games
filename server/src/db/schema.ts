@@ -25,6 +25,8 @@ export const users = pgTable(
     externalId: text("external_id").notNull(),
     /** Verified Solana address synced from Bearer auth (null for dev/guest). */
     walletPublicKey: text("wallet_public_key"),
+    /** Player-selected social display label. Null means this account has not confirmed a name yet. */
+    driverName: text("driver_name"),
     /** first-login welcome crate claimed — SET-ONCE per account (see users.claimWelcome). */
     welcomeClaimed: boolean("welcome_claimed").notNull().default(false),
     /** redeemed access-code ids (trimmed+lowercased) — each grants its reward ONCE per account (see users.redeemAccess). */
