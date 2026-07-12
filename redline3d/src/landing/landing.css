@@ -592,7 +592,7 @@ html.motion-paused.landing-ready [data-reveal] {
   aspect-ratio: 0.57;
   justify-self: end;
   margin: 0;
-  overflow: visible;
+  overflow: clip;
   border: 1px solid rgba(255, 57, 192, 0.35);
   background:
     radial-gradient(circle at 50% 28%, rgba(255, 57, 192, 0.28), transparent 30%),

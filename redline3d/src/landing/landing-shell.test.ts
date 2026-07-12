@@ -66,6 +66,14 @@ describe("Perps Rider landing shell", () => {
     expect(landingHtml).toContain('/src/landing/main.ts');
   });
 
+  it("contains decorative poster overflow within the hero artwork", async () => {
+    const nodeFs = "node:fs/promises";
+    const { readFile } = await import(nodeFs);
+    const stylesheet = await readFile(new URL("./landing.css", import.meta.url), "utf8");
+
+    expect(stylesheet).toMatch(/\.hero-poster \{[^}]*overflow: clip;/);
+  });
+
   it("registers landing and play as explicit Vite entries", () => {
     expect(viteConfig).toContain('landing: fileURLToPath(new URL("index.html"');
     expect(viteConfig).toContain('play: fileURLToPath(new URL("play/index.html"');
