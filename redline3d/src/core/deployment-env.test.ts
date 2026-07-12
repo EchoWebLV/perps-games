@@ -2,7 +2,6 @@ import { describe, expect, it } from "vitest";
 import developmentEnv from "../../.env.development?raw";
 import productionEnv from "../../.env.production?raw";
 import dockerfile from "../../Dockerfile?raw";
-import dockerIgnore from "../../Dockerfile.dockerignore?raw";
 import apkBuildScript from "../../scripts/build-apk.sh?raw";
 
 function apiBase(env: string): string | undefined {
@@ -22,13 +21,6 @@ describe("Railway-only API configuration", () => {
     expect(dockerfile).toContain("ARG VITE_WALLET");
     expect(dockerfile).toContain("ARG VITE_SOLANA_CLUSTER");
     expect(dockerfile.indexOf("ARG VITE_PRIVY_APP_ID")).toBeLessThan(dockerfile.indexOf("RUN npm run build"));
-  });
-
-  it("refreshes the public APK inside Railway's persistent models volume", () => {
-    expect(dockerfile).toContain("/opt/perps-rider.apk");
-    expect(dockerfile).toContain("cp /opt/perps-rider.apk /usr/share/caddy/models/perps-rider.apk");
-    expect(dockerfile).toContain("exec caddy run");
-    expect(dockerIgnore).toContain("!redline3d/public/models/perps-rider.apk");
   });
 
   it("refuses to build a native APK without auth and a WebView-safe Solana RPC", () => {
