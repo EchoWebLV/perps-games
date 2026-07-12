@@ -992,7 +992,11 @@ function triggerBuilding(kind: BuildingKind) {
     case "scrapyard": lobbyHud.toast("ScrapYard — coming soon"); break; // collect scrap, not built yet
     case "track": exitFrom = "track"; exitLobby(); break;            // onto the track — full racing HUD, GO lives there
     case "highway": {
-      const decision = highwayEntryDecision(globalThis.location?.hostname ?? "", driverNameConfirmed());
+      const decision = highwayEntryDecision(
+        globalThis.location?.hostname ?? "",
+        driverNameConfirmed(),
+        capacitorNative,
+      );
       if (decision === "coming-soon") {
         lobbyHud.toast("Highway coming soon");
         break;

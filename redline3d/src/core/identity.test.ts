@@ -52,7 +52,10 @@ describe("driver name application wiring", () => {
     expect(main).toContain("driverName: {");
     expect(main).toContain("current: () => identity?.name ?? null");
     expect(main).toContain("edit: () => openDriverNameDialog(false)");
-    expect(main).toContain("highwayEntryDecision(globalThis.location?.hostname ?? \"\", driverNameConfirmed())");
+    expect(main).toContain("const decision = highwayEntryDecision(");
+    expect(main).toContain("globalThis.location?.hostname ?? \"\",");
+    expect(main).toContain("driverNameConfirmed(),");
+    expect(main).toContain("capacitorNative,");
     expect(main).toContain("openDriverNameDialog(true, enterHighwayFromLobby)");
   });
 

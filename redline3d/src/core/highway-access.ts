@@ -5,7 +5,11 @@ export function highwayAvailable(hostname: string): boolean {
 
 export type HighwayEntryDecision = "coming-soon" | "driver-name" | "enter";
 
-export function highwayEntryDecision(hostname: string, driverNameConfirmed: boolean): HighwayEntryDecision {
-  if (!highwayAvailable(hostname)) return "coming-soon";
+export function highwayEntryDecision(
+  hostname: string,
+  driverNameConfirmed: boolean,
+  nativePlatform = false,
+): HighwayEntryDecision {
+  if (nativePlatform || !highwayAvailable(hostname)) return "coming-soon";
   return driverNameConfirmed ? "enter" : "driver-name";
 }

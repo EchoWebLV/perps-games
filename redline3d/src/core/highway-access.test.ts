@@ -17,6 +17,11 @@ describe("highwayAvailable", () => {
     expect(highwayEntryDecision("localhost", true)).toBe("enter");
   });
 
+  it("keeps Highway closed in native builds that use localhost as their app origin", () => {
+    expect(highwayEntryDecision("localhost", false, true)).toBe("coming-soon");
+    expect(highwayEntryDecision("localhost", true, true)).toBe("coming-soon");
+  });
+
   it("gates only the Highway building branch", async () => {
     const main = await readFile(new URL("../main.ts", import.meta.url), "utf8");
     const start = main.indexOf('case "highway"');
@@ -26,6 +31,7 @@ describe("highwayAvailable", () => {
     expect(start).toBeGreaterThanOrEqual(0);
     expect(end).toBeGreaterThan(start);
     expect(branch).toContain("highwayEntryDecision");
+    expect(branch).toContain("capacitorNative");
     expect(branch).toContain('lobbyHud.toast("Highway coming soon")');
     expect(branch).toContain("openDriverNameDialog(true, enterHighwayFromLobby)");
     expect(main).toContain('case "track": exitFrom = "track"; exitLobby();');
