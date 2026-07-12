@@ -27,6 +27,10 @@ export interface CrateBoxDeps {
   /** signed-in VRF draws: () => null (guest / not connected) | draws(n) that resolves n uniform
    *  draws from MagicBlock VRF. Resolved PER OPEN so a mid-session sign-in upgrades the path. */
   vrfDraws?: () => (null | ((n: number) => Promise<number[]>));
+  /** True for account-backed crates. These must never fall back to browser RNG. */
+  vrfRequired?: () => boolean;
+  /** Atomic server completion for a free signed-in welcome crate, called after VRF succeeds. */
+  completeGift?: () => Promise<boolean>;
   /** quiet escrow for the VRF path (upgrades.holdCoins/settleHold) */
   holdCoins?: (n: number) => boolean;
   settleHold?: (n: number, commit: boolean) => void;
@@ -42,13 +46,27 @@ export interface CrateBox {
   setBusy(busy: boolean): void;
 }
 
-/** Free welcome gifts must not depend on a brand-new wallet having SOL for a VRF transaction. */
-export function shouldUseVrfForOpen(free: boolean, hasProvider: boolean): boolean {
-  return !free && hasProvider;
+export type CrateRandomnessMode = "vrf" | "client" | "blocked";
+
+/** Signed-in crates fail closed; only guest practice may use browser randomness. */
+export function crateRandomnessMode(vrfRequired: boolean, hasProvider: boolean): CrateRandomnessMode {
+  if (hasProvider) return "vrf";
+  return vrfRequired ? "blocked" : "client";
+}
+
+/** A free account reward is applied only after the once-per-account claim wins. */
+export async function completeVrfReward(
+  free: boolean,
+  completeGift: (() => Promise<boolean>) | undefined,
+  applyReward: () => boolean,
+): Promise<boolean> {
+  if (free && (!completeGift || !(await completeGift()))) return false;
+  return applyReward();
 }
 
 /** Keep the player-facing failure actionable while retaining the raw error in the console. */
-export function vrfFailureMessage(error: unknown): string {
+export function vrfFailureMessage(error: unknown, coinsHeld = true): string {
+  const suffix = coinsHeld ? " Your coins were restored." : "";
   const cause = error instanceof Error && "cause" in error
     ? String((error as Error & { cause?: unknown }).cause ?? "")
     : "";
@@ -56,15 +74,13 @@ export function vrfFailureMessage(error: unknown): string {
     ? `${error.name} ${error.message} ${cause}`
     : String(error);
   if (/prior credit|insufficient (funds|lamports).*fee|insufficient.*balance/i.test(text)) {
-    return "This wallet needs devnet SOL for VRF. Open Wallet, send a little SOL, then try again. Coins restored.";
+    return `This wallet needs devnet SOL for VRF. Open Wallet, send a little SOL, then try again.${suffix}`;
   }
-  if (/vrf_timeout/i.test(text)) {
-    return "The randomness oracle timed out. Your coins were restored. Try again.";
-  }
+  if (/vrf_timeout/i.test(text)) return `The randomness oracle timed out. Try again.${suffix}`;
   if (/429|too many requests|failed to fetch|network/i.test(text)) {
-    return "The devnet connection is busy. Your coins were restored. Try again shortly.";
+    return `The devnet connection is busy. Try again shortly.${suffix}`;
   }
-  return "The VRF request failed. Your coins were restored. Try again.";
+  return `The verified crate open failed. Try again.${suffix}`;
 }
 
 const gems = (r: number) => {
@@ -343,9 +359,15 @@ export function createCrateBox(parent: HTMLElement, deps: CrateBoxDeps): CrateBo
   const doOpen = (crate: CrateType, free = false) => {
     if (opening) return;
     if (!free) giftMode = false; // a paid open ends the welcome flow → its reveal returns to the shop
-    // Resolve only paid opens. A welcome gift must work before the embedded wallet is funded.
-    const availableVrf = free ? null : deps.vrfDraws?.() ?? null;
-    const vrfProvider = shouldUseVrfForOpen(free, !!availableVrf) ? availableVrf : null;
+    const vrfRequired = deps.vrfRequired?.() ?? false;
+    const availableVrf = deps.vrfDraws?.() ?? null;
+    const randomnessMode = crateRandomnessMode(vrfRequired, !!availableVrf);
+    if (randomnessMode === "blocked") {
+      deps.onVrfFail?.("Connect and fund your wallet to open this crate with MagicBlock VRF.");
+      if (giftMode) { giftMode = false; close(); }
+      return;
+    }
+    const vrfProvider = randomnessMode === "vrf" ? availableVrf : null;
 
     if (!vrfProvider) {
       // ── guest / not connected: the existing sync client-RNG path, verbatim behavior ──
@@ -379,14 +401,22 @@ export function createCrateBox(parent: HTMLElement, deps: CrateBoxDeps): CrateBo
     opening = true;
     syncCoins();
     showCrateAnim(crate, true); // loop the shake while the oracle works
-    void vrfProvider(4).then((draws) => {
+    void vrfProvider(4).then(async (draws) => {
       if (!free) deps.settleHold!(crate.priceCoins, true); // commit: forward the spend to the server
-      if (!resolveAndReveal(crate, draws, true)) { opening = false; if (giftMode) { giftMode = false; close(); } else showShop(); }
+      const revealed = await completeVrfReward(
+        free,
+        deps.completeGift,
+        () => resolveAndReveal(crate, draws, true),
+      );
+      if (!revealed) {
+        opening = false;
+        if (giftMode) { giftMode = false; close(); } else showShop();
+      }
     }).catch((error) => {
       if (!free) deps.settleHold!(crate.priceCoins, false); // release: quiet local restore, zero server traffic
       opening = false;
-      console.warn("[crate] VRF request failed:", error);
-      deps.onVrfFail?.(vrfFailureMessage(error));
+      console.warn("[crate] verified open failed:", error);
+      deps.onVrfFail?.(vrfFailureMessage(error, !free));
       if (giftMode) { giftMode = false; close(); } else showShop();
     });
   };

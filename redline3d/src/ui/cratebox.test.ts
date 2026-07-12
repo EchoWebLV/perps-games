@@ -45,26 +45,62 @@ describe("crate shop odds disclosure", () => {
   });
 });
 
-describe("welcome crate randomness policy", () => {
-  test("a free welcome crate never requires the new wallet to fund a VRF transaction", () => {
-    const usesVrf = (crateboxModule as unknown as {
-      shouldUseVrfForOpen?: (free: boolean, hasProvider: boolean) => boolean;
-    }).shouldUseVrfForOpen;
+describe("crate randomness policy", () => {
+  test("requires VRF for every signed-in crate, including free welcome crates", () => {
+    const mode = (crateboxModule as unknown as {
+      crateRandomnessMode?: (required: boolean, hasProvider: boolean) => "vrf" | "client" | "blocked";
+    }).crateRandomnessMode;
 
-    expect(usesVrf?.(true, true)).toBe(false);
-    expect(usesVrf?.(false, true)).toBe(true);
-    expect(usesVrf?.(false, false)).toBe(false);
+    expect(mode?.(true, true)).toBe("vrf");
+    expect(mode?.(true, false)).toBe("blocked");
+    expect(mode?.(false, false)).toBe("client");
+  });
+
+  test("completes a free welcome claim before applying its VRF reward", async () => {
+    const complete = (crateboxModule as unknown as {
+      completeVrfReward?: (
+        free: boolean,
+        completeGift: (() => Promise<boolean>) | undefined,
+        applyReward: () => boolean,
+      ) => Promise<boolean>;
+    }).completeVrfReward!;
+    const events: string[] = [];
+
+    const revealed = await complete(
+      true,
+      async () => { events.push("claim"); return true; },
+      () => { events.push("reward"); return true; },
+    );
+
+    expect(revealed).toBe(true);
+    expect(events).toEqual(["claim", "reward"]);
+  });
+
+  test("does not apply a welcome reward when atomic completion loses", async () => {
+    const complete = (crateboxModule as unknown as {
+      completeVrfReward?: (
+        free: boolean,
+        completeGift: (() => Promise<boolean>) | undefined,
+        applyReward: () => boolean,
+      ) => Promise<boolean>;
+    }).completeVrfReward!;
+    let grants = 0;
+
+    await expect(complete(true, async () => false, () => { grants++; return true; })).resolves.toBe(false);
+    expect(grants).toBe(0);
   });
 });
 
 describe("VRF failure messages", () => {
   test("separates an unfunded wallet from an oracle timeout", () => {
     const messageFor = (crateboxModule as unknown as {
-      vrfFailureMessage?: (error: unknown) => string;
+      vrfFailureMessage?: (error: unknown, coinsHeld?: boolean) => string;
     }).vrfFailureMessage;
 
     expect(messageFor?.(new Error("Attempt to debit an account but found no record of a prior credit")))
       .toContain("wallet needs devnet SOL");
     expect(messageFor?.(new Error("vrf_timeout"))).toContain("oracle timed out");
+    expect(messageFor?.(new Error("vrf_timeout"), false)).not.toContain("coins were restored");
+    expect(messageFor?.(new Error("vrf_timeout"), true)).toContain("coins were restored");
   });
 });
