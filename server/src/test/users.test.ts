@@ -32,6 +32,15 @@ describe("users service", () => {
     expect(await ctx.users.claimWelcome(a.id)).toEqual({ granted: false });
   });
 
+  it("reports welcome pending without consuming the claim", async () => {
+    const user = await ctx.users.upsertByExternalId("dev:pending");
+
+    expect(await ctx.users.welcomeStatus(user.id)).toEqual({ pending: true });
+    expect(await ctx.users.welcomeStatus(user.id)).toEqual({ pending: true });
+    expect(await ctx.users.claimWelcome(user.id)).toEqual({ granted: true });
+    expect(await ctx.users.welcomeStatus(user.id)).toEqual({ pending: false });
+  });
+
   it("claimWelcome grants each distinct user once, independently", async () => {
     const a = await ctx.users.upsertByExternalId("dev:alice");
     const b = await ctx.users.upsertByExternalId("dev:bob");

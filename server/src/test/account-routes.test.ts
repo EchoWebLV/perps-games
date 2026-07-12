@@ -167,6 +167,31 @@ describe("POST /v1/welcome/claim (once per account)", () => {
   let ctx: TestCtx;
   afterEach(async () => { await ctx?.close(); });
 
+  it("reads pending status without consuming the welcome claim", async () => {
+    ctx = await makeTestDb({ signupFaucet: false });
+    await bindDevWallet(ctx, "alice");
+
+    const before = await ctx.server.inject({ method: "GET", url: "/v1/welcome/status", headers: H });
+    const again = await ctx.server.inject({ method: "GET", url: "/v1/welcome/status", headers: H });
+    const claim = await ctx.server.inject({ method: "POST", url: "/v1/welcome/claim", headers: H, payload: {} });
+    const after = await ctx.server.inject({ method: "GET", url: "/v1/welcome/status", headers: H });
+
+    expect(before.statusCode).toBe(200);
+    expect(before.json()).toEqual({ pending: true });
+    expect(again.json()).toEqual({ pending: true });
+    expect(claim.json()).toEqual({ granted: true });
+    expect(after.json()).toEqual({ pending: false });
+  });
+
+  it("requires a wallet-bound account for welcome status", async () => {
+    ctx = await makeTestDb({ signupFaucet: false });
+
+    const res = await ctx.server.inject({ method: "GET", url: "/v1/welcome/status", headers: H });
+
+    expect(res.statusCode).toBe(403);
+    expect(res.json()).toEqual({ error: "wallet_required" });
+  });
+
   // NOTE: the real client (core/api.ts `call`) always sends content-type:application/json, so it
   // MUST send a body ({}) — an empty body with that content-type is a Fastify 400. These tests
   // mirror that by posting `payload: {}`; the handler ignores the body.

@@ -67,6 +67,15 @@ export function makeUsers(db: any) {
       }
       return cur as User;
     },
+    /** Read welcome eligibility without consuming the once-per-account claim. */
+    async welcomeStatus(id: string): Promise<{ pending: boolean }> {
+      const rows = await db
+        .select({ welcomeClaimed: users.welcomeClaimed })
+        .from(users)
+        .where(eq(users.id, id))
+        .limit(1);
+      return { pending: rows[0]?.welcomeClaimed === false };
+    },
     /**
      * Claim the first-login welcome crate — SET-ONCE per account. Atomic conditional UPDATE:
      * flips welcome_claimed false→true and RETURNs only when it actually moved the row, so exactly

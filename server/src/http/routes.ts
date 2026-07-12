@@ -183,6 +183,12 @@ export function registerRoutes(server: FastifyInstance, deps: RouteDeps): void {
     return { cars: rows.map((r) => ({ carId: r.carId, count: r.count, acquiredAt: r.acquiredAt })) };
   });
 
+  // Read-only preflight. The welcome claim remains pending until VRF succeeds and the client
+  // calls the atomic claim endpoint below.
+  server.get("/v1/welcome/status", { preHandler: requireWalletBoundUser }, async (req) => {
+    return deps.users.welcomeStatus(req.userId!);
+  });
+
   // First-login welcome crate — granted ONCE PER WALLET-BOUND ACCOUNT. Anonymous browser sessions
   // are intentionally rejected so a refresh cannot mint a fresh "first" claim under a new anon id.
   // An already-consumed claim is an explicit conflict, not a successful false result. This keeps
