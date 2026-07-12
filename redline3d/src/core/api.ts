@@ -73,6 +73,8 @@ export interface Api {
   /** authoritative upgrade purchase — the server debits the coins ITSELF and returns the new level.
    *  The client must never also post a coinsSpend for the same purchase (double debit). */
   upgradesBuy(p: { track: "turbo" | "tank" | "suspension" }): Promise<{ track: string; level: number; coins: number }>;
+  /** Read welcome eligibility without consuming the once-per-account claim. */
+  welcomeStatus(): Promise<{ pending: boolean }>;
   /** claim the first-login welcome crate ONCE PER ACCOUNT (server-side). granted=true only the first time. */
   claimWelcome(): Promise<{ granted: boolean }>;
   /** redeem an access code for THIS account. Server-authoritative + idempotent per account+code:
@@ -184,6 +186,7 @@ export function createApi(opts: ApiOpts = {}): Api {
     inventoryMelt: (p) => call("POST", "/v1/inventory/melt", p),
     migrate: (p) => call("POST", "/v1/migrate", p),
     upgradesBuy: (p) => call("POST", "/v1/upgrades/buy", p),
+    welcomeStatus: () => call("GET", "/v1/welcome/status"),
     // send an empty {} body: `call` always sets content-type:application/json, and Fastify 400s an
     // empty body under that content-type. The server ignores the body.
     claimWelcome: () => call("POST", "/v1/welcome/claim", {}),

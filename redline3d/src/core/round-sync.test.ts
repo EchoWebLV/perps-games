@@ -80,6 +80,7 @@ function fakeApi(over: Partial<Api> = {}): Api {
     inventoryMelt: async (p) => ({ carId: p.carId, melted: true, count: 0 }),
     migrate: async () => ({ seeded: true }),
     upgradesBuy: async (p) => ({ track: p.track, level: 1, coins: 0 }),
+    welcomeStatus: async () => ({ pending: false }),
     claimWelcome: async () => ({ granted: false }),
     redeemAccess: async () => ({ granted: false }),
     openRound: async (p) => ({ roundId: "R", asset: p.asset, dir: p.dir, lev: p.lev, stake: p.stake, entryRaw: 100, entryTsUs: 5_000_000 }),

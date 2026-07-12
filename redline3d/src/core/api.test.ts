@@ -251,6 +251,31 @@ describe("createApi", () => {
     expect(seen[4].url).toBe("http://x/v1/migrate");
   });
 
+  it("reads welcome status before posting the atomic claim", async () => {
+    const calls: Array<{ url: string; method: string; body: unknown }> = [];
+    const api = createApi({
+      baseUrl: "http://x",
+      userId: "u",
+      fetch: async (url, init) => {
+        calls.push({
+          url: String(url),
+          method: String(init?.method),
+          body: init?.body ? JSON.parse(String(init.body)) : undefined,
+        });
+        return String(url).endsWith("/status")
+          ? res(200, { pending: true })
+          : res(200, { granted: true });
+      },
+    });
+
+    await expect(api.welcomeStatus()).resolves.toEqual({ pending: true });
+    await expect(api.claimWelcome()).resolves.toEqual({ granted: true });
+    expect(calls).toEqual([
+      { url: "http://x/v1/welcome/status", method: "GET", body: undefined },
+      { url: "http://x/v1/welcome/claim", method: "POST", body: {} },
+    ]);
+  });
+
   it("maps a 402 coin spend to insufficient_balance", async () => {
     const api = createApi({ baseUrl: "http://x", userId: "u", fetch: async () => res(402, { error: "insufficient_balance" }) });
     await expect(api.coinsSpend({ amount: 9, ref: "x" })).rejects.toMatchObject({ code: "insufficient_balance" });
