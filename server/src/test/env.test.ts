@@ -10,6 +10,8 @@ describe("parseEnv auth flags", () => {
     expect(parseEnv({}).CORS_ORIGINS.split(",")).toEqual(expect.arrayContaining([
       "http://localhost:4000",
       "http://127.0.0.1:4000",
+      "https://localhost",
+      "capacitor://localhost",
     ]));
   });
   it("requires SESSION_SECRET in production", () => {

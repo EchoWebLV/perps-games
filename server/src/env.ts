@@ -13,7 +13,7 @@ const EnvShape = z.object({
   CORS_ORIGINS: z
     .string()
     .optional()
-    .default("http://localhost:3000,http://127.0.0.1:3000,http://localhost:4000,http://127.0.0.1:4000"),
+    .default("http://localhost:3000,http://127.0.0.1:3000,http://localhost:4000,http://127.0.0.1:4000,https://localhost,capacitor://localhost"),
   START_BALANCE: z.coerce.number().int().nonnegative().default(10000), // cents → $100.00 faucet
   SESSION_SECRET: z.string().min(32).optional(),
   DEV_AUTH: z
