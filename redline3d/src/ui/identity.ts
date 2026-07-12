@@ -61,7 +61,7 @@ export function createIdentityGate(
 
   const card = document.createElement("div");
   card.className = "panel";
-  card.style.cssText = "position:relative;width:min(400px,94vw);padding:22px 20px 18px;border-radius:16px;text-align:center;display:flex;flex-direction:column;gap:13px";
+  card.style.cssText = "position:relative;width:min(400px,94vw);max-height:calc(100dvh - max(20px,env(safe-area-inset-top)) - max(20px,env(safe-area-inset-bottom)));overflow-y:auto;box-sizing:border-box;padding:22px 20px 18px;border-radius:16px;text-align:center;display:flex;flex-direction:column;gap:13px";
   card.innerHTML =
     (opts.onDismiss ? `<button id="idclose" type="button" aria-label="Close"
       style="position:absolute;top:10px;right:10px;width:32px;height:32px;padding:0;display:grid;place-items:center;border-radius:8px;border:1px solid var(--line);background:rgba(12,10,26,.74);color:var(--mut);cursor:pointer;font-size:14px">✕</button>` : "") +
@@ -74,6 +74,7 @@ export function createIdentityGate(
   }
   #idguest.identity-secondary {
     width:100%;
+    min-height:44px;
     padding:11px 13px;
     border-radius:11px;
     border:1px solid rgba(39,231,255,.34);
@@ -89,11 +90,11 @@ export function createIdentityGate(
   #idguest:disabled { cursor:progress;filter:saturate(.55); }
 </style>` +
     `<div class="num" style="font-size:26px;letter-spacing:.14em;color:var(--cyan);text-shadow:0 0 18px rgba(39,231,255,.5)">PERPS RIDER</div>` +
-    `<div class="lbl" style="letter-spacing:.08em;color:#aeb8dc">driver name · optional for sign in</div>` +
-    `<input id="idname" maxlength="16" autocomplete="off" spellcheck="false" placeholder="e.g. liq_dodger"
+    `<label for="idname" class="lbl" style="letter-spacing:.08em;color:#aeb8dc">driver name · optional for sign in</label>` +
+    `<input id="idname" maxlength="16" autocomplete="off" spellcheck="false" aria-describedby="idmsg" placeholder="e.g. liq_dodger"
       style="width:100%;box-sizing:border-box;padding:13px 14px;border-radius:11px;border:1px solid var(--line);background:rgba(10,8,22,.85);color:#eef1ff;font:700 17px 'Chakra Petch',ui-monospace,monospace;letter-spacing:.06em;text-align:center;outline:none"/>` +
-    `<div id="idmsg" class="lbl" style="min-height:13px;color:#ff9db1"></div>` +
-    `<button id="idsignin" class="cta identity-primary" type="button" style="width:100%"><span></span><span>SIGN IN</span></button>` +
+    `<div id="idmsg" class="lbl" role="status" aria-live="polite" style="min-height:13px;color:#ff9db1"></div>` +
+    `<button id="idsignin" class="cta identity-primary" type="button" style="width:100%"><span></span><span id="idsigninlabel">SIGN IN</span></button>` +
     `<div class="lbl" style="color:#2ee6a6;letter-spacing:.1em;line-height:1.45">save progress · collect cars · play for real SOL</div>` +
     `<div style="height:1px;background:linear-gradient(90deg,transparent,rgba(132,150,224,.26),transparent);margin:1px 0"></div>` +
     `<button id="idguest" class="identity-secondary" type="button">RIDE AS GUEST</button>` +
@@ -106,6 +107,7 @@ export function createIdentityGate(
   const msg = card.querySelector("#idmsg") as HTMLElement;
   const guestBtn = card.querySelector("#idguest") as HTMLButtonElement;
   const signBtn = card.querySelector("#idsignin") as HTMLButtonElement;
+  const signLabel = card.querySelector("#idsigninlabel") as HTMLSpanElement;
 
   const takeName = (): string | null => {
     const name = validateName(input.value);
@@ -119,7 +121,7 @@ export function createIdentityGate(
 
   const setBusy = (busy: boolean) => {
     guestBtn.disabled = busy; signBtn.disabled = busy;
-    signBtn.textContent = busy ? "CONNECTING…" : "SIGN IN";
+    signLabel.textContent = busy ? "CONNECTING…" : "SIGN IN";
     el.style.opacity = busy ? "0.85" : "1";
   };
 

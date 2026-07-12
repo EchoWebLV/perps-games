@@ -43,6 +43,62 @@ test("presents sign-in as the primary action before guest practice", () => {
   expect(gate.el.textContent).toContain("practice mode · no wallet required");
 });
 
+test("keeps the centered card scrollable within short safe-area viewports", () => {
+  const gate = createIdentityGate(document.body, {
+    onGuest: vi.fn(),
+    onSignIn: vi.fn().mockResolvedValue(false),
+  });
+
+  const card = gate.el.querySelector<HTMLElement>(".panel")!;
+
+  expect(card.style.maxHeight).toContain("100dvh");
+  expect(card.style.maxHeight).toContain("safe-area-inset-top");
+  expect(card.style.maxHeight).toContain("safe-area-inset-bottom");
+  expect(card.style.overflowY).toBe("auto");
+});
+
+test("associates the driver-name label and live status with the input", () => {
+  const gate = createIdentityGate(document.body, {
+    onGuest: vi.fn(),
+    onSignIn: vi.fn().mockResolvedValue(false),
+  });
+
+  const input = gate.el.querySelector<HTMLInputElement>("#idname")!;
+  const label = gate.el.querySelector<HTMLLabelElement>('label[for="idname"]');
+  const message = gate.el.querySelector<HTMLElement>("#idmsg")!;
+
+  expect(label).not.toBeNull();
+  expect(label!.textContent).toBe("driver name · optional for sign in");
+  expect(input.getAttribute("aria-describedby")).toBe("idmsg");
+  expect(message.getAttribute("role")).toBe("status");
+  expect(message.getAttribute("aria-live")).toBe("polite");
+});
+
+test("gives the guest action a 44px minimum touch target", () => {
+  const gate = createIdentityGate(document.body, {
+    onGuest: vi.fn(),
+    onSignIn: vi.fn().mockResolvedValue(false),
+  });
+
+  const guest = gate.el.querySelector<HTMLButtonElement>("#idguest")!;
+
+  expect(getComputedStyle(guest).minHeight).toBe("44px");
+});
+
+test("preserves the sign-in label span after a failed attempt", async () => {
+  const gate = createIdentityGate(document.body, {
+    onGuest: vi.fn(),
+    onSignIn: vi.fn().mockResolvedValue(false),
+  });
+
+  gate.el.querySelector<HTMLButtonElement>("#idsignin")!.click();
+  await vi.waitFor(() => {
+    const label = gate.el.querySelector<HTMLElement>("#idsigninlabel");
+    expect(label).not.toBeNull();
+    expect(label!.textContent).toBe("SIGN IN");
+  });
+});
+
 test("keeps sign-in name optional and guest name required", async () => {
   const onGuest = vi.fn();
   const onSignIn = vi.fn().mockResolvedValue(false);
