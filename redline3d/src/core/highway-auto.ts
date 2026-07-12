@@ -47,6 +47,16 @@ export function stepHighwayMotion(state: HighwayMotion, lev: number, dt: number)
   };
 }
 
+/** Reconstruct a Round's canonical wall-clock position in every browser. */
+export function synchronizedHighwayMotion(
+  roundPda: string,
+  dir: 1 | -1,
+  lev: number,
+  nowSeconds: number,
+): HighwayMotion {
+  return stepHighwayMotion(seedHighwayMotion(roundPda, dir), lev, nowSeconds);
+}
+
 export function highwayPose(state: HighwayMotion): HighwayPose {
   const center = sample(state.s);
   const lateral = state.dir * (TRACK.MEDIAN_HALF + TRACK.LANE_W * (state.lane + 0.5));

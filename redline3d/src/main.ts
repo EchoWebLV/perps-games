@@ -87,7 +87,7 @@ import { modeSwitchBlocked } from "./core/mode-guard";
 import { createOval } from "./render/oval";
 import { createGarageRoom } from "./render/garage-room";
 import { elevationAt } from "./core/track";
-import { HIGHWAY_MAX_LEV, highwayPose, seedHighwayMotion, speedForLeverage, stepHighwayMotion, type HighwayMotion } from "./core/highway-auto";
+import { HIGHWAY_MAX_LEV, highwayPose, seedHighwayMotion, speedForLeverage, stepHighwayMotion, synchronizedHighwayMotion, type HighwayMotion } from "./core/highway-auto";
 import { PublicKey } from "@solana/web3.js";
 import { CHAIN } from "./chain/config";
 import { createGameSession } from "./chain/game-session";
@@ -982,8 +982,9 @@ async function updateVerifiedHighway(players: PresencePlayer[]): Promise<void> {
     if (!state) return [];
     const key = `${id}:${state.roundPda}`;
     const existing = prior.get(key);
-    const motion = existing?.motion ?? stepHighwayMotion(
-      seedHighwayMotion(state.roundPda, state.dir),
+    const motion = existing?.motion ?? synchronizedHighwayMotion(
+      state.roundPda,
+      state.dir,
       state.lev,
       Date.now() / 1000,
     );
@@ -1187,7 +1188,10 @@ function restoreHighwayPosition(): boolean {
     enterHighway(true);
   }
   reconcileHighwaySnapshot(snap);
-  highwayMotion = seedHighwayMotion(roundKey(snap, session.address()), dir);
+  const roundPda = deriveHighwayRoundPda(session.address());
+  highwayMotion = roundPda
+    ? synchronizedHighwayMotion(roundPda, dir, snap.lev, Date.now() / 1000)
+    : seedHighwayMotion(roundKey(snap, session.address()), dir);
   roundActive = true;
   simRound = false;
   nearDeath = false;
@@ -1526,7 +1530,10 @@ controls.onLaunch(async () => {
     if (mode === "highway") {
       highwayConfirmedLev = lev;
       highwayControls.setConfirmed(lev);
-      highwayMotion = seedHighwayMotion(roundKey({ deadlineTs: opened.deadlineTs }, session.address()), dir);
+      const roundPda = deriveHighwayRoundPda(session.address());
+      highwayMotion = roundPda
+        ? synchronizedHighwayMotion(roundPda, dir, lev, Date.now() / 1000)
+        : seedHighwayMotion(roundKey({ deadlineTs: opened.deadlineTs }, session.address()), dir);
       game.lev = lev;
       hud.setOpenPosition(true);
       syncPresenceLifecycle();

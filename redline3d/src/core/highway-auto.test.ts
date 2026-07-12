@@ -6,6 +6,8 @@ import {
   speedForLeverage,
   stepHighwayMotion,
 } from "./highway-auto";
+import * as highwayAuto from "./highway-auto";
+import { progress } from "./track";
 
 describe("automatic Highway motion", () => {
   it("snaps and clamps the 10x to 250x slider", () => {
@@ -30,7 +32,26 @@ describe("automatic Highway motion", () => {
   it("puts longs and shorts on opposite carriageways facing their travel direction", () => {
     const long = highwayPose(seedHighwayMotion("same", 1));
     const short = highwayPose(seedHighwayMotion("same", -1));
-    expect(long.x).not.toBe(short.x);
+    expect(progress(long.x, long.z).lateralOffset).toBeGreaterThan(0);
+    expect(progress(short.x, short.z).lateralOffset).toBeLessThan(0);
     expect(Math.abs(long.heading - short.heading)).toBeCloseTo(Math.PI, 8);
+  });
+
+  it("reconstructs the same live position for the local and remote views of a Round", () => {
+    const synchronized = (highwayAuto as unknown as {
+      synchronizedHighwayMotion?: (
+        roundPda: string,
+        dir: 1 | -1,
+        lev: number,
+        nowSeconds: number,
+      ) => ReturnType<typeof seedHighwayMotion>;
+    }).synchronizedHighwayMotion;
+    expect(synchronized).toBeTypeOf("function");
+    if (!synchronized) return;
+
+    const local = synchronized("RoundPda", 1, 250, 1_234);
+    const remote = synchronized("RoundPda", 1, 250, 1_234);
+    expect(local).toEqual(remote);
+    expect(highwayPose(local)).toEqual(highwayPose(remote));
   });
 });
