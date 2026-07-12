@@ -157,4 +157,20 @@ describe("createAccountSync", () => {
     await guest.hydrate(empty);
     expect(guest.accessCodes()).toEqual([]);         // guests never hydrate → stays empty
   });
+
+  it("surfaces the Railway driver name after hydrate and clears it on disable", async () => {
+    const api = fakeApi({
+      me: vi.fn(async () => ({
+        userId: "u", balance: 0, coins: 0, scrap: 0, cars: [], openRoundId: null,
+        access: [], driverName: "road_king",
+      })),
+    });
+    const sync = createAccountSync({ api, nonce: "t", applyServer: () => {} });
+
+    expect(sync.driverName()).toBeNull();
+    await sync.hydrate(empty);
+    expect(sync.driverName()).toBe("road_king");
+    sync.disable();
+    expect(sync.driverName()).toBeNull();
+  });
 });

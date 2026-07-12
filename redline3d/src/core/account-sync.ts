@@ -20,6 +20,8 @@ export interface AccountSync {
   /** the access-code ids this account has redeemed server-side, as of the last hydrate. Empty before
    *  hydrate and for guests — the account-level access wall reads this to decide whether to show. */
   accessCodes(): string[];
+  /** Railway-backed social display name, or null until the account has chosen one. */
+  driverName(): string | null;
   /** drop server authority (logout / account switch); forwarders no-op again. */
   disable(): void;
   coinsEarned(n: number): void;
@@ -48,6 +50,7 @@ export function createAccountSync(opts: AccountSyncOpts): AccountSync {
   let on = false;
   let seq = 0;
   let access: string[] = []; // the account's redeemed access-code ids, refreshed on each hydrate
+  let profileName: string | null = null;
   const ref = (kind: string) => `${opts.nonce}:${kind}:${seq++}`;
   const swallow = (where: string) => (err: unknown) => opts.onError?.(where, err);
   // Best-effort fire-and-forget: the local cache already updated the UI, so a failed server write
@@ -57,7 +60,8 @@ export function createAccountSync(opts: AccountSyncOpts): AccountSync {
   return {
     enabled: () => on,
     accessCodes: () => access,
-    disable: () => { on = false; },
+    driverName: () => profileName,
+    disable: () => { on = false; access = []; profileName = null; },
 
     async hydrate(local) {
       const api = opts.api;
@@ -71,6 +75,7 @@ export function createAccountSync(opts: AccountSyncOpts): AccountSync {
         return "offline";
       }
       access = me.access ?? []; // surface the account's redeemed codes for the access wall (default [])
+      profileName = me.driverName ?? null;
       // Mirrors the server's /v1/migrate emptiness semantics: any non-zero level blocks seeding
       // (missing levels — an old server — counts as all-zero).
       const serverEmpty = (me.coins ?? 0) === 0 && (me.scrap ?? 0) === 0 && (me.cars?.length ?? 0) === 0
