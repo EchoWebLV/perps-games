@@ -165,18 +165,27 @@ describe("Perps Rider landing shell", () => {
     );
   });
 
-  it("provides a dependency-free reactive motion field", () => {
+  it("provides a dependency-free compositor motion field with normalized input", () => {
     for (const layer of ["plasma", "grid", "streaks", "particles"]) {
-      expect(landingHtml).toContain(`motion-layer motion-${layer}`);
+      expect(landingHtml).toMatch(
+        new RegExp(`<div class="motion-layer motion-${layer}">\\s*<span><\\/span>\\s*<\\/div>`),
+      );
     }
+    expect(landingHtml.match(/class="motion-layer motion-/g)).toHaveLength(4);
     expect(landingHtml).toContain("data-motion-bg");
 
     const entry = Object.values(landingScripts)[0] as string;
+    const stylesheet = Object.values(landingStyles)[0] as string;
     expect(entry).toContain('addEventListener("pointermove"');
     expect(entry).toContain('addEventListener("deviceorientation"');
     expect(entry).toContain("requestAnimationFrame");
-    expect(entry).toContain('setProperty("--motion-x"');
-    expect(entry).toContain('setProperty("--motion-y"');
+    expect(entry).toContain('setProperty("--motion-x", motionX.toFixed(3))');
+    expect(entry).toContain('setProperty("--motion-y", motionY.toFixed(3))');
+    expect(entry).not.toContain("--motion-near-x");
+    expect(stylesheet).not.toContain("--motion-near-x");
+    expect(stylesheet).not.toMatch(
+      /@keyframes\s+[^\s{]+\s*\{(?:[^{}]|\{[^{}]*\})*background-position/,
+    );
     expect(entry).not.toContain('from "three"');
   });
 

@@ -15,12 +15,8 @@
   --amber: #ffd166;
   --shell: min(1180px, calc(100vw - 48px));
   --font: "Chakra Petch", ui-monospace, monospace;
-  --motion-x: 0px;
-  --motion-y: 0px;
-  --motion-far-x: 0px;
-  --motion-far-y: 0px;
-  --motion-near-x: 0px;
-  --motion-near-y: 0px;
+  --motion-x: 0;
+  --motion-y: 0;
 }
 
 * {
@@ -64,10 +60,19 @@ body {
 .motion-layer {
   position: absolute;
   inset: -18%;
-  will-change: background-position, transform;
+}
+
+.motion-layer > span {
+  position: absolute;
+  inset: -8%;
+  display: block;
 }
 
 .motion-plasma {
+  transform: translate3d(calc(var(--motion-x) * 18px), calc(var(--motion-y) * 14px), 0);
+}
+
+.motion-plasma > span {
   background:
     radial-gradient(circle at 74% 15%, rgba(255, 57, 192, 0.34), transparent 24%),
     radial-gradient(circle at 18% 32%, rgba(39, 231, 255, 0.29), transparent 27%),
@@ -76,57 +81,78 @@ body {
   background-position: 0 0;
   background-size: 120% 120%;
   filter: blur(30px) saturate(1.35);
-  transform: translate3d(var(--motion-x), var(--motion-y), 0) scale(1.05);
-  animation: plasma-drift 18s ease-in-out infinite alternate;
+  animation: ambient-plasma 18s ease-in-out infinite alternate;
 }
 
 .motion-grid {
   inset: 41% -25% -45%;
+  transform: translate3d(calc(var(--motion-x) * -7px), calc(var(--motion-y) * -5px), 0);
+}
+
+.motion-grid > span {
   background:
     repeating-linear-gradient(90deg, rgba(39, 231, 255, 0.17) 0 1px, transparent 1px 64px),
     repeating-linear-gradient(0deg, rgba(255, 57, 192, 0.14) 0 1px, transparent 1px 46px);
   filter: drop-shadow(0 0 5px rgba(39, 231, 255, 0.18));
   mask-image: linear-gradient(to top, #000 22%, rgba(0, 0, 0, 0.7) 58%, transparent 96%);
-  transform: perspective(420px) rotateX(62deg) translate3d(var(--motion-far-x), var(--motion-far-y), 0);
   transform-origin: bottom;
-  animation: grid-rush 8s linear infinite;
+  animation: ambient-grid 8s linear infinite;
 }
 
 .motion-streaks {
+  opacity: 0.76;
+  transform: translate3d(calc(var(--motion-x) * -7px), calc(var(--motion-y) * -5px), 0);
+}
+
+.motion-streaks > span {
   background: repeating-linear-gradient(116deg, transparent 0 76px, rgba(39, 231, 255, 0.13) 77px, transparent 79px 148px, rgba(255, 57, 192, 0.11) 149px, transparent 151px 230px);
   filter: drop-shadow(0 0 7px rgba(39, 231, 255, 0.28));
   mix-blend-mode: screen;
-  opacity: 0.76;
-  transform: translate3d(var(--motion-far-x), var(--motion-far-y), 0);
-  animation: streak-slide 14s linear infinite;
+  animation: ambient-streaks 14s linear infinite;
 }
 
 .motion-particles {
+  opacity: 0.28;
+  transform: translate3d(calc(var(--motion-x) * 28px), calc(var(--motion-y) * 21px), 0);
+}
+
+.motion-particles > span {
   background-image:
     radial-gradient(circle, rgba(255, 255, 255, 0.72) 0 1px, transparent 1.5px),
     radial-gradient(circle, rgba(39, 231, 255, 0.75) 0 1px, transparent 1.5px);
   background-position: 0 0, 37px 61px;
   background-size: 137px 137px, 193px 193px;
-  opacity: 0.28;
-  transform: translate3d(var(--motion-near-x), var(--motion-near-y), 0);
-  animation: particles-float 24s linear infinite;
+  animation: ambient-particles 24s linear infinite;
 }
 
-@keyframes plasma-drift {
-  from { background-position: 0 0; }
-  to { background-position: 9% -6%; }
+html:not(.motion-paused) .motion-layer,
+html:not(.motion-paused) .motion-layer > span {
+  will-change: transform;
 }
 
-@keyframes grid-rush {
-  to { background-position: 64px 92px; }
+html.motion-paused .motion-layer > span {
+  animation-play-state: paused !important;
+  will-change: auto;
 }
 
-@keyframes streak-slide {
-  to { background-position: 230px -150px; }
+@keyframes ambient-plasma {
+  from { transform: translate3d(-3%, -2%, 0) scale(1.04); }
+  to { transform: translate3d(4%, 3%, 0) scale(1.1); }
 }
 
-@keyframes particles-float {
-  to { background-position: 137px 137px, 230px 254px; }
+@keyframes ambient-grid {
+  from { transform: perspective(420px) rotateX(62deg) translateY(0); }
+  to { transform: perspective(420px) rotateX(62deg) translateY(46px); }
+}
+
+@keyframes ambient-streaks {
+  from { transform: translate3d(-5%, -4%, 0); }
+  to { transform: translate3d(6%, 5%, 0); }
+}
+
+@keyframes ambient-particles {
+  from { transform: translate3d(0, 0, 0); }
+  to { transform: translate3d(70px, 80px, 0); }
 }
 
 main,
@@ -270,7 +296,6 @@ img {
   color: var(--muted);
 }
 
-html.motion-paused .motion-layer,
 html.motion-paused .tech-scene *,
 html:not(.tech-motion-active) .tech-scene * {
   animation-play-state: paused !important;
@@ -1389,7 +1414,11 @@ html.landing-ready [data-reveal].is-visible {
   }
 
   .motion-streaks {
-    opacity: 0.55;
+    display: none;
+  }
+
+  .motion-particles {
+    opacity: 0.18;
   }
 
   .site-header {
@@ -1607,7 +1636,7 @@ html.landing-ready [data-reveal].is-visible {
     transform: none;
   }
 
-  .motion-layer {
+  .motion-layer > span {
     animation: none !important;
     will-change: auto;
   }
@@ -1618,7 +1647,7 @@ html.landing-ready [data-reveal].is-visible {
     transform: none;
   }
 
-  .motion-grid {
+  .motion-grid > span {
     transform: perspective(420px) rotateX(62deg);
   }
 

@@ -20,12 +20,8 @@
 
   const clampMotion = (value: number) => Math.max(-1, Math.min(1, value));
   const paintMotion = () => {
-    root.style.setProperty("--motion-x", `${(motionX * 18).toFixed(2)}px`);
-    root.style.setProperty("--motion-y", `${(motionY * 14).toFixed(2)}px`);
-    root.style.setProperty("--motion-far-x", `${(motionX * -7).toFixed(2)}px`);
-    root.style.setProperty("--motion-far-y", `${(motionY * -5).toFixed(2)}px`);
-    root.style.setProperty("--motion-near-x", `${(motionX * 28).toFixed(2)}px`);
-    root.style.setProperty("--motion-near-y", `${(motionY * 21).toFixed(2)}px`);
+    root.style.setProperty("--motion-x", motionX.toFixed(3));
+    root.style.setProperty("--motion-y", motionY.toFixed(3));
     motionFrame = 0;
   };
   const queueMotion = (x: number, y: number) => {
