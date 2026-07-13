@@ -1,7 +1,44 @@
 // @vitest-environment jsdom
+import * as THREE from "three";
+import { GLTFLoader, type GLTF } from "three/examples/jsm/loaders/GLTFLoader.js";
 import { describe, expect, it, test, vi } from "vitest";
 import { createCarPicker, setHudMenuMode, type CarOption } from "./carpicker";
 import { createTradeHistory } from "./trade-history";
+
+const staticArtHarness = vi.hoisted(() => ({
+  renderers: [] as Array<{
+    domElement: HTMLCanvasElement;
+    render: ReturnType<typeof vi.fn>;
+    dispose: ReturnType<typeof vi.fn>;
+  }>,
+  environments: [] as Array<{ dispose: ReturnType<typeof vi.fn> }>,
+}));
+
+vi.mock("three", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("three")>();
+  class TestWebGLRenderer {
+    domElement = document.createElement("canvas");
+    render = vi.fn();
+    dispose = vi.fn();
+    setPixelRatio = vi.fn();
+    setSize = vi.fn();
+
+    constructor() {
+      this.domElement.toDataURL = () => "data:image/png;base64,garage";
+      staticArtHarness.renderers.push(this);
+    }
+  }
+  class TestPMREMGenerator {
+    dispose = vi.fn();
+
+    fromScene() {
+      const texture = { dispose: vi.fn() };
+      staticArtHarness.environments.push(texture);
+      return { texture };
+    }
+  }
+  return { ...actual, WebGLRenderer: TestWebGLRenderer, PMREMGenerator: TestPMREMGenerator };
+});
 
 function fakeEl(display = "") {
   return { style: { display } } as HTMLElement;
@@ -75,6 +112,70 @@ describe("live Garage ownership reconciliation", () => {
     expect(cars[0].locked).toBe(true);
     expect(parent.querySelectorAll(".gcard")[0].classList.contains("locked")).toBe(true);
     expect(picks).toEqual(["DeLorean", "Solana Paper"]);
+  });
+
+  it("cancels stale card art rendering and completes the replacement generation", () => {
+    const pending: Array<{ url: string; succeed(gltf: GLTF): void }> = [];
+    const load = vi.spyOn(GLTFLoader.prototype, "load").mockImplementation((url, onLoad) => {
+      pending.push({ url, succeed: onLoad });
+      return undefined as never;
+    });
+    const model = () => {
+      const texture = new THREE.Texture();
+      const geometry = new THREE.BoxGeometry(2, 1, 4);
+      const material = new THREE.MeshStandardMaterial({ map: texture });
+      const scene = new THREE.Group();
+      scene.add(new THREE.Mesh(geometry, material));
+      return {
+        gltf: { scene } as unknown as GLTF,
+        disposeTexture: vi.spyOn(texture, "dispose"),
+        disposeGeometry: vi.spyOn(geometry, "dispose"),
+        disposeMaterial: vi.spyOn(material, "dispose"),
+      };
+    };
+
+    try {
+      staticArtHarness.renderers.length = 0;
+      staticArtHarness.environments.length = 0;
+      const parent = document.createElement("div");
+      const cars = roster();
+      cars[0].locked = false;
+      const garage = createCarPicker(parent, cars, () => {});
+
+      garage.openGarage();
+      expect(pending.map(({ url }) => url)).toEqual(["/models/delorean.glb"]);
+      const staleArt = parent.querySelectorAll(".gcard")[0].querySelector(".gcard-art") as HTMLImageElement;
+
+      garage.reconcileOwnership((name) => name === "Solana Paper");
+      expect(pending.map(({ url }) => url)).toEqual(["/models/delorean.glb", "/models/trabant.glb"]);
+      const stale = model();
+
+      expect(() => pending[0].succeed(stale.gltf)).not.toThrow();
+      expect(pending).toHaveLength(2);
+      expect(staticArtHarness.renderers[0].render).not.toHaveBeenCalled();
+      expect(staticArtHarness.renderers[0].dispose).toHaveBeenCalledOnce();
+      expect(staticArtHarness.environments[0].dispose).toHaveBeenCalledOnce();
+      expect(parent.contains(staleArt)).toBe(false);
+      expect(staleArt.src).toBe("");
+      expect(staleArt.classList.contains("on")).toBe(false);
+      expect(stale.disposeTexture).toHaveBeenCalledOnce();
+      expect(stale.disposeGeometry).toHaveBeenCalledOnce();
+      expect(stale.disposeMaterial).toHaveBeenCalledOnce();
+
+      const current = model();
+      pending[1].succeed(current.gltf);
+
+      const currentArt = parent.querySelectorAll(".gcard")[1].querySelector(".gcard-art");
+      expect(currentArt?.classList.contains("on")).toBe(true);
+      expect(staticArtHarness.renderers[1].render).toHaveBeenCalledOnce();
+      expect(staticArtHarness.renderers[1].dispose).toHaveBeenCalledOnce();
+      expect(staticArtHarness.environments[1].dispose).toHaveBeenCalledOnce();
+      expect(current.disposeTexture).toHaveBeenCalledOnce();
+      expect(current.disposeGeometry).toHaveBeenCalledOnce();
+      expect(current.disposeMaterial).toHaveBeenCalledOnce();
+    } finally {
+      load.mockRestore();
+    }
   });
 });
 

@@ -573,9 +573,12 @@ export function createCarPicker(
 
   // ---- render each car to a STATIC image once (no persistent canvas → light + no stuck frames) ----
   let rendered = false;
+  let artGeneration = 0;
+  const invalidateArt = () => { rendered = false; artGeneration++; };
   const renderArt = () => {
     if (rendered) return;
     rendered = true;
+    const generation = artGeneration;
     const r = new THREE.WebGLRenderer({ alpha: true, antialias: true, preserveDrawingBuffer: true });
     r.setPixelRatio(2);
     r.setSize(300, 224, false);
@@ -590,12 +593,41 @@ export function createCarPicker(
     // context was the mobile memory peak (tab-killed Chrome/Safari on phones). The
     // queue drains sequentially and the renderer tears down even if a load errors.
     const queue = cars.map((c, i) => ({ c, i })).filter(({ c }) => !c.locked);
+    let disposed = false;
+    const disposeRender = () => {
+      if (disposed) return;
+      disposed = true;
+      env.dispose();
+      r.dispose();
+    };
+    const disposeModel = (model: THREE.Object3D) => {
+      const geometries = new Set<THREE.BufferGeometry>();
+      const materials = new Set<THREE.Material>();
+      const textures = new Set<THREE.Texture>();
+      model.traverse((o) => {
+        const m = o as THREE.Mesh;
+        if (!m.isMesh) return;
+        if (m.geometry) geometries.add(m.geometry);
+        (Array.isArray(m.material) ? m.material : [m.material]).forEach((material) => {
+          if (!material) return;
+          materials.add(material);
+          Object.values(material).forEach((value) => {
+            if ((value as THREE.Texture | undefined)?.isTexture) textures.add(value as THREE.Texture);
+          });
+        });
+      });
+      textures.forEach((texture) => texture.dispose());
+      materials.forEach((material) => material.dispose());
+      geometries.forEach((geometry) => geometry.dispose());
+    };
     const next = () => {
+      if (generation !== artGeneration) { disposeRender(); return; }
       const item = queue.shift();
-      if (!item) { env.dispose(); r.dispose(); return; }
+      if (!item) { disposeRender(); return; }
       const { c, i } = item;
       loader.load(c.url, (gltf) => {
         const model = gltf.scene;
+        if (generation !== artGeneration) { disposeModel(model); disposeRender(); return; }
         model.rotation.y = MODEL_YAW + (c.yaw ?? 0);
         const box = new THREE.Box3().setFromObject(model);
         const sph = box.getBoundingSphere(new THREE.Sphere());
@@ -622,9 +654,13 @@ export function createCarPicker(
         card.art.classList.add("on");
         card.spinner.style.display = "none";
         // free the GPU resources for this car
-        model.traverse((o) => { const m = o as THREE.Mesh; if (m.isMesh) { m.geometry?.dispose(); (Array.isArray(m.material) ? m.material : [m.material]).forEach((mm) => mm?.dispose()); } });
+        disposeModel(model);
         next();
-      }, undefined, (err) => { console.warn("[garage] GLB failed:", c.url, err); next(); });
+      }, undefined, (err) => {
+        if (generation !== artGeneration) { disposeRender(); return; }
+        console.warn("[garage] GLB failed:", c.url, err);
+        next();
+      });
     };
     next();
   };
@@ -822,7 +858,7 @@ export function createCarPicker(
       if (idx < 0 || !cars[idx].locked) return; // unknown car or already owned
       cars[idx].locked = false;
       cards[idx] = fillCard(grid.children[idx] as HTMLElement, cars[idx], idx);
-      rendered = false; renderArt(); // re-render owned card art (the newly-unlocked one now included)
+      invalidateArt(); renderArt(); // re-render owned card art (the newly-unlocked one now included)
     },
     reconcileOwnership(owns) {
       let changed = false;
@@ -834,7 +870,7 @@ export function createCarPicker(
         changed = true;
       });
       if (!changed) return;
-      rendered = false;
+      invalidateArt();
       if (selectedCar?.locked) {
         selectedEl = null;
         selectedCar = null;
