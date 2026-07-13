@@ -116,13 +116,14 @@ describe("Perps Rider landing shell", () => {
     expect(sources).toContain("Retrieved: 2026-07-13");
   });
 
-  it("uses resilient native video loops for every tutorial step", () => {
+  it("uses JS-controlled resilient native video loops for every tutorial step", () => {
     const videos = landingHtml.match(/<video\b[\s\S]*?<\/video>/g) ?? [];
 
     expect(videos).toHaveLength(3);
     for (const video of videos) {
       expect(video).toContain("data-tutorial-video");
-      expect(video).toMatch(/autoplay[^>]*loop[^>]*muted[^>]*playsinline/);
+      expect(video).not.toContain("autoplay");
+      expect(video).toMatch(/<video[^>]*\bloop\b[^>]*\bmuted\b[^>]*\bplaysinline\b/);
       expect(video).toMatch(/poster="\/tutorial\/(market-side|leverage|cash-out)\.webp"/);
       expect(video).toContain('type="video/webm"');
       expect(video).toContain('type="video/mp4"');
@@ -134,7 +135,9 @@ describe("Perps Rider landing shell", () => {
   it("actively starts tutorial loops when motion is allowed", () => {
     const entry = Object.values(landingScripts)[0] as string;
 
+    expect(entry).toContain('[data-tutorial-video]');
     expect(entry).toContain("video.play().catch");
+    expect(entry).toContain("video.pause()");
   });
 
   it("offers a persistent motion control that responds to system and page visibility", () => {

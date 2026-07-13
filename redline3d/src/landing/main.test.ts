@@ -178,19 +178,27 @@ describe("landing motion runtime", () => {
     expect(pauseVideo).toHaveBeenCalled();
   });
 
-  it("keeps media, reveals, and navigation usable without IntersectionObserver", async () => {
+  it("initializes reveals and navigation without IntersectionObserver", async () => {
     Reflect.deleteProperty(window, "IntersectionObserver");
 
     await loadLanding();
 
     expect(document.documentElement.classList.contains("landing-ready")).toBe(true);
-    expect(document.documentElement.classList.contains("tech-motion-active")).toBe(true);
-    expect(playVideo).toHaveBeenCalled();
     expect(document.querySelector("[data-reveal]")?.classList.contains("is-visible")).toBe(true);
 
     const menuToggle = document.querySelector<HTMLButtonElement>("[data-menu-toggle]")!;
     menuToggle.click();
     expect(menuToggle.getAttribute("aria-expanded")).toBe("true");
     expect(document.querySelector("[data-menu]")?.classList.contains("is-open")).toBe(true);
+  });
+
+  it("keeps optional section motion inactive without IntersectionObserver", async () => {
+    Reflect.deleteProperty(window, "IntersectionObserver");
+
+    await loadLanding();
+
+    expect(playVideo).not.toHaveBeenCalled();
+    expect(pauseVideo).toHaveBeenCalled();
+    expect(document.documentElement.classList.contains("tech-motion-active")).toBe(false);
   });
 });

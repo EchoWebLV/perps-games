@@ -73,8 +73,8 @@
     }), { threshold: 0.12 });
     document.querySelectorAll<HTMLElement>("[data-motion-section]").forEach((section) => sectionObserver.observe(section));
   } else {
-    dispatchMotion({ type: "tutorial-visible", visible: true });
-    dispatchMotion({ type: "technology-visible", visible: true });
+    dispatchMotion({ type: "tutorial-visible", visible: false });
+    dispatchMotion({ type: "technology-visible", visible: false });
   }
   renderMotionState();
 
