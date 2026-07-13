@@ -42,7 +42,7 @@ building.group.traverse((object) => {
 scene.add(building.group);
 
 scene.add(new THREE.HemisphereLight(0x8fb7ff, 0x14061f, 2.1));
-const key = new THREE.DirectionalLight(0xffd9f6, 4.2);
+const key = new THREE.DirectionalLight(0x4c1d95, 4.2);
 key.position.set(-28, 42, 30);
 key.castShadow = true;
 scene.add(key);

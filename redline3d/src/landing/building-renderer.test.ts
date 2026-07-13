@@ -160,6 +160,13 @@ const findChunk = (bytes: Uint8Array, type: string) => {
 };
 
 describe("landing building renderer", () => {
+  it("uses the approved dark-violet key light instead of the rejected pale-pink key", () => {
+    const rendererSource = Object.values(rendererSourceFiles)[0] as string;
+
+    expect(rendererSource).toContain("new THREE.DirectionalLight(0x4c1d95, 4.2)");
+    expect(rendererSource).not.toContain("0xffd9f6");
+  });
+
   it("renders the real game buildings through a transparent orthographic scene", () => {
     expect(Object.keys(rendererHtmlFiles)).toHaveLength(1);
     expect(Object.keys(rendererSourceFiles)).toHaveLength(1);
