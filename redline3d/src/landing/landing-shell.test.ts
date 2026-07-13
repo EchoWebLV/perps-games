@@ -162,6 +162,65 @@ describe("Perps Rider landing shell", () => {
     expect(landingHtml).not.toContain("<canvas");
   });
 
+  it("shows three distinct market quotes with staggered flips and a pulsing live badge", async () => {
+    const nodeFs = "node:fs/promises";
+    const { readFile } = await import(nodeFs);
+    const stylesheet = await readFile(new URL("./landing.css", import.meta.url), "utf8");
+
+    const expectedQuotes = [
+      ["btc", "BTC", "$118,240"],
+      ["eth", "ETH", "$3,842.16"],
+      ["sol", "SOL", "$186.42"],
+    ] as const;
+    const quoteHooks = landingHtml.match(/data-price-quote=/g) ?? [];
+    expect(quoteHooks).toHaveLength(expectedQuotes.length);
+    for (const [hook, symbol, value] of expectedQuotes) {
+      expect(landingHtml).toMatch(
+        new RegExp(`class="price-quote price-quote-${hook}" data-price-quote="${hook}">\\s*<span>${symbol}<\\/span>\\s*<b>${value.replace("$", "\\$")}<\\/b>`),
+      );
+      expect(stylesheet).toMatch(
+        new RegExp(`\\.price-quote-${hook} \\{[^}]*--tech-phase-delay: \\d*\\.?\\d+s;`),
+      );
+    }
+    expect(new Set(expectedQuotes.map(([, , value]) => value)).size).toBe(expectedQuotes.length);
+    expect(landingHtml).toContain('<i class="price-live">LIVE</i>');
+    expect(stylesheet).toMatch(/\.price-quote b \{[^}]*animation: ticker-flip [^;]* infinite;/);
+    expect(stylesheet).toMatch(/\.price-live \{[^}]*animation: live-pulse [^;]* infinite;/);
+    const livePulseStart = stylesheet.indexOf("@keyframes live-pulse");
+    expect(livePulseStart).toBeGreaterThanOrEqual(0);
+    const livePulseEnd = stylesheet.indexOf("@keyframes", livePulseStart + 1);
+    const livePulse = stylesheet.slice(livePulseStart, livePulseEnd);
+    expect(livePulse).toContain("transform:");
+    expect(livePulse).toContain("opacity:");
+    expect(livePulse).not.toMatch(/(?:background|color|filter|box-shadow):/);
+
+    const staticStateRule = stylesheet.match(
+      /:where\(html\.motion-paused, html:not\(\.tech-motion-active\)\) \.tech-scene :is\(([\s\S]*?)\) \{([^}]*)\}/,
+    );
+    expect(staticStateRule?.[1]).toContain(".price-quote b");
+    expect(staticStateRule?.[1]).toContain(".price-live");
+    expect(staticStateRule?.[2]).toContain("opacity: 1;");
+    expect(staticStateRule?.[2]).toContain("transform: none;");
+  });
+
+  it("moves both world cars inward with signed travel variables", async () => {
+    const nodeFs = "node:fs/promises";
+    const { readFile } = await import(nodeFs);
+    const stylesheet = await readFile(new URL("./landing.css", import.meta.url), "utf8");
+    const travelFor = (selector: string) => {
+      const rule = stylesheet.match(new RegExp(`\\.${selector} \\{([^}]*)\\}`))?.[1] ?? "";
+      return Number(rule.match(/--car-travel:\s*(-?\d+(?:\.\d+)?)px;/)?.[1]);
+    };
+
+    expect(travelFor("car-a")).toBeGreaterThan(0);
+    expect(travelFor("car-b")).toBeLessThan(0);
+    expect(stylesheet).toMatch(
+      /@keyframes car-route \{[\s\S]*?translate3d\(var\(--car-travel\), -7px, 0\)/,
+    );
+    expect(stylesheet).toMatch(/\.car-b \{[^}]*--tech-phase-delay: 1\.2s;/);
+    expect(stylesheet).not.toMatch(/\.car-b \{[^}]*animation:[^;}]*\breverse\b/);
+  });
+
   it("anchors the cinematic pipeline with canonical technology marks", async () => {
     const nodeFs = "node:fs/promises";
     const { readFile } = await import(nodeFs);
@@ -236,7 +295,8 @@ describe("Perps Rider landing shell", () => {
     );
     expect(staticStateRule).not.toBeNull();
     for (const hook of [
-      ".price-ticker b",
+      ".price-quote b",
+      ".price-live",
       ".rollup-pressure",
       ".tx-shard",
       ".settlement-rail",

@@ -309,7 +309,8 @@ img {
 }
 
 :where(html.motion-paused, html:not(.tech-motion-active)) .tech-scene :is(
-  .price-ticker b,
+  .price-quote b,
+  .price-live,
   .rollup-pressure,
   .tx-shard,
   .confirmed-bolt,
@@ -1227,35 +1228,63 @@ html.motion-paused .stop-grid article:hover .strip-building img {
   z-index: 4;
   top: 24px;
   left: 16px;
-  min-width: 92px;
-  padding: 7px 9px 6px;
+  width: 132px;
+  max-width: calc(100% - 32px);
+  padding: 6px 8px;
   border-left: 2px solid currentColor;
   background: rgba(4, 4, 14, 0.82);
   box-shadow: 0 0 28px color-mix(in srgb, var(--tech-accent) 14%, transparent);
 }
 
-.price-ticker b {
+.price-quote {
+  display: grid;
+  min-height: 20px;
+  grid-template-columns: 24px minmax(0, 1fr);
+  align-items: center;
+  gap: 5px;
+  border-bottom: 1px solid color-mix(in srgb, currentColor 16%, transparent);
+}
+
+.price-quote:last-of-type {
+  border-bottom: 0;
+}
+
+.price-quote span {
+  color: color-mix(in srgb, currentColor 76%, white);
+  font-size: 6px;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+}
+
+.price-quote b {
   display: block;
   color: #f7fbff;
-  font-size: 17px;
+  font-size: 10px;
+  font-variant-numeric: tabular-nums;
   line-height: 1;
+  text-align: right;
   transform-origin: center;
   animation: ticker-flip 3.2s steps(1, end) infinite;
 }
 
-.price-ticker small {
-  display: inline-block;
-  margin-top: 5px;
-  color: var(--green);
-  font-size: 7px;
-}
+.price-quote-btc { --tech-phase-delay: 0s; }
+.price-quote-eth { --tech-phase-delay: .24s; }
+.price-quote-sol { --tech-phase-delay: .48s; }
 
-.price-ticker i {
-  margin-left: 7px;
+.price-live {
+  --tech-phase-delay: .72s;
+  position: absolute;
+  top: -7px;
+  right: -6px;
+  padding: 2px 4px;
+  border: 1px solid currentColor;
+  background: rgba(4, 4, 14, 0.94);
   color: currentColor;
   font-size: 6px;
   font-style: normal;
   letter-spacing: 0.12em;
+  transform-origin: center;
+  animation: live-pulse 1.8s ease-in-out infinite;
 }
 
 .tech-brand {
@@ -1444,8 +1473,8 @@ html.motion-paused .stop-grid article:hover .strip-building img {
   animation: window-wake 3.6s steps(2, end) infinite;
 }
 
-.car-a { animation: car-route 3.8s ease-in-out infinite; }
-.car-b { --tech-phase-delay: 1.2s; animation: car-route 3.8s ease-in-out infinite reverse; }
+.car-a { --car-travel: 28px; --tech-phase-delay: 0s; animation: car-route 3.8s ease-in-out infinite; }
+.car-b { --car-travel: -28px; --tech-phase-delay: 1.2s; animation: car-route 3.8s ease-in-out infinite; }
 
 .pipeline-pulse {
   position: absolute;
@@ -1481,6 +1510,11 @@ html.motion-paused .stop-grid article:hover .strip-building img {
   48% { transform: translate3d(0, -8px, 0); opacity: 0; }
   54% { transform: translate3d(0, 8px, 0); opacity: 0; }
   60%, 100% { transform: translate3d(0, 0, 0); opacity: 1; }
+}
+
+@keyframes live-pulse {
+  0%, 100% { transform: scale(0.86); opacity: 0.55; }
+  50% { transform: scale(1.08); opacity: 1; }
 }
 
 @keyframes chamber-pressure {
@@ -1533,7 +1567,7 @@ html.motion-paused .stop-grid article:hover .strip-building img {
 
 @keyframes car-route {
   0%, 100% { transform: translate3d(0, 0, 0); opacity: 0.4; }
-  50% { transform: translate3d(16px, -7px, 0); opacity: 0.9; }
+  50% { transform: translate3d(var(--car-travel), -7px, 0); opacity: 0.9; }
 }
 
 @keyframes pipeline-travel {
