@@ -31,7 +31,7 @@ import { carLeverageCeiling } from "@perps/engine/entitlements";
 import { createMinimap } from "./ui/minimap";
 import { CART_COIN_RATE, createPickups } from "./render/pickups";
 import { createFireTrail } from "./render/firetrail";
-import { createCarPicker, type CarAbility, type CarOption } from "./ui/carpicker";
+import { createCarPicker, type CarAbility, type CarOption, type Garage } from "./ui/carpicker";
 import { createCrateBox } from "./ui/cratebox";
 import { createHowTo, howToSeen, markHowToSeen } from "./ui/howto";
 import { createTradeHistory } from "./ui/trade-history";
@@ -446,12 +446,14 @@ const showGarageAndUpgrades = showLocalEconomyMenu({
   hostname: globalThis.location?.hostname ?? "",
   native: capacitorNative,
 });
+let garageForHydration: Garage | null = null;
 const accountSync = createAccountSync({
   api,
   nonce: String(Date.now()), // stable per page load; namespaces this session's delta refs
   applyServer: (snap) => {
     upgrades.hydrate({ coins: snap.coins, scrap: snap.scrap, levels: snap.levels });
     inventory.hydrate(snap.cars);
+    garageForHydration?.reconcileOwnership((name) => inventory.owns(name));
   },
 });
 function driverNameConfirmed(): boolean {
@@ -700,6 +702,7 @@ const garage = createCarPicker(hudRoot, CAR_DEFS, (c) => { car.setModel(c.url, c
     edit: () => openDriverNameDialog(false),
   },
 });
+garageForHydration = garage;
 
 // Crate Shop (lobby Crates building): buy a crate → roll a car by rarity odds → reveal. A NEW car
 // unlocks in the garage; a DUPLICATE melts to Scrap. Account crates use MagicBlock VRF; only guests

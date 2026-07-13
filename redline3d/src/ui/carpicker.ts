@@ -1,7 +1,7 @@
 import * as THREE from "three";
 import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader.js";
 import { RoomEnvironment } from "three/examples/jsm/environments/RoomEnvironment.js";
-import { TIERS, tierOf, type Rarity } from "../core/rarity";
+import { TIERS, poolable, tierOf, type Rarity } from "../core/rarity";
 import { onTap } from "./tap";
 
 /** a car's special ability id; drives in-game effects when that card is selected */
@@ -27,6 +27,8 @@ export interface Garage {
   openGarage(): void;
   /** unlock a car in the collection after a crate pull — flips its card from LOCKED to owned + renders its art */
   grant(name: string): void;
+  /** replace live card locks from an authoritative inventory snapshot */
+  reconcileOwnership(owns: (name: string) => boolean): void;
   /** the menu/garage/help overlay is on screen (a GO press must not launch behind it) */
   isOpen(): boolean;
   /** cruise chrome: lift the hamburger to the top corner (the price chip's slot is empty
@@ -502,12 +504,14 @@ export function createCarPicker(
 
   const cards: Card[] = [];
   let selectedEl: HTMLElement | null = null;
+  let selectedCar: CarOption | null = null;
   const select = (el: HTMLElement, c: CarOption) => {
     if (c.locked || c.comingSoon) return; // taped-off cards aren't drivable yet
     if (busy) { busyNote.animate([{ transform: "translateX(0)" }, { transform: "translateX(-4px)" }, { transform: "translateX(4px)" }, { transform: "translateX(0)" }], { duration: 240 }); return; }
     if (selectedEl) selectedEl.classList.remove("sel");
     el.classList.add("sel");
     selectedEl = el;
+    selectedCar = c;
     onPick(c);
   };
 
@@ -819,6 +823,25 @@ export function createCarPicker(
       cars[idx].locked = false;
       cards[idx] = fillCard(grid.children[idx] as HTMLElement, cars[idx], idx);
       rendered = false; renderArt(); // re-render owned card art (the newly-unlocked one now included)
+    },
+    reconcileOwnership(owns) {
+      let changed = false;
+      cars.forEach((c, i) => {
+        const locked = poolable(c) && !owns(c.name);
+        if (!!c.locked === locked) return;
+        c.locked = locked;
+        cards[i] = fillCard(grid.children[i] as HTMLElement, c, i);
+        changed = true;
+      });
+      if (!changed) return;
+      rendered = false;
+      if (selectedCar?.locked) {
+        selectedEl = null;
+        selectedCar = null;
+        const firstOpen = cars.findIndex((c) => !c.locked && !c.comingSoon);
+        if (firstOpen >= 0) select(grid.children[firstOpen] as HTMLElement, cars[firstOpen]);
+      }
+      if (view === "garage") renderArt();
     },
     isOpen: () => overlay.style.display !== "none",
     // on: the hamburger takes the price chip's top-row slot; off: the below-graph row (base+134 = 144 on desktop)

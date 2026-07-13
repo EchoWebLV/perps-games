@@ -45,6 +45,39 @@ describe("createCarPicker initial selection", () => {
   });
 });
 
+describe("live Garage ownership reconciliation", () => {
+  const roster = (): CarOption[] => [
+    { name: "DeLorean", url: "/models/delorean.glb", locked: true },
+    { name: "Solana Paper", url: "/models/trabant.glb", pool: false },
+  ];
+
+  it("unlocks a server-owned car without rebuilding the app", () => {
+    const parent = document.createElement("div");
+    const cars = roster();
+    const garage = createCarPicker(parent, cars, () => {});
+
+    garage.reconcileOwnership((name) => name === "DeLorean" || name === "Solana Paper");
+
+    expect(cars[0].locked).toBe(false);
+    expect(parent.querySelectorAll(".gcard")[0].classList.contains("locked")).toBe(false);
+    expect(parent.querySelectorAll(".gcard")[0].textContent).not.toContain("LOCKED");
+  });
+
+  it("relocks an absent car and falls back when it was equipped", () => {
+    const parent = document.createElement("div");
+    const cars = roster();
+    cars[0].locked = false;
+    const picks: string[] = [];
+    const garage = createCarPicker(parent, cars, (car) => picks.push(car.name));
+
+    garage.reconcileOwnership((name) => name === "Solana Paper");
+
+    expect(cars[0].locked).toBe(true);
+    expect(parent.querySelectorAll(".gcard")[0].classList.contains("locked")).toBe(true);
+    expect(picks).toEqual(["DeLorean", "Solana Paper"]);
+  });
+});
+
 describe("coming-soon construction tape", () => {
   const roster = (): CarOption[] => [
     { name: "DeLorean", url: "/models/delorean.glb" },
