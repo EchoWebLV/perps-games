@@ -1936,6 +1936,9 @@ html.landing-ready [data-reveal].is-visible {
     display: none;
   }
 
+  .car-a { --car-travel: 16px; }
+  .car-b { --car-travel: -16px; }
+
   .driver-a { --driver-x: -38px; }
   .driver-b { --driver-x: 38px; }
   .driver-c { --driver-x: -24px; opacity: 0.68; }

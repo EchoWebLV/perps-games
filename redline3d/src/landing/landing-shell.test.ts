@@ -174,15 +174,20 @@ describe("Perps Rider landing shell", () => {
     ] as const;
     const quoteHooks = landingHtml.match(/data-price-quote=/g) ?? [];
     expect(quoteHooks).toHaveLength(expectedQuotes.length);
+    const quotePhases: string[] = [];
     for (const [hook, symbol, value] of expectedQuotes) {
       expect(landingHtml).toMatch(
         new RegExp(`class="price-quote price-quote-${hook}" data-price-quote="${hook}">\\s*<span>${symbol}<\\/span>\\s*<b>${value.replace("$", "\\$")}<\\/b>`),
       );
-      expect(stylesheet).toMatch(
-        new RegExp(`\\.price-quote-${hook} \\{[^}]*--tech-phase-delay: \\d*\\.?\\d+s;`),
-      );
+      const phase = stylesheet.match(
+        new RegExp(`\\.price-quote-${hook} \\{[^}]*--tech-phase-delay: (\\d*\\.?\\d+s);`),
+      )?.[1];
+      expect(phase).toBeDefined();
+      quotePhases.push(phase ?? "");
     }
     expect(new Set(expectedQuotes.map(([, , value]) => value)).size).toBe(expectedQuotes.length);
+    expect(quotePhases).toEqual(["0s", ".24s", ".48s"]);
+    expect(new Set(quotePhases).size).toBe(expectedQuotes.length);
     expect(landingHtml).toContain('<i class="price-live">LIVE</i>');
     expect(stylesheet).toMatch(/\.price-quote b \{[^}]*animation: ticker-flip [^;]* infinite;/);
     expect(stylesheet).toMatch(/\.price-live \{[^}]*animation: live-pulse [^;]* infinite;/);
@@ -219,6 +224,24 @@ describe("Perps Rider landing shell", () => {
     );
     expect(stylesheet).toMatch(/\.car-b \{[^}]*--tech-phase-delay: 1\.2s;/);
     expect(stylesheet).not.toMatch(/\.car-b \{[^}]*animation:[^;}]*\breverse\b/);
+  });
+
+  it("shortens both inward car routes at the mobile breakpoint", async () => {
+    const nodeFs = "node:fs/promises";
+    const { readFile } = await import(nodeFs);
+    const stylesheet = await readFile(new URL("./landing.css", import.meta.url), "utf8");
+    const mobileStart = stylesheet.indexOf("@media (max-width: 760px)");
+    const mobileEnd = stylesheet.indexOf("@media (prefers-reduced-motion: reduce)", mobileStart);
+    const mobileStyles = stylesheet.slice(mobileStart, mobileEnd);
+    const mobileTravelFor = (selector: string) => {
+      const rule = mobileStyles.match(new RegExp(`\\.${selector} \\{([^}]*)\\}`))?.[1] ?? "";
+      return Number(rule.match(/--car-travel:\s*(-?\d+(?:\.\d+)?)px;/)?.[1]);
+    };
+
+    expect(mobileStart).toBeGreaterThanOrEqual(0);
+    expect(mobileEnd).toBeGreaterThan(mobileStart);
+    expect(mobileTravelFor("car-a")).toBe(16);
+    expect(mobileTravelFor("car-b")).toBe(-16);
   });
 
   it("anchors the cinematic pipeline with canonical technology marks", async () => {
