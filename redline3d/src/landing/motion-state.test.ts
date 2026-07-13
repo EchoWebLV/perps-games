@@ -1,0 +1,45 @@
+import { describe, expect, it } from "vitest";
+
+const motionModules = import.meta.glob("./motion-state.ts");
+
+async function loadMotionState() {
+  expect(Object.keys(motionModules)).toHaveLength(1);
+  return Object.values(motionModules)[0]() as Promise<any>;
+}
+
+describe("landing motion state", () => {
+  it("lets system reduction override the user preference", async () => {
+    const { initialMotionState, motionEnabled, reduceMotionState } = await loadMotionState();
+    const state = initialMotionState(false, true);
+    expect(motionEnabled(state)).toBe(false);
+    expect(reduceMotionState(state, { type: "user-paused", paused: false })).toEqual(state);
+  });
+
+  it("runs tutorial and technology motion only while visible", async () => {
+    const { initialMotionState, reduceMotionState, technologyMotionEnabled, tutorialPlaybackEnabled } = await loadMotionState();
+    let state = initialMotionState(false, false);
+    expect(tutorialPlaybackEnabled(state)).toBe(false);
+    expect(technologyMotionEnabled(state)).toBe(false);
+    state = reduceMotionState(state, { type: "tutorial-visible", visible: true });
+    state = reduceMotionState(state, { type: "technology-visible", visible: true });
+    expect(tutorialPlaybackEnabled(state)).toBe(true);
+    expect(technologyMotionEnabled(state)).toBe(true);
+  });
+
+  it("stops everything while the document is hidden or the user pauses", async () => {
+    const { initialMotionState, motionEnabled, reduceMotionState } = await loadMotionState();
+    let state = initialMotionState(false, false);
+    state = reduceMotionState(state, { type: "document-visible", visible: false });
+    expect(motionEnabled(state)).toBe(false);
+    state = reduceMotionState(state, { type: "document-visible", visible: true });
+    state = reduceMotionState(state, { type: "user-paused", paused: true });
+    expect(motionEnabled(state)).toBe(false);
+  });
+
+  it("reacts when the system preference changes", async () => {
+    const { initialMotionState, motionEnabled, reduceMotionState } = await loadMotionState();
+    const state = reduceMotionState(initialMotionState(false, false), { type: "system-reduced", reduced: true });
+    expect(state.systemReduced).toBe(true);
+    expect(motionEnabled(state)).toBe(false);
+  });
+});

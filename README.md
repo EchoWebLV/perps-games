@@ -22,7 +22,19 @@ The repository contains the Three.js game, Railway-backed account service, two A
 
 ## Quickstart
 
-Requirements: Node.js 22+, npm, and Git. The basic local loop uses in-memory PGlite, so Postgres is optional.
+Requirements: Node.js 22+, npm, Git, and `dwebp` from libwebp. `dwebp` is mandatory for the default asset-validation test suite. The basic local loop uses in-memory PGlite, so Postgres is optional.
+
+Install libwebp on macOS with Homebrew:
+
+```bash
+brew install webp
+```
+
+For Linux, Windows, and other platforms, use the [official libwebp releases and installation documentation](https://developers.google.com/speed/webp/download). Verify the decoder is available on `PATH`:
+
+```bash
+dwebp -version
+```
 
 ```bash
 git clone https://github.com/EchoWebLV/perps-games.git

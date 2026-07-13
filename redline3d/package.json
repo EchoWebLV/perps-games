@@ -9,6 +9,7 @@
     "preview": "vite preview",
     "test": "vitest run",
     "test:watch": "vitest",
+    "render:landing-buildings": "node scripts/render-landing-buildings.mjs",
     "apk": "bash scripts/build-apk.sh",
     "apk:install": "bash scripts/build-apk.sh --install",
     "apk:serve": "bash scripts/build-apk.sh --serve",

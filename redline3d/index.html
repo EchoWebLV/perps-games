@@ -24,10 +24,18 @@
   <body data-landing-page>
     <a class="skip-link" href="#main">Skip to content</a>
 
+    <div class="motion-bg" data-motion-bg aria-hidden="true">
+      <div class="motion-layer motion-plasma"><span></span></div>
+      <div class="motion-layer motion-grid"><span></span></div>
+      <div class="motion-layer motion-streaks"><span></span></div>
+      <div class="motion-layer motion-particles"><span></span></div>
+    </div>
+
     <header class="site-header" data-site-header>
       <a class="wordmark" href="/" aria-label="Perps Rider home">
         <span>PERPS</span><strong>RIDER</strong>
       </a>
+      <button class="motion-toggle" type="button" aria-label="Motion" aria-pressed="true" data-motion-toggle>MOTION ON</button>
       <button class="menu-toggle" type="button" aria-expanded="false" aria-controls="landing-nav" data-menu-toggle>
         <span></span><span></span><span></span><span class="sr-only">Open navigation</span>
       </button>
@@ -70,7 +78,7 @@
         </figure>
       </section>
 
-      <section id="how" class="section-shell content-section" aria-labelledby="how-title">
+      <section id="how" class="section-shell content-section" aria-labelledby="how-title" data-motion-section="tutorial">
         <div class="section-heading" data-reveal>
           <div><span class="section-index">01</span><span class="eyebrow">How it works</span></div>
           <h2 id="how-title">Three moves.<br /><em>One live road.</em></h2>
@@ -78,15 +86,30 @@
         </div>
         <div class="step-grid">
           <article class="step-card step-cyan" data-reveal>
-            <div class="step-media"><img src="/tutorial/market-side.webp" alt="Choosing long or short in Perps Rider" loading="lazy" /></div>
+            <div class="step-media">
+              <video loop muted playsinline preload="metadata" poster="/tutorial/market-side.webp" data-tutorial-video aria-hidden="true">
+                <source src="/tutorial/market-side.webm" type="video/webm" />
+                <source src="/tutorial/market-side.mp4" type="video/mp4" />
+              </video>
+            </div>
             <div class="step-copy"><span>01 / CALL</span><h3>Pick your side</h3><p>Long if the price goes up. Short if it goes down. Choose BTC, ETH, or SOL.</p></div>
           </article>
           <article class="step-card step-amber" data-reveal>
-            <div class="step-media"><img src="/tutorial/leverage.webp" alt="Revving the leverage control" loading="lazy" /></div>
+            <div class="step-media">
+              <video loop muted playsinline preload="metadata" poster="/tutorial/leverage.webp" data-tutorial-video aria-hidden="true">
+                <source src="/tutorial/leverage.webm" type="video/webm" />
+                <source src="/tutorial/leverage.mp4" type="video/mp4" />
+              </video>
+            </div>
             <div class="step-copy"><span>02 / REV</span><h3>Choose your risk</h3><p>More revs means more leverage. Bigger moves hit harder in both directions.</p></div>
           </article>
           <article class="step-card step-magenta" data-reveal>
-            <div class="step-media"><img src="/tutorial/cash-out.webp" alt="Cashing out before liquidation" loading="lazy" /></div>
+            <div class="step-media">
+              <video loop muted playsinline preload="metadata" poster="/tutorial/cash-out.webp" data-tutorial-video aria-hidden="true">
+                <source src="/tutorial/cash-out.webm" type="video/webm" />
+                <source src="/tutorial/cash-out.mp4" type="video/mp4" />
+              </video>
+            </div>
             <div class="step-copy"><span>03 / BANK</span><h3>Exit before impact</h3><p>Cash out to keep the win. Hit liquidation and the play amount is gone.</p></div>
           </article>
         </div>
@@ -100,24 +123,92 @@
             <p>Drive the lobby, pull into a stop, and build a garage around the way you play.</p>
           </div>
           <div class="stop-grid" data-reveal>
-            <article><span class="stop-signal signal-green"></span><b>TRACK</b><p>Start a live price race.</p><small>RACE</small></article>
-            <article><span class="stop-signal signal-cyan"></span><b>GARAGE</b><p>Collect cars with unique powers.</p><small>COLLECT</small></article>
-            <article><span class="stop-signal signal-amber"></span><b>UPGRADES</b><p>Push risk, time, and control.</p><small>TUNE</small></article>
-            <article><span class="stop-signal signal-magenta"></span><b>CRATES</b><p>Unlock the next ride.</p><small>OPEN</small></article>
+            <article>
+              <div class="strip-building">
+                <img src="/assets/landing/building-track.webp" width="1024" height="720" loading="lazy" decoding="async" alt="" />
+              </div>
+              <b>TRACK</b><p>Start a live price race.</p><small>RACE</small>
+            </article>
+            <article>
+              <div class="strip-building">
+                <img src="/assets/landing/building-garage.webp" width="1024" height="720" loading="lazy" decoding="async" alt="" />
+              </div>
+              <b>GARAGE</b><p>Collect cars with unique powers.</p><small>COLLECT</small>
+            </article>
+            <article>
+              <div class="strip-building">
+                <img src="/assets/landing/building-upgrades.webp" width="1024" height="720" loading="lazy" decoding="async" alt="" />
+              </div>
+              <b>UPGRADES</b><p>Push risk, time, and control.</p><small>TUNE</small>
+            </article>
+            <article>
+              <div class="strip-building">
+                <img src="/assets/landing/building-crates.webp" width="1024" height="720" loading="lazy" decoding="async" alt="" />
+              </div>
+              <b>CRATES</b><p>Unlock the next ride.</p><small>OPEN</small>
+            </article>
           </div>
         </div>
       </section>
 
-      <section id="built-on" class="section-shell content-section technology" aria-labelledby="tech-title">
+      <section id="built-on" class="section-shell content-section technology" aria-labelledby="tech-title" data-motion-section="technology">
         <div class="section-heading" data-reveal>
           <div><span class="section-index">03</span><span class="eyebrow">Under the hood</span></div>
           <h2 id="tech-title">Arcade feel.<br /><em>Real rails.</em></h2>
           <p>The game stays fast without turning the position into pretend money or a hidden server result.</p>
         </div>
         <div class="tech-grid">
-          <article data-reveal><span>01</span><div><small>PRICE</small><h3>Pyth Lazer</h3><p>Live market prices shape the road and your position.</p></div></article>
-          <article data-reveal><span>02</span><div><small>EXECUTION</small><h3>MagicBlock</h3><p>Fast on-chain rounds through an Ephemeral Rollup.</p></div></article>
-          <article data-reveal><span>03</span><div><small>SETTLEMENT</small><h3>Solana</h3><p>Your signed-in wallet holds the SOL you bring to play.</p></div></article>
+          <i class="pipeline-pulse" aria-hidden="true"></i>
+          <article style="--tech-delay: 0s" data-reveal>
+            <span>01</span>
+            <div class="tech-scene scene-price" data-tech-scene="price" aria-hidden="true">
+              <svg viewBox="0 0 280 130"><path class="scene-grid" d="M0 24H280M0 56H280M0 88H280M0 120H280M52 0V130M112 0V130M172 0V130M232 0V130"/><path class="price-ghost" d="M6 103L36 97L62 107L91 71L119 79L147 53L178 64L208 30L239 45L274 16"/><path class="price-trace" d="M6 103L36 97L62 107L91 71L119 79L147 53L178 64L208 30L239 45L274 16"/><g class="price-nodes"><circle cx="91" cy="71" r="4"/><circle cx="147" cy="53" r="4"/><circle cx="208" cy="30" r="4"/><circle cx="274" cy="16" r="4"/></g><path class="price-crosshair" d="M201 30H215M208 23V37"/><rect class="price-laser" x="0" y="0" width="3" height="130"/></svg>
+              <div class="price-ticker">
+                <div class="price-quote price-quote-btc" data-price-quote="btc"><span>BTC</span><b>$118,240</b></div>
+                <div class="price-quote price-quote-eth" data-price-quote="eth"><span>ETH</span><b>$3,842.16</b></div>
+                <div class="price-quote price-quote-sol" data-price-quote="sol"><span>SOL</span><b>$186.42</b></div>
+                <i class="price-live">LIVE</i>
+              </div>
+              <span class="scene-status">BTC · ETH · SOL / LIVE</span>
+            </div>
+            <div><small>PRICE</small><h3>Pyth Lazer</h3><p>Live market prices shape the road and your position.</p></div>
+          </article>
+          <article style="--tech-delay: .35s" data-reveal>
+            <span>02</span>
+            <div class="tech-scene scene-execution" data-tech-scene="execution" aria-hidden="true">
+              <svg viewBox="0 0 280 130"><path class="execution-rail rail-top" d="M4 25H92L112 45H276"/><path class="execution-rail rail-mid" d="M4 65H276"/><path class="execution-rail rail-bottom" d="M4 105H92L112 85H276"/><g class="execution-ticks"><path d="M22 18V32M43 18V32M64 18V32M22 98V112M43 98V112M64 98V112"/></g><path class="execution-chevron" d="M248 55L260 65L248 75"/></svg>
+              <div class="rollup-chamber">
+                <span class="rollup-pressure"></span>
+                <img class="tech-brand tech-brand-magicblock" data-tech-brand="magicblock" src="/assets/brands/magicblock-logo.svg" width="162" height="32" alt="" />
+              </div>
+              <i class="tx-shard tx-shard-a"></i><i class="tx-shard tx-shard-b"></i><i class="tx-shard tx-shard-c"></i><i class="confirmed-bolt"></i>
+              <span class="scene-status">EPHEMERAL ROLLUP / CONFIRMED</span>
+            </div>
+            <div><small>EXECUTION</small><h3>MagicBlock</h3><p>Fast on-chain rounds through an Ephemeral Rollup.</p></div>
+          </article>
+          <article style="--tech-delay: .7s" data-reveal>
+            <span>03</span>
+            <div class="tech-scene scene-settlement" data-tech-scene="settlement" aria-hidden="true">
+              <svg viewBox="0 0 280 130"><circle class="signature-ring ring-a" cx="140" cy="63" r="52"/><circle class="signature-ring ring-b" cx="140" cy="63" r="39"/><path class="signature-axis" d="M140 4V17M140 109V122M81 63H94M186 63H199"/><path class="settlement-horizon" d="M8 116H272"/><g class="settlement-coordinates"><path d="M21 111V121M43 111V121M237 111V121M259 111V121"/></g></svg>
+              <div class="settlement-gate">
+                <span class="settlement-rail rail-a"></span><span class="settlement-rail rail-b"></span><span class="settlement-rail rail-c"></span>
+                <span class="solana-plinth"><img class="tech-brand tech-brand-solana" data-tech-brand="solana" src="/assets/brands/solana-mark.svg" width="101" height="88" alt="" /></span>
+                <i class="settlement-seal"></i>
+              </div>
+              <span class="scene-status">SIGNED / SETTLED</span>
+            </div>
+            <div><small>SETTLEMENT</small><h3>Solana</h3><p>Your signed-in wallet holds the SOL you bring to play.</p></div>
+          </article>
+          <article style="--tech-delay: 1.05s" data-reveal>
+            <span>04</span>
+            <div class="tech-scene scene-world" data-tech-scene="world" aria-hidden="true">
+              <svg viewBox="0 0 280 130"><path class="world-grid" d="M4 122L140 19L276 122M39 122L140 45L241 122M77 122L140 74L203 122M4 122H276M35 99H245M68 76H212"/><path class="city-silhouette" d="M66 95V50H91V35H116V95M164 95V29H192V51H215V95"/><g class="city-windows"><rect x="74" y="58" width="6" height="7"/><rect x="97" y="45" width="6" height="7"/><rect x="74" y="75" width="6" height="7"/><rect x="173" y="39" width="7" height="7"/><rect x="173" y="58" width="7" height="7"/><rect x="199" y="60" width="7" height="7"/><rect x="199" y="78" width="7" height="7"/></g><g class="world-nodes"><circle cx="39" cy="99" r="4"/><circle cx="140" cy="45" r="4"/><circle cx="241" cy="99" r="4"/></g><rect class="world-car car-a" x="42" y="108" width="18" height="8" rx="3"/><rect class="world-car car-b" x="220" y="108" width="18" height="8" rx="3"/></svg>
+              <div class="world-destination"><i></i><b>THE STRIP</b></div>
+              <span class="driver driver-a"></span><span class="driver driver-b"></span><span class="driver driver-c"></span>
+              <span class="scene-status">DRIVERS ONLINE / SHARED STRIP</span>
+            </div>
+            <div><small>WORLD</small><h3>Social Open World</h3><p>Drive the Strip with other traders, show off your garage, and enter shared destinations together.</p></div>
+          </article>
         </div>
       </section>
 
