@@ -92,7 +92,7 @@ export function setHudMenuMode(parent: HTMLElement, menuRoot: HTMLElement, open:
   }
 }
 
-interface Card { art: HTMLImageElement; spinner: HTMLElement; locked: boolean; }
+interface Card { art: HTMLImageElement | null; spinner: HTMLElement | null; locked: boolean; }
 
 let stylesInjected = false;
 function injectStyles() {
@@ -505,9 +505,9 @@ export function createCarPicker(
   const cards: Card[] = [];
   let selectedEl: HTMLElement | null = null;
   let selectedCar: CarOption | null = null;
-  const select = (el: HTMLElement, c: CarOption) => {
+  const select = (el: HTMLElement, c: CarOption, authoritative = false) => {
     if (c.locked || c.comingSoon) return; // taped-off cards aren't drivable yet
-    if (busy) { busyNote.animate([{ transform: "translateX(0)" }, { transform: "translateX(-4px)" }, { transform: "translateX(4px)" }, { transform: "translateX(0)" }], { duration: 240 }); return; }
+    if (busy && !authoritative) { busyNote.animate([{ transform: "translateX(0)" }, { transform: "translateX(-4px)" }, { transform: "translateX(4px)" }, { transform: "translateX(0)" }], { duration: 240 }); return; }
     if (selectedEl) selectedEl.classList.remove("sel");
     el.classList.add("sel");
     selectedEl = el;
@@ -519,6 +519,7 @@ export function createCarPicker(
   // (re)paint a card element for car `c` — locked (sealed) vs unlocked (art + ability). Extracted
   // so grant() can flip a card from LOCKED to owned after a crate pull without duplicating the build.
   const fillCard = (card: HTMLElement, c: CarOption, i: number): Card => {
+    card.onpointermove = null;
     card.className = "gcard" + (c.locked ? " locked" : "") + (c.comingSoon ? " soon" : "");
     const displayName = carDisplayName(c);
     const series = `${String(i + 1).padStart(2, "0")} / ${String(cars.length).padStart(2, "0")}`;
@@ -541,11 +542,11 @@ export function createCarPicker(
         `<div class="gcard-ab">${ability}</div>` +
         `<div class="gfoot"><span class="gfoot-brand">PERPS RIDER</span><span class="gfoot-no">${series}</span></div>`;
       const holo = card.querySelector(".gcard-holo") as HTMLElement;
-      card.addEventListener("pointermove", (e) => {
+      card.onpointermove = (e) => {
         const r = card.getBoundingClientRect();
         holo.style.setProperty("--gx", `${((e.clientX - r.left) / r.width) * 100}%`);
         holo.style.setProperty("--gy", `${((e.clientY - r.top) / r.height) * 100}%`);
-      });
+      };
       if (c.comingSoon) {
         // construction tape stretched across the card: 3 angle variants, cycled so the
         // wall of "coming soon" cards reads varied rather than stamped
@@ -556,8 +557,8 @@ export function createCarPicker(
         card.appendChild(tape);
       }
     }
-    const art = card.querySelector(".gcard-art") as HTMLImageElement;
-    const spinner = card.querySelector(".gcard-ld") as HTMLElement;
+    const art = card.querySelector<HTMLImageElement>(".gcard-art");
+    const spinner = card.querySelector<HTMLElement>(".gcard-ld");
     card.onclick = () => { if (c.locked || c.comingSoon) return; openDetail(c, i, card); };
     return { art, spinner, locked: !!c.locked };
   };
@@ -650,9 +651,11 @@ export function createCarPicker(
         r.render(scene, cam);
         const url = r.domElement.toDataURL("image/png");
         const card = cards[i];
-        card.art.src = url;
-        card.art.classList.add("on");
-        card.spinner.style.display = "none";
+        if (card.art && card.spinner) {
+          card.art.src = url;
+          card.art.classList.add("on");
+          card.spinner.style.display = "none";
+        }
         // free the GPU resources for this car
         disposeModel(model);
         next();
@@ -672,6 +675,7 @@ export function createCarPicker(
   detailCard.className = "gdcard";
   detailScrim.appendChild(detailCard);
   let detailPoll = 0;
+  let detailCar: CarOption | null = null;
 
   // ---- lazy live-3D for the OPEN detail card ----
   // one shared renderer/canvas, one model at a time, rAF only while a card is open, model
@@ -741,11 +745,13 @@ export function createCarPicker(
 
   const closeDetail = () => {
     stopLive();
+    detailCar = null;
     detailScrim.classList.remove("on");
     detailCard.style.transform = "";
     if (detailPoll) { clearInterval(detailPoll); detailPoll = 0; }
   };
   const openDetail = (c: CarOption, i: number, gridEl: HTMLElement) => {
+    detailCar = c;
     const displayName = carDisplayName(c);
     const rarity = c.rarity ?? 1;
     const t = tierOf(rarity);
@@ -765,7 +771,7 @@ export function createCarPicker(
         `<button class="gdcard-equip${busy ? " dis" : ""}" data-dact="equip">${busy ? "ROUND LIVE — CASH OUT TO SWITCH" : "EQUIP"}</button>` +
       `</div>`;
     const dart = detailCard.querySelector(".gdcard-art") as HTMLImageElement;
-    const setArt = () => { const src = cards[i].art.src; if (src) { dart.src = src; return true; } return false; };
+    const setArt = () => { const src = cards[i].art?.src; if (src) { dart.src = src; return true; } return false; };
     if (!setArt()) detailPoll = window.setInterval(() => { if (setArt()) { clearInterval(detailPoll); detailPoll = 0; } }, 160);
     (detailCard.querySelector('[data-dact="equip"]') as HTMLButtonElement).onclick = () => { if (busy) return; select(gridEl, c); closeDetail(); };
     (detailCard.querySelector('[data-dact="close"]') as HTMLButtonElement).onclick = closeDetail;
@@ -871,11 +877,12 @@ export function createCarPicker(
       });
       if (!changed) return;
       invalidateArt();
+      if (detailCar?.locked) closeDetail();
       if (selectedCar?.locked) {
         selectedEl = null;
         selectedCar = null;
         const firstOpen = cars.findIndex((c) => !c.locked && !c.comingSoon);
-        if (firstOpen >= 0) select(grid.children[firstOpen] as HTMLElement, cars[firstOpen]);
+        if (firstOpen >= 0) select(grid.children[firstOpen] as HTMLElement, cars[firstOpen], true);
       }
       if (view === "garage") renderArt();
     },

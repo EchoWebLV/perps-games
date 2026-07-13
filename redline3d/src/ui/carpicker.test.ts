@@ -114,6 +114,29 @@ describe("live Garage ownership reconciliation", () => {
     expect(picks).toEqual(["DeLorean", "Solana Paper"]);
   });
 
+  it("selects the authoritative fallback even while Garage is busy", () => {
+    const originalAnimate = Object.getOwnPropertyDescriptor(HTMLElement.prototype, "animate");
+    const animate = vi.fn(() => ({}) as Animation);
+    Object.defineProperty(HTMLElement.prototype, "animate", { configurable: true, value: animate });
+    try {
+      const parent = document.createElement("div");
+      const cars = roster();
+      cars[0].locked = false;
+      const picks: string[] = [];
+      const garage = createCarPicker(parent, cars, (car) => picks.push(car.name));
+      garage.setBusy(true);
+
+      garage.reconcileOwnership((name) => name === "Solana Paper");
+
+      expect(picks).toEqual(["DeLorean", "Solana Paper"]);
+      expect(parent.querySelectorAll(".gcard")[1].classList.contains("sel")).toBe(true);
+      expect(animate).not.toHaveBeenCalled();
+    } finally {
+      if (originalAnimate) Object.defineProperty(HTMLElement.prototype, "animate", originalAnimate);
+      else delete (HTMLElement.prototype as Partial<HTMLElement>).animate;
+    }
+  });
+
   it("cancels stale card art rendering and completes the replacement generation", () => {
     const pending: Array<{ url: string; succeed(gltf: GLTF): void }> = [];
     const load = vi.spyOn(GLTFLoader.prototype, "load").mockImplementation((url, onLoad) => {
@@ -176,6 +199,69 @@ describe("live Garage ownership reconciliation", () => {
     } finally {
       load.mockRestore();
     }
+  });
+
+  it("closes and cancels an open detail when reconciliation relocks its car", () => {
+    vi.useFakeTimers();
+    const pending: Array<{ succeed(gltf: GLTF): void }> = [];
+    const load = vi.spyOn(GLTFLoader.prototype, "load").mockImplementation((_url, onLoad) => {
+      pending.push({ succeed: onLoad });
+      return undefined as never;
+    });
+    try {
+      const parent = document.createElement("div");
+      const cars = roster();
+      cars[0].locked = false;
+      const garage = createCarPicker(parent, cars, () => {});
+      (parent.querySelectorAll(".gcard")[0] as HTMLElement).click();
+      const detail = parent.querySelector(".gdetail-scrim") as HTMLElement;
+
+      expect(detail.classList.contains("on")).toBe(true);
+      expect(vi.getTimerCount()).toBe(1);
+      expect(pending).toHaveLength(1);
+
+      garage.reconcileOwnership((name) => name === "Solana Paper");
+
+      expect(() => vi.advanceTimersByTime(160)).not.toThrow();
+      expect(detail.classList.contains("on")).toBe(false);
+      expect(vi.getTimerCount()).toBe(0);
+
+      const geometry = new THREE.BoxGeometry(2, 1, 4);
+      const material = new THREE.MeshStandardMaterial();
+      const model = new THREE.Group();
+      model.add(new THREE.Mesh(geometry, material));
+      const disposeGeometry = vi.spyOn(geometry, "dispose");
+      const disposeMaterial = vi.spyOn(material, "dispose");
+
+      expect(() => pending[0].succeed({ scene: model } as unknown as GLTF)).not.toThrow();
+      expect(disposeGeometry).toHaveBeenCalledOnce();
+      expect(disposeMaterial).toHaveBeenCalledOnce();
+      expect(parent.querySelector(".gdcard-3d")?.classList.contains("on")).toBe(false);
+    } finally {
+      load.mockRestore();
+      vi.useRealTimers();
+    }
+  });
+
+  it("keeps only the current hologram pointer handler after ownership cycles", () => {
+    const parent = document.createElement("div");
+    const cars = roster();
+    const garage = createCarPicker(parent, cars, () => {});
+    const card = parent.querySelectorAll(".gcard")[0] as HTMLElement;
+    card.getBoundingClientRect = () => ({ left: 0, top: 0, width: 100, height: 100 }) as DOMRect;
+
+    garage.reconcileOwnership(() => true);
+    const detachedHolo = card.querySelector(".gcard-holo") as HTMLElement;
+    garage.reconcileOwnership((name) => name === "Solana Paper");
+    garage.reconcileOwnership(() => true);
+    const currentHolo = card.querySelector(".gcard-holo") as HTMLElement;
+
+    card.dispatchEvent(new MouseEvent("pointermove", { clientX: 25, clientY: 40 }));
+
+    expect(detachedHolo.style.getPropertyValue("--gx")).toBe("");
+    expect(detachedHolo.style.getPropertyValue("--gy")).toBe("");
+    expect(currentHolo.style.getPropertyValue("--gx")).toBe("25%");
+    expect(currentHolo.style.getPropertyValue("--gy")).toBe("40%");
   });
 });
 
