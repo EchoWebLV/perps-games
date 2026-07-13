@@ -50,6 +50,30 @@ const rim = new THREE.DirectionalLight(0x27e7ff, 3.3);
 rim.position.set(34, 24, -26);
 scene.add(rim);
 
+const contactShadowCanvas = document.createElement("canvas");
+contactShadowCanvas.width = 256;
+contactShadowCanvas.height = 256;
+const contactShadowContext = contactShadowCanvas.getContext("2d");
+if (!contactShadowContext) throw new Error("Could not create contact shadow canvas context.");
+const contactShadowGradient = contactShadowContext.createRadialGradient(128, 128, 0, 128, 128, 128);
+contactShadowGradient.addColorStop(0, "rgba(0, 0, 0, 0.26)");
+contactShadowGradient.addColorStop(0.38, "rgba(0, 0, 0, 0.16)");
+contactShadowGradient.addColorStop(0.68, "rgba(0, 0, 0, 0.07)");
+contactShadowGradient.addColorStop(1, "rgba(0, 0, 0, 0)");
+contactShadowContext.fillStyle = contactShadowGradient;
+contactShadowContext.fillRect(0, 0, 256, 256);
+const contactShadowTexture = new THREE.CanvasTexture(contactShadowCanvas);
+const contactShadowMaterial = new THREE.MeshBasicMaterial({
+  map: contactShadowTexture,
+  transparent: true,
+  depthWrite: false,
+});
+const contactShadow = new THREE.Mesh(new THREE.PlaneGeometry(42, 20), contactShadowMaterial);
+contactShadow.rotation.x = -Math.PI / 2;
+contactShadow.position.y = 0.03;
+contactShadow.renderOrder = -2;
+scene.add(contactShadow);
+
 const shadow = new THREE.Mesh(new THREE.PlaneGeometry(42, 32), new THREE.ShadowMaterial({ color: 0x000000, opacity: 0.42 }));
 shadow.rotation.x = -Math.PI / 2;
 shadow.receiveShadow = true;

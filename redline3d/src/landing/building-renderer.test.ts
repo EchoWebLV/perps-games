@@ -160,6 +160,30 @@ const findChunk = (bytes: Uint8Array, type: string) => {
 };
 
 describe("landing building renderer", () => {
+  it("adds a soft elliptical contact shadow without changing the approved camera or lighting rig", () => {
+    const rendererSource = Object.values(rendererSourceFiles)[0] as string;
+
+    expect(rendererSource).toContain("new THREE.OrthographicCamera(-28.45, 28.45, 20, -20, 0.1, 200)");
+    expect(rendererSource).toContain("camera.position.set(38, 30, 42)");
+    expect(rendererSource).toContain("camera.lookAt(0, 10, 0)");
+    expect(rendererSource).toContain("new THREE.DirectionalLight(0x4c1d95, 4.2)");
+    expect(rendererSource).toContain("key.position.set(-28, 42, 30)");
+    expect(rendererSource).toContain("new THREE.DirectionalLight(0x27e7ff, 3.3)");
+    expect(rendererSource).toContain("rim.position.set(34, 24, -26)");
+
+    expect(rendererSource).toContain("createRadialGradient(128, 128, 0, 128, 128, 128)");
+    expect(rendererSource).toContain('addColorStop(0, "rgba(0, 0, 0, 0.26)")');
+    expect(rendererSource).toContain('addColorStop(1, "rgba(0, 0, 0, 0)")');
+    expect(rendererSource).toContain("new THREE.CanvasTexture(contactShadowCanvas)");
+    expect(rendererSource).toContain("new THREE.MeshBasicMaterial({");
+    expect(rendererSource).toContain("map: contactShadowTexture");
+    expect(rendererSource).toContain("transparent: true");
+    expect(rendererSource).toContain("depthWrite: false");
+    expect(rendererSource).toContain("new THREE.PlaneGeometry(42, 20)");
+    expect(rendererSource).toContain("contactShadow.position.y = 0.03");
+    expect(rendererSource).toContain("contactShadow.renderOrder = -2");
+  });
+
   it("uses the approved dark-violet key light instead of the rejected pale-pink key", () => {
     const rendererSource = Object.values(rendererSourceFiles)[0] as string;
 
