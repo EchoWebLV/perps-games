@@ -19,25 +19,7 @@ class FakeIntersectionObserver {
 const intersectionObservers: FakeIntersectionObserver[] = [];
 let playVideo: ReturnType<typeof vi.spyOn>;
 let pauseVideo: ReturnType<typeof vi.spyOn>;
-
-class ThrowingStorage implements Storage {
-  readonly #values = new Map<string, string>();
-
-  constructor(private readonly failure: "read" | "write") {}
-
-  get length() { return this.#values.size; }
-  clear() { this.#values.clear(); }
-  key(index: number) { return [...this.#values.keys()][index] ?? null; }
-  removeItem(key: string) { this.#values.delete(key); }
-  getItem(key: string) {
-    if (this.failure === "read") throw new DOMException("Storage unavailable", "SecurityError");
-    return this.#values.get(key) ?? null;
-  }
-  setItem(key: string, value: string) {
-    if (this.failure === "write") throw new DOMException("Storage unavailable", "SecurityError");
-    this.#values.set(key, value);
-  }
-}
+let reducedMotionQuery: MediaQueryList;
 
 function mediaQueryList(matches = false): MediaQueryList {
   const events = new EventTarget();
@@ -60,7 +42,6 @@ function mountLanding(hidden = false) {
   document.body.innerHTML = `
     <div data-motion-bg></div>
     <header data-site-header>
-      <button type="button" aria-label="Motion" aria-pressed="true" data-motion-toggle>MOTION ON</button>
       <button type="button" aria-expanded="false" data-menu-toggle>Menu</button>
       <nav data-menu><a href="#tutorial">Tutorial</a></nav>
     </header>
@@ -92,9 +73,9 @@ beforeEach(() => {
   vi.resetModules();
   vi.unstubAllGlobals();
   intersectionObservers.length = 0;
-  sessionStorage.clear();
   mountLanding();
-  vi.stubGlobal("matchMedia", vi.fn(() => mediaQueryList()));
+  reducedMotionQuery = mediaQueryList();
+  vi.stubGlobal("matchMedia", vi.fn(() => reducedMotionQuery));
   vi.stubGlobal("IntersectionObserver", FakeIntersectionObserver);
   vi.stubGlobal("requestAnimationFrame", vi.fn(() => 1));
   playVideo = vi.spyOn(HTMLMediaElement.prototype, "play").mockResolvedValue(undefined);
@@ -107,65 +88,31 @@ afterEach(() => {
 });
 
 describe("landing motion runtime", () => {
-  it("initializes when reading motion preference from storage throws", async () => {
-    vi.stubGlobal("sessionStorage", new ThrowingStorage("read"));
-
-    await expect(loadLanding()).resolves.toBeDefined();
-
-    expect(document.documentElement.classList.contains("landing-ready")).toBe(true);
-    expect(document.documentElement.classList.contains("motion-paused")).toBe(false);
-  });
-
-  it("updates motion state when writing the preference to storage throws", async () => {
-    vi.stubGlobal("sessionStorage", new ThrowingStorage("write"));
-    await loadLanding();
-
-    const motionToggle = document.querySelector<HTMLButtonElement>("[data-motion-toggle]")!;
-    expect(() => motionToggle.click()).not.toThrow();
-
-    expect(document.documentElement.classList.contains("motion-paused")).toBe(true);
-    expect(motionToggle.getAttribute("aria-pressed")).toBe("false");
-    expect(motionToggle.textContent).toBe("MOTION OFF");
-  });
-
-  it("keeps the motion toggle accessible name stable while its state text changes", async () => {
-    const nodeFs = "node:fs/promises";
-    const { readFile } = await import(nodeFs);
-    const landingHtml = await readFile("index.html", "utf8");
-    expect(landingHtml).toContain('aria-label="Motion"');
-
-    await loadLanding();
-    const motionToggle = document.querySelector<HTMLButtonElement>("[data-motion-toggle]")!;
-    expect(motionToggle.getAttribute("aria-label")).toBe("Motion");
-
-    motionToggle.click();
-    expect(motionToggle.textContent).toBe("MOTION OFF");
-    expect(motionToggle.getAttribute("aria-label")).toBe("Motion");
-
-    motionToggle.click();
-    expect(motionToggle.textContent).toBe("MOTION ON");
-    expect(motionToggle.getAttribute("aria-label")).toBe("Motion");
-  });
-
-  it("applies reduced-motion behavior when the user pauses motion", async () => {
+  it("reacts to live OS reduced-motion changes", async () => {
     await loadLanding();
     markSectionVisible("tutorial");
     expect(playVideo).toHaveBeenCalled();
+    playVideo.mockClear();
     pauseVideo.mockClear();
 
-    document.querySelector<HTMLButtonElement>("[data-motion-toggle]")?.click();
+    reducedMotionQuery.dispatchEvent(Object.assign(new Event("change"), { matches: true }));
 
     expect(document.documentElement.classList.contains("motion-paused")).toBe(true);
-    expect(document.querySelector("[data-motion-toggle]")?.getAttribute("aria-pressed")).toBe("false");
-    expect(sessionStorage.getItem("perps-rider:motion-paused")).toBe("true");
     expect(pauseVideo).toHaveBeenCalled();
-    const nodeFs = "node:fs/promises";
-    const { readFile } = await import(nodeFs);
-    const landingStylesheet = await readFile("src/landing/landing.css", "utf8");
-    expect(landingStylesheet).toMatch(/html\.motion-paused \{[^}]*scroll-behavior: auto;[^}]*\}/);
-    expect(landingStylesheet).toMatch(
-      /html\.motion-paused\.landing-ready \[data-reveal\] \{[^}]*opacity: 1;[^}]*transform: none;[^}]*transition: none;[^}]*\}/,
-    );
+
+    reducedMotionQuery.dispatchEvent(Object.assign(new Event("change"), { matches: false }));
+
+    expect(document.documentElement.classList.contains("motion-paused")).toBe(false);
+    expect(playVideo).toHaveBeenCalled();
+  });
+
+  it("starts paused when the OS initially requests reduced motion", async () => {
+    reducedMotionQuery = mediaQueryList(true);
+
+    await loadLanding();
+
+    expect(document.documentElement.classList.contains("motion-paused")).toBe(true);
+    expect(pauseVideo).toHaveBeenCalled();
   });
 
   it("starts paused when the document is initially hidden", async () => {
@@ -174,7 +121,6 @@ describe("landing motion runtime", () => {
     await loadLanding();
 
     expect(document.documentElement.classList.contains("motion-paused")).toBe(true);
-    expect(document.querySelector("[data-motion-toggle]")?.getAttribute("aria-pressed")).toBe("false");
     expect(pauseVideo).toHaveBeenCalled();
   });
 

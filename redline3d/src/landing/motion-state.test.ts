@@ -8,16 +8,22 @@ async function loadMotionState() {
 }
 
 describe("landing motion state", () => {
-  it("lets system reduction override the user preference", async () => {
-    const { initialMotionState, motionEnabled, reduceMotionState } = await loadMotionState();
-    const state = initialMotionState(false, true);
+  it("derives its initial state only from the system motion preference", async () => {
+    const { initialMotionState, motionEnabled } = await loadMotionState();
+    const state = initialMotionState(true);
+
+    expect(state).toEqual({
+      systemReduced: true,
+      documentVisible: true,
+      tutorialVisible: false,
+      technologyVisible: false,
+    });
     expect(motionEnabled(state)).toBe(false);
-    expect(reduceMotionState(state, { type: "user-paused", paused: false })).toEqual(state);
   });
 
   it("runs tutorial and technology motion only while visible", async () => {
     const { initialMotionState, reduceMotionState, technologyMotionEnabled, tutorialPlaybackEnabled } = await loadMotionState();
-    let state = initialMotionState(false, false);
+    let state = initialMotionState(false);
     expect(tutorialPlaybackEnabled(state)).toBe(false);
     expect(technologyMotionEnabled(state)).toBe(false);
     state = reduceMotionState(state, { type: "tutorial-visible", visible: true });
@@ -26,19 +32,18 @@ describe("landing motion state", () => {
     expect(technologyMotionEnabled(state)).toBe(true);
   });
 
-  it("stops everything while the document is hidden or the user pauses", async () => {
+  it("stops everything while the document is hidden", async () => {
     const { initialMotionState, motionEnabled, reduceMotionState } = await loadMotionState();
-    let state = initialMotionState(false, false);
+    let state = initialMotionState(false);
     state = reduceMotionState(state, { type: "document-visible", visible: false });
     expect(motionEnabled(state)).toBe(false);
     state = reduceMotionState(state, { type: "document-visible", visible: true });
-    state = reduceMotionState(state, { type: "user-paused", paused: true });
-    expect(motionEnabled(state)).toBe(false);
+    expect(motionEnabled(state)).toBe(true);
   });
 
   it("reacts when the system preference changes", async () => {
     const { initialMotionState, motionEnabled, reduceMotionState } = await loadMotionState();
-    const state = reduceMotionState(initialMotionState(false, false), { type: "system-reduced", reduced: true });
+    const state = reduceMotionState(initialMotionState(false), { type: "system-reduced", reduced: true });
     expect(state.systemReduced).toBe(true);
     expect(motionEnabled(state)).toBe(false);
   });

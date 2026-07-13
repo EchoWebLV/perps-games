@@ -140,11 +140,27 @@ describe("Perps Rider landing shell", () => {
     expect(entry).toContain("video.pause()");
   });
 
-  it("offers a persistent motion control that responds to system and page visibility", () => {
-    expect(landingHtml).toContain("data-motion-toggle");
-    expect(landingHtml).toContain('aria-pressed="true"');
+  it("does not render a manual motion control", () => {
+    expect(landingHtml).not.toContain("data-motion-toggle");
+    expect(landingHtml).not.toContain('aria-label="Motion"');
+  });
+
+  it("has no manual motion control styling", async () => {
+    const nodeFs = "node:fs/promises";
+    const { readFile } = await import(nodeFs);
+    const stylesheet = await readFile(new URL("./landing.css", import.meta.url), "utf8");
+
+    expect(stylesheet).not.toContain(".motion-toggle");
+  });
+
+  it("uses OS reduced motion and page visibility without persisting a manual preference", () => {
     const entry = Object.values(landingScripts)[0] as string;
-    expect(entry).toContain('"perps-rider:motion-paused"');
+    expect(entry).not.toContain("sessionStorage");
+    expect(entry).not.toContain("perps-rider:motion-paused");
+    expect(entry).not.toContain("data-motion-toggle");
+    expect(entry).not.toContain("userPaused");
+    expect(entry).not.toContain('type: "user-paused"');
+    expect(entry).toContain('matchMedia("(prefers-reduced-motion: reduce)")');
     expect(entry).toContain('reduceMotion.addEventListener("change"');
     expect(entry).toContain('addEventListener("visibilitychange"');
     expect(landingHtml).toContain('data-motion-section="tutorial"');

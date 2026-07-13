@@ -275,27 +275,6 @@ img {
   text-shadow: 0 0 18px rgba(255, 57, 192, 0.55);
 }
 
-.motion-toggle {
-  min-height: 38px;
-  margin-left: auto;
-  margin-right: 14px;
-  padding: 0 13px;
-  border: 1px solid rgba(39, 231, 255, 0.38);
-  background: rgba(39, 231, 255, 0.07);
-  color: var(--cyan);
-  font-size: 9px;
-  font-weight: 700;
-  letter-spacing: 0.12em;
-  cursor: pointer;
-}
-
-.motion-toggle[aria-pressed="false"],
-.motion-toggle:disabled {
-  border-color: var(--line-strong);
-  background: rgba(12, 10, 26, 0.72);
-  color: var(--muted);
-}
-
 :where(html.motion-paused, html:not(.tech-motion-active)) .tech-scene *:not(.tech-brand) {
   animation-play-state: paused !important;
   animation: none !important;
@@ -1770,13 +1749,6 @@ html.landing-ready [data-reveal].is-visible {
 @media (max-width: 760px) {
   :root {
     --shell: min(100% - 32px, 620px);
-  }
-
-  .motion-toggle {
-    min-height: 36px;
-    margin-right: 8px;
-    padding-inline: 9px;
-    font-size: 8px;
   }
 
   .motion-grid {

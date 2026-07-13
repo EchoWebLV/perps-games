@@ -47,30 +47,28 @@ Tablet layouts use a two-by-two grid. Mobile layouts use one card per row and hi
 
 ## Motion Architecture
 
-The animation remains dependency-free. `index.html` owns semantic card content and decorative inline SVG markup. `landing.css` owns rendering, transitions, and keyframes. `landing/main.ts` owns visibility, user motion preference, and media playback state.
+The animation remains dependency-free. `index.html` owns semantic card content and decorative inline SVG markup. `landing.css` owns rendering, transitions, and keyframes. `landing/main.ts` owns visibility, operating-system motion preference, and media playback state.
 
 SVG motion uses transforms and opacity wherever possible. Small SVG strokes may pulse, but the large fixed background must stop animating gradient `background-position`. Ambient background movement and input parallax use separate nested layers so both can be compositor-driven without transform conflicts.
 
 Technology scenes run only while the section intersects the viewport. Tutorial videos play only while their section is visible. When the document is hidden, all optional motion pauses.
 
-## Motion Control and Accessibility
+## Motion Accessibility
 
-A visible `MOTION ON` / `MOTION OFF` button appears in the site header. It uses `aria-pressed`, remains keyboard accessible, and stores the user's choice in `sessionStorage`.
+The landing page follows the operating system's `prefers-reduced-motion` setting automatically. It exposes no manual Motion control and does not persist a site-specific motion preference.
 
 One root state controls tutorial videos, the abstract background, card scenes, and hover motion. The system follows these rules:
 
 - `prefers-reduced-motion: reduce` pauses optional motion immediately.
 - The media-query `change` event updates the page without requiring a reload.
-- A user may turn motion off even when the operating system allows motion.
-- Operating-system reduced motion always wins over the user toggle.
+- The operating system remains the single source of truth for reduced motion.
 - Paused scenes retain a meaningful composed frame rather than disappearing.
-- The toggle text and pressed state always describe the actual motion state.
 
 ## Existing Review Remediation
 
 This change also resolves the final branch review findings:
 
-- provide a visible global motion pause control;
+- follow the operating system's reduced-motion preference without a separate site control;
 - react live to reduced-motion changes;
 - play tutorial videos only while visible;
 - replace large fixed `background-position` animation with compositor-friendly transforms and avoid permanent `will-change` outside active motion;
@@ -80,7 +78,7 @@ This change also resolves the final branch review findings:
 
 ## Testing and Verification
 
-Contract tests verify four technology cards, all four scene hooks, exact Social Open World copy, the global motion control, visibility observers, live reduced-motion handling, session persistence, and production landing dependency isolation.
+Contract tests verify four technology cards, all four scene hooks, exact Social Open World copy, the absence of a manual motion control or persistence path, visibility observers, live reduced-motion handling, and production landing dependency isolation.
 
 Building renderer tests inspect each committed WebP file rather than only capture-script source. They verify the RIFF/WebP signature, extended WebP metadata, 1024 by 720 dimensions, and alpha flag.
 

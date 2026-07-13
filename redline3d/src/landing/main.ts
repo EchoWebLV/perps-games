@@ -1,23 +1,15 @@
   import { initialMotionState, motionEnabled, reduceMotionState, technologyMotionEnabled, tutorialPlaybackEnabled } from "./motion-state";
 
-  const MOTION_STORAGE_KEY = "perps-rider:motion-paused";
   const root = document.documentElement;
   const header = document.querySelector<HTMLElement>("[data-site-header]");
   const menu = document.querySelector<HTMLElement>("[data-menu]");
   const menuToggle = document.querySelector<HTMLButtonElement>("[data-menu-toggle]");
   const heroArt = document.querySelector<HTMLImageElement>("[data-hero-art]");
   const reduceMotion = matchMedia("(prefers-reduced-motion: reduce)");
-  const toggle = document.querySelector<HTMLButtonElement>("[data-motion-toggle]");
   const motionBackground = document.querySelector<HTMLElement>("[data-motion-bg]");
   const tutorialVideos = document.querySelectorAll<HTMLVideoElement>("[data-tutorial-video]");
-  const storedMotionPaused = () => {
-    try { return sessionStorage.getItem(MOTION_STORAGE_KEY) === "true"; } catch { return false; }
-  };
-  const storeMotionPaused = (paused: boolean) => {
-    try { sessionStorage.setItem(MOTION_STORAGE_KEY, String(paused)); } catch { /* storage is optional */ }
-  };
   let motionState = reduceMotionState(
-    initialMotionState(storedMotionPaused(), reduceMotion.matches),
+    initialMotionState(reduceMotion.matches),
     { type: "document-visible", visible: !document.hidden },
   );
   let motionFrame = 0;
@@ -40,11 +32,6 @@
     const enabled = motionEnabled(motionState);
     root.classList.toggle("motion-paused", !enabled);
     root.classList.toggle("tech-motion-active", technologyMotionEnabled(motionState));
-    if (toggle) {
-      toggle.textContent = enabled ? "MOTION ON" : "MOTION OFF";
-      toggle.setAttribute("aria-pressed", String(enabled));
-      toggle.disabled = motionState.systemReduced;
-    }
     tutorialVideos.forEach((video) => {
       if (tutorialPlaybackEnabled(motionState)) void video.play().catch(() => undefined);
       else video.pause();
@@ -56,11 +43,6 @@
     renderMotionState();
   };
 
-  toggle?.addEventListener("click", () => {
-    const paused = !motionState.userPaused;
-    storeMotionPaused(paused);
-    dispatchMotion({ type: "user-paused", paused });
-  });
   reduceMotion.addEventListener("change", (event) => dispatchMotion({ type: "system-reduced", reduced: event.matches }));
   document.addEventListener("visibilitychange", () => dispatchMotion({ type: "document-visible", visible: !document.hidden }));
 

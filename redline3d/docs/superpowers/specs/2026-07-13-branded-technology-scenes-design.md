@@ -46,7 +46,7 @@ Replace the sparse grid with a compact neon city-and-road scene. Driver avatars 
 ## Motion and Performance
 
 - Animate only transform and opacity for repeating scene motion.
-- The global Motion control, document visibility, section visibility, and reduced-motion state pause all optional scene animation.
+- Operating-system reduced motion, document visibility, and section visibility pause all optional scene animation. The page has no separate manual Motion control.
 - Avoid canvas, Three.js, external runtime assets, animated filters, and paint-heavy background-position changes.
 - Mobile retains the same story with fewer secondary particles and shorter travel distances.
 
@@ -62,5 +62,5 @@ Replace the sparse grid with a compact neon city-and-road scene. Driver avatars 
 - The actual marks remain crisp, correctly proportioned, and visually stable.
 - All four scenes feel like one cinematic data pipeline rather than independent diagrams.
 - Every scene still communicates in a paused frame.
-- Motion Off and reduced motion stop every optional scene animation.
+- Operating-system reduced motion stops every optional scene animation.
 - Desktop, tablet, and mobile layouts have no clipping or horizontal overflow.
