@@ -1,8 +1,7 @@
 export interface Quality {
   tier: "low" | "high";
   bloom: boolean;
-  /** bloom internal-resolution scale — lower = cheaper blur passes on weak GPUs. Only read
-   *  when `bloom` is true (the low tier turns bloom off, so this value is inert there). */
+  /** bloom internal-resolution scale: the low tier uses 0.5 and the high tier uses 1. */
   bloomScale: number;
   pixelRatioCap: number;
   /** content scaling: "reduced" thins decorative counts (stars/dust), trims the roving

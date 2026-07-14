@@ -10,11 +10,9 @@ export interface Post {
 
 export function createPost(renderer: THREE.WebGLRenderer, scene: THREE.Scene, camera: THREE.Camera, bloomScale = 1, samples = 4): Post {
   const composer = new EffectComposer(renderer);
-  // The composer renders into its own targets and BYPASSES the renderer's MSAA, so the
-  // sharp bright lamp-head geometry (bulb/cone/strip edges) aliases as it moves — and
-  // bloom amplifies that into the halo "flicker", worst at high resolution (desktop DPR 2,
-  // why it didn't show on the lower-res phone). Multisampling the composer targets anti-
-  // aliases the scene BEFORE the bloom threshold, which is what stops the shimmer.
+  // The composer renders into its own targets and bypasses the renderer's MSAA. Multisampling
+  // those targets anti-aliases the scene before the bloom threshold: the low tier uses 2x and
+  // the high tier uses 4x pre-bloom multisampling.
   composer.renderTarget1.samples = samples;
   composer.renderTarget2.samples = samples;
   composer.addPass(new RenderPass(scene, camera));
