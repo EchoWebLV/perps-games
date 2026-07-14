@@ -25,6 +25,15 @@ const AMP = 3.2;          // rolling-hill amplitude
 const PLANE_Z = -900;     // grid/road plane center in z
 const GRADE_ANCHOR_LOCAL_Y = PLANE_Z - ROAD_GRADE_ANCHOR_Z;
 const GRADE_TAU = 0.22;
+const REAL_LIGHT_FADE_DISTANCE = 64;
+
+export type LampMode = 0 | 1 | 2;
+
+export function lampWorldLightFactor(mode: LampMode, distanceFromCar: number): number {
+  if (mode === 1) return 0;
+  const t = Math.max(0, 1 - Math.abs(distanceFromCar) / REAL_LIGHT_FADE_DISTANCE);
+  return t * t;
+}
 
 type Junk = Array<{ dispose(): void }>;
 const _WHITE = new THREE.Color(0xffffff);
@@ -632,7 +641,7 @@ export function createWorld(detail: "full" | "reduced" = "full"): World {
     return new THREE.CanvasTexture(cv);
   })();
 
-  type Lamp = { o: THREE.Group; lights: THREE.Object3D[]; mode: 0 | 1 | 2; seed: number; side: number };
+  type Lamp = { o: THREE.Group; lights: THREE.Object3D[]; mode: LampMode; seed: number; side: number };
   const lamps: Lamp[] = []; // rebuilt each theme by buildLamps()
 
   // a few REAL point-lights ride the lamps nearest the car, so the car + poles
@@ -679,7 +688,7 @@ export function createWorld(detail: "full" | "reduced" = "full"): World {
         g.add(root);
         // most lamps lit; ~1/50 dead, ~1/43 flickering — for life
         const r = Math.random();
-        const mode: 0 | 1 | 2 = r < 1 / 50 ? 1 : r < 1 / 50 + 1 / 43 ? 2 : 0;
+        const mode: LampMode = r < 1 / 50 ? 1 : r < 1 / 50 + 1 / 43 ? 2 : 0;
         if (mode === 1) for (const m of lights) m.visible = false;
         lamps.push({ o: root, lights, mode, seed: i * 2.7 + side, side });
       }
@@ -724,9 +733,8 @@ export function createWorld(detail: "full" | "reduced" = "full"): World {
       const inward = l.side < 0 ? 1 : -1;
       pl.position.set(l.o.position.x + inward * 3.05, l.o.position.y + 12, l.o.position.z);
       pl.color.copy(l.side < 0 ? colA : colB).lerp(shockColor, shockAmount * 0.72);
-      const lit = l.mode === 2 ? l.lights[1].visible : true; // respect flicker
-      const t = Math.max(0, 1 - Math.abs(l.o.position.z - CAR_Z) / 64);
-      target = lit ? t * t * REAL_I * marketShockLightBoost(shockAmount) : 0;
+      const factor = lampWorldLightFactor(l.mode, l.o.position.z - CAR_Z);
+      target = factor * REAL_I * marketShockLightBoost(shockAmount);
     }
     // when a light HOPS to a different lamp, snap to that lamp's brightness instead
     // of carrying the old value across the teleport (that carry-over was the flicker).
