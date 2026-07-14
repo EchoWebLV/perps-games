@@ -34,6 +34,12 @@ require_vite_env() {
 require_vite_env VITE_PRIVY_APP_ID
 require_vite_env VITE_BASE_RPC
 
+LOOPBACK_API_PATTERN='^https?://(localhost|127\.0\.0\.1|\[::1\])(:[0-9]+)?([/?#]|$)'
+if [[ "${VITE_API_BASE:-}" =~ $LOOPBACK_API_PATTERN ]]; then
+  echo "Invalid VITE_API_BASE=$VITE_API_BASE: loopback API endpoints are invalid for APK builds." >&2
+  exit 1
+fi
+
 INSTALL=0
 SERVE=0
 for arg in "$@"; do
