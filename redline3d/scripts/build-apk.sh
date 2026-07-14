@@ -34,8 +34,20 @@ require_vite_env() {
 require_vite_env VITE_PRIVY_APP_ID
 require_vite_env VITE_BASE_RPC
 
-LOOPBACK_API_PATTERN='^https?://(localhost|127\.0\.0\.1|\[::1\])(:[0-9]+)?([/?#]|$)'
-if ( shopt -s nocasematch && [[ "${VITE_API_BASE:-}" =~ $LOOPBACK_API_PATTERN ]] ); then
+if [ -n "${VITE_API_BASE:-}" ] && node -e '
+  const { isIP } = require("node:net");
+  let hostname;
+  try {
+    hostname = new URL(process.env.VITE_API_BASE).hostname.toLowerCase();
+  } catch {
+    process.exit(1);
+  }
+  const host = hostname.startsWith("[") ? hostname.slice(1, -1) : hostname;
+  const isLoopback = host === "localhost"
+    || (isIP(host) === 4 && host.startsWith("127."))
+    || (isIP(host) === 6 && host === "::1");
+  process.exit(isLoopback ? 0 : 1);
+'; then
   echo "Invalid VITE_API_BASE=$VITE_API_BASE: loopback API endpoints are invalid for APK builds." >&2
   exit 1
 fi
