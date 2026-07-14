@@ -33,6 +33,8 @@ describe("Railway-only API configuration", () => {
 
   it.each([
     ["localhost", "http://localhost:8080"],
+    ["uppercase URL scheme", "HTTP://localhost:8080"],
+    ["uppercase localhost", "http://LOCALHOST:8080"],
     ["IPv4 loopback", "http://127.0.0.1:8080"],
     ["IPv6 loopback", "http://[::1]:8080"],
   ])("rejects an exported %s API endpoint before invoking the web build", async (_host, apiUrl) => {
