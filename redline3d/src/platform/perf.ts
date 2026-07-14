@@ -13,10 +13,8 @@ export interface Quality {
    *  phone presents a steady cadence instead of sawtoothing 60→20; absent on high (every
    *  refresh). Enforced in main.ts's frame loop via `shouldRenderFrame`. */
   frameCapFps?: number;
-  /** MSAA sample count for the post composer's render targets (render/post.ts). The 4× MSAA
-   *  exists to stop desktop-DPR bloom shimmer; per that file's own note the aliasing "didn't
-   *  show on the lower-res phone", so the low tier drops to 0 — same glow, none of the
-   *  multisample resolve bandwidth (a large slice of the composer cost on Mali tilers). */
+  /** MSAA sample count for the post composer's render targets (render/post.ts). The low tier
+   *  uses 2× pre-bloom multisampling; the high tier uses 4×. */
   postSamples: number;
 }
 
@@ -76,12 +74,11 @@ export function detectQuality(signals: QualitySignals = {}): Quality {
     // chain, and shipping without it reads as "all dark" (proven on the Seeker 2026-07-08 —
     // a bloom:false low tier was built, seen on-device, and reverted same day; don't retry it).
     // The low tier instead cheapens the SAME look: half-res blur chain (bloomScale 0.5),
-    // composer MSAA off (postSamples 0 — the desktop-DPR shimmer it prevents doesn't show at
-    // phone resolution, and the multisample resolve is a big slice of the composer's Mali
-    // cost), dpr cap 1.25, and a 30fps cadence cap for thermal headroom. The high tier is
-    // byte-identical to the original config — devices that earn it match desktop.
+    // 2× pre-bloom multisampling, dpr cap 1.25, and a 30fps cadence cap for thermal headroom.
+    // The high tier keeps 4× pre-bloom multisampling and is byte-identical to the original
+    // config; devices that earn it match desktop.
     low
-      ? { tier: "low", bloom: true, bloomScale: 0.5, pixelRatioCap: 1.25, detail: "reduced", frameCapFps: 30, postSamples: 0 }
+      ? { tier: "low", bloom: true, bloomScale: 0.5, pixelRatioCap: 1.25, detail: "reduced", frameCapFps: 30, postSamples: 2 }
       : { tier: "high", bloom: true, bloomScale: 1, pixelRatioCap: 2, detail: "full", postSamples: 4 };
 
   // `?perf=low|high` — same runtime escape hatch pattern as `?wallet=` (chain/wallet-select.ts),

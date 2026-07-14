@@ -28,17 +28,14 @@ describe("detectQuality", () => {
     expect(q.frameCapFps).toBeUndefined(); // present every refresh — no cap on high
   });
 
-  test("low tier keeps the authored look but cheap: bloom ON half-res, msaa off, tighter dpr, 30fps cap", () => {
+  test("low tier keeps the authored look with 2x pre-bloom MSAA and a 30fps cap", () => {
     const q = detectQuality({ nav: weakNav });
-    // bloom:false was tried on-device (Seeker 2026-07-08) and the scene reads "all dark" —
-    // the look is authored through the post chain. Low keeps bloom and cuts its cost instead:
-    // half-res blur + no composer MSAA (the shimmer it fixes doesn't show at phone res).
     expect(q.bloom).toBe(true);
     expect(q.bloomScale).toBe(0.5);
-    expect(q.postSamples).toBe(0);
+    expect(q.postSamples).toBe(2);
     expect(q.pixelRatioCap).toBe(1.25);
     expect(q.detail).toBe("reduced");
-    expect(q.frameCapFps).toBe(30); // steady cadence on a throttling phone
+    expect(q.frameCapFps).toBe(30);
   });
 
   test("weak GPU forces low even on a strong-RAM device (the Seeker case: 8GB/8-core Mali)", () => {
@@ -104,7 +101,7 @@ describe("detectQuality", () => {
       const q = detectQuality({ nav: strongNav, ua: seekerUA });
       expect(q.tier).toBe("low");
       expect(q.bloom).toBe(true); // authored look stays; low cheapens bloom, never drops it
-      expect(q.postSamples).toBe(0);
+      expect(q.postSamples).toBe(2);
       expect(q.frameCapFps).toBe(30);
     });
 
