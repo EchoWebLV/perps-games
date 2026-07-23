@@ -4,6 +4,7 @@ globalThis.Buffer = globalThis.Buffer || Buffer;
 import * as THREE from "three";
 import { createScene } from "./render/scene";
 import { createWorld } from "./render/world";
+import { installOutlineDevControls } from "./render/toon";
 import { THEMES, themeKeys, nextThemeKey } from "./render/world-themes";
 import { createCar } from "./render/car";
 import { createChaseCam, ROAD_SPEED_MAX, roadSpeed } from "./render/camera";
@@ -138,6 +139,7 @@ if (typeof ResizeObserver !== "undefined") new ResizeObserver(applyViewportSize)
 // world + car
 const world = createWorld(quality.detail);
 ctx.scene.add(world.group);
+installOutlineDevControls(); // DEV: [ / ] rescale every cel-shade outline live; window.__outline(x)
 /** swap the race-world skin AND re-warm its brand-new shader programs off the hot path —
  *  setTheme rebuilds env/lamp materials, and compiling them from a menu beats a first-corner
  *  stall on the next track entry (precompileModes is defined below, hoisted). */

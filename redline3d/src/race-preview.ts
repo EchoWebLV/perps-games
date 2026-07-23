@@ -24,7 +24,7 @@ import { buildWheelRig, type WheelRig } from "./render/wheels";
 import { tierOf, type Rarity } from "./core/rarity";
 import { createRaceTrack } from "./render/race-track";
 import { createRaceEnvironment } from "./render/race-environment";
-import { toonify } from "./render/toon";
+import { toonify, installOutlineDevControls } from "./render/toon";
 import { createRaceDirector, type DirectorCar, type DirectorMode } from "./render/race-director";
 import { createRaceHud, type RacePhase } from "./ui/race-hud";
 import { createBetPanel } from "./ui/bet-panel";
@@ -535,6 +535,8 @@ function loadCar(car: RaceCar): Promise<void> {
     }, undefined, (err) => { console.warn("[race-preview] GLB failed:", car.spec.url, err); done(); });
   });
 }
+
+installOutlineDevControls(); // DEV: [ / ] rescale every cel-shade outline live; window.__outline(x)
 
 // ── boot: HUD + market panel up immediately, load cars after 2 frames, then open the market ──
 nextFrame(() => nextFrame(async () => {

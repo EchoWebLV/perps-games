@@ -1,15 +1,55 @@
-// Game-wide cartoon render style for CARS: cel shading + inverted-hull outlines. `toonify(root)`
-// swaps every mesh material under `root` to MeshToonMaterial (preserving map / color / emissive,
-// banded through a shared 4-step NearestFilter gradient ramp) and adds an inverted-hull outline
-// sibling per mesh (BackSide, near-black, puffed along a SMOOTHED normal so hard-edge normal splits
-// on the low-poly GLBs don't leave crease gaps in the silhouette). Cars only — the neon world
-// already reads graphic. Outline meshes are named `__outline` and carry no `perpsWheel` userData,
-// so wheel rigs (which look up rigged wheels) are unaffected. Toon-only: no restore path.
+// Game-wide cartoon render style: cel shading + inverted-hull outlines. `toonify(root)` cel-shades a
+// CAR (every mesh) — swaps materials to MeshToonMaterial (preserving map / color / emissive, banded
+// through a shared 4-step NearestFilter gradient ramp) and adds an inverted-hull outline sibling per
+// mesh (BackSide, near-black, puffed along a SMOOTHED normal so hard-edge normal splits on the
+// low-poly GLBs don't leave crease gaps in the silhouette). `toonifyWorld(root)` extends the same look
+// to WORLDS/STORES: it only converts LIT solids (MeshStandard/Lambert/Phong) and outlines the mid/large
+// chunky ones — emissive neon, additive glow, shaders, points, lines and sprites (the light of the art
+// style) are left untouched. All outlines share ONE `uOutlineScale` uniform (see setOutlineWidth), so
+// the whole game's outline thickness can be rescaled instantly with no rebuilds.
+//
+// Outline meshes are named `__outline` and carry no `perpsWheel` userData, so wheel rigs (which look up
+// rigged wheels) are unaffected. Toon-only: no restore path.
 import * as THREE from "three";
 
 const OUTLINE_COLOR = 0x0a0a12;
 const DEFAULT_OUTLINE = 0.22; // world-units of hull puff — a good compromise across camera distances
 export const OUTLINE_NAME = "__outline";
+
+// ─────────────────────────────────────────────────────────────────────────────────────────────
+// Global outline width control. Every hull material multiplies its per-context base width by ONE
+// shared uniform object; mutating `.value` rescales every outline in the game on the next frame
+// (three re-uploads onBeforeCompile uniforms each draw from the live object) — no material rebuilds.
+// ─────────────────────────────────────────────────────────────────────────────────────────────
+const OUTLINE_STORAGE = "toon.outlineScale";
+// Default global multiplier when the user hasn't dialed one. 0.7 (not 1.0) = a ~30% thinner default:
+// the designed base widths read too heavy at chase-cam distance, so every outline (car + world hull)
+// ships trimmed. The [ / ] dial + localStorage still let a user thicken back up to 3×.
+const DEFAULT_OUTLINE_SCALE = 0.7;
+const clampScale = (n: number): number => (Number.isFinite(n) ? Math.min(3, Math.max(0, n)) : DEFAULT_OUTLINE_SCALE);
+function loadOutlineScale(): number {
+  try {
+    const raw = localStorage.getItem(OUTLINE_STORAGE);
+    if (raw == null) return DEFAULT_OUTLINE_SCALE;      // unset → the trimmed default
+    const n = parseFloat(raw);
+    return Number.isFinite(n) ? clampScale(n) : DEFAULT_OUTLINE_SCALE;
+  } catch { return DEFAULT_OUTLINE_SCALE; }
+}
+/** the one uniform shared by EVERY outline hull — assigned by reference in each onBeforeCompile */
+const outlineScaleUniform: { value: number } = { value: loadOutlineScale() };
+
+/** current global outline multiplier (0.7 = the trimmed default; 1 = each context's designed base) */
+export function getOutlineWidth(): number { return outlineScaleUniform.value; }
+/** rescale every outline in the game instantly (clamped 0..3), persisted for next boot */
+export function setOutlineWidth(scale: number): void {
+  outlineScaleUniform.value = clampScale(scale);
+  try { localStorage.setItem(OUTLINE_STORAGE, String(outlineScaleUniform.value)); } catch { /* private mode — non-fatal */ }
+}
+/** The current outline multiplier, for INK LINES (chunky road edges, curbs, sign frames) to key off
+ *  so hand-built world lines and shader-puffed car outlines stay proportional. World geometry is
+ *  built once at boot, so ink reads the multiplier live at build — thickening the [ / ] dial later
+ *  won't rebuild already-placed ink, but a boot with a saved scale rebuilds ink to match. */
+export function inkScale(): number { return outlineScaleUniform.value; }
 
 // shared 4-step grey ramp (lazy singleton), nearest-filtered → hard cel bands
 let _ramp: THREE.CanvasTexture | null = null;
@@ -62,12 +102,14 @@ function outlineMesh(src: THREE.Mesh, localWidth: number): THREE.Mesh {
   // Puff at begin_vertex (bind-pose). For a SkinnedMesh hull the later skinning_vertex chunk then
   // transforms the already-puffed position by the bone matrices, so the puff direction is posed
   // with the skin (LBS is linear → offset rotates into the skinned normal). One injection, both cases.
+  // The puff = per-hull base width (uOutline) × the ONE global scale (uOutlineScale, shared object).
   mat.onBeforeCompile = (shader) => {
     shader.uniforms.uOutline = { value: localWidth };
-    shader.vertexShader = "attribute vec3 aSmoothNormal;\nuniform float uOutline;\n" + shader.vertexShader;
+    shader.uniforms.uOutlineScale = outlineScaleUniform; // same object on every hull → global control
+    shader.vertexShader = "attribute vec3 aSmoothNormal;\nuniform float uOutline;\nuniform float uOutlineScale;\n" + shader.vertexShader;
     shader.vertexShader = shader.vertexShader.replace(
       "#include <begin_vertex>",
-      "#include <begin_vertex>\n transformed += normalize(aSmoothNormal) * uOutline;",
+      "#include <begin_vertex>\n transformed += normalize(aSmoothNormal) * uOutline * uOutlineScale;",
     );
   };
   let hull: THREE.Mesh;
@@ -85,6 +127,12 @@ function outlineMesh(src: THREE.Mesh, localWidth: number): THREE.Mesh {
   return hull;
 }
 
+/** average absolute world scale of a mesh (uniform-scale approximation), never 0 */
+function avgWorldScale(mesh: THREE.Object3D, out: THREE.Vector3): number {
+  const s = mesh.getWorldScale(out);
+  return (Math.abs(s.x) + Math.abs(s.y) + Math.abs(s.z)) / 3 || 1;
+}
+
 /** Cel-shade + outline every mesh under `root` (a car model). Idempotent-safe on already-toon'd
  *  trees (skips `__outline` meshes). `outlineWidth` is the target WORLD thickness of the outline. */
 export function toonify(root: THREE.Object3D, opts?: { outlineWidth?: number }): void {
@@ -95,8 +143,141 @@ export function toonify(root: THREE.Object3D, opts?: { outlineWidth?: number }):
   const ws = new THREE.Vector3();
   for (const mesh of meshes) {
     mesh.material = Array.isArray(mesh.material) ? mesh.material.map(toonMaterial) : toonMaterial(mesh.material);
-    const s = mesh.getWorldScale(ws);
-    const scale = (Math.abs(s.x) + Math.abs(s.y) + Math.abs(s.z)) / 3 || 1;
+    const scale = avgWorldScale(mesh, ws);
     mesh.add(outlineMesh(mesh, target / scale)); // local puff → constant world outline (skins if src is skinned)
   }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────────────────────
+// World / store cel-shading. Unlike cars, worlds mix solid bodies with emissive neon (signs, glow
+// strips, ring-road lines) and shader/points/sprite glows that ARE the light of the art style. We
+// only convert LIT solids and only outline the chunky ones; everything meant to bloom is left alone.
+// ─────────────────────────────────────────────────────────────────────────────────────────────
+
+/** emissiveIntensity ≥ this (with a non-black emissive) reads as neon/glow → left untouched. The
+ *  codebase's solid bodies self-glow at ≤1.05; genuine neon sits at 1.2–1.8, so 1.2 cleanly splits. */
+const EMISSIVE_CUT = 1.2;
+/** a mesh needs a bbox longest side ≥ this (world units) to earn an outline (skip tiny greebles) */
+const OUTLINE_MIN_SIZE = 2;
+/** …and a shortest side ≥ this, so flat planes / thin strips / road decals don't get a dark rim */
+const FLAT_MIN = 0.4;
+
+/** true when a material is a LIT solid we should cel-shade (and, if chunky, outline). Basic / shader /
+ *  points / line / sprite materials, additive glow, emissive-mapped windows and bright neon are left. */
+function isConvertibleSolid(mat: THREE.Material): boolean {
+  const m = mat as THREE.MeshStandardMaterial & {
+    isMeshStandardMaterial?: boolean; isMeshPhysicalMaterial?: boolean;
+    isMeshLambertMaterial?: boolean; isMeshPhongMaterial?: boolean;
+  };
+  const lit = m.isMeshStandardMaterial || m.isMeshPhysicalMaterial || m.isMeshLambertMaterial || m.isMeshPhongMaterial;
+  if (!lit) return false;                                        // Basic / Shader / Points / Line / Sprite → neon/glow, leave
+  if (m.emissiveMap) return false;                               // texture-driven glow (lit windows) → leave
+  if (m.blending !== undefined && m.blending !== THREE.NormalBlending) return false; // additive/multiply glow → leave
+  const e = m.emissive;
+  const bright = !!e && (e.r + e.g + e.b) > 0.001;
+  if (bright && (m.emissiveIntensity ?? 1) >= EMISSIVE_CUT) return false; // neon fixture body → leave
+  return true;
+}
+
+/** convert one material (or array) to toon where solid; returns [newMaterial, didConvertAny]. */
+function convertMeshMaterials(mesh: THREE.Mesh): boolean {
+  if (Array.isArray(mesh.material)) {
+    let any = false;
+    mesh.material = mesh.material.map((mm) => { if (isConvertibleSolid(mm)) { any = true; return toonMaterial(mm); } return mm; });
+    return any;
+  }
+  if (isConvertibleSolid(mesh.material)) { mesh.material = toonMaterial(mesh.material); return true; }
+  return false;
+}
+
+/** does this mesh's world-space footprint clear the mid/large + not-flat gates for an outline? */
+function earnsOutline(mesh: THREE.Mesh, minSize: number, ws: THREE.Vector3): boolean {
+  const geo = mesh.geometry;
+  if (!geo.boundingBox) geo.computeBoundingBox();
+  const bb = geo.boundingBox;
+  if (!bb) return false;
+  const scale = avgWorldScale(mesh, ws);
+  const sx = (bb.max.x - bb.min.x) * scale, sy = (bb.max.y - bb.min.y) * scale, sz = (bb.max.z - bb.min.z) * scale;
+  const maxDim = Math.max(sx, sy, sz), minDim = Math.min(sx, sy, sz);
+  return maxDim >= minSize && minDim >= FLAT_MIN;
+}
+
+/** Cel-shade a WORLD/STORE subtree: convert lit solids to toon, outline the chunky ones, and leave
+ *  every neon / glow / shader / points / sprite element untouched. Subtrees flagged with
+ *  `object.userData.toonSkip = true` (e.g. a synthwave backdrop, ghost-car group) are skipped whole.
+ *  InstancedMesh sources are cel-shaded but NOT outlined (a per-instance hull is skipped by design).
+ *  Returns rough self-check counts for build-time logging. */
+export function toonifyWorld(
+  root: THREE.Object3D,
+  opts?: { outlineWidth?: number; outlineMinSize?: number },
+): { toonMats: number; hulls: number; instanced: number } {
+  const target = opts?.outlineWidth ?? DEFAULT_OUTLINE;
+  const minSize = opts?.outlineMinSize ?? OUTLINE_MIN_SIZE;
+  root.updateWorldMatrix(true, true);
+
+  // manual walk so we can prune whole `toonSkip` subtrees (traverse() can't skip a branch)
+  const meshes: THREE.Mesh[] = [];
+  const stack: THREE.Object3D[] = [root];
+  while (stack.length) {
+    const o = stack.pop()!;
+    if (o !== root && o.userData?.toonSkip) continue; // don't descend into flagged subtrees
+    const m = o as THREE.Mesh;
+    if (m.isMesh && m.name !== OUTLINE_NAME) meshes.push(m);
+    for (const c of o.children) stack.push(c);
+  }
+
+  const ws = new THREE.Vector3();
+  let toonMats = 0, hulls = 0, instanced = 0;
+  for (const mesh of meshes) {
+    const converted = convertMeshMaterials(mesh);
+    if (!converted) continue;
+    toonMats++;
+    if ((mesh as THREE.InstancedMesh).isInstancedMesh) { instanced++; continue; } // per-instance hull skipped by design
+    if (!earnsOutline(mesh, minSize, ws)) continue;
+    const scale = avgWorldScale(mesh, ws);
+    mesh.add(outlineMesh(mesh, target / scale));
+    hulls++;
+  }
+  return { toonMats, hulls, instanced };
+}
+
+// ─────────────────────────────────────────────────────────────────────────────────────────────
+// Dev-only outline-thickness controls (Vite DEV builds only; tree-shaken from production). Keys
+// `[` / `]` step the global scale −/+0.1 with a small toast; `window.__outline(scale)` sets it.
+// ─────────────────────────────────────────────────────────────────────────────────────────────
+let _devInstalled = false;
+let _toastEl: HTMLDivElement | null = null;
+let _toastTimer: ReturnType<typeof setTimeout> | undefined;
+function outlineToast(): void {
+  if (typeof document === "undefined") return;
+  if (!_toastEl) {
+    _toastEl = document.createElement("div");
+    _toastEl.style.cssText = [
+      "position:fixed", "left:50%", "bottom:24px", "transform:translateX(-50%)", "z-index:2147483647",
+      "padding:7px 14px", "border-radius:8px", "pointer-events:none",
+      "font:700 13px/1 'Chakra Petch',ui-monospace,monospace", "letter-spacing:.06em",
+      "color:#eaf2ff", "background:rgba(10,8,22,.9)", "border:1px solid rgba(132,150,224,.4)",
+      "box-shadow:0 4px 16px rgba(0,0,0,.5)",
+    ].join(";");
+    document.body.appendChild(_toastEl);
+  }
+  _toastEl.textContent = `outline ×${getOutlineWidth().toFixed(1)}`;
+  _toastEl.style.opacity = "1";
+  if (_toastTimer) clearTimeout(_toastTimer);
+  _toastTimer = setTimeout(() => { if (_toastEl) _toastEl.style.opacity = "0"; }, 900);
+}
+
+/** wire the DEV outline hotkeys + console hook once. No-op in production or if already installed. */
+export function installOutlineDevControls(): void {
+  if (!import.meta.env.DEV) return;
+  if (_devInstalled) return;
+  _devInstalled = true;
+  (window as unknown as { __outline: (s: number) => void }).__outline = (s: number) => { setOutlineWidth(s); outlineToast(); };
+  const step = (d: number) => { setOutlineWidth(Math.round((getOutlineWidth() + d) * 10) / 10); outlineToast(); };
+  addEventListener("keydown", (e) => {
+    const t = e.target as HTMLElement | null;
+    if (t && (t.isContentEditable || t.tagName === "INPUT" || t.tagName === "TEXTAREA")) return;
+    if (e.key === "[") step(-0.1);
+    else if (e.key === "]") step(0.1);
+  });
 }
