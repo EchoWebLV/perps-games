@@ -4,7 +4,8 @@ globalThis.Buffer = globalThis.Buffer || Buffer;
 import * as THREE from "three";
 import { createScene } from "./render/scene";
 import { createWorld } from "./render/world";
-import { installOutlineDevControls, refreshToonStyle } from "./render/toon";
+import { installOutlineDevControls, refreshToonStyle, isToonEnabled, onToonChanged } from "./render/toon";
+import { edgePassEnabled } from "./render/edge-outline-pass";
 import { THEMES, themeKeys, nextThemeKey } from "./render/world-themes";
 import { createCar } from "./render/car";
 import { createChaseCam, ROAD_SPEED_MAX, roadSpeed } from "./render/camera";
@@ -831,6 +832,17 @@ requestAnimationFrame(() => requestAnimationFrame(() => {
 const lobbyCam = createLobbyCam();
 const oval = createOval();
 ctx.scene.add(oval.group);
+
+// toon depth-edge pass: exclude the solid cars (they already carry thick inverted-hull outlines, so a
+// thin screen edge would double-line them) and gate it to toon style + the `toon.edgePass` kill-switch
+// (localStorage, default ON). No-op when bloom/composer is off (low tier).
+if (post) {
+  post.edge.exclude = [car.group, cruisers.group, stripCars.group];
+  const applyEdge = (): void => { post.edge.enabled = isToonEnabled() && edgePassEnabled(); };
+  applyEdge();
+  onToonChanged(applyEdge);
+  console.info(`[toon] edge pass ${post.edge.enabled ? "ON" : "off"} (toon=${isToonEnabled()}, flag=${edgePassEnabled()})`);
+}
 // drive-in garage showroom: your equipped car hero-lit on a turntable (its own world, like the oval)
 garageRoom = createGarageRoom(ctx.renderer);
 ctx.scene.add(garageRoom.group);

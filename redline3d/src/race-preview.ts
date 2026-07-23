@@ -25,6 +25,7 @@ import { tierOf, type Rarity } from "./core/rarity";
 import { createRaceTrack } from "./render/race-track";
 import { createRaceEnvironment } from "./render/race-environment";
 import { toonify, installOutlineDevControls, isToonEnabled, onToonChanged, refreshToonStyle } from "./render/toon";
+import { EdgeOutlinePass, edgePassEnabled } from "./render/edge-outline-pass";
 import { createRaceDirector, type DirectorCar, type DirectorMode } from "./render/race-director";
 import { createRaceHud, type RacePhase } from "./ui/race-hud";
 import { createBetPanel } from "./ui/bet-panel";
@@ -133,6 +134,13 @@ composer.addPass(new RenderPass(scene, camera));
 // strength / radius / threshold tuned so neon edges glow but the env-lit cars don't blow out
 const bloom = new UnrealBloomPass(new THREE.Vector2(vw(), vh()), 0.62, 0.4, 0.62);
 composer.addPass(bloom);
+// toon depth-edge pass (after bloom). Cars are excluded below (they carry hull outlines); gated to
+// toon style + the `toon.edgePass` kill-switch. Disabled → composer routes bloom straight to screen.
+const edgePass = new EdgeOutlinePass(scene, camera);
+edgePass.setSize(vw(), vh());
+edgePass.enabled = false;
+composer.addPass(edgePass);
+const applyEdge = (): void => { edgePass.enabled = isToonEnabled() && edgePassEnabled(); };
 
 const director = createRaceDirector(camera, track);
 
@@ -225,6 +233,11 @@ const cars: RaceCar[] = SPECS.map((spec, i) => {
     dist: 0, speed: 0, finished: false, finishT: 0,
   };
 });
+
+// exclude the cars from the edge pass (hull outlines already), then sync the initial enabled state
+edgePass.exclude = cars.map((c) => c.anchor);
+applyEdge();
+onToonChanged(applyEdge);
 
 const hud = createRaceHud();
 const betPanel = createBetPanel();
@@ -560,6 +573,7 @@ addEventListener("resize", () => {
   camera.updateProjectionMatrix();
   composer.setSize(vw(), vh());
   bloom.setSize(vw(), vh());
+  edgePass.setSize(vw(), vh());
 });
 
 let last = performance.now();
