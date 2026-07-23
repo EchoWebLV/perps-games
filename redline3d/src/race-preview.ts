@@ -88,8 +88,10 @@ renderer.domElement.style.height = "100vh";
 document.body.appendChild(renderer.domElement);
 
 const scene = new THREE.Scene();
-scene.background = new THREE.Color(0x05030f);
-scene.fog = new THREE.Fog(0x0a0518, 210, 760); // dark violet depth haze
+scene.background = new THREE.Color(0x140a24); // dusk zenith — matches the sky-dome top
+// warm dusk haze: the city skyline recedes into it while the striped sun + parallax mountains
+// (fog:false) own the horizon. Far pushed out so the pushed-back skyline ring still reads.
+scene.fog = new THREE.Fog(0x3a2246, 260, 1300);
 // near/far tightened for depth-buffer precision (the road decals stack in <1u of vertical range):
 // near 2 (camera never gets closer — clearance keeps it ≥8 from cars), far just past the sky dome.
 const camera = new THREE.PerspectiveCamera(55, vw() / vh(), 2, 4000);
