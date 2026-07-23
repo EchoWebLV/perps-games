@@ -2,7 +2,7 @@ import * as THREE from "three";
 import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader.js";
 import { RoomEnvironment } from "three/examples/jsm/environments/RoomEnvironment.js";
 import { carNormScale } from "./car-scale";
-import { toonify, toonifyWorld } from "./toon";
+import { toonify, toonifyWorld, unregisterToonRoot } from "./toon";
 
 /** the bits of a CarOption the showroom needs to place a car on the turntable */
 export interface GarageCar {
@@ -254,12 +254,15 @@ export function createGarageRoom(renderer: THREE.WebGLRenderer): GarageRoom {
   let carObj: THREE.Object3D | null = null;
   let gen = 0;
   let lastReq = "";
-  const disposeTree = (root: THREE.Object3D) => root.traverse((o) => {
-    const m = o as THREE.Mesh;
-    if (!m.isMesh) return;
-    m.geometry?.dispose();
-    (Array.isArray(m.material) ? m.material : [m.material]).forEach((mm) => mm?.dispose());
-  });
+  const disposeTree = (root: THREE.Object3D) => {
+    unregisterToonRoot(root); // drop from the style registry (no-op if never toonified) so it can GC
+    root.traverse((o) => {
+      const m = o as THREE.Mesh;
+      if (!m.isMesh) return;
+      m.geometry?.dispose();
+      (Array.isArray(m.material) ? m.material : [m.material]).forEach((mm) => mm?.dispose());
+    });
+  };
 
   const setCar = (opt: GarageCar): void => {
     const req = `${opt.url}|${opt.scale ?? 1}|${opt.yaw ?? 0}`;

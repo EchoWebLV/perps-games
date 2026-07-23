@@ -51,6 +51,74 @@ export function setOutlineWidth(scale: number): void {
  *  won't rebuild already-placed ink, but a boot with a saved scale rebuilds ink to match. */
 export function inkScale(): number { return outlineScaleUniform.value; }
 
+// ─────────────────────────────────────────────────────────────────────────────────────────────
+// Classic ↔ toon style toggle. toonify/toonifyWorld register each swapped mesh's ORIGINAL and TOON
+// material in `matVariants`, and every toonified / variant-bearing root in `styleRoots`. A flip walks
+// the roots: restore/reapply materials, show/hide `__outline` hulls, and toggle visibility of any
+// object tagged `userData.styleVariant` ('toon' | 'classic'). No disposal — material-pointer and
+// visibility swaps only, so switching is instant. Persisted to localStorage `toon.enabled` (default
+// TRUE), read before the first toonify so a classic-mode boot ends with original mats + hidden hulls.
+// ─────────────────────────────────────────────────────────────────────────────────────────────
+const TOON_ENABLED_KEY = "toon.enabled";
+function loadToonEnabled(): boolean {
+  try { const raw = localStorage.getItem(TOON_ENABLED_KEY); return raw == null ? true : raw !== "false"; }
+  catch { return true; }
+}
+let _toonEnabled = loadToonEnabled();
+type MatOrArray = THREE.Material | THREE.Material[];
+const matVariants = new WeakMap<THREE.Mesh, { orig: MatOrArray; toon: MatOrArray }>();
+const styleRoots: THREE.Object3D[] = [];
+const toonListeners: Array<(on: boolean) => void> = [];
+let _restorable = 0; // self-check: number of meshes with a registered material variant
+
+function registerRoot(root: THREE.Object3D): void { if (!styleRoots.includes(root)) styleRoots.push(root); }
+function registerMat(mesh: THREE.Mesh, orig: MatOrArray, toon: MatOrArray): void {
+  if (!matVariants.has(mesh)) _restorable++;
+  matVariants.set(mesh, { orig, toon });
+}
+/** drop a root from the style registry (call when its subtree is disposed) so it can't leak or be
+ *  needlessly walked on future toggles. Materials in the WeakMap are released with the meshes. */
+export function unregisterToonRoot(root: THREE.Object3D): void {
+  const i = styleRoots.indexOf(root); if (i >= 0) styleRoots.splice(i, 1);
+}
+
+/** true when the toon (cel + ink + dusk) style is active; false = the classic pre-toon neon look */
+export function isToonEnabled(): boolean { return _toonEnabled; }
+/** register a callback fired (with the new state) whenever the style flips or is (re)synced at boot */
+export function onToonChanged(cb: (on: boolean) => void): void { toonListeners.push(cb); }
+
+/** apply the CURRENT `_toonEnabled` across every registered root + toggle the `toon-ui` body class +
+ *  notify listeners. No persistence — call at boot (after everything is built and listeners wired) to
+ *  sync the initial style, and internally on every flip. */
+export function refreshToonStyle(): void {
+  const on = _toonEnabled;
+  for (const root of styleRoots) {
+    root.traverse((o) => {
+      const mesh = o as THREE.Mesh;
+      if (mesh.isMesh) { const v = matVariants.get(mesh); if (v) mesh.material = on ? v.toon : v.orig; }
+      if (o.name === OUTLINE_NAME) o.visible = on;                                  // inverted hulls: toon only
+      const sv = (o.userData as { styleVariant?: string }).styleVariant;
+      if (sv === "toon") o.visible = on; else if (sv === "classic") o.visible = !on; // geometry variants
+    });
+  }
+  if (typeof document !== "undefined" && document.body) document.body.classList.toggle("toon-ui", on);
+  for (const cb of toonListeners) cb(on);
+  console.info(`[toon] style → ${on ? "TOON" : "CLASSIC"} (${_restorable} restorable materials, ${styleRoots.length} roots)`);
+}
+
+/** flip the whole game between classic and toon instantly (materials + hulls + geometry variants +
+ *  UI class) and persist the choice for next boot. */
+export function setToonEnabled(on: boolean): void {
+  _toonEnabled = on;
+  try { localStorage.setItem(TOON_ENABLED_KEY, String(on)); } catch { /* private mode — non-fatal */ }
+  refreshToonStyle();
+}
+
+// always-on console hook (the buttons + key T are the primary controls; this mirrors window.__outline)
+if (typeof window !== "undefined") {
+  (window as unknown as { __toonStyle: (on: boolean) => void }).__toonStyle = (on) => setToonEnabled(!!on);
+}
+
 // shared 4-step grey ramp (lazy singleton), nearest-filtered → hard cel bands
 let _ramp: THREE.CanvasTexture | null = null;
 function ramp(): THREE.CanvasTexture {
@@ -142,10 +210,16 @@ export function toonify(root: THREE.Object3D, opts?: { outlineWidth?: number }):
   root.traverse((o) => { const m = o as THREE.Mesh; if (m.isMesh && m.name !== OUTLINE_NAME) meshes.push(m); });
   const ws = new THREE.Vector3();
   for (const mesh of meshes) {
-    mesh.material = Array.isArray(mesh.material) ? mesh.material.map(toonMaterial) : toonMaterial(mesh.material);
+    const orig = mesh.material;
+    const toon = Array.isArray(orig) ? orig.map(toonMaterial) : toonMaterial(orig);
+    registerMat(mesh, orig, toon);
+    mesh.material = _toonEnabled ? toon : orig;             // classic-mode boot keeps the original material
     const scale = avgWorldScale(mesh, ws);
-    mesh.add(outlineMesh(mesh, target / scale)); // local puff → constant world outline (skins if src is skinned)
+    const hull = outlineMesh(mesh, target / scale);        // local puff → constant world outline (skins if src is skinned)
+    hull.visible = _toonEnabled;                            // hulls render only in toon mode
+    mesh.add(hull);
   }
+  registerRoot(root);
 }
 
 // ─────────────────────────────────────────────────────────────────────────────────────────────
@@ -179,14 +253,24 @@ function isConvertibleSolid(mat: THREE.Material): boolean {
   return true;
 }
 
-/** convert one material (or array) to toon where solid; returns [newMaterial, didConvertAny]. */
+/** convert a mesh's solid material(s) to toon, register the original↔toon variant, and apply whichever
+ *  is active per `_toonEnabled`. Returns true if anything was convertible (→ eligible for an outline). */
 function convertMeshMaterials(mesh: THREE.Mesh): boolean {
-  if (Array.isArray(mesh.material)) {
+  const orig = mesh.material;
+  if (Array.isArray(orig)) {
     let any = false;
-    mesh.material = mesh.material.map((mm) => { if (isConvertibleSolid(mm)) { any = true; return toonMaterial(mm); } return mm; });
-    return any;
+    const toon = orig.map((mm) => { if (isConvertibleSolid(mm)) { any = true; return toonMaterial(mm); } return mm; });
+    if (!any) return false;
+    registerMat(mesh, orig, toon);
+    mesh.material = _toonEnabled ? toon : orig;
+    return true;
   }
-  if (isConvertibleSolid(mesh.material)) { mesh.material = toonMaterial(mesh.material); return true; }
+  if (isConvertibleSolid(orig)) {
+    const toon = toonMaterial(orig);
+    registerMat(mesh, orig, toon);
+    mesh.material = _toonEnabled ? toon : orig;
+    return true;
+  }
   return false;
 }
 
@@ -235,9 +319,12 @@ export function toonifyWorld(
     if ((mesh as THREE.InstancedMesh).isInstancedMesh) { instanced++; continue; } // per-instance hull skipped by design
     if (!earnsOutline(mesh, minSize, ws)) continue;
     const scale = avgWorldScale(mesh, ws);
-    mesh.add(outlineMesh(mesh, target / scale));
+    const hull = outlineMesh(mesh, target / scale);
+    hull.visible = _toonEnabled;                            // hulls render only in toon mode
+    mesh.add(hull);
     hulls++;
   }
+  registerRoot(root);
   return { toonMats, hulls, instanced };
 }
 

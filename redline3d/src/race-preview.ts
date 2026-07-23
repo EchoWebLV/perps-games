@@ -24,7 +24,7 @@ import { buildWheelRig, type WheelRig } from "./render/wheels";
 import { tierOf, type Rarity } from "./core/rarity";
 import { createRaceTrack } from "./render/race-track";
 import { createRaceEnvironment } from "./render/race-environment";
-import { toonify, installOutlineDevControls } from "./render/toon";
+import { toonify, installOutlineDevControls, isToonEnabled, onToonChanged, refreshToonStyle } from "./render/toon";
 import { createRaceDirector, type DirectorCar, type DirectorMode } from "./render/race-director";
 import { createRaceHud, type RacePhase } from "./ui/race-hud";
 import { createBetPanel } from "./ui/bet-panel";
@@ -88,10 +88,15 @@ renderer.domElement.style.height = "100vh";
 document.body.appendChild(renderer.domElement);
 
 const scene = new THREE.Scene();
-scene.background = new THREE.Color(0x140a24); // dusk zenith — matches the sky-dome top
-// warm dusk haze: the city skyline recedes into it while the striped sun + parallax mountains
-// (fog:false) own the horizon. Far pushed out so the pushed-back skyline ring still reads.
-scene.fog = new THREE.Fog(0x3a2246, 260, 1300);
+// Atmosphere follows the art style, swapped live by the toggle. TOON = warm dusk haze (city recedes
+// into it while the sun + parallax mountains own the horizon, far pushed out). CLASSIC = the pre-toon
+// dark-violet night void.
+const applyStyleFog = (on: boolean): void => {
+  if (on) { scene.background = new THREE.Color(0x140a24); scene.fog = new THREE.Fog(0x3a2246, 260, 1300); }
+  else { scene.background = new THREE.Color(0x05030f); scene.fog = new THREE.Fog(0x0a0518, 210, 760); }
+};
+applyStyleFog(isToonEnabled());
+onToonChanged(applyStyleFog);
 // near/far tightened for depth-buffer precision (the road decals stack in <1u of vertical range):
 // near 2 (camera never gets closer — clearance keeps it ≥8 from cars), far just past the sky dome.
 const camera = new THREE.PerspectiveCamera(55, vw() / vh(), 2, 4000);
@@ -102,6 +107,9 @@ const track = createRaceTrack();
 scene.add(track.group);
 const environment = createRaceEnvironment(track);
 scene.add(environment.group);
+// sync the initial art style now the toon'd/variant-bearing roots (track + environment) exist:
+// applies material/hull/geometry-variant state, sets the `toon-ui` body class, and fires applyStyleFog.
+refreshToonStyle();
 const lapLen = track.length;
 const raceDist = TOTAL_LAPS * lapLen;
 

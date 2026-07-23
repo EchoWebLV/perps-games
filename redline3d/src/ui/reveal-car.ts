@@ -1,7 +1,7 @@
 import * as THREE from "three";
 import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader.js";
 import { RoomEnvironment } from "three/examples/jsm/environments/RoomEnvironment.js";
-import { toonify } from "../render/toon";
+import { toonify, unregisterToonRoot } from "../render/toon";
 
 // The crate-reveal car viewer. High tier: a live, slowly spinning 3D model in its own small
 // WebGL canvas (lazily created on first show). Low tier (weak GPU): one rendered frame shown as
@@ -32,6 +32,7 @@ function frameModel(model: THREE.Object3D, yaw: number): void {
   model.position.set(-ctr.x, -ctr.y, -ctr.z);
 }
 function disposeModel(o: THREE.Object3D): void {
+  unregisterToonRoot(o); // drop it from the style registry (no-op if never toonified) so it can GC
   o.traverse((n) => { const m = n as THREE.Mesh; if (m.isMesh) { m.geometry?.dispose(); (Array.isArray(m.material) ? m.material : [m.material]).forEach((mm) => mm?.dispose()); } });
 }
 

@@ -33,36 +33,58 @@ export interface RaceHud {
 }
 
 const STYLE_ID = "race-hud-style";
-// Comic sticker styling: thick near-black ink borders, chunky rounded corners, HARD offset drop
-// shadows (no blur), flat bright accent fills, heavy type. Same layout/info as before — reskin only.
+// Two skins in one sheet. CLASSIC (base, unscoped) is the original dark-neon look. COMIC rules are
+// scoped under `body.toon-ui` (toggled by toon.ts) — thick near-black ink borders, chunky corners,
+// HARD offset drop shadows (no blur), flat bright fills, heavy type. Same layout/info either way.
 const INK = "#0a0812";
 const CSS = `
-.rh-root{position:fixed;inset:0;pointer-events:none;font-family:'Chakra Petch',ui-monospace,monospace;color:#f4f0ff;z-index:20;}
-.rh-board{position:absolute;left:14px;top:14px;width:236px;background:#241640;border:3px solid ${INK};border-radius:14px;padding:10px 10px 8px;box-shadow:5px 5px 0 rgba(8,5,16,.9);}
-.rh-board h3{margin:0 0 8px;font-size:12px;letter-spacing:.16em;font-weight:800;color:#ffe08a;text-transform:uppercase;display:flex;justify-content:space-between;align-items:center;}
-.rh-live{font-size:9px;letter-spacing:.12em;color:#07120a;font-weight:800;background:#3ff08a;border:2px solid ${INK};border-radius:99px;padding:2px 8px;box-shadow:2px 2px 0 rgba(8,5,16,.7);}
-.rh-rows{display:flex;flex-direction:column;gap:4px;}
-.rh-row{display:flex;align-items:center;gap:8px;padding:4px 7px;border-radius:9px;background:#31204d;border:2px solid ${INK};transition:transform .1s,background .18s;cursor:pointer;-webkit-tap-highlight-color:transparent;pointer-events:auto;}
-.rh-row:hover{background:#3b2860;}
-.rh-row:active{transform:translate(1px,1px);}
-.rh-row.lead{background:#0f7fa8;}
-.rh-row.focus{border-color:#ffe08a;box-shadow:3px 3px 0 rgba(8,5,16,.8);}
-.rh-row.focus .rh-name::after{content:' ◉';color:#ffe08a;}
-.rh-pos{width:20px;text-align:center;font-weight:800;font-size:14px;color:#e6ddff;font-variant-numeric:tabular-nums;}
-.rh-row.lead .rh-pos{color:#fff;}
-.rh-dot{width:12px;height:12px;border-radius:50%;flex:0 0 auto;border:2px solid ${INK};}
-.rh-name{flex:1;font-size:13px;font-weight:700;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
-.rh-status{position:absolute;top:14px;left:50%;transform:translateX(-50%);display:flex;gap:10px;align-items:center;background:#241640;border:3px solid ${INK};border-radius:99px;padding:7px 18px;box-shadow:4px 4px 0 rgba(8,5,16,.9);}
-.rh-lap{font-size:16px;font-weight:800;letter-spacing:.06em;color:#f4f0ff;font-variant-numeric:tabular-nums;}
-.rh-phase{font-size:11px;letter-spacing:.14em;font-weight:800;text-transform:uppercase;}
+.rh-root{position:fixed;inset:0;pointer-events:none;font-family:'Chakra Petch',ui-monospace,monospace;color:#eaf2ff;z-index:20;}
+.rh-board{position:absolute;left:14px;top:14px;width:236px;background:rgba(9,6,22,.72);border:1px solid rgba(122,90,220,.45);border-radius:12px;padding:10px 10px 8px;box-shadow:0 0 24px rgba(120,60,220,.25),inset 0 0 18px rgba(40,20,80,.4);backdrop-filter:blur(6px);}
+.rh-board h3{margin:0 0 8px;font-size:12px;letter-spacing:.18em;font-weight:700;color:#9ad7ff;text-transform:uppercase;display:flex;justify-content:space-between;align-items:center;}
+.rh-live{font-size:9px;letter-spacing:.14em;color:#41d67f;border:1px solid rgba(65,214,127,.5);border-radius:99px;padding:2px 7px;}
+.rh-rows{display:flex;flex-direction:column;gap:3px;}
+.rh-row{display:flex;align-items:center;gap:8px;padding:4px 7px;border-radius:7px;background:rgba(255,255,255,.03);border:1px solid transparent;transition:background .18s,border-color .18s;cursor:pointer;-webkit-tap-highlight-color:transparent;pointer-events:auto;}
+.rh-row:hover{background:rgba(255,255,255,.07);}
+.rh-row:active{transform:translateY(1px);}
+.rh-row.lead{background:rgba(39,231,255,.10);border-color:rgba(39,231,255,.5);}
+.rh-row.focus{border-color:#27e7ff;box-shadow:0 0 12px rgba(39,231,255,.45);}
+.rh-row.focus .rh-name::after{content:' ◉';color:#27e7ff;}
+.rh-pos{width:20px;text-align:center;font-weight:700;font-size:14px;color:#c9d6ff;font-variant-numeric:tabular-nums;}
+.rh-row.lead .rh-pos{color:#27e7ff;}
+.rh-dot{width:11px;height:11px;border-radius:50%;flex:0 0 auto;box-shadow:0 0 8px currentColor;}
+.rh-name{flex:1;font-size:13px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+.rh-status{position:absolute;top:14px;left:50%;transform:translateX(-50%);display:flex;gap:10px;align-items:center;background:rgba(9,6,22,.72);border:1px solid rgba(122,90,220,.45);border-radius:99px;padding:7px 16px;box-shadow:0 0 20px rgba(120,60,220,.22);}
+.rh-lap{font-size:16px;font-weight:700;letter-spacing:.08em;color:#eaf2ff;font-variant-numeric:tabular-nums;}
+.rh-phase{font-size:11px;letter-spacing:.16em;font-weight:700;text-transform:uppercase;}
 .rh-phase[data-p="COUNTDOWN"]{color:#ffd166;}
 .rh-phase[data-p="RACING"]{color:#41d67f;}
 .rh-phase[data-p="FINISH"]{color:#ff5da0;}
 .rh-phase[data-p="MARKET"]{color:#9ad7ff;}
 .rh-phase[data-p="LOADING"]{color:#9ad7ff;}
 .rh-count{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;pointer-events:none;}
-.rh-count span{font-size:170px;font-weight:800;color:#ffe08a;-webkit-text-stroke:6px ${INK};text-shadow:7px 7px 0 ${INK};animation:rh-pop .5s ease-out;}
+.rh-count span{font-size:160px;font-weight:700;color:#fff;text-shadow:0 0 40px rgba(39,231,255,.9),0 0 12px rgba(255,93,160,.8);animation:rh-pop .5s ease-out;}
 @keyframes rh-pop{from{transform:scale(1.6);opacity:0;}to{transform:scale(1);opacity:1;}}
+
+/* ── COMIC skin (active when body.toon-ui) ── */
+body.toon-ui .rh-root{color:#f4f0ff;}
+body.toon-ui .rh-board{background:#241640;border:3px solid ${INK};border-radius:14px;box-shadow:5px 5px 0 rgba(8,5,16,.9);backdrop-filter:none;}
+body.toon-ui .rh-board h3{letter-spacing:.16em;font-weight:800;color:#ffe08a;}
+body.toon-ui .rh-live{letter-spacing:.12em;color:#07120a;font-weight:800;background:#3ff08a;border:2px solid ${INK};padding:2px 8px;box-shadow:2px 2px 0 rgba(8,5,16,.7);}
+body.toon-ui .rh-rows{gap:4px;}
+body.toon-ui .rh-row{border-radius:9px;background:#31204d;border:2px solid ${INK};transition:transform .1s,background .18s;}
+body.toon-ui .rh-row:hover{background:#3b2860;}
+body.toon-ui .rh-row:active{transform:translate(1px,1px);}
+body.toon-ui .rh-row.lead{background:#0f7fa8;border-color:${INK};}
+body.toon-ui .rh-row.focus{border-color:#ffe08a;box-shadow:3px 3px 0 rgba(8,5,16,.8);}
+body.toon-ui .rh-row.focus .rh-name::after{color:#ffe08a;}
+body.toon-ui .rh-pos{font-weight:800;color:#e6ddff;}
+body.toon-ui .rh-row.lead .rh-pos{color:#fff;}
+body.toon-ui .rh-dot{width:12px;height:12px;box-shadow:none;border:2px solid ${INK};}
+body.toon-ui .rh-name{font-weight:700;}
+body.toon-ui .rh-status{background:#241640;border:3px solid ${INK};padding:7px 18px;box-shadow:4px 4px 0 rgba(8,5,16,.9);}
+body.toon-ui .rh-lap{font-weight:800;letter-spacing:.06em;color:#f4f0ff;}
+body.toon-ui .rh-phase{letter-spacing:.14em;font-weight:800;}
+body.toon-ui .rh-count span{font-size:170px;font-weight:800;color:#ffe08a;-webkit-text-stroke:6px ${INK};text-shadow:7px 7px 0 ${INK};}
 `;
 
 export function createRaceHud(parent: HTMLElement = document.body): RaceHud {

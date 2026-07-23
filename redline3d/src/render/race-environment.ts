@@ -8,7 +8,7 @@
 // low via InstancedMesh + shared canvas textures + additive depthWrite:false layers.
 import * as THREE from "three";
 import type { RaceTrack } from "./race-track";
-import { toonifyWorld } from "./toon";
+import { toonifyWorld, isToonEnabled } from "./toon";
 
 export interface RaceEnvironment {
   group: THREE.Group;
@@ -96,6 +96,17 @@ export function createRaceEnvironment(track: RaceTrack): RaceEnvironment {
   const R = track.boundingRadius;
   const dummy = new THREE.Object3D();
 
+  // classic ↔ toon backdrop variants: two sibling groups flipped by the style switch (toon.ts). Both
+  // are `toonSkip` (all MeshBasic/Shader/Points — nothing for toonifyWorld to convert) and carry a
+  // `styleVariant` tag that drives their visibility. Elements shared by BOTH looks (stars, the single
+  // city ring) go on `group`. Skyline/poles/etc. cel-shade + toggle via the material registry.
+  const isToon = isToonEnabled();
+  const skyToon = new THREE.Group();
+  skyToon.userData.toonSkip = true; skyToon.userData.styleVariant = "toon"; skyToon.visible = isToon;
+  const skyClassic = new THREE.Group();
+  skyClassic.userData.toonSkip = true; skyClassic.userData.styleVariant = "classic"; skyClassic.visible = !isToon;
+  group.add(skyToon); group.add(skyClassic);
+
   const DOME_R = R + 1400;
   // ---- cartoon dusk sky dome (warm orange horizon → pink → purple → dark zenith). Vertex-colored
   // through a 4-stop ramp; kept below bloom-threshold luminance so the sky glows softly without
@@ -131,7 +142,26 @@ export function createRaceEnvironment(track: RaceTrack): RaceEnvironment {
     geo.setAttribute("color", new THREE.Float32BufferAttribute(col, 3));
     const dome = new THREE.Mesh(geo, keep(new THREE.MeshBasicMaterial({ vertexColors: true, side: THREE.BackSide, fog: false, depthWrite: false })));
     dome.position.set(cx, 0, cz);
-    group.add(dome);
+    skyToon.add(dome);
+  }
+
+  // ---- CLASSIC sky dome: deep violet horizon glow → near-black zenith (the pre-toon night void) ----
+  {
+    const geo = keep(new THREE.SphereGeometry(DOME_R, 32, 20));
+    const col = new Float32Array(geo.attributes.position.count * 3);
+    const horizon = new THREE.Color(0x241247), zenith = new THREE.Color(0x030109);
+    const p = geo.attributes.position;
+    const tmp = new THREE.Color();
+    for (let i = 0; i < p.count; i++) {
+      const ny = p.getY(i) / DOME_R;
+      const tt = Math.min(1, Math.max(0, (ny + 0.15) / 0.7));
+      tmp.copy(horizon).lerp(zenith, tt);
+      col[i * 3] = tmp.r; col[i * 3 + 1] = tmp.g; col[i * 3 + 2] = tmp.b;
+    }
+    geo.setAttribute("color", new THREE.Float32BufferAttribute(col, 3));
+    const dome = new THREE.Mesh(geo, keep(new THREE.MeshBasicMaterial({ vertexColors: true, side: THREE.BackSide, fog: false, depthWrite: false })));
+    dome.position.set(cx, 0, cz);
+    skyClassic.add(dome);
   }
 
   // deterministic PRNG for the backdrop scenery (mountains/clouds) → identical arrangement per load
@@ -156,13 +186,13 @@ export function createRaceEnvironment(track: RaceTrack): RaceEnvironment {
       keep(new THREE.CircleGeometry(SUN_R * 1.7, 48)),
       keep(new THREE.MeshBasicMaterial({ map: keep(radialSprite("rgba(255,150,70,0.5)")), transparent: true, blending: THREE.AdditiveBlending, depthWrite: false, fog: false })),
     );
-    halo.position.copy(sunPos).add(new THREE.Vector3(0, 0, -14)); halo.lookAt(cx, SUN_Y, cz); group.add(halo);
+    halo.position.copy(sunPos).add(new THREE.Vector3(0, 0, -14)); halo.lookAt(cx, SUN_Y, cz); skyToon.add(halo);
     // bold dark ink outline disc, nudged a hair further out so depth seats it behind the sun face
     const outline = new THREE.Mesh(
       keep(new THREE.CircleGeometry(SUN_R + 14, 56)),
       keep(new THREE.MeshBasicMaterial({ color: 0x0a0a12, fog: false })),
     );
-    outline.position.copy(sunPos).add(new THREE.Vector3(0, 0, -6)); outline.lookAt(cx, SUN_Y, cz); group.add(outline);
+    outline.position.copy(sunPos).add(new THREE.Vector3(0, 0, -6)); outline.lookAt(cx, SUN_Y, cz); skyToon.add(outline);
     // the striped sun face
     const sunMat = keep(new THREE.ShaderMaterial({
       fog: false,
@@ -179,7 +209,16 @@ export function createRaceEnvironment(track: RaceTrack): RaceEnvironment {
         }`,
     }));
     const sun = new THREE.Mesh(keep(new THREE.CircleGeometry(SUN_R, 56)), sunMat);
-    sun.position.copy(sunPos); sun.lookAt(cx, SUN_Y, cz); group.add(sun);
+    sun.position.copy(sunPos); sun.lookAt(cx, SUN_Y, cz); skyToon.add(sun);
+  }
+
+  // ---- CLASSIC moon disc low on one side + soft halo (the pre-toon night light) ----
+  {
+    const mx = cx - (R + 900), my = 220, mz = cz + (R + 500);
+    const halo = new THREE.Mesh(keep(new THREE.CircleGeometry(150, 40)), keep(new THREE.MeshBasicMaterial({ map: keep(radialSprite("rgba(180,200,255,0.5)")), transparent: true, blending: THREE.AdditiveBlending, depthWrite: false, fog: false })));
+    halo.position.set(mx, my, mz); halo.lookAt(cx, my, cz); skyClassic.add(halo);
+    const moon = new THREE.Mesh(keep(new THREE.CircleGeometry(70, 48)), keep(new THREE.MeshBasicMaterial({ color: 0xdfe6ff, fog: false })));
+    moon.position.set(mx, my, mz); moon.lookAt(cx, my, cz); skyClassic.add(moon);
   }
 
   // ---- parallax mountain rings: three depth layers of low-poly silhouette cones ringing the horizon.
@@ -203,7 +242,7 @@ export function createRaceEnvironment(track: RaceTrack): RaceEnvironment {
         m.scale.set(rad, h, rad);
         m.position.set(cx + Math.cos(a) * rr, h / 2 - 6, cz + Math.sin(a) * rr);
         m.rotation.y = rand() * Math.PI;
-        group.add(m);
+        skyToon.add(m);
       }
     }
   }
@@ -218,7 +257,7 @@ export function createRaceEnvironment(track: RaceTrack): RaceEnvironment {
       const cloud = new THREE.Mesh(keep(new THREE.PlaneGeometry(w, h)), cloudMat);
       cloud.position.set(cx + Math.cos(a) * rr, 360 + rand() * 260, cz + Math.sin(a) * rr);
       cloud.lookAt(cx, cloud.position.y, cz);
-      group.add(cloud);
+      skyToon.add(cloud);
     }
   }
 

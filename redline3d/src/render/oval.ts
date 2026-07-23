@@ -1,6 +1,6 @@
 import * as THREE from "three";
 import { TRACK, LEN, sample, elevationAt, progress } from "../core/track";
-import { toonifyWorld, inkScale } from "./toon";
+import { toonifyWorld, inkScale, isToonEnabled } from "./toon";
 
 // Highway oval v2 (spec 2026-07-02): a 3-lane-per-carriageway divided highway on
 // the 3× track. The road follows elevationAt(s) — a rolling synthwave causeway
@@ -163,32 +163,45 @@ export function createOval(): Oval {
   const EBAND = 0.5 + 0.9 * INK;         // chunky colored edge/median band
   const ERIM = 0.45 * INK;               // dark ink rim on the road side of each band
   const inkRimMat = track(new THREE.MeshBasicMaterial({ color: OVAL_INK }));
+  // style toggle: the widened bands/rims + fat dashes are the TOON variant; a thin-neon-line set is the
+  // hidden CLASSIC variant. `tagVariant` tags + sets initial visibility (flipped later by toon.ts).
+  const isToon = isToonEnabled();
+  const addTagged = (mesh: THREE.Mesh, v: "toon" | "classic"): void => {
+    mesh.userData.styleVariant = v; mesh.visible = v === "toon" ? isToon : !isToon; group.add(mesh);
+  };
 
-  // raised median + its amber edge bands (the hard barrier down the middle)
+  // raised median (shared by both looks) + its amber edge lines (TOON band+rim / CLASSIC thin line)
   const medianMat = track(new THREE.MeshStandardMaterial({ color: 0x1a1133, emissive: 0xffb02e, emissiveIntensity: 0.12 }));
   const median = new THREE.Mesh(track(ribbonGeometry(-MEDIAN_HALF, MEDIAN_HALF, 0.22)), medianMat);
   group.add(median);
   const amberMat = track(new THREE.MeshBasicMaterial({ color: 0xffb02e }));
-  group.add(new THREE.Mesh(track(ribbonGeometry(-MEDIAN_HALF - EBAND, -MEDIAN_HALF, 0.24)), amberMat));
-  group.add(new THREE.Mesh(track(ribbonGeometry(MEDIAN_HALF, MEDIAN_HALF + EBAND, 0.24)), amberMat));
-  group.add(new THREE.Mesh(track(ribbonGeometry(-MEDIAN_HALF - EBAND - ERIM, -MEDIAN_HALF - EBAND, 0.245)), inkRimMat));
-  group.add(new THREE.Mesh(track(ribbonGeometry(MEDIAN_HALF + EBAND, MEDIAN_HALF + EBAND + ERIM, 0.245)), inkRimMat));
+  addTagged(new THREE.Mesh(track(ribbonGeometry(-MEDIAN_HALF - EBAND, -MEDIAN_HALF, 0.24)), amberMat), "toon");
+  addTagged(new THREE.Mesh(track(ribbonGeometry(MEDIAN_HALF, MEDIAN_HALF + EBAND, 0.24)), amberMat), "toon");
+  addTagged(new THREE.Mesh(track(ribbonGeometry(-MEDIAN_HALF - EBAND - ERIM, -MEDIAN_HALF - EBAND, 0.245)), inkRimMat), "toon");
+  addTagged(new THREE.Mesh(track(ribbonGeometry(MEDIAN_HALF + EBAND, MEDIAN_HALF + EBAND + ERIM, 0.245)), inkRimMat), "toon");
+  addTagged(new THREE.Mesh(track(ribbonGeometry(-MEDIAN_HALF - 0.35, -MEDIAN_HALF, 0.24)), amberMat), "classic");
+  addTagged(new THREE.Mesh(track(ribbonGeometry(MEDIAN_HALF, MEDIAN_HALF + 0.35, 0.24)), amberMat), "classic");
 
-  // outer edge bands (cyan) + dark ink rim on the road side, both carriageways
+  // outer edge lines (cyan): TOON band+rim / CLASSIC thin line, both carriageways
   const cyanMat = track(new THREE.MeshBasicMaterial({ color: 0x2de2e6 }));
-  group.add(new THREE.Mesh(track(ribbonGeometry(EDGE - EBAND, EDGE, 0.03)), cyanMat));
-  group.add(new THREE.Mesh(track(ribbonGeometry(-EDGE, -EDGE + EBAND, 0.03)), cyanMat));
-  group.add(new THREE.Mesh(track(ribbonGeometry(EDGE - EBAND - ERIM, EDGE - EBAND, 0.035)), inkRimMat));
-  group.add(new THREE.Mesh(track(ribbonGeometry(-EDGE + EBAND, -EDGE + EBAND + ERIM, 0.035)), inkRimMat));
-  console.info(`[ink] oval: INK×${INK.toFixed(2)} — edge/median band ${EBAND.toFixed(2)}+rim ${ERIM.toFixed(2)}`);
+  addTagged(new THREE.Mesh(track(ribbonGeometry(EDGE - EBAND, EDGE, 0.03)), cyanMat), "toon");
+  addTagged(new THREE.Mesh(track(ribbonGeometry(-EDGE, -EDGE + EBAND, 0.03)), cyanMat), "toon");
+  addTagged(new THREE.Mesh(track(ribbonGeometry(EDGE - EBAND - ERIM, EDGE - EBAND, 0.035)), inkRimMat), "toon");
+  addTagged(new THREE.Mesh(track(ribbonGeometry(-EDGE + EBAND, -EDGE + EBAND + ERIM, 0.035)), inkRimMat), "toon");
+  addTagged(new THREE.Mesh(track(ribbonGeometry(EDGE - 0.35, EDGE, 0.03)), cyanMat), "classic");
+  addTagged(new THREE.Mesh(track(ribbonGeometry(-EDGE, -EDGE + 0.35, 0.03)), cyanMat), "classic");
+  console.info(`[ink] oval: INK×${INK.toFixed(2)} — edge/median band ${EBAND.toFixed(2)}+rim ${ERIM.toFixed(2)} (toon) vs 0.35 line (classic)`);
 
-  // dashed lane dividers: LANES lanes per carriageway → LANES−1 dash rings per
-  // side at lat ±(MEDIAN_HALF + k·LANE_W), riding the road elevation
+  // dashed lane dividers: LANES lanes per carriageway → LANES−1 dash rings per side, riding the road
+  // elevation. TOON = fat dashes / CLASSIC = thin dashes; one transform loop fills both instanced meshes.
   const dashMat = track(new THREE.MeshBasicMaterial({ color: 0x9ad7ff }));
-  const dashGeo = track(new THREE.PlaneGeometry(0.35 + 0.7 * INK, 3.4)); // fat cartoon lane dashes
+  const dashGeoToon = track(new THREE.PlaneGeometry(0.35 + 0.7 * INK, 3.4));   // fat cartoon lane dashes
+  const dashGeoClassic = track(new THREE.PlaneGeometry(0.35, 3));               // thin classic lane dashes
   const laneRings = TRACK.LANES - 1;
   const dashCount = Math.floor(LEN / 9);
-  const dashes = track(new THREE.InstancedMesh(dashGeo, dashMat, dashCount * 2 * laneRings));
+  const nDash = dashCount * 2 * laneRings;
+  const dashesToon = track(new THREE.InstancedMesh(dashGeoToon, dashMat, nDash));
+  const dashesClassic = track(new THREE.InstancedMesh(dashGeoClassic, dashMat, nDash));
   const m4 = new THREE.Matrix4(), q = new THREE.Quaternion(), up = new THREE.Vector3(0, 1, 0);
   const flatQ = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(1, 0, 0), -Math.PI / 2);
   const one = new THREE.Vector3(1, 1, 1);
@@ -204,11 +217,12 @@ export function createOval(): Oval {
         // plane lies flat (rotated −90° around X), long axis along the travel direction
         q.setFromAxisAngle(up, -c.heading).multiply(flatQ);
         m4.compose(new THREE.Vector3(c.x + rx * laneLat * side, ey + 0.03, c.z + rz * laneLat * side), q, one);
-        dashes.setMatrixAt(di++, m4);
+        dashesToon.setMatrixAt(di, m4); dashesClassic.setMatrixAt(di, m4); di++;
       }
     }
   }
-  group.add(dashes);
+  addTagged(dashesToon, "toon");
+  addTagged(dashesClassic, "classic");
 
   // outer barrier: low glowing wall segments (instanced), like the lobby's perimeter
   const wallMat = track(new THREE.MeshStandardMaterial({ color: 0x180a30, emissive: 0xff4dd2, emissiveIntensity: 0.55 }));

@@ -6,7 +6,7 @@
 // world-distance lookups, so car speed is real world speed everywhere. Nothing here touches
 // the game; it is imported only by the dev harness.
 import * as THREE from "three";
-import { toonifyWorld, inkScale } from "./toon";
+import { toonifyWorld, inkScale, isToonEnabled } from "./toon";
 
 export interface TrackPose { x: number; z: number; rot: number; tx: number; tz: number }
 export interface RaceTrack {
@@ -109,6 +109,12 @@ export function createRaceTrack(): RaceTrack {
   const RAIL_H = 0.5 + 0.7 * INK;        // thicker barrier top rail
   const RAIL_CAP = 0.3 * INK;            // dark ink cap on top of the rail
   console.info(`[ink] race-track: INK×${INK.toFixed(2)} — edge band ${EDGE_BAND.toFixed(2)}+rim ${EDGE_RIM.toFixed(2)}, curb ±${CURB_HW.toFixed(2)}+rim ${CURB_RIM.toFixed(2)}, dash ±${DASH_HW.toFixed(2)}, rail ${RAIL_H.toFixed(2)}+cap ${RAIL_CAP.toFixed(2)}`);
+  // style toggle: road edges + centre dashes have a hidden CLASSIC (thin neon strip) variant; tag by
+  // style and let toon.ts flip visibility. `tagVariant` tags a mesh + sets its initial visibility.
+  const isToon = isToonEnabled();
+  const tagVariant = <T extends THREE.Object3D>(o: T, v: "toon" | "classic"): T => {
+    o.userData.styleVariant = v; o.visible = v === "toon" ? isToon : !isToon; return o;
+  };
 
   const pts = RAW.map(([x, z]) => new THREE.Vector3(x * SCALE, 0, z * SCALE));
   // "centripetal" Catmull-Rom is guaranteed cusp/self-intersection free — uniform ("catmullrom")
@@ -199,36 +205,43 @@ export function createRaceTrack(): RaceTrack {
   // negative per layer) so draw order is offset-driven, not depth-precision-driven → no z-fight.
   const roadMat = keep(new THREE.MeshBasicMaterial({ color: 0x1a1a28, side: THREE.DoubleSide, polygonOffset: true, polygonOffsetFactor: -1, polygonOffsetUnits: -1 }));
   solidRibbon(HALF_W, -HALF_W, 0.10, roadMat, "road");
-  // chunky cartoon road-edge bands (Mario-Kart borders): a fat colored band on each rim + a near-black
-  // ink rim on its road side so the edge reads as a bold outlined curb, not a thin neon line.
+  // TOON road-edge bands (Mario-Kart borders): a fat colored band on each rim + a near-black ink rim
+  // on its road side so the edge reads as a bold outlined curb. Tagged 'toon' (hidden in classic mode).
   const inkRimMat = keep(new THREE.MeshBasicMaterial({ color: INK_DARK, side: THREE.DoubleSide, polygonOffset: true, polygonOffsetFactor: -6, polygonOffsetUnits: -6 }));
   const bandMat = (hex: number) => keep(new THREE.MeshBasicMaterial({ color: hex, side: THREE.DoubleSide, polygonOffset: true, polygonOffsetFactor: -4, polygonOffsetUnits: -4 }));
-  solidRibbon(HALF_W, HALF_W - EDGE_BAND, 0.55, bandMat(EDGE));                          // left colored band
-  solidRibbon(HALF_W - EDGE_BAND, HALF_W - EDGE_BAND - EDGE_RIM, 0.56, inkRimMat);        // left dark ink rim
-  solidRibbon(-(HALF_W - EDGE_BAND), -HALF_W, 0.55, bandMat(EDGE2));                       // right colored band
-  solidRibbon(-(HALF_W - EDGE_BAND - EDGE_RIM), -(HALF_W - EDGE_BAND), 0.56, inkRimMat);   // right dark ink rim
+  tagVariant(solidRibbon(HALF_W, HALF_W - EDGE_BAND, 0.55, bandMat(EDGE)), "toon");                        // left colored band
+  tagVariant(solidRibbon(HALF_W - EDGE_BAND, HALF_W - EDGE_BAND - EDGE_RIM, 0.56, inkRimMat), "toon");      // left dark ink rim
+  tagVariant(solidRibbon(-(HALF_W - EDGE_BAND), -HALF_W, 0.55, bandMat(EDGE2)), "toon");                    // right colored band
+  tagVariant(solidRibbon(-(HALF_W - EDGE_BAND - EDGE_RIM), -(HALF_W - EDGE_BAND), 0.56, inkRimMat), "toon"); // right dark ink rim
+  // CLASSIC thin neon edge strips (0.8u), tagged 'classic' (hidden in toon mode) — the pre-toon look.
+  const edgeMat = (hex: number) => keep(new THREE.MeshBasicMaterial({ color: hex, side: THREE.DoubleSide, polygonOffset: true, polygonOffsetFactor: -4, polygonOffsetUnits: -4 }));
+  tagVariant(solidRibbon(HALF_W, HALF_W - 0.8, 0.55, edgeMat(EDGE)), "classic");
+  tagVariant(solidRibbon(-(HALF_W - 0.8), -HALF_W, 0.55, edgeMat(EDGE2)), "classic");
 
-  // fat cartoon centre dashes — chunky opaque cream blocks on alternate segments (fewer, fatter)
-  {
-    const pos: number[] = [];
-    const idx: number[] = [];
+  // centre dashes — TOON = fat opaque cream blocks (fewer, fatter); CLASSIC = thin translucent strip.
+  // Both built and tagged by style; `makeDashes` merges one variant into a single mesh.
+  const makeDashes = (hw: number, dashLen: number, mat: THREE.Material): THREE.Mesh => {
+    const pos: number[] = [], idx: number[] = [];
     let v = 0;
-    const DASH = 5;
     for (let i = 0; i < N; i++) {
-      if (Math.floor(i / DASH) % 2 === 1) continue;
-      const [ax, az] = edgeAt(i / N, DASH_HW);
-      const [bx, bz] = edgeAt(i / N, -DASH_HW);
-      const [cx, cz] = edgeAt((i + 1) / N, DASH_HW);
-      const [dx, dz] = edgeAt((i + 1) / N, -DASH_HW);
-      pos.push(ax, 0.25, az, bx, 0.25, bz, cx, 0.25, cz, dx, 0.25, dz);
+      if (Math.floor(i / dashLen) % 2 === 1) continue;
+      const [ax, az] = edgeAt(i / N, hw);
+      const [bx, bz] = edgeAt(i / N, -hw);
+      const [cx2, cz2] = edgeAt((i + 1) / N, hw);
+      const [dx, dz] = edgeAt((i + 1) / N, -hw);
+      pos.push(ax, 0.25, az, bx, 0.25, bz, cx2, 0.25, cz2, dx, 0.25, dz);
       idx.push(v, v + 2, v + 1, v + 1, v + 2, v + 3); // upward-facing winding (verts: 0,2 left / 1,3 right)
       v += 4;
     }
     const g = keep(new THREE.BufferGeometry());
     g.setAttribute("position", new THREE.Float32BufferAttribute(pos, 3));
     g.setIndex(idx);
-    group.add(new THREE.Mesh(g, keep(new THREE.MeshBasicMaterial({ color: 0xffe9a8, side: THREE.DoubleSide, polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -2 }))));
-  }
+    const m = new THREE.Mesh(g, mat);
+    group.add(m);
+    return m;
+  };
+  tagVariant(makeDashes(DASH_HW, 5, keep(new THREE.MeshBasicMaterial({ color: 0xffe9a8, side: THREE.DoubleSide, polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -2 }))), "toon");
+  tagVariant(makeDashes(0.35, 4, keep(new THREE.MeshBasicMaterial({ color: 0xcfe0ff, transparent: true, opacity: 0.55, side: THREE.DoubleSide, polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -2 }))), "classic");
 
   // ---- start pose + gantry + checkered strip (curve param 0 = start/finish line) ----
   curve.getPointAt(0, _p);
