@@ -17,6 +17,7 @@ import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader.js";
 import { EffectComposer } from "three/examples/jsm/postprocessing/EffectComposer.js";
 import { RenderPass } from "three/examples/jsm/postprocessing/RenderPass.js";
 import { UnrealBloomPass } from "three/examples/jsm/postprocessing/UnrealBloomPass.js";
+import { OutputPass } from "three/examples/jsm/postprocessing/OutputPass.js";
 import { RoomEnvironment } from "three/examples/jsm/environments/RoomEnvironment.js";
 import { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
 import { carNormScale, REF_LEN } from "./render/car-scale";
@@ -140,6 +141,9 @@ const edgePass = new EdgeOutlinePass(scene, camera);
 edgePass.setSize(vw(), vh());
 edgePass.enabled = false;
 composer.addPass(edgePass);
+// OutputPass LAST — tone mapping (ACES here) + linear→sRGB, restoring the conversion the bloom pass
+// did via its MeshBasic screen-blit when it was last (else the edge pass ships a linear frame → dark).
+composer.addPass(new OutputPass());
 const applyEdge = (): void => { edgePass.enabled = isToonEnabled() && edgePassEnabled(); };
 
 const director = createRaceDirector(camera, track);

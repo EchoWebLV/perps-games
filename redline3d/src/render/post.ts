@@ -2,6 +2,7 @@ import * as THREE from "three";
 import { EffectComposer } from "three/examples/jsm/postprocessing/EffectComposer.js";
 import { RenderPass } from "three/examples/jsm/postprocessing/RenderPass.js";
 import { UnrealBloomPass } from "three/examples/jsm/postprocessing/UnrealBloomPass.js";
+import { OutputPass } from "three/examples/jsm/postprocessing/OutputPass.js";
 import { EdgeOutlinePass } from "./edge-outline-pass";
 
 export interface Post {
@@ -31,6 +32,11 @@ export function createPost(renderer: THREE.WebGLRenderer, scene: THREE.Scene, ca
   edge.setSize(window.innerWidth, window.innerHeight);
   edge.enabled = false;
   composer.addPass(edge);
+  // OutputPass LAST — applies tone mapping + linear→sRGB, the conversion the bloom pass used to do via
+  // its MeshBasic screen-blit when it was last. Without this, the edge pass (a raw ShaderMaterial) would
+  // ship the linear buffer to the sRGB canvas → the whole frame ~2-4x too dark. Correct whether the edge
+  // pass is enabled or not (bloom now always renders into the buffer, never straight to screen).
+  composer.addPass(new OutputPass());
   return {
     render: () => composer.render(),
     setSize: (w, h) => { composer.setSize(w, h); bloom.setSize(w * bloomScale, h * bloomScale); edge.setSize(w, h); },
