@@ -1,6 +1,6 @@
 import * as THREE from "three";
 import { TRACK, LEN, sample, elevationAt, progress } from "../core/track";
-import { toonifyWorld } from "./toon";
+import { toonifyWorld, inkScale } from "./toon";
 
 // Highway oval v2 (spec 2026-07-02): a 3-lane-per-carriageway divided highway on
 // the 3× track. The road follows elevationAt(s) — a rolling synthwave causeway
@@ -156,23 +156,36 @@ export function createOval(): Oval {
   const roadMat = track(new THREE.MeshStandardMaterial({ color: 0x0d0d1f, metalness: 0.3, roughness: 0.7 }));
   group.add(new THREE.Mesh(track(ribbonGeometry(-EDGE, EDGE, 0)), roadMat));
 
-  // raised median + its amber edge lines (the hard barrier down the middle)
+  // ── shared INK weights (cartoon Mario-Kart road lines) keyed off the global outline scale so the
+  // highway's chunky ink stays proportional to the car/world cel outlines. Colored band + dark rim. ──
+  const INK = inkScale();                 // 0.7 default
+  const OVAL_INK = 0x0a0a12;              // near-black ink rim
+  const EBAND = 0.5 + 0.9 * INK;         // chunky colored edge/median band
+  const ERIM = 0.45 * INK;               // dark ink rim on the road side of each band
+  const inkRimMat = track(new THREE.MeshBasicMaterial({ color: OVAL_INK }));
+
+  // raised median + its amber edge bands (the hard barrier down the middle)
   const medianMat = track(new THREE.MeshStandardMaterial({ color: 0x1a1133, emissive: 0xffb02e, emissiveIntensity: 0.12 }));
   const median = new THREE.Mesh(track(ribbonGeometry(-MEDIAN_HALF, MEDIAN_HALF, 0.22)), medianMat);
   group.add(median);
   const amberMat = track(new THREE.MeshBasicMaterial({ color: 0xffb02e }));
-  group.add(new THREE.Mesh(track(ribbonGeometry(-MEDIAN_HALF - 0.35, -MEDIAN_HALF, 0.24)), amberMat));
-  group.add(new THREE.Mesh(track(ribbonGeometry(MEDIAN_HALF, MEDIAN_HALF + 0.35, 0.24)), amberMat));
+  group.add(new THREE.Mesh(track(ribbonGeometry(-MEDIAN_HALF - EBAND, -MEDIAN_HALF, 0.24)), amberMat));
+  group.add(new THREE.Mesh(track(ribbonGeometry(MEDIAN_HALF, MEDIAN_HALF + EBAND, 0.24)), amberMat));
+  group.add(new THREE.Mesh(track(ribbonGeometry(-MEDIAN_HALF - EBAND - ERIM, -MEDIAN_HALF - EBAND, 0.245)), inkRimMat));
+  group.add(new THREE.Mesh(track(ribbonGeometry(MEDIAN_HALF + EBAND, MEDIAN_HALF + EBAND + ERIM, 0.245)), inkRimMat));
 
-  // outer edge lines (cyan) on both sides
+  // outer edge bands (cyan) + dark ink rim on the road side, both carriageways
   const cyanMat = track(new THREE.MeshBasicMaterial({ color: 0x2de2e6 }));
-  group.add(new THREE.Mesh(track(ribbonGeometry(EDGE - 0.35, EDGE, 0.03)), cyanMat));
-  group.add(new THREE.Mesh(track(ribbonGeometry(-EDGE, -EDGE + 0.35, 0.03)), cyanMat));
+  group.add(new THREE.Mesh(track(ribbonGeometry(EDGE - EBAND, EDGE, 0.03)), cyanMat));
+  group.add(new THREE.Mesh(track(ribbonGeometry(-EDGE, -EDGE + EBAND, 0.03)), cyanMat));
+  group.add(new THREE.Mesh(track(ribbonGeometry(EDGE - EBAND - ERIM, EDGE - EBAND, 0.035)), inkRimMat));
+  group.add(new THREE.Mesh(track(ribbonGeometry(-EDGE + EBAND, -EDGE + EBAND + ERIM, 0.035)), inkRimMat));
+  console.info(`[ink] oval: INK×${INK.toFixed(2)} — edge/median band ${EBAND.toFixed(2)}+rim ${ERIM.toFixed(2)}`);
 
   // dashed lane dividers: LANES lanes per carriageway → LANES−1 dash rings per
   // side at lat ±(MEDIAN_HALF + k·LANE_W), riding the road elevation
   const dashMat = track(new THREE.MeshBasicMaterial({ color: 0x9ad7ff }));
-  const dashGeo = track(new THREE.PlaneGeometry(0.35, 3));
+  const dashGeo = track(new THREE.PlaneGeometry(0.35 + 0.7 * INK, 3.4)); // fat cartoon lane dashes
   const laneRings = TRACK.LANES - 1;
   const dashCount = Math.floor(LEN / 9);
   const dashes = track(new THREE.InstancedMesh(dashGeo, dashMat, dashCount * 2 * laneRings));

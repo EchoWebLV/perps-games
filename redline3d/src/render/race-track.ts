@@ -6,7 +6,7 @@
 // world-distance lookups, so car speed is real world speed everywhere. Nothing here touches
 // the game; it is imported only by the dev harness.
 import * as THREE from "three";
-import { toonifyWorld } from "./toon";
+import { toonifyWorld, inkScale } from "./toon";
 
 export interface TrackPose { x: number; z: number; rot: number; tx: number; tz: number }
 export interface RaceTrack {
@@ -33,11 +33,13 @@ export interface RaceTrack {
 
 // ---- canvas-texture helpers (repeated detail baked into textures → few draw calls) ----
 // one sponsor board on its own canvas (used by discrete board planes — no tiling, no shared UVs)
+const INK_HEX = "#07060d"; // near-black cartoon ink for sign/board frames (matches toon outline)
 function makeBoardTexture(label: string, color: string): HTMLCanvasElement {
   const c = document.createElement("canvas"); c.width = 512; c.height = 128;
   const g = c.getContext("2d")!;
   g.fillStyle = "#0a0713"; g.fillRect(0, 0, c.width, c.height);
-  g.strokeStyle = color; g.lineWidth = 8; g.strokeRect(10, 12, c.width - 20, c.height - 24);
+  g.strokeStyle = INK_HEX; g.lineWidth = 18; g.strokeRect(9, 9, c.width - 18, c.height - 18); // bold dark ink frame
+  g.strokeStyle = color; g.lineWidth = 8; g.strokeRect(22, 22, c.width - 44, c.height - 44);  // colored inner border
   g.fillStyle = color; g.font = "700 62px 'Chakra Petch', ui-monospace, monospace";
   g.textAlign = "center"; g.textBaseline = "middle";
   g.shadowColor = color; g.shadowBlur = 22;
@@ -48,7 +50,8 @@ function makeSignTexture(label: string, color: string): HTMLCanvasElement {
   const c = document.createElement("canvas"); c.width = 128; c.height = 128;
   const g = c.getContext("2d")!;
   g.fillStyle = "#0a0713"; g.fillRect(0, 0, 128, 128);
-  g.strokeStyle = color; g.lineWidth = 8; g.strokeRect(8, 8, 112, 112);
+  g.strokeStyle = INK_HEX; g.lineWidth = 15; g.strokeRect(7, 7, 114, 114); // bold dark ink frame
+  g.strokeStyle = color; g.lineWidth = 8; g.strokeRect(18, 18, 92, 92);    // colored inner border
   g.fillStyle = color; g.font = "700 62px 'Chakra Petch', ui-monospace, monospace";
   g.textAlign = "center"; g.textBaseline = "middle";
   g.shadowColor = color; g.shadowBlur = 16; g.fillText(label, 64, 68);
@@ -58,6 +61,7 @@ function makeBannerTexture(): HTMLCanvasElement {
   const c = document.createElement("canvas"); c.width = 1024; c.height = 96;
   const g = c.getContext("2d")!;
   g.fillStyle = "#0a0713"; g.fillRect(0, 0, c.width, c.height);
+  g.fillStyle = INK_HEX; g.fillRect(0, 0, c.width, 9); g.fillRect(0, c.height - 9, c.width, 9); // dark ink top/bottom rails
   const msg = "  OCTANE  •  PERPS RACE  •  VRF VERIFIED  ";
   g.fillStyle = "#27e7ff"; g.font = "700 54px 'Chakra Petch', ui-monospace, monospace";
   g.textAlign = "left"; g.textBaseline = "middle";
@@ -91,6 +95,20 @@ export function createRaceTrack(): RaceTrack {
   const disposables: Array<{ dispose(): void }> = [];
   const keep = <T extends { dispose(): void }>(o: T): T => { disposables.push(o); return o; };
   const animators: Array<(t: number) => void> = []; // per-frame dressing animations, driven by update()
+
+  // ── shared INK weights (Mario-Kart cartoon lines). One INK multiplier keyed off the global outline
+  // scale (0.7 default) so hand-built road ink stays proportional to the shader-puffed car/world
+  // outlines. Structure = chunky colored bands with near-black dark rims; neon glow stays an accent. ──
+  const INK = inkScale();                 // 0.7 default — coherent with car/world outline thickness
+  const INK_DARK = 0x0a0a12;              // near-black ink rim (matches toon OUTLINE_COLOR)
+  const EDGE_BAND = 2.4 * INK;            // chunky colored road-edge band width (world units)
+  const EDGE_RIM = 0.75 * INK;           // dark ink rim on the road side of each edge band
+  const CURB_HW = 1.0 + 0.3 * INK;       // curb half-width (chunkier two-tone chevrons)
+  const CURB_RIM = 0.7 * INK;            // dark ink rim on the road side of the curb
+  const DASH_HW = 0.55 + 0.35 * INK;     // fat lane-dash half-width
+  const RAIL_H = 0.5 + 0.7 * INK;        // thicker barrier top rail
+  const RAIL_CAP = 0.3 * INK;            // dark ink cap on top of the rail
+  console.info(`[ink] race-track: INK×${INK.toFixed(2)} — edge band ${EDGE_BAND.toFixed(2)}+rim ${EDGE_RIM.toFixed(2)}, curb ±${CURB_HW.toFixed(2)}+rim ${CURB_RIM.toFixed(2)}, dash ±${DASH_HW.toFixed(2)}, rail ${RAIL_H.toFixed(2)}+cap ${RAIL_CAP.toFixed(2)}`);
 
   const pts = RAW.map(([x, z]) => new THREE.Vector3(x * SCALE, 0, z * SCALE));
   // "centripetal" Catmull-Rom is guaranteed cusp/self-intersection free — uniform ("catmullrom")
@@ -181,21 +199,27 @@ export function createRaceTrack(): RaceTrack {
   // negative per layer) so draw order is offset-driven, not depth-precision-driven → no z-fight.
   const roadMat = keep(new THREE.MeshBasicMaterial({ color: 0x1a1a28, side: THREE.DoubleSide, polygonOffset: true, polygonOffsetFactor: -1, polygonOffsetUnits: -1 }));
   solidRibbon(HALF_W, -HALF_W, 0.10, roadMat, "road");
-  solidRibbon(HALF_W, HALF_W - 0.8, 0.55, keep(new THREE.MeshBasicMaterial({ color: EDGE, side: THREE.DoubleSide, polygonOffset: true, polygonOffsetFactor: -4, polygonOffsetUnits: -4 })));
-  solidRibbon(-(HALF_W - 0.8), -HALF_W, 0.55, keep(new THREE.MeshBasicMaterial({ color: EDGE2, side: THREE.DoubleSide, polygonOffset: true, polygonOffsetFactor: -4, polygonOffsetUnits: -4 })));
+  // chunky cartoon road-edge bands (Mario-Kart borders): a fat colored band on each rim + a near-black
+  // ink rim on its road side so the edge reads as a bold outlined curb, not a thin neon line.
+  const inkRimMat = keep(new THREE.MeshBasicMaterial({ color: INK_DARK, side: THREE.DoubleSide, polygonOffset: true, polygonOffsetFactor: -6, polygonOffsetUnits: -6 }));
+  const bandMat = (hex: number) => keep(new THREE.MeshBasicMaterial({ color: hex, side: THREE.DoubleSide, polygonOffset: true, polygonOffsetFactor: -4, polygonOffsetUnits: -4 }));
+  solidRibbon(HALF_W, HALF_W - EDGE_BAND, 0.55, bandMat(EDGE));                          // left colored band
+  solidRibbon(HALF_W - EDGE_BAND, HALF_W - EDGE_BAND - EDGE_RIM, 0.56, inkRimMat);        // left dark ink rim
+  solidRibbon(-(HALF_W - EDGE_BAND), -HALF_W, 0.55, bandMat(EDGE2));                       // right colored band
+  solidRibbon(-(HALF_W - EDGE_BAND - EDGE_RIM), -(HALF_W - EDGE_BAND), 0.56, inkRimMat);   // right dark ink rim
 
-  // dashed centre line — independent quads on alternate segments
+  // fat cartoon centre dashes — chunky opaque cream blocks on alternate segments (fewer, fatter)
   {
     const pos: number[] = [];
     const idx: number[] = [];
     let v = 0;
-    const DASH = 4;
+    const DASH = 5;
     for (let i = 0; i < N; i++) {
       if (Math.floor(i / DASH) % 2 === 1) continue;
-      const [ax, az] = edgeAt(i / N, 0.35);
-      const [bx, bz] = edgeAt(i / N, -0.35);
-      const [cx, cz] = edgeAt((i + 1) / N, 0.35);
-      const [dx, dz] = edgeAt((i + 1) / N, -0.35);
+      const [ax, az] = edgeAt(i / N, DASH_HW);
+      const [bx, bz] = edgeAt(i / N, -DASH_HW);
+      const [cx, cz] = edgeAt((i + 1) / N, DASH_HW);
+      const [dx, dz] = edgeAt((i + 1) / N, -DASH_HW);
       pos.push(ax, 0.25, az, bx, 0.25, bz, cx, 0.25, cz, dx, 0.25, dz);
       idx.push(v, v + 2, v + 1, v + 1, v + 2, v + 3); // upward-facing winding (verts: 0,2 left / 1,3 right)
       v += 4;
@@ -203,7 +227,7 @@ export function createRaceTrack(): RaceTrack {
     const g = keep(new THREE.BufferGeometry());
     g.setAttribute("position", new THREE.Float32BufferAttribute(pos, 3));
     g.setIndex(idx);
-    group.add(new THREE.Mesh(g, keep(new THREE.MeshBasicMaterial({ color: 0xcfe0ff, transparent: true, opacity: 0.55, side: THREE.DoubleSide, polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -2 }))));
+    group.add(new THREE.Mesh(g, keep(new THREE.MeshBasicMaterial({ color: 0xffe9a8, side: THREE.DoubleSide, polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -2 }))));
   }
 
   // ---- start pose + gantry + checkered strip (curve param 0 = start/finish line) ----
@@ -394,24 +418,28 @@ export function createRaceTrack(): RaceTrack {
     corners.sort((a, b) => a - b);
   }
 
-  // ---- racing curbs: magenta/white chevrons on the inner edge of every turn (one merged mesh) ----
+  // ---- racing curbs: chunky two-tone magenta/white chevrons + a near-black ink rim on the road side
+  // of every turn's inner edge (one merged mesh, DoubleSide so winding is free) ----
   {
     const pos: number[] = [], col: number[] = [], idx: number[] = [];
     let v = 0;
     const curbThresh = maxCurv * 0.25;
-    const magenta = [1.0, 0.30, 0.82], white = [0.92, 0.96, 1.0];
-    for (let i = 0; i < K; i++) {
-      if (curv[i] < curbThresh) continue;
-      const lat = sgn[i] * (HALF_W - 0.6); // inner (concave) edge of the turn
-      const [ax, az] = edgeAt(i / K, lat - 0.9);
-      const [bx2, bz2] = edgeAt(i / K, lat + 0.9);
-      const [cx, cz] = edgeAt((i + 1) / K, lat - 0.9);
-      const [dx, dz] = edgeAt((i + 1) / K, lat + 0.9);
-      const c = (Math.floor(i / 2) % 2 === 0) ? magenta : white;
+    const magenta = [1.0, 0.30, 0.82], white = [0.92, 0.96, 1.0], dark = [0.04, 0.04, 0.07];
+    const quad = (u0: number, u1: number, latA: number, latB: number, c: number[]) => {
+      const [ax, az] = edgeAt(u0, latA), [bx2, bz2] = edgeAt(u0, latB);
+      const [cx, cz] = edgeAt(u1, latA), [dx, dz] = edgeAt(u1, latB);
       pos.push(ax, 0.40, az, bx2, 0.40, bz2, cx, 0.40, cz, dx, 0.40, dz);
       for (let q = 0; q < 4; q++) col.push(c[0], c[1], c[2]);
       idx.push(v, v + 2, v + 1, v + 1, v + 2, v + 3);
       v += 4;
+    };
+    for (let i = 0; i < K; i++) {
+      if (curv[i] < curbThresh) continue;
+      const lat = sgn[i] * (HALF_W - 0.6);   // inner (concave) edge of the turn
+      const c = (Math.floor(i / 2) % 2 === 0) ? magenta : white;
+      quad(i / K, (i + 1) / K, lat - CURB_HW, lat + CURB_HW, c);                             // chunky two-tone curb
+      const rimOut = lat - sgn[i] * CURB_HW; // road-side edge of the curb
+      quad(i / K, (i + 1) / K, rimOut, rimOut - sgn[i] * CURB_RIM, dark);                    // dark ink rim on the road side
     }
     if (v) {
       const g = keep(new THREE.BufferGeometry());
@@ -433,18 +461,22 @@ export function createRaceTrack(): RaceTrack {
     ["SCRAPYARD", "#ffb020"], ["CRATES", "#b06bff"],
   ];
   const wallMat = keep(new THREE.MeshBasicMaterial({ color: 0x0a0713, side: THREE.DoubleSide }));
+  const railCapMat = keep(new THREE.MeshBasicMaterial({ color: INK_DARK, side: THREE.DoubleSide })); // dark ink top edge
   const buildWall = (side: 1 | -1, railColor: number) => {
-    const wp: number[] = [], wi: number[] = [], rp: number[] = [], rii: number[] = [];
+    const wp: number[] = [], wi: number[] = [], rp: number[] = [], rii: number[] = [], cp: number[] = [], ci: number[] = [];
     for (let i = 0; i <= N; i++) {
       const [x, z] = edgeAt(i / N, side * WALL_LAT);
       wp.push(x, 0.1, z, x, WALL_H, z);
-      rp.push(x, WALL_H, z, x, WALL_H + 0.5, z);
+      rp.push(x, WALL_H, z, x, WALL_H + RAIL_H, z);                       // thick colored top rail
+      cp.push(x, WALL_H + RAIL_H, z, x, WALL_H + RAIL_H + RAIL_CAP, z);   // dark ink cap above it
     }
-    for (let i = 0; i < N; i++) { const a = i * 2, b = i * 2 + 1, c = i * 2 + 2, d = i * 2 + 3; wi.push(a, c, b, b, c, d); rii.push(a, c, b, b, c, d); }
+    for (let i = 0; i < N; i++) { const a = i * 2, b = i * 2 + 1, c = i * 2 + 2, d = i * 2 + 3; wi.push(a, c, b, b, c, d); rii.push(a, c, b, b, c, d); ci.push(a, c, b, b, c, d); }
     const wg = keep(new THREE.BufferGeometry()); wg.setAttribute("position", new THREE.Float32BufferAttribute(wp, 3)); wg.setIndex(wi);
     group.add(new THREE.Mesh(wg, wallMat)); // DoubleSide dark — no text, nothing to mirror
     const rg = keep(new THREE.BufferGeometry()); rg.setAttribute("position", new THREE.Float32BufferAttribute(rp, 3)); rg.setIndex(rii);
     group.add(new THREE.Mesh(rg, keep(new THREE.MeshBasicMaterial({ color: railColor, side: THREE.DoubleSide, toneMapped: false }))));
+    const cg = keep(new THREE.BufferGeometry()); cg.setAttribute("position", new THREE.Float32BufferAttribute(cp, 3)); cg.setIndex(ci);
+    group.add(new THREE.Mesh(cg, railCapMat));
   };
   buildWall(1, EDGE); buildWall(-1, EDGE2);
 
