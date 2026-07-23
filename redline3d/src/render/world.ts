@@ -1,6 +1,6 @@
 import * as THREE from "three";
 import { type WorldTheme, type LampStyle, getTheme, loadThemeKey, saveThemeKey } from "./world-themes";
-import { toonifyWorld, unregisterToonRoot } from "./toon";
+import { toonifyWorld, unregisterToonRoot, isToonEnabled, onToonChanged } from "./toon";
 import { ROAD_GRADE_ANCHOR_Z, roadGradeOffset, roadGradeSlope } from "../core/market-road";
 import type { MarketDirection } from "../core/market-pulse";
 import { marketShockLightBoost } from "./market-shock";
@@ -566,10 +566,10 @@ export function createWorld(detail: "full" | "reduced" = "full"): World {
   // neon grid floor (displaced by the shared wave) — persistent, recoloured on setTheme()
   const gridMat = new THREE.ShaderMaterial({
     transparent: true,
-    uniforms: { uOffset: { value: 0 }, uScroll: { value: 0 }, uAmp: { value: AMP }, uGrade: { value: 0 }, uGradeAnchor: { value: GRADE_ANCHOR_LOCAL_Y }, uColor: { value: new THREE.Color("#ff39c0") }, uColor2: { value: new THREE.Color("#27e7ff") }, uShock: { value: 0 }, uShockColor: { value: shockColor.clone() } },
+    uniforms: { uOffset: { value: 0 }, uScroll: { value: 0 }, uAmp: { value: AMP }, uGrade: { value: 0 }, uGradeAnchor: { value: GRADE_ANCHOR_LOCAL_Y }, uColor: { value: new THREE.Color("#ff39c0") }, uColor2: { value: new THREE.Color("#27e7ff") }, uShock: { value: 0 }, uShockColor: { value: shockColor.clone() }, uToon: { value: 0 } },
     vertexShader: VERT.replace("varying vec2 vUv;", "varying vec2 vUv; uniform float uOffset;"),
     fragmentShader: `
-      varying vec2 vUv; uniform float uOffset; uniform vec3 uColor; uniform vec3 uColor2; uniform float uShock; uniform vec3 uShockColor;
+      varying vec2 vUv; uniform float uOffset; uniform vec3 uColor; uniform vec3 uColor2; uniform float uShock; uniform vec3 uShockColor; uniform float uToon;
       float line(float x){ float g = abs(fract(x)-0.5); return smoothstep(0.46,0.5,1.0-g*2.0); }
       void main(){
         float gx = line(vUv.x*40.0);
@@ -578,6 +578,7 @@ export function createWorld(detail: "full" | "reduced" = "full"): World {
         // hide grid lines under the road strip (grid-x ±13 -> vUv.x 0.484..0.516)
         // so they don't bleed through as extra lines in the distance
         g *= 1.0 - step(0.484, vUv.x) * step(vUv.x, 0.516);
+        g *= 1.0 - uToon * 0.45; // toon: calm the neon grid so the depth-edge ink pops instead
         vec3 c = mix(mix(uColor2, uColor, vUv.x), uShockColor, uShock * 0.72);
         float fade = smoothstep(0.0, 0.35, vUv.y);
         gl_FragColor = vec4(c, min(1.0, g * fade * (1.0 + uShock * 0.65)));
@@ -591,19 +592,22 @@ export function createWorld(detail: "full" | "reduced" = "full"): World {
   // road strip (same wave)
   const roadMat = new THREE.ShaderMaterial({
     transparent: true,
-    uniforms: { uOffset: { value: 0 }, uScroll: { value: 0 }, uAmp: { value: AMP }, uGrade: { value: 0 }, uGradeAnchor: { value: GRADE_ANCHOR_LOCAL_Y }, uEdge: { value: new THREE.Color("#ff39c0") }, uLane: { value: 0 }, uShock: { value: 0 }, uShockColor: { value: shockColor.clone() } },
+    uniforms: { uOffset: { value: 0 }, uScroll: { value: 0 }, uAmp: { value: AMP }, uGrade: { value: 0 }, uGradeAnchor: { value: GRADE_ANCHOR_LOCAL_Y }, uEdge: { value: new THREE.Color("#ff39c0") }, uLane: { value: 0 }, uShock: { value: 0 }, uShockColor: { value: shockColor.clone() }, uToon: { value: 0 } },
     vertexShader: VERT.replace("varying vec2 vUv;", "varying vec2 vUv; uniform float uOffset;"),
     fragmentShader: `
-      varying vec2 vUv; uniform float uOffset; uniform vec3 uEdge; uniform float uLane; uniform float uShock; uniform vec3 uShockColor;
+      varying vec2 vUv; uniform float uOffset; uniform vec3 uEdge; uniform float uLane; uniform float uShock; uniform vec3 uShockColor; uniform float uToon;
       void main(){
         float edge = smoothstep(0.0,0.06,vUv.x) * smoothstep(1.0,0.94,vUv.x);
         float edges = 1.0 - edge;
-        float dash = step(0.5, fract(vUv.y*90.0 + uOffset)) * step(0.46,vUv.x)*step(vUv.x,0.54);
+        // centre dashes — classic: thin white; toon: fatter, longer, cream (edge pass can't draw these)
+        float dashW = mix(0.04, 0.075, uToon);
+        float dash = step(mix(0.5, 0.38, uToon), fract(vUv.y*90.0 + uOffset)) * step(0.5-dashW, vUv.x) * step(vUv.x, 0.5+dashW);
+        vec3 dashCol = mix(vec3(0.9), vec3(1.0, 0.91, 0.66), uToon);
         vec3 road = vec3(0.06,0.07,0.12);
         // Clown Car ability: left half green (LONG), right half red (SHORT)
         vec3 lane = mix(vec3(0.06,0.62,0.30), vec3(0.74,0.09,0.17), step(0.5, vUv.x));
         road = mix(road, lane, uLane);
-        vec3 col = mix(road, uEdge, edges*0.9) + dash*vec3(0.9);
+        vec3 col = mix(road, uEdge, edges*0.9) + dash*dashCol;
         col += uShockColor * uShock * (0.35 + edges * 0.75);
         // bright divider down the centre line while the ability is on
         col += uLane * smoothstep(0.014, 0.0, abs(vUv.x - 0.5)) * vec3(1.0);
@@ -616,6 +620,11 @@ export function createWorld(detail: "full" | "reduced" = "full"): World {
   road.position.set(0, 0.05, PLANE_Z);
   group.add(road);
   const scrollMats = [gridMat, roadMat]; // shared-uniform pair, hoisted off the per-frame path
+  // cartoon road: fatter cream dashes + a calmer grid in toon mode (uToon=1); classic (uToon=0) is
+  // byte-identical. The road/mountain/building silhouette ink comes from the screen-space edge pass.
+  const applyToonRoad = (on: boolean): void => { const v = on ? 1 : 0; gridMat.uniforms.uToon.value = v; roadMat.uniforms.uToon.value = v; };
+  applyToonRoad(isToonEnabled());
+  onToonChanged(applyToonRoad);
 
   // roadside street lamps — the fixture DESIGN is per-theme (lampStyle), rebuilt on setTheme() by
   // buildLamps(); the scroll + recycle + flicker + the real point-lights below are shared by every
