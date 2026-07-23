@@ -4,7 +4,7 @@ import type { PresenceEmote } from "../core/presence";
 import { buildBuilding } from "./buildings";
 import { buildLobbyBackdrop, type LobbyBackdrop } from "./lobby-backdrop";
 import { createRemoteCars, type RemoteCarResolver } from "./remote-cars";
-import { toonifyWorld } from "./toon";
+import { toonifyWorld, isToonEnabled, onToonChanged } from "./toon";
 
 export interface RemoteCarState {
   id: string;
@@ -259,8 +259,15 @@ export function createLobby(
   const dust = new THREE.Points(dustGeo, dustMat);
   group.add(dust);
 
-  // ambient fill so the lot isn't pitch black
-  const amb = new THREE.AmbientLight(0x6a4cff, 0.5); group.add(amb);
+  // ambient fill so the lot isn't pitch black. In TOON mode the lit solids become MeshToon, which
+  // has no envMap — so the scene.environment IBL fill (environmentIntensity 0.55) is lost and the lot
+  // reads darker than classic. Ambient is flat-added (not crushed by the cel ramp), so bumping it only
+  // while toon is active restores the lost fill without touching classic; neon (MeshBasic) is unaffected.
+  const AMB_BASE = 0.5, AMB_TOON = 0.92;
+  const amb = new THREE.AmbientLight(0x6a4cff, AMB_BASE); group.add(amb);
+  const applyAmbForStyle = (on: boolean): void => { amb.intensity = on ? AMB_TOON : AMB_BASE; };
+  applyAmbForStyle(isToonEnabled());
+  onToonChanged(applyAmbForStyle);
 
   // Remote drivers are presentation-only. They are not part of lobby layout or collision state.
   const remoteCars = createRemoteCars(resolveRemoteCar);

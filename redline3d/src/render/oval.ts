@@ -1,6 +1,6 @@
 import * as THREE from "three";
 import { TRACK, LEN, sample, elevationAt, progress } from "../core/track";
-import { toonifyWorld, inkScale, isToonEnabled } from "./toon";
+import { toonifyWorld, inkScale, isToonEnabled, onToonChanged } from "./toon";
 
 // Highway oval v2 (spec 2026-07-02): a 3-lane-per-carriageway divided highway on
 // the 3× track. The road follows elevationAt(s) — a rolling synthwave causeway
@@ -295,8 +295,14 @@ export function createOval(): Oval {
     const p = new THREE.Mesh(bbPoleGeo, poleMat); p.position.set(R + EDGE + 25, 5.25, 60 + dz); group.add(p);
   }
 
-  // ambient fill (the lobby does the same)
-  group.add(new THREE.AmbientLight(0x6a4cff, 0.5));
+  // ambient fill (the lobby does the same). The highway sits in the main scene, so its solids also
+  // lost the scene.environment IBL when they became MeshToon — bump the ambient only while toon is
+  // active (flat-added, so it lifts uniformly and never touches classic or the neon accents).
+  const AMB_BASE = 0.5, AMB_TOON = 0.92;
+  const amb = new THREE.AmbientLight(0x6a4cff, AMB_BASE); group.add(amb);
+  const applyAmbForStyle = (on: boolean): void => { amb.intensity = on ? AMB_TOON : AMB_BASE; };
+  applyAmbForStyle(isToonEnabled());
+  onToonChanged(applyAmbForStyle);
 
   // ghost cars — same shape as the lobby seam, tinted by direction
   const remoteGroup = new THREE.Group(); group.add(remoteGroup);

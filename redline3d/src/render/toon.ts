@@ -119,18 +119,24 @@ if (typeof window !== "undefined") {
   (window as unknown as { __toonStyle: (on: boolean) => void }).__toonStyle = (on) => setToonEnabled(!!on);
 }
 
-// shared 4-step grey ramp (lazy singleton), nearest-filtered → hard cel bands
-let _ramp: THREE.CanvasTexture | null = null;
-function ramp(): THREE.CanvasTexture {
-  if (_ramp) return _ramp;
-  const c = document.createElement("canvas"); c.width = 4; c.height = 1;
+// 4-step grey ramps (lazy singletons), nearest-filtered → hard cel bands. `bands` are sRGB greys.
+function makeRamp(bands: string[]): THREE.CanvasTexture {
+  const c = document.createElement("canvas"); c.width = bands.length; c.height = 1;
   const g = c.getContext("2d")!;
-  ["#444444", "#888888", "#cccccc", "#ffffff"].forEach((col, i) => { g.fillStyle = col; g.fillRect(i, 0, 1, 1); });
-  _ramp = new THREE.CanvasTexture(c);
-  _ramp.minFilter = THREE.NearestFilter; _ramp.magFilter = THREE.NearestFilter;
-  _ramp.colorSpace = THREE.SRGBColorSpace;
-  return _ramp;
+  bands.forEach((col, i) => { g.fillStyle = col; g.fillRect(i, 0, 1, 1); });
+  const t = new THREE.CanvasTexture(c);
+  t.minFilter = THREE.NearestFilter; t.magFilter = THREE.NearestFilter;
+  t.colorSpace = THREE.SRGBColorSpace;
+  return t;
 }
+// CAR ramp — deep darkest band for punchy cel shading on the well-lit hero cars.
+let _ramp: THREE.CanvasTexture | null = null;
+function ramp(): THREE.CanvasTexture { return (_ramp ??= makeRamp(["#444444", "#888888", "#cccccc", "#ffffff"])); }
+// WORLD ramp — LIFTED darkest band (#6e vs #44) so dimly-lit world solids (the lobby especially)
+// don't crush into near-black. MeshToonMaterial has no envMap, so this also stands in for the
+// scene.environment IBL fill that Standard materials had and toon loses. Cars keep the deeper ramp.
+let _worldRamp: THREE.CanvasTexture | null = null;
+function worldRamp(): THREE.CanvasTexture { return (_worldRamp ??= makeRamp(["#6e6e6e", "#9a9a9a", "#cccccc", "#ffffff"])); }
 
 // average normals across coincident positions (merge-by-position) → one smooth normal per position
 // on its OWN attribute, so the inverted hull doesn't split at hard creases while the lit material
@@ -151,9 +157,9 @@ function smoothNormals(geo: THREE.BufferGeometry): Float32Array {
   return out;
 }
 
-function toonMaterial(src: THREE.Material): THREE.MeshToonMaterial {
+function toonMaterial(src: THREE.Material, gradientMap: THREE.Texture = ramp()): THREE.MeshToonMaterial {
   const s = src as THREE.MeshStandardMaterial;
-  const tm = new THREE.MeshToonMaterial({ gradientMap: ramp() });
+  const tm = new THREE.MeshToonMaterial({ gradientMap });
   if (s.map) tm.map = s.map;
   if (s.color) tm.color.copy(s.color);
   if (s.emissive) { tm.emissive.copy(s.emissive); tm.emissiveIntensity = s.emissiveIntensity ?? 1; if (s.emissiveMap) tm.emissiveMap = s.emissiveMap; }
@@ -211,7 +217,8 @@ export function toonify(root: THREE.Object3D, opts?: { outlineWidth?: number }):
   const ws = new THREE.Vector3();
   for (const mesh of meshes) {
     const orig = mesh.material;
-    const toon = Array.isArray(orig) ? orig.map(toonMaterial) : toonMaterial(orig);
+    // NB: wrap the map callback so Array.map's (element,index,array) args don't leak into gradientMap.
+    const toon = Array.isArray(orig) ? orig.map((m) => toonMaterial(m)) : toonMaterial(orig);
     registerMat(mesh, orig, toon);
     mesh.material = _toonEnabled ? toon : orig;             // classic-mode boot keeps the original material
     const scale = avgWorldScale(mesh, ws);
@@ -259,14 +266,14 @@ function convertMeshMaterials(mesh: THREE.Mesh): boolean {
   const orig = mesh.material;
   if (Array.isArray(orig)) {
     let any = false;
-    const toon = orig.map((mm) => { if (isConvertibleSolid(mm)) { any = true; return toonMaterial(mm); } return mm; });
+    const toon = orig.map((mm) => { if (isConvertibleSolid(mm)) { any = true; return toonMaterial(mm, worldRamp()); } return mm; });
     if (!any) return false;
     registerMat(mesh, orig, toon);
     mesh.material = _toonEnabled ? toon : orig;
     return true;
   }
   if (isConvertibleSolid(orig)) {
-    const toon = toonMaterial(orig);
+    const toon = toonMaterial(orig, worldRamp()); // LIFTED world ramp → dim solids don't crush to black
     registerMat(mesh, orig, toon);
     mesh.material = _toonEnabled ? toon : orig;
     return true;
