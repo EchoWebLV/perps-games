@@ -11,6 +11,7 @@
 // Outline meshes are named `__outline` and carry no `perpsWheel` userData, so wheel rigs (which look up
 // rigged wheels) are unaffected. Toon-only: no restore path.
 import * as THREE from "three";
+import { pNum, pColor } from "../config/visual-presets";
 
 const OUTLINE_COLOR = 0x0a0a12;
 const DEFAULT_OUTLINE = 0.22; // world-units of hull puff — a good compromise across camera distances
@@ -25,7 +26,7 @@ const OUTLINE_STORAGE = "toon.outlineScale";
 // Default global multiplier when the user hasn't dialed one. 0.7 (not 1.0) = a ~30% thinner default:
 // the designed base widths read too heavy at chase-cam distance, so every outline (car + world hull)
 // ships trimmed. The [ / ] dial + localStorage still let a user thicken back up to 3×.
-const DEFAULT_OUTLINE_SCALE = 0.7;
+const DEFAULT_OUTLINE_SCALE = pNum("Global", "outlineScale", 0.7);
 const clampScale = (n: number): number => (Number.isFinite(n) ? Math.min(3, Math.max(0, n)) : DEFAULT_OUTLINE_SCALE);
 function loadOutlineScale(): number {
   try {
@@ -120,7 +121,10 @@ if (typeof window !== "undefined") {
 }
 
 // 4-step grey ramps (lazy singletons), nearest-filtered → hard cel bands. `bands` are sRGB greys.
-function makeRamp(bands: string[]): THREE.CanvasTexture {
+// null in a non-DOM env (e.g. the node test runner) → toon materials get no gradientMap, which is
+// harmless there since nothing is drawn. Real browsers always build the canvas ramp.
+function makeRamp(bands: string[]): THREE.CanvasTexture | null {
+  if (typeof document === "undefined") return null;
   const c = document.createElement("canvas"); c.width = bands.length; c.height = 1;
   const g = c.getContext("2d")!;
   bands.forEach((col, i) => { g.fillStyle = col; g.fillRect(i, 0, 1, 1); });
@@ -131,11 +135,11 @@ function makeRamp(bands: string[]): THREE.CanvasTexture {
 }
 // CAR ramp — deep darkest band for punchy cel shading on the well-lit hero cars.
 let _ramp: THREE.CanvasTexture | null = null;
-function ramp(): THREE.CanvasTexture { return (_ramp ??= makeRamp(["#444444", "#888888", "#cccccc", "#ffffff"])); }
+function ramp(): THREE.CanvasTexture | null { return (_ramp ??= makeRamp(["#444444", "#888888", "#cccccc", "#ffffff"])); }
 // WORLD ramp — LIFTED darkest band (#6e vs #44) so dimly-lit world solids (the lobby especially)
 // don't crush into near-black. MeshToonMaterial has no envMap, so this also stands in for the
 // scene.environment IBL fill that Standard materials had and toon loses. Cars keep the deeper ramp.
-const _worldBands = ["#6e6e6e", "#9a9a9a", "#cccccc", "#ffffff"];
+const _worldBands = [pColor("Global", "rampFloor", "#6e6e6e"), pColor("Global", "rampBand2", "#9a9a9a"), "#cccccc", "#ffffff"];
 let _worldRamp: THREE.CanvasTexture | null = null;
 let _worldRampCanvas: HTMLCanvasElement | null = null;
 function drawRampCanvas(canvas: HTMLCanvasElement, bands: string[]): void {
@@ -143,8 +147,9 @@ function drawRampCanvas(canvas: HTMLCanvasElement, bands: string[]): void {
   const g = canvas.getContext("2d")!;
   bands.forEach((col, i) => { g.fillStyle = col; g.fillRect(i, 0, 1, 1); });
 }
-function worldRamp(): THREE.CanvasTexture {
+function worldRamp(): THREE.CanvasTexture | null {
   if (_worldRamp) return _worldRamp;
+  if (typeof document === "undefined") return null;
   _worldRampCanvas = document.createElement("canvas");
   drawRampCanvas(_worldRampCanvas, _worldBands);
   _worldRamp = new THREE.CanvasTexture(_worldRampCanvas);
@@ -153,10 +158,11 @@ function worldRamp(): THREE.CanvasTexture {
   return _worldRamp;
 }
 /** DEV Light-Lab hooks: read/rewrite the shared world cel ramp's dark bands live (redraws the shared
- *  texture in place → every world toon material updates next frame). i=0 darkest floor, i=1 2nd band. */
-export function getWorldRampBand(i: number): number { return parseInt(_worldBands[i].slice(1), 16); }
-export function setWorldRampBand(i: number, hex: number): void {
-  _worldBands[i] = "#" + (hex & 0xffffff).toString(16).padStart(6, "0");
+ *  texture in place → every world toon material updates next frame). i=0 darkest floor, i=1 2nd band.
+ *  Bands are "#rrggbb" hex strings (matching the config file + the Light Lab colour controls). */
+export function getWorldRampBand(i: number): string { return _worldBands[i]; }
+export function setWorldRampBand(i: number, hex: string): void {
+  _worldBands[i] = hex;
   worldRamp();
   if (_worldRamp && _worldRampCanvas) { drawRampCanvas(_worldRampCanvas, _worldBands); _worldRamp.needsUpdate = true; }
 }
@@ -180,7 +186,7 @@ function smoothNormals(geo: THREE.BufferGeometry): Float32Array {
   return out;
 }
 
-function toonMaterial(src: THREE.Material, gradientMap: THREE.Texture = ramp()): THREE.MeshToonMaterial {
+function toonMaterial(src: THREE.Material, gradientMap: THREE.Texture | null = ramp()): THREE.MeshToonMaterial {
   const s = src as THREE.MeshStandardMaterial;
   const tm = new THREE.MeshToonMaterial({ gradientMap });
   if (s.map) tm.map = s.map;

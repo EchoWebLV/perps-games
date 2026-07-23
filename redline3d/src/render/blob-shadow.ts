@@ -9,8 +9,11 @@ import * as THREE from "three";
 // pass also excludes car groups, so it never gets an ink line.
 
 let _tex: THREE.CanvasTexture | null = null;
-function shadowTex(): THREE.CanvasTexture {
+// null in a non-DOM env (e.g. the node test runner) — the blob mesh then renders map-less, which is
+// harmless since those environments never draw. Real browsers always get the gradient texture.
+function shadowTex(): THREE.CanvasTexture | null {
   if (_tex) return _tex;
+  if (typeof document === "undefined") return null;
   const c = document.createElement("canvas"); c.width = c.height = 64;
   const g = c.getContext("2d")!;
   const grd = g.createRadialGradient(32, 32, 0, 32, 32, 32);
@@ -31,6 +34,7 @@ export function makeBlobShadow(width = 6, length = 10, opacity = 0.85): THREE.Me
     shadowGeo(),
     new THREE.MeshBasicMaterial({ map: shadowTex(), transparent: true, depthWrite: false, opacity, fog: false }),
   );
+  // (map is null only in non-DOM test envs)
   m.rotation.x = -Math.PI / 2;   // flat on the ground (plane's local +Y → world +Z = length)
   m.position.y = 0.05;           // just above the road so it never z-fights the surface
   m.scale.set(width, length, 1);

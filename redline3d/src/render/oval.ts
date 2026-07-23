@@ -2,6 +2,7 @@ import * as THREE from "three";
 import { TRACK, LEN, sample, elevationAt, progress } from "../core/track";
 import { toonifyWorld, inkScale, isToonEnabled, onToonChanged } from "./toon";
 import { registerLightLab } from "../ui/light-lab";
+import { pNum, pColor } from "../config/visual-presets";
 
 // Highway oval v2 (spec 2026-07-02): a 3-lane-per-carriageway divided highway on
 // the 3× track. The road follows elevationAt(s) — a rolling synthwave causeway
@@ -299,14 +300,14 @@ export function createOval(): Oval {
   // ambient fill (the lobby does the same). The highway sits in the main scene, so its solids also
   // lost the scene.environment IBL when they became MeshToon — bump the ambient only while toon is
   // active (flat-added, so it lifts uniformly and never touches classic or the neon accents).
-  const AMB_BASE = 0.5, AMB_TOON = 0.92;
-  const amb = new THREE.AmbientLight(0x6a4cff, AMB_BASE); group.add(amb);
+  const AMB_BASE = 0.5, AMB_TOON = pNum("highway", "ambient", 0.92);
+  const amb = new THREE.AmbientLight(pColor("highway", "ambientColor", "#6a4cff"), AMB_BASE); group.add(amb);
   const applyAmbForStyle = (on: boolean): void => { amb.intensity = on ? AMB_TOON : AMB_BASE; };
   applyAmbForStyle(isToonEnabled());
   onToonChanged(applyAmbForStyle);
   registerLightLab("highway", { controls: [
     { key: "ambient", label: "ambient", kind: "num", min: 0, max: 3, step: 0.01, get: () => amb.intensity, set: (v) => { amb.intensity = v; } },
-    { key: "ambientColor", label: "ambient color", kind: "color", get: () => amb.color.getHex(), set: (v) => amb.color.setHex(v) },
+    { key: "ambientColor", label: "ambient color", kind: "color", get: () => "#" + amb.color.getHexString(), set: (v) => amb.color.set(v) },
   ] });
 
   // ghost cars — same shape as the lobby seam, tinted by direction

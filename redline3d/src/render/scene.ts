@@ -1,5 +1,6 @@
 import * as THREE from "three";
 import { RoomEnvironment } from "three/examples/jsm/environments/RoomEnvironment.js";
+import { pNum, pColor } from "../config/visual-presets";
 
 export interface SceneCtx {
   renderer: THREE.WebGLRenderer;
@@ -19,15 +20,15 @@ export function createScene(canvas: HTMLCanvasElement): SceneCtx {
 
   const scene = new THREE.Scene();
   scene.background = new THREE.Color("#05030d");
-  scene.fog = new THREE.Fog("#150a26", 60, 420);
+  scene.fog = new THREE.Fog(pColor("perps-road", "fogColor", "#150a26"), pNum("perps-road", "fogNear", 60), pNum("perps-road", "fogFar", 420));
 
   const camera = new THREE.PerspectiveCamera(70, window.innerWidth / window.innerHeight, 0.1, 2000);
   camera.position.set(0, 9, 17);
   camera.lookAt(0, 1.4, -34);
 
-  const ambient = new THREE.AmbientLight("#8866ff", 0.7);
+  const ambient = new THREE.AmbientLight(pColor("perps-road", "ambientColor", "#8866ff"), pNum("perps-road", "ambient", 0.7));
   scene.add(ambient);
-  const key = new THREE.DirectionalLight("#ff7ad0", 0.8);
+  const key = new THREE.DirectionalLight(pColor("perps-road", "keyColor", "#ff7ad0"), pNum("perps-road", "key", 0.8));
   key.position.set(0, 40, -10);
   scene.add(key);
 

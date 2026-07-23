@@ -1,6 +1,7 @@
 import * as THREE from "three";
 import { Pass, FullScreenQuad } from "three/examples/jsm/postprocessing/Pass.js";
 import { inkScale } from "./toon";
+import { pNum, pBool } from "../config/visual-presets";
 
 // Screen-space depth edge pass — the "full shader" toon look. After the beauty + bloom, it re-renders
 // the scene's DEPTH into a private target (real materials, so vertex-displaced roads/grids and the
@@ -17,9 +18,11 @@ import { inkScale } from "./toon";
 // `toon.edgePass` kill-switch (default ON; meant to be turned off on weak GPUs like Seeker).
 
 const EDGE_FLAG_KEY = "toon.edgePass";
-/** localStorage kill-switch, default ON. Disable to drop the full-res depth prepass (e.g. Seeker). */
+/** localStorage kill-switch; default is the config file's Global.edgePass (ON). A localStorage value
+ *  (dev sandbox) overrides it; disable to drop the full-res depth prepass (e.g. Seeker). */
 export function edgePassEnabled(): boolean {
-  try { return localStorage.getItem(EDGE_FLAG_KEY) !== "false"; } catch { return true; }
+  const def = pBool("Global", "edgePass", true);
+  try { const raw = localStorage.getItem(EDGE_FLAG_KEY); return raw == null ? def : raw !== "false"; } catch { return def; }
 }
 export function setEdgePassEnabled(on: boolean): void {
   try { localStorage.setItem(EDGE_FLAG_KEY, String(on)); } catch { /* private mode */ }
@@ -52,7 +55,7 @@ export class EdgeOutlinePass extends Pass {
     super();
     this.scene = scene;
     this.camera = camera;
-    this.baseThickness = opts.thickness ?? 1.3;
+    this.baseThickness = opts.thickness ?? pNum("Global", "edgeThickness", 1.3);
 
     const size = new THREE.Vector2(1, 1);
     const depthTexture = new THREE.DepthTexture(1, 1);
@@ -74,8 +77,8 @@ export class EdgeOutlinePass extends Pass {
         cameraFar: { value: cam.far ?? 2000 },
         uThickness: { value: this.baseThickness },
         uColor: { value: INK.clone() },
-        uDepthThresh: { value: opts.depthThreshold ?? 0.28 },
-        uNormalThresh: { value: opts.normalThreshold ?? 0.55 },
+        uDepthThresh: { value: opts.depthThreshold ?? pNum("Global", "edgeDepth", 0.28) },
+        uNormalThresh: { value: opts.normalThreshold ?? pNum("Global", "edgeNormal", 0.55) },
         uOpacity: { value: opts.opacity ?? 1.0 },
       },
       vertexShader: /* glsl */`

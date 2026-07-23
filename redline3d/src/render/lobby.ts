@@ -6,6 +6,7 @@ import { buildLobbyBackdrop, type LobbyBackdrop } from "./lobby-backdrop";
 import { createRemoteCars, type RemoteCarResolver } from "./remote-cars";
 import { toonifyWorld, isToonEnabled, onToonChanged } from "./toon";
 import { registerLightLab } from "../ui/light-lab";
+import { pNum, pColor } from "../config/visual-presets";
 
 export interface RemoteCarState {
   id: string;
@@ -264,14 +265,14 @@ export function createLobby(
   // has no envMap — so the scene.environment IBL fill (environmentIntensity 0.55) is lost and the lot
   // reads darker than classic. Ambient is flat-added (not crushed by the cel ramp), so bumping it only
   // while toon is active restores the lost fill without touching classic; neon (MeshBasic) is unaffected.
-  const AMB_BASE = 0.5, AMB_TOON = 0.92;
-  const amb = new THREE.AmbientLight(0x6a4cff, AMB_BASE); group.add(amb);
+  const AMB_BASE = 0.5, AMB_TOON = pNum("lobby", "ambient", 0.92);
+  const amb = new THREE.AmbientLight(pColor("lobby", "ambientColor", "#6a4cff"), AMB_BASE); group.add(amb);
   const applyAmbForStyle = (on: boolean): void => { amb.intensity = on ? AMB_TOON : AMB_BASE; };
   applyAmbForStyle(isToonEnabled());
   onToonChanged(applyAmbForStyle);
   registerLightLab("lobby", { controls: [
     { key: "ambient", label: "ambient", kind: "num", min: 0, max: 3, step: 0.01, get: () => amb.intensity, set: (v) => { amb.intensity = v; } },
-    { key: "ambientColor", label: "ambient color", kind: "color", get: () => amb.color.getHex(), set: (v) => amb.color.setHex(v) },
+    { key: "ambientColor", label: "ambient color", kind: "color", get: () => "#" + amb.color.getHexString(), set: (v) => amb.color.set(v) },
   ] });
 
   // Remote drivers are presentation-only. They are not part of lobby layout or collision state.

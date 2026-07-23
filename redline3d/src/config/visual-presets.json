@@ -1,0 +1,50 @@
+{
+  "Global": {
+    "outlineScale": 0.7,
+    "rampFloor": "#6e6e6e",
+    "rampBand2": "#9a9a9a",
+    "edgePass": true,
+    "edgeDepth": 0.28,
+    "edgeNormal": 0.55,
+    "edgeThickness": 1.3
+  },
+  "perps-road": {
+    "ambient": 0.7,
+    "ambientColor": "#8866ff",
+    "key": 0.8,
+    "keyColor": "#ff7ad0",
+    "fogColor": "#150a26",
+    "fogNear": 60,
+    "fogFar": 420,
+    "bloomStrength": 0.9,
+    "bloomRadius": 0.6,
+    "bloomThreshold": 0.85
+  },
+  "lobby": {
+    "ambient": 0.92,
+    "ambientColor": "#6a4cff"
+  },
+  "highway": {
+    "ambient": 0.92,
+    "ambientColor": "#6a4cff"
+  },
+  "garage": {
+    "hemisphere": 0.55,
+    "ambient": 0.35,
+    "key": 3.0,
+    "keyColor": "#fff2e0"
+  },
+  "race-track": {
+    "exposure": 1.05,
+    "hemi": 0.9,
+    "key": 1.15,
+    "keyColor": "#ffffff",
+    "rim": 0.55,
+    "bloomStrength": 0.62,
+    "bloomRadius": 0.4,
+    "bloomThreshold": 0.62,
+    "fogColor": "#3a2246",
+    "fogNear": 260,
+    "fogFar": 1300
+  }
+}

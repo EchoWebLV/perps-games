@@ -4,6 +4,7 @@ import { RenderPass } from "three/examples/jsm/postprocessing/RenderPass.js";
 import { UnrealBloomPass } from "three/examples/jsm/postprocessing/UnrealBloomPass.js";
 import { OutputPass } from "three/examples/jsm/postprocessing/OutputPass.js";
 import { EdgeOutlinePass } from "./edge-outline-pass";
+import { pNum } from "../config/visual-presets";
 
 export interface Post {
   render(): void;
@@ -25,7 +26,11 @@ export function createPost(renderer: THREE.WebGLRenderer, scene: THREE.Scene, ca
   // The scene renders at full resolution; the bloom blur chain is scaled by bloomScale —
   // 1 on the high tier (devices that earn it match desktop exactly), 0.5 on the low tier
   // (same glow, ~¼ the blurred fragments — the Mali-class win; see platform/perf.ts).
-  const bloom = new UnrealBloomPass(new THREE.Vector2(window.innerWidth * bloomScale, window.innerHeight * bloomScale), 0.9, 0.6, 0.85);
+  // main-game bloom defaults live in the perps-road preset (this is the perps-driving composer)
+  const bloom = new UnrealBloomPass(
+    new THREE.Vector2(window.innerWidth * bloomScale, window.innerHeight * bloomScale),
+    pNum("perps-road", "bloomStrength", 0.9), pNum("perps-road", "bloomRadius", 0.6), pNum("perps-road", "bloomThreshold", 0.85),
+  );
   composer.addPass(bloom);
   // toon depth-edge pass AFTER bloom → crisp ink over the bloomed beauty. Disabled by default; the
   // app enables it (toon style + kill-switch) and fills its car-exclusion list. When disabled the
