@@ -55,9 +55,13 @@ function toonMaterial(src: THREE.Material): THREE.MeshToonMaterial {
   return tm;
 }
 
-function outlineMesh(geo: THREE.BufferGeometry, localWidth: number): THREE.Mesh {
+function outlineMesh(src: THREE.Mesh, localWidth: number): THREE.Mesh {
+  const geo = src.geometry;
   if (!geo.getAttribute("aSmoothNormal")) geo.setAttribute("aSmoothNormal", new THREE.BufferAttribute(smoothNormals(geo), 3));
   const mat = new THREE.MeshBasicMaterial({ color: OUTLINE_COLOR, side: THREE.BackSide });
+  // Puff at begin_vertex (bind-pose). For a SkinnedMesh hull the later skinning_vertex chunk then
+  // transforms the already-puffed position by the bone matrices, so the puff direction is posed
+  // with the skin (LBS is linear → offset rotates into the skinned normal). One injection, both cases.
   mat.onBeforeCompile = (shader) => {
     shader.uniforms.uOutline = { value: localWidth };
     shader.vertexShader = "attribute vec3 aSmoothNormal;\nuniform float uOutline;\n" + shader.vertexShader;
@@ -66,9 +70,19 @@ function outlineMesh(geo: THREE.BufferGeometry, localWidth: number): THREE.Mesh 
       "#include <begin_vertex>\n transformed += normalize(aSmoothNormal) * uOutline;",
     );
   };
-  const m = new THREE.Mesh(geo, mat);
-  m.name = OUTLINE_NAME;
-  return m;
+  let hull: THREE.Mesh;
+  const sk = src as THREE.SkinnedMesh;
+  if (sk.isSkinnedMesh) {
+    // the DeLorean is skinned — the hull must skin too, or it renders as a bind-pose black blob
+    const s = new THREE.SkinnedMesh(geo, mat);
+    s.bindMode = sk.bindMode;
+    s.bind(sk.skeleton, sk.bindMatrix);
+    hull = s;
+  } else {
+    hull = new THREE.Mesh(geo, mat);
+  }
+  hull.name = OUTLINE_NAME;
+  return hull;
 }
 
 /** Cel-shade + outline every mesh under `root` (a car model). Idempotent-safe on already-toon'd
@@ -83,6 +97,6 @@ export function toonify(root: THREE.Object3D, opts?: { outlineWidth?: number }):
     mesh.material = Array.isArray(mesh.material) ? mesh.material.map(toonMaterial) : toonMaterial(mesh.material);
     const s = mesh.getWorldScale(ws);
     const scale = (Math.abs(s.x) + Math.abs(s.y) + Math.abs(s.z)) / 3 || 1;
-    mesh.add(outlineMesh(mesh.geometry, target / scale)); // local puff → constant world outline
+    mesh.add(outlineMesh(mesh, target / scale)); // local puff → constant world outline (skins if src is skinned)
   }
 }
