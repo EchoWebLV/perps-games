@@ -633,9 +633,16 @@ const CAR_DEFS: CarOption[] = [
   { name: "The Kraken", url: "/models/kraken.glb", rarity: 2, yaw: Math.PI / 2, power: { name: "Deep Six", desc: "smells faintly of low tide", icon: "swerve" } },
   { name: "Noodler", url: "/models/ramen.glb", rarity: 2, yaw: Math.PI / 2, power: { name: "Al Dente", desc: "served scalding, tips poorly", icon: "flame" } },
 ];
+// DEV-only local unlock: on the Vite dev server AND a loopback host, skip the hard access wall and open
+// all content (every car + every level theme) for style/level testing. import.meta.env.DEV is false in
+// every production build, so this whole branch is dead (and tree-shaken) in prod → production behaviour
+// is byte-identical (gate + unlock ladder stay). Client-side only; never touches the server.
+const DEV_UNLOCK = !!import.meta.env.DEV && /^(localhost|127\.0\.0\.1|\[::1\]|0\.0\.0\.0)$/.test(location.hostname);
+if (DEV_UNLOCK) console.info("[dev] localhost: access wall bypassed + all cars & level themes unlocked");
+
 // Lock every pullable car the player doesn't own yet → the collection becomes "collect the cars".
 // Non-pullable cars (Solana Paper / benched / coming-soon) are never locked; poolable() ignores ownership.
-for (const c of CAR_DEFS) c.locked = poolable(c) && !inventory.owns(c.name);
+for (const c of CAR_DEFS) c.locked = !DEV_UNLOCK && poolable(c) && !inventory.owns(c.name);
 // the equipped car (shown on the road) — mirrored onto the garage-showroom turntable
 let equippedCar: CarOption = CAR_DEFS[0];
 let garageRoom: ReturnType<typeof createGarageRoom> | null = null;
@@ -696,7 +703,7 @@ const garage = createCarPicker(hudRoot, CAR_DEFS, (c) => { car.setModel(c.url, c
   // race-level skin picker (menu → World). Shows EVERY skin; unowned ones render SEALED (like a
   // locked car card) and can't be selected — they unlock from crates (Silver/Gold mostly).
   // setWorldTheme (world.setTheme + shader re-warm) is the shared seam.
-  list: () => THEMES.map((t) => ({ key: t.key, name: t.name, colors: [t.sky[0], t.sky[1], t.roadEdge], locked: !levels.owns(t.key) })),
+  list: () => THEMES.map((t) => ({ key: t.key, name: t.name, colors: [t.sky[0], t.sky[1], t.roadEdge], locked: !DEV_UNLOCK && !levels.owns(t.key) })),
   current: () => world.currentTheme(),
   set: (key: string) => { setWorldTheme(key); },
 }, {
@@ -2175,6 +2182,7 @@ function openAccessCodeDialog() {
 // Each helper mounts the same wall with its own redeem, then runs `onDone` (welcome gift, etc.) once
 // the wall clears — so the crate reveal is never drawn behind the wall.
 function guestAccessThenEnter(onDone: () => void) {
+  if (DEV_UNLOCK) { onDone(); return; }     // dev localhost: never wall the game
   if (anyRedeemed()) { onDone(); return; } // this browser already redeemed → straight through
   createAccessWall(hudRoot, {
     onRedeem: (code) => redeem(code, accessPorts), // guest-local, synchronous
@@ -2185,6 +2193,7 @@ function accountAccessThenEnter(onDone: () => void) {
   // Server state follows the account across devices. The scoped browser flag only covers an offline
   // redemption by this same wallet and can never leak guest or another account's access.
   const accountId = session.address();
+  if (DEV_UNLOCK) { onDone(); return; }     // dev localhost: never wall the game
   if (accountSync.accessCodes().length > 0 || anyAccountRedeemed(accountId)) { onDone(); return; }
   createAccessWall(hudRoot, {
     onRedeem: (code) => redeemForAccount(code, {
