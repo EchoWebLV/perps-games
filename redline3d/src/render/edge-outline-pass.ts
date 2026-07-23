@@ -138,6 +138,14 @@ export class EdgeOutlinePass extends Pass {
     this.material.uniforms.resolution.value.set(width, height);
   }
 
+  // ── DEV Light-Lab tuning accessors ──
+  get depthThreshold(): number { return this.material.uniforms.uDepthThresh.value; }
+  set depthThreshold(v: number) { this.material.uniforms.uDepthThresh.value = v; }
+  get normalThreshold(): number { return this.material.uniforms.uNormalThresh.value; }
+  set normalThreshold(v: number) { this.material.uniforms.uNormalThresh.value = v; }
+  get thickness(): number { return this.baseThickness; }
+  set thickness(v: number) { this.baseThickness = v; }
+
   render(renderer: THREE.WebGLRenderer, writeBuffer: THREE.WebGLRenderTarget, readBuffer: THREE.WebGLRenderTarget): void {
     // ── depth prepass: real materials (keeps vertex-displaced roads/grid true; glow = depthWrite:false
     //    so it never writes depth), cars hidden so their hull outlines aren't double-lined ──

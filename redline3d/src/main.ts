@@ -4,8 +4,9 @@ globalThis.Buffer = globalThis.Buffer || Buffer;
 import * as THREE from "three";
 import { createScene } from "./render/scene";
 import { createWorld } from "./render/world";
-import { installOutlineDevControls, refreshToonStyle, isToonEnabled, onToonChanged } from "./render/toon";
-import { edgePassEnabled } from "./render/edge-outline-pass";
+import { installOutlineDevControls, refreshToonStyle, isToonEnabled, onToonChanged, getOutlineWidth, setOutlineWidth, getWorldRampBand, setWorldRampBand } from "./render/toon";
+import { edgePassEnabled, setEdgePassEnabled } from "./render/edge-outline-pass";
+import { registerLightLab } from "./ui/light-lab";
 import { THEMES, themeKeys, nextThemeKey } from "./render/world-themes";
 import { createCar } from "./render/car";
 import { createChaseCam, ROAD_SPEED_MAX, roadSpeed } from "./render/camera";
@@ -850,6 +851,35 @@ if (post) {
   onToonChanged(applyEdge);
   console.info(`[toon] edge pass ${post.edge.enabled ? "ON" : "off"} (toon=${isToonEnabled()}, flag=${edgePassEnabled()})`);
 }
+
+// ── DEV Light Lab registrations (key L / ?lightlab=1). Global engine knobs + the shared main-scene
+// lights/fog (used by every main-game world). Per-world lights register from their own modules. ──
+registerLightLab("Global", { controls: [
+  { key: "exposure", label: "exposure", kind: "num", min: 0, max: 3, step: 0.01, get: () => ctx.renderer.toneMappingExposure, set: (v) => { ctx.renderer.toneMappingExposure = v; } },
+  { key: "outlineScale", label: "outline scale", kind: "num", min: 0, max: 3, step: 0.05, get: () => getOutlineWidth(), set: (v) => setOutlineWidth(v) },
+  { key: "rampFloor", label: "toon ramp floor", kind: "color", get: () => getWorldRampBand(0), set: (v) => setWorldRampBand(0, v) },
+  { key: "rampBand2", label: "toon ramp band 2", kind: "color", get: () => getWorldRampBand(1), set: (v) => setWorldRampBand(1, v) },
+  ...(post ? [
+    { key: "bloomStrength", label: "bloom strength", kind: "num" as const, min: 0, max: 3, step: 0.01, get: () => post.bloom.strength, set: (v: number) => { post.bloom.strength = v; } },
+    { key: "bloomRadius", label: "bloom radius", kind: "num" as const, min: 0, max: 1, step: 0.01, get: () => post.bloom.radius, set: (v: number) => { post.bloom.radius = v; } },
+    { key: "bloomThreshold", label: "bloom threshold", kind: "num" as const, min: 0, max: 1, step: 0.01, get: () => post.bloom.threshold, set: (v: number) => { post.bloom.threshold = v; } },
+    { key: "edgePass", label: "edge pass", kind: "bool" as const, get: () => post.edge.enabled, set: (v: boolean) => { setEdgePassEnabled(v); post.edge.enabled = v && isToonEnabled(); } },
+    { key: "edgeDepth", label: "edge depth thresh", kind: "num" as const, min: 0.01, max: 2, step: 0.01, get: () => post.edge.depthThreshold, set: (v: number) => { post.edge.depthThreshold = v; } },
+    { key: "edgeNormal", label: "edge normal thresh", kind: "num" as const, min: 0.01, max: 2, step: 0.01, get: () => post.edge.normalThreshold, set: (v: number) => { post.edge.normalThreshold = v; } },
+    { key: "edgeThickness", label: "edge thickness px", kind: "num" as const, min: 0.5, max: 4, step: 0.05, get: () => post.edge.thickness, set: (v: number) => { post.edge.thickness = v; } },
+  ] : []),
+] });
+registerLightLab("perps-road", { controls: [
+  { key: "ambient", label: "ambient", kind: "num", min: 0, max: 3, step: 0.01, get: () => ctx.ambient.intensity, set: (v) => { ctx.ambient.intensity = v; } },
+  { key: "ambientColor", label: "ambient color", kind: "color", get: () => ctx.ambient.color.getHex(), set: (v) => ctx.ambient.color.setHex(v) },
+  { key: "key", label: "key (directional)", kind: "num", min: 0, max: 3, step: 0.01, get: () => ctx.key.intensity, set: (v) => { ctx.key.intensity = v; } },
+  { key: "keyColor", label: "key color", kind: "color", get: () => ctx.key.color.getHex(), set: (v) => ctx.key.color.setHex(v) },
+  ...(ctx.scene.fog instanceof THREE.Fog ? [
+    { key: "fogColor", label: "fog color", kind: "color" as const, get: () => (ctx.scene.fog as THREE.Fog).color.getHex(), set: (v: number) => (ctx.scene.fog as THREE.Fog).color.setHex(v) },
+    { key: "fogNear", label: "fog near", kind: "num" as const, min: 0, max: 800, step: 1, get: () => (ctx.scene.fog as THREE.Fog).near, set: (v: number) => { (ctx.scene.fog as THREE.Fog).near = v; } },
+    { key: "fogFar", label: "fog far", kind: "num" as const, min: 0, max: 2000, step: 1, get: () => (ctx.scene.fog as THREE.Fog).far, set: (v: number) => { (ctx.scene.fog as THREE.Fog).far = v; } },
+  ] : []),
+] });
 // drive-in garage showroom: your equipped car hero-lit on a turntable (its own world, like the oval)
 garageRoom = createGarageRoom(ctx.renderer);
 ctx.scene.add(garageRoom.group);

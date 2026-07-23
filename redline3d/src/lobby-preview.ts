@@ -5,6 +5,8 @@
 import * as THREE from "three";
 import { createLobby } from "./render/lobby";
 import { BUILDINGS, LOT_BOUNDS } from "./core/lobby-layout";
+import { getOutlineWidth, setOutlineWidth, getWorldRampBand, setWorldRampBand } from "./render/toon";
+import { registerLightLab } from "./ui/light-lab";
 
 // Some headless preview viewports report innerWidth/innerHeight as 0 — fall back to a fixed size.
 const vw = () => innerWidth || 1280;
@@ -25,6 +27,15 @@ const camera = new THREE.PerspectiveCamera(58, vw() / vh(), 0.1, 4000);
 const lobby = createLobby();
 scene.add(lobby.group);
 lobby.show();
+
+// DEV Light Lab (key L / ?lightlab=1): the "lobby" folder registers itself from createLobby(); this
+// harness adds the shared toon Global knobs (this preview has no bloom/edge composer).
+registerLightLab("Global", { controls: [
+  { key: "exposure", label: "exposure", kind: "num", min: 0, max: 3, step: 0.01, get: () => renderer.toneMappingExposure, set: (v) => { renderer.toneMappingExposure = v; } },
+  { key: "outlineScale", label: "outline scale", kind: "num", min: 0, max: 3, step: 0.05, get: () => getOutlineWidth(), set: (v) => setOutlineWidth(v) },
+  { key: "rampFloor", label: "toon ramp floor", kind: "color", get: () => getWorldRampBand(0), set: (v) => setWorldRampBand(0, v) },
+  { key: "rampBand2", label: "toon ramp band 2", kind: "color", get: () => getWorldRampBand(1), set: (v) => setWorldRampBand(1, v) },
+] });
 
 function view(cx: number, cy: number, cz: number, tx: number, ty: number, tz: number) {
   camera.position.set(cx, cy, cz);

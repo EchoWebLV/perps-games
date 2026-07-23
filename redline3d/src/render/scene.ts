@@ -6,6 +6,9 @@ export interface SceneCtx {
   scene: THREE.Scene;
   camera: THREE.PerspectiveCamera;
   clock: THREE.Clock;
+  /** shared main-scene lights, exposed for the DEV Light Lab */
+  ambient: THREE.AmbientLight;
+  key: THREE.DirectionalLight;
   /** resize renderer + camera together; pixel ratio is owned by the caller (perf tier) */
   resize(w: number, h: number): void;
 }
@@ -22,7 +25,8 @@ export function createScene(canvas: HTMLCanvasElement): SceneCtx {
   camera.position.set(0, 9, 17);
   camera.lookAt(0, 1.4, -34);
 
-  scene.add(new THREE.AmbientLight("#8866ff", 0.7));
+  const ambient = new THREE.AmbientLight("#8866ff", 0.7);
+  scene.add(ambient);
   const key = new THREE.DirectionalLight("#ff7ad0", 0.8);
   key.position.set(0, 40, -10);
   scene.add(key);
@@ -40,5 +44,5 @@ export function createScene(canvas: HTMLCanvasElement): SceneCtx {
     renderer.setSize(w, h, false);
   }
 
-  return { renderer, scene, camera, clock: new THREE.Clock(), resize };
+  return { renderer, scene, camera, clock: new THREE.Clock(), ambient, key, resize };
 }

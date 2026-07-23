@@ -135,8 +135,31 @@ function ramp(): THREE.CanvasTexture { return (_ramp ??= makeRamp(["#444444", "#
 // WORLD ramp — LIFTED darkest band (#6e vs #44) so dimly-lit world solids (the lobby especially)
 // don't crush into near-black. MeshToonMaterial has no envMap, so this also stands in for the
 // scene.environment IBL fill that Standard materials had and toon loses. Cars keep the deeper ramp.
+const _worldBands = ["#6e6e6e", "#9a9a9a", "#cccccc", "#ffffff"];
 let _worldRamp: THREE.CanvasTexture | null = null;
-function worldRamp(): THREE.CanvasTexture { return (_worldRamp ??= makeRamp(["#6e6e6e", "#9a9a9a", "#cccccc", "#ffffff"])); }
+let _worldRampCanvas: HTMLCanvasElement | null = null;
+function drawRampCanvas(canvas: HTMLCanvasElement, bands: string[]): void {
+  canvas.width = bands.length; canvas.height = 1;
+  const g = canvas.getContext("2d")!;
+  bands.forEach((col, i) => { g.fillStyle = col; g.fillRect(i, 0, 1, 1); });
+}
+function worldRamp(): THREE.CanvasTexture {
+  if (_worldRamp) return _worldRamp;
+  _worldRampCanvas = document.createElement("canvas");
+  drawRampCanvas(_worldRampCanvas, _worldBands);
+  _worldRamp = new THREE.CanvasTexture(_worldRampCanvas);
+  _worldRamp.minFilter = THREE.NearestFilter; _worldRamp.magFilter = THREE.NearestFilter;
+  _worldRamp.colorSpace = THREE.SRGBColorSpace;
+  return _worldRamp;
+}
+/** DEV Light-Lab hooks: read/rewrite the shared world cel ramp's dark bands live (redraws the shared
+ *  texture in place → every world toon material updates next frame). i=0 darkest floor, i=1 2nd band. */
+export function getWorldRampBand(i: number): number { return parseInt(_worldBands[i].slice(1), 16); }
+export function setWorldRampBand(i: number, hex: number): void {
+  _worldBands[i] = "#" + (hex & 0xffffff).toString(16).padStart(6, "0");
+  worldRamp();
+  if (_worldRamp && _worldRampCanvas) { drawRampCanvas(_worldRampCanvas, _worldBands); _worldRamp.needsUpdate = true; }
+}
 
 // average normals across coincident positions (merge-by-position) → one smooth normal per position
 // on its OWN attribute, so the inverted hull doesn't split at hard creases while the lit material

@@ -1,6 +1,7 @@
 import * as THREE from "three";
 import { TRACK, LEN, sample, elevationAt, progress } from "../core/track";
 import { toonifyWorld, inkScale, isToonEnabled, onToonChanged } from "./toon";
+import { registerLightLab } from "../ui/light-lab";
 
 // Highway oval v2 (spec 2026-07-02): a 3-lane-per-carriageway divided highway on
 // the 3× track. The road follows elevationAt(s) — a rolling synthwave causeway
@@ -303,6 +304,10 @@ export function createOval(): Oval {
   const applyAmbForStyle = (on: boolean): void => { amb.intensity = on ? AMB_TOON : AMB_BASE; };
   applyAmbForStyle(isToonEnabled());
   onToonChanged(applyAmbForStyle);
+  registerLightLab("highway", { controls: [
+    { key: "ambient", label: "ambient", kind: "num", min: 0, max: 3, step: 0.01, get: () => amb.intensity, set: (v) => { amb.intensity = v; } },
+    { key: "ambientColor", label: "ambient color", kind: "color", get: () => amb.color.getHex(), set: (v) => amb.color.setHex(v) },
+  ] });
 
   // ghost cars — same shape as the lobby seam, tinted by direction
   const remoteGroup = new THREE.Group(); group.add(remoteGroup);

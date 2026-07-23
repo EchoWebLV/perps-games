@@ -8,8 +8,10 @@ import { EdgeOutlinePass } from "./edge-outline-pass";
 export interface Post {
   render(): void;
   setSize(w: number, h: number): void;
-  /** the toon depth-edge pass (last in the chain). App wires `.exclude` (car groups) + `.enabled`. */
+  /** the toon depth-edge pass. App wires `.exclude` (car groups) + `.enabled`. */
   edge: EdgeOutlinePass;
+  /** bloom pass, exposed for the DEV Light Lab (strength / radius / threshold). */
+  bloom: UnrealBloomPass;
 }
 
 export function createPost(renderer: THREE.WebGLRenderer, scene: THREE.Scene, camera: THREE.Camera, bloomScale = 1, samples = 4): Post {
@@ -41,5 +43,6 @@ export function createPost(renderer: THREE.WebGLRenderer, scene: THREE.Scene, ca
     render: () => composer.render(),
     setSize: (w, h) => { composer.setSize(w, h); bloom.setSize(w * bloomScale, h * bloomScale); edge.setSize(w, h); },
     edge,
+    bloom,
   };
 }

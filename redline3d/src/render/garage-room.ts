@@ -3,6 +3,7 @@ import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader.js";
 import { RoomEnvironment } from "three/examples/jsm/environments/RoomEnvironment.js";
 import { carNormScale } from "./car-scale";
 import { toonify, toonifyWorld, unregisterToonRoot } from "./toon";
+import { registerLightLab } from "../ui/light-lab";
 
 /** the bits of a CarOption the showroom needs to place a car on the turntable */
 export interface GarageCar {
@@ -239,8 +240,10 @@ export function createGarageRoom(renderer: THREE.WebGLRenderer): GarageRoom {
   turntable.add(discRing);
 
   // ================= LIGHTS (ride inside the group → on/off with show/hide) =================
-  group.add(track(new THREE.HemisphereLight(0x2a3550, 0x05060a, 0.55)));
-  group.add(track(new THREE.AmbientLight(0x3a4358, 0.35)));
+  const hemi = track(new THREE.HemisphereLight(0x2a3550, 0x05060a, 0.55));
+  group.add(hemi);
+  const amb = track(new THREE.AmbientLight(0x3a4358, 0.35));
+  group.add(amb);
   const key = new THREE.SpotLight(0xfff2e0, 3.0, 60, 0.62, 0.55, 1.2);
   key.position.set(0, 17, 9);
   key.target.position.set(0, 1.6, 0);
@@ -248,6 +251,12 @@ export function createGarageRoom(renderer: THREE.WebGLRenderer): GarageRoom {
   const rimC = new THREE.PointLight(0x27e7ff, 90, 46, 2); rimC.position.set(-11, 5, 7); group.add(rimC);
   const rimM = new THREE.PointLight(0xff39c0, 80, 46, 2); rimM.position.set(11, 5, -1); group.add(rimM);
   const backGlow = new THREE.PointLight(0x3355ff, 40, 40, 2); backGlow.position.set(0, 8, -14); group.add(backGlow);
+  registerLightLab("garage", { controls: [
+    { key: "hemisphere", label: "hemisphere", kind: "num", min: 0, max: 3, step: 0.01, get: () => hemi.intensity, set: (v) => { hemi.intensity = v; } },
+    { key: "ambient", label: "ambient", kind: "num", min: 0, max: 3, step: 0.01, get: () => amb.intensity, set: (v) => { amb.intensity = v; } },
+    { key: "key", label: "key (spot)", kind: "num", min: 0, max: 8, step: 0.05, get: () => key.intensity, set: (v) => { key.intensity = v; } },
+    { key: "keyColor", label: "key color", kind: "color", get: () => key.color.getHex(), set: (v) => key.color.setHex(v) },
+  ] });
 
   // ================= CAR (equipped car on the turntable) =================
   const loader = new GLTFLoader();

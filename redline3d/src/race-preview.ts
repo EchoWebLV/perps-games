@@ -25,8 +25,9 @@ import { buildWheelRig, type WheelRig } from "./render/wheels";
 import { tierOf, type Rarity } from "./core/rarity";
 import { createRaceTrack } from "./render/race-track";
 import { createRaceEnvironment } from "./render/race-environment";
-import { toonify, installOutlineDevControls, isToonEnabled, onToonChanged, refreshToonStyle } from "./render/toon";
-import { EdgeOutlinePass, edgePassEnabled } from "./render/edge-outline-pass";
+import { toonify, installOutlineDevControls, isToonEnabled, onToonChanged, refreshToonStyle, getOutlineWidth, setOutlineWidth, getWorldRampBand, setWorldRampBand } from "./render/toon";
+import { EdgeOutlinePass, edgePassEnabled, setEdgePassEnabled } from "./render/edge-outline-pass";
+import { registerLightLab } from "./ui/light-lab";
 import { createRaceDirector, type DirectorCar, type DirectorMode } from "./render/race-director";
 import { createRaceHud, type RacePhase } from "./ui/race-hud";
 import { createBetPanel } from "./ui/bet-panel";
@@ -119,7 +120,8 @@ const raceDist = TOTAL_LAPS * lapLen;
 // PMREM environment map (same pattern as the game's garage-room.ts) → real reflections on car paint
 const pmrem = new THREE.PMREMGenerator(renderer);
 scene.environment = pmrem.fromScene(new RoomEnvironment(), 0.04).texture;
-scene.add(new THREE.HemisphereLight(0x9fc4ff, 0x120a24, 0.9));
+const hemi = new THREE.HemisphereLight(0x9fc4ff, 0x120a24, 0.9);
+scene.add(hemi);
 const key = new THREE.DirectionalLight(0xffffff, 1.15); // key for shape
 key.position.set(80, 150, 60);
 scene.add(key);
@@ -242,6 +244,30 @@ const cars: RaceCar[] = SPECS.map((spec, i) => {
 edgePass.exclude = cars.map((c) => c.anchor);
 applyEdge();
 onToonChanged(applyEdge);
+
+// ── DEV Light Lab (key L / ?lightlab=1): Global engine knobs + this preview's own scene lights/fog ──
+registerLightLab("Global", { controls: [
+  { key: "exposure", label: "exposure", kind: "num", min: 0, max: 3, step: 0.01, get: () => renderer.toneMappingExposure, set: (v) => { renderer.toneMappingExposure = v; } },
+  { key: "outlineScale", label: "outline scale", kind: "num", min: 0, max: 3, step: 0.05, get: () => getOutlineWidth(), set: (v) => setOutlineWidth(v) },
+  { key: "rampFloor", label: "toon ramp floor", kind: "color", get: () => getWorldRampBand(0), set: (v) => setWorldRampBand(0, v) },
+  { key: "rampBand2", label: "toon ramp band 2", kind: "color", get: () => getWorldRampBand(1), set: (v) => setWorldRampBand(1, v) },
+  { key: "bloomStrength", label: "bloom strength", kind: "num", min: 0, max: 3, step: 0.01, get: () => bloom.strength, set: (v) => { bloom.strength = v; } },
+  { key: "bloomRadius", label: "bloom radius", kind: "num", min: 0, max: 1, step: 0.01, get: () => bloom.radius, set: (v) => { bloom.radius = v; } },
+  { key: "bloomThreshold", label: "bloom threshold", kind: "num", min: 0, max: 1, step: 0.01, get: () => bloom.threshold, set: (v) => { bloom.threshold = v; } },
+  { key: "edgePass", label: "edge pass", kind: "bool", get: () => edgePass.enabled, set: (v) => { setEdgePassEnabled(v); edgePass.enabled = v && isToonEnabled(); } },
+  { key: "edgeDepth", label: "edge depth thresh", kind: "num", min: 0.01, max: 2, step: 0.01, get: () => edgePass.depthThreshold, set: (v) => { edgePass.depthThreshold = v; } },
+  { key: "edgeNormal", label: "edge normal thresh", kind: "num", min: 0.01, max: 2, step: 0.01, get: () => edgePass.normalThreshold, set: (v) => { edgePass.normalThreshold = v; } },
+  { key: "edgeThickness", label: "edge thickness px", kind: "num", min: 0.5, max: 4, step: 0.05, get: () => edgePass.thickness, set: (v) => { edgePass.thickness = v; } },
+] });
+registerLightLab("race-track", { controls: [
+  { key: "hemi", label: "hemisphere", kind: "num", min: 0, max: 3, step: 0.01, get: () => hemi.intensity, set: (v) => { hemi.intensity = v; } },
+  { key: "key", label: "key (directional)", kind: "num", min: 0, max: 3, step: 0.01, get: () => key.intensity, set: (v) => { key.intensity = v; } },
+  { key: "keyColor", label: "key color", kind: "color", get: () => key.color.getHex(), set: (v) => key.color.setHex(v) },
+  { key: "rim", label: "rim", kind: "num", min: 0, max: 3, step: 0.01, get: () => rim.intensity, set: (v) => { rim.intensity = v; } },
+  { key: "fogColor", label: "fog color", kind: "color", get: () => (scene.fog as THREE.Fog).color.getHex(), set: (v) => (scene.fog as THREE.Fog).color.setHex(v) },
+  { key: "fogNear", label: "fog near", kind: "num", min: 0, max: 1500, step: 1, get: () => (scene.fog as THREE.Fog).near, set: (v) => { (scene.fog as THREE.Fog).near = v; } },
+  { key: "fogFar", label: "fog far", kind: "num", min: 0, max: 4000, step: 1, get: () => (scene.fog as THREE.Fog).far, set: (v) => { (scene.fog as THREE.Fog).far = v; } },
+] });
 
 const hud = createRaceHud();
 const betPanel = createBetPanel();

@@ -5,6 +5,7 @@ import { buildBuilding } from "./buildings";
 import { buildLobbyBackdrop, type LobbyBackdrop } from "./lobby-backdrop";
 import { createRemoteCars, type RemoteCarResolver } from "./remote-cars";
 import { toonifyWorld, isToonEnabled, onToonChanged } from "./toon";
+import { registerLightLab } from "../ui/light-lab";
 
 export interface RemoteCarState {
   id: string;
@@ -268,6 +269,10 @@ export function createLobby(
   const applyAmbForStyle = (on: boolean): void => { amb.intensity = on ? AMB_TOON : AMB_BASE; };
   applyAmbForStyle(isToonEnabled());
   onToonChanged(applyAmbForStyle);
+  registerLightLab("lobby", { controls: [
+    { key: "ambient", label: "ambient", kind: "num", min: 0, max: 3, step: 0.01, get: () => amb.intensity, set: (v) => { amb.intensity = v; } },
+    { key: "ambientColor", label: "ambient color", kind: "color", get: () => amb.color.getHex(), set: (v) => amb.color.setHex(v) },
+  ] });
 
   // Remote drivers are presentation-only. They are not part of lobby layout or collision state.
   const remoteCars = createRemoteCars(resolveRemoteCar);
