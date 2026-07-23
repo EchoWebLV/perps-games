@@ -4,7 +4,7 @@ globalThis.Buffer = globalThis.Buffer || Buffer;
 import * as THREE from "three";
 import { createScene } from "./render/scene";
 import { createWorld } from "./render/world";
-import { installOutlineDevControls, refreshToonStyle, isToonEnabled, onToonChanged, getOutlineWidth, setOutlineWidth, getWorldRampBand, setWorldRampBand } from "./render/toon";
+import { installOutlineDevControls, refreshToonStyle, isToonEnabled, setToonEnabled, onToonChanged, getOutlineWidth, setOutlineWidth, getWorldRampBand, setWorldRampBand } from "./render/toon";
 import { edgePassEnabled, setEdgePassEnabled } from "./render/edge-outline-pass";
 import { registerLightLab } from "./ui/light-lab";
 import { THEMES, themeKeys, nextThemeKey } from "./render/world-themes";
@@ -714,6 +714,11 @@ const garage = createCarPicker(hudRoot, CAR_DEFS, (c) => { car.setModel(c.url, c
   driverName: {
     current: () => identity?.name ?? null,
     edit: () => openDriverNameDialog(false),
+  },
+  style: {
+    get: () => isToonEnabled(),
+    toggle: () => setToonEnabled(!isToonEnabled()),
+    subscribe: (cb) => onToonChanged(cb),
   },
 });
 garageForHydration = garage;

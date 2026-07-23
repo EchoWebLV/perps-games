@@ -301,6 +301,12 @@ export interface MenuFeatures {
     current(): string | null;
     edit(): void;
   };
+  /** art-style toggle (classic ↔ toon) as a menu row; tapping toggles in place (menu stays open) */
+  style?: {
+    get(): boolean;                              // true = toon
+    toggle(): void;
+    subscribe(cb: (toon: boolean) => void): void; // re-sync the row label on any flip
+  };
 }
 
 export function createCarPicker(
@@ -367,6 +373,22 @@ export function createCarPicker(
       `<span class="gmenu-tx"><b>World</b><small>race level skin</small></span>` +
       `<span class="gmenu-arr">${icon("chevron", 16)}</span>`;
     gmenu.appendChild(b);
+  }
+  // Style (art style) toggle — TOON / CLASSIC. Tapping toggles in place (menu stays open); the value
+  // on the right reflects the current mode and re-syncs whenever the style flips anywhere (subscribe).
+  if (menuFeatures.style && gmenu) {
+    const b = document.createElement("button");
+    b.className = "gmenu-item";
+    b.dataset.act = "style";
+    b.innerHTML =
+      `<span class="gmenu-ic">${icon("swap", 20)}</span>` +
+      `<span class="gmenu-tx"><b>Style</b><small>cartoon look</small></span>` +
+      `<span class="gmenu-arr" data-style-mode style="color:var(--cyan);font:700 13px/1 'Chakra Petch',ui-monospace,monospace"></span>`;
+    gmenu.appendChild(b);
+    const modeEl = b.querySelector("[data-style-mode]") as HTMLElement;
+    const paintStyle = (toon: boolean) => { modeEl.textContent = toon ? "TOON" : "CLASSIC"; };
+    paintStyle(menuFeatures.style.get());
+    menuFeatures.style.subscribe(paintStyle);
   }
   // audio volume faders (Music / SFX) — a styled range slider per channel; 0 = off
   const sliderEls: { input: HTMLInputElement; val: HTMLElement }[] = [];
@@ -836,6 +858,7 @@ export function createCarPicker(
     const t = (e.target as HTMLElement).closest("[data-act],[data-go],[data-toggle],[data-world]") as HTMLElement | null;
     if (!t) return;
     if (t.dataset.world !== undefined) { if (t.classList.contains("locked")) return; worlds?.set(t.dataset.world); renderWorlds(); return; } // switch level skin (sealed skins ignore the tap), stay open
+    if (t.dataset.act === "style") { menuFeatures.style?.toggle(); return; } // toggle art style, stay open (label re-syncs via subscribe)
     if (t.dataset.act === "history") { close("chain"); menuButton.focus(); menuFeatures.onHistory?.(); return; }
     if (t.dataset.act === "access-code") { close("chain"); menuButton.focus(); menuFeatures.onAccessCode?.(); return; }
     if (t.dataset.act === "driver-name") { close("chain"); menuButton.focus(); menuFeatures.driverName?.edit(); return; }

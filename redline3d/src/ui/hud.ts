@@ -1,7 +1,6 @@
 import { sol3 } from "../core/money";
 import { ACTIVE_STAKE_CURRENCY, type StakeCurrency } from "../core/stake-currency";
 import { onTap } from "./tap";
-import { isToonEnabled, setToonEnabled, onToonChanged } from "../render/toon";
 
 export interface Hud {
   root: HTMLElement;
@@ -50,10 +49,6 @@ export function createHud(parent: HTMLElement, currency: StakeCurrency = ACTIVE_
         <span id="baladd" style="display:grid;place-items:center;width:17px;height:17px;border-radius:50%;font-size:14px;font-weight:700;line-height:0;color:#04101a;background:linear-gradient(180deg,#5fe3ff,#2775ca);box-shadow:0 0 9px rgba(39,231,255,.55)">+</span>
       </span></div>
 
-    <div id="stylechip" class="pe panel chip" style="position:absolute;left:14px;top:50%;transform:translateY(-50%);cursor:pointer" aria-label="Toggle art style" title="Switch classic / toon art style">
-      <span class="lbl">style</span>
-      <span id="styleval" class="num" style="letter-spacing:.06em">TOON</span></div>
-
     <div id="pxchip" class="pe panel chip" style="position:absolute;${top};right:14px;text-align:right">
       <span class="lbl"><span id="asset">SOL</span> · <span id="feed" style="color:var(--amb)">connecting</span></span>
       <span id="solpx" class="num">$—</span></div>
@@ -90,14 +85,6 @@ export function createHud(parent: HTMLElement, currency: StakeCurrency = ACTIVE_
   const bal = q("#bal"), px = q("#solpx"), feed = q("#feed"), multi = q("#multi"),
     status = q("#status"), assetEl = q("#asset"), timer = q("#timer"), balchip = q("#balchip");
   const tabs = Array.from(parent.querySelectorAll<HTMLElement>(".atab"));
-
-  // persistent art-style toggle chip (classic ↔ toon). Always visible (setMinimal never hides it);
-  // label mirrors the current style and re-syncs on any flip (this chip, key T, or window.__toonStyle).
-  const styleVal = q("#styleval");
-  const syncStyle = (on: boolean) => { styleVal.textContent = on ? "TOON" : "CLASSIC"; };
-  syncStyle(isToonEnabled());
-  onTap(q("#stylechip"), () => setToonEnabled(!isToonEnabled()));
-  onToonChanged(syncStyle);
 
   // Last-written values for the setters the rAF loop hits at 60fps (price/multiplier/timer).
   // Most frames the strings are unchanged (idle price, 1s timer granularity) — skipping the
