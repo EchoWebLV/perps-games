@@ -22,13 +22,17 @@ export interface CamControls {
 
 const MODES: CamMode[] = ["AUTO", "CHASE", "TV", "DRONE", "FREE"];
 const STYLE_ID = "cam-controls-style";
+// Comic sticker styling: thick near-black ink borders, chunky rounded corners, HARD offset drop
+// shadows (no blur), flat bright fills, heavy type. Same layout as before — reskin only.
 const CSS = `
 .cc-root{position:fixed;right:14px;bottom:16px;z-index:24;display:flex;flex-direction:column;gap:6px;align-items:flex-end;font-family:'Chakra Petch',ui-monospace,monospace;}
-.cc-modes{display:flex;gap:6px;background:rgba(9,6,22,.8);border:1px solid rgba(122,90,220,.45);border-radius:10px;padding:6px;box-shadow:0 0 20px rgba(120,60,220,.25);pointer-events:auto;}
-.cc-btn{cursor:pointer;font-size:12px;font-weight:700;letter-spacing:.06em;color:#c9d6ff;background:rgba(255,255,255,.04);border:1px solid rgba(122,90,220,.45);border-radius:7px;padding:7px 11px;user-select:none;-webkit-tap-highlight-color:transparent;}
-.cc-btn.sel{background:rgba(39,231,255,.16);border-color:#27e7ff;color:#eaf7ff;box-shadow:0 0 12px rgba(39,231,255,.4);}
-.cc-focus{cursor:pointer;font-size:12px;font-weight:700;color:#ffd166;background:rgba(9,6,22,.8);border:1px solid rgba(255,209,102,.5);border-radius:8px;padding:6px 12px;box-shadow:0 0 14px rgba(255,160,40,.2);pointer-events:auto;user-select:none;-webkit-tap-highlight-color:transparent;}
-.cc-hint{font-size:9px;color:#6b74a6;letter-spacing:.06em;}
+.cc-modes{display:flex;gap:6px;background:#241640;border:3px solid #0a0812;border-radius:12px;padding:6px;box-shadow:4px 4px 0 rgba(8,5,16,.9);pointer-events:auto;}
+.cc-btn{cursor:pointer;font-size:12px;font-weight:800;letter-spacing:.05em;color:#e6ddff;background:#31204d;border:2px solid #0a0812;border-radius:8px;padding:7px 11px;user-select:none;-webkit-tap-highlight-color:transparent;}
+.cc-btn.sel{background:#2de2e6;color:#04121a;box-shadow:2px 2px 0 rgba(8,5,16,.7);}
+.cc-btn:active{transform:translate(1px,1px);}
+.cc-focus{cursor:pointer;font-size:12px;font-weight:800;color:#04121a;background:#ffd166;border:3px solid #0a0812;border-radius:10px;padding:6px 12px;box-shadow:3px 3px 0 rgba(8,5,16,.9);pointer-events:auto;user-select:none;-webkit-tap-highlight-color:transparent;}
+.cc-focus:active{transform:translate(2px,2px);box-shadow:1px 1px 0 rgba(8,5,16,.9);}
+.cc-hint{font-size:9px;color:#8a7db3;font-weight:700;letter-spacing:.05em;}
 `;
 
 export function createCamControls(carCount: number, parent: HTMLElement = document.body): CamControls {
