@@ -1,5 +1,6 @@
 import * as THREE from "three";
 import { TRACK, LEN, sample, elevationAt, progress } from "../core/track";
+import { toonifyWorld } from "./toon";
 
 // Highway oval v2 (spec 2026-07-02): a 3-lane-per-carriageway divided highway on
 // the 3× track. The road follows elevationAt(s) — a rolling synthwave causeway
@@ -277,6 +278,13 @@ export function createOval(): Oval {
   const matLong = track(new THREE.MeshStandardMaterial({ color: 0x11261c, emissive: 0x35ff9d, emissiveIntensity: 0.5, transparent: true, opacity: 0.85 }));
   const matShort = track(new THREE.MeshStandardMaterial({ color: 0x2a0f1c, emissive: 0xff5a7a, emissiveIntensity: 0.5, transparent: true, opacity: 0.85 }));
   const matIdle = track(new THREE.MeshStandardMaterial({ color: 0x222233, emissive: 0x4da6ff, emissiveIntensity: 0.4, transparent: true, opacity: 0.85 }));
+  remoteGroup.userData.toonSkip = true; // ghost cars are dynamic presentation boxes — leave them
+
+  // ── cel-shade the causeway: ground, road, median + lit lamp poles/walls become MeshToon. The
+  // sky/sun shaders, mountain + billboard basics, dashed neon and glow bars are left to bloom.
+  // Instanced sources (dashes, walls, poles, bars) are toon-shaded but not per-instance outlined. ──
+  const toonStats = toonifyWorld(group, { outlineWidth: 0.25, outlineMinSize: 3 });
+  console.info(`[toon] oval: ${toonStats.toonMats} toon mats, ${toonStats.hulls} outline hulls, ${toonStats.instanced} instanced`);
 
   return {
     group,

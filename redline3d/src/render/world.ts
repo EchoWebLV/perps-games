@@ -1,5 +1,6 @@
 import * as THREE from "three";
 import { type WorldTheme, type LampStyle, getTheme, loadThemeKey, saveThemeKey } from "./world-themes";
+import { toonifyWorld } from "./toon";
 import { ROAD_GRADE_ANCHOR_Z, roadGradeOffset, roadGradeSlope } from "../core/market-road";
 import type { MarketDirection } from "../core/market-pulse";
 import { marketShockLightBoost } from "./market-shock";
@@ -695,6 +696,11 @@ export function createWorld(detail: "full" | "reduced" = "full"): World {
     }
     colA.copy(tint(theme.lights[0], 0.12)); colB.copy(tint(theme.lights[1], 0.12)); // point-light tints
     lampGroup = g; group.add(g);
+    // cel-shade the fixture SOLIDS (poles / posts / bases) + outline the tall poles. The neon strips,
+    // bulbs, beams, halos and glowing crystal spires are MeshBasic/Sprite and left to bloom. Re-runs
+    // per theme since lamps are rebuilt; the sky/scenery/grid shaders elsewhere are never touched.
+    const s = toonifyWorld(g, { outlineWidth: 0.3, outlineMinSize: 4 });
+    console.info(`[toon] race lamps (${theme.key}): ${s.toonMats} toon mats, ${s.hulls} outline hulls`);
   }
 
   // ---- recolour the persistent road system (grid + road) from a theme (lamps are rebuilt, not recoloured) ----

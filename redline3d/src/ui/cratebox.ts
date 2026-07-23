@@ -5,6 +5,7 @@ import { tierOf } from "../core/rarity";
 import { rollCrate, dupeScrap, pickLevel, clientRandom, CRATES, crateByKey, type CrateType, type CrateCar, type RandomnessProvider } from "../core/crate";
 import { createRevealCar } from "./reveal-car";
 import { scrapPileHtml, levelPosterHtml, type LevelPoster } from "./reveal-bits";
+import { toonify } from "../render/toon";
 
 // The Crate Shop: pick one of three crates (Wooden / Silver / Gold), buy with coins → roll a car by
 // that crate's rarity odds + bank the crate's scrap → reveal. A NEW car unlocks in the garage; a
@@ -279,6 +280,7 @@ export function createCrateBox(parent: HTMLElement, deps: CrateBoxDeps): CrateBo
         const kl = new THREE.DirectionalLight("#27e7ff", 1.7); kl.position.set(2.2, 3, 2.4); scene.add(kl);
         const rl = new THREE.DirectionalLight("#ff39c0", 1.5); rl.position.set(-2.4, 1.2, -2); scene.add(rl);
         const pivot = new THREE.Group(); pivot.rotation.y = -0.6; pivot.add(model); scene.add(pivot);
+        toonify(model, { outlineWidth: 0.03 }); // cel-shade + outline the 3D crate (unit-sphere framed)
         r.render(scene, cam);
         cratePng[key] = r.domElement.toDataURL("image/png");
         const ico = panel.querySelector(`[data-ico="${key}"]`) as HTMLElement | null;

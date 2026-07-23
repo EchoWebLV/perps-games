@@ -1,6 +1,7 @@
 import * as THREE from "three";
 import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader.js";
 import { RoomEnvironment } from "three/examples/jsm/environments/RoomEnvironment.js";
+import { toonify } from "../render/toon";
 
 // The crate-reveal car viewer. High tier: a live, slowly spinning 3D model in its own small
 // WebGL canvas (lazily created on first show). Low tier (weak GPU): one rendered frame shown as
@@ -58,6 +59,7 @@ export function createRevealCar({ lowTier }: { lowTier: boolean }): RevealCar {
           const kl = new THREE.DirectionalLight("#ffffff", 1.6); kl.position.set(2.2, 3, 2.4); scene.add(kl);
           const rim = new THREE.DirectionalLight(tierColor, 2.2); rim.position.set(-2.4, 1.2, -2.2); scene.add(rim);
           const model = gltf.scene; frameModel(model, yaw); model.rotation.y += -0.5; scene.add(model);
+          toonify(model, { outlineWidth: 0.03 }); // cel-shade the reward car (unit-sphere framed)
           r.render(scene, makeCam());
           img.src = r.domElement.toDataURL("image/png");
           disposeModel(model); env.dispose(); r.dispose();
@@ -106,6 +108,7 @@ export function createRevealCar({ lowTier }: { lowTier: boolean }): RevealCar {
         if (gen !== loadGen) return;
         drop();
         const model = gltf.scene; frameModel(model, yaw); pivot.add(model); current = model;
+        toonify(model, { outlineWidth: 0.03 }); // cel-shade the spinning reward car (unit-sphere framed)
         pivot.rotation.y = -0.5; last = 0; stop(); raf = requestAnimationFrame(loop);
       }, undefined, (err) => console.warn("[reveal-car] GLB failed:", url, err));
     },

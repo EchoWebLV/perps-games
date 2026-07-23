@@ -8,6 +8,7 @@
 // low via InstancedMesh + shared canvas textures + additive depthWrite:false layers.
 import * as THREE from "three";
 import type { RaceTrack } from "./race-track";
+import { toonifyWorld } from "./toon";
 
 export interface RaceEnvironment {
   group: THREE.Group;
@@ -285,6 +286,12 @@ export function createRaceEnvironment(track: RaceTrack): RaceEnvironment {
     }
     cons.count = ci; cons.instanceMatrix.needsUpdate = true; group.add(cons);
   }
+
+  // cel-shade the lit solids (the instanced light poles + any standard-material props). The skyline
+  // buildings glow through emissive-mapped windows, and the moon/stars/billboards/beacons/searchlights
+  // are MeshBasic/Points/additive — all left to bloom. Instanced sources are toon'd, not outlined.
+  const toonStats = toonifyWorld(group, { outlineWidth: 0.3, outlineMinSize: 4 });
+  console.info(`[toon] race-environment: ${toonStats.toonMats} toon mats, ${toonStats.hulls} outline hulls, ${toonStats.instanced} instanced`);
 
   let t = 0;
   return {

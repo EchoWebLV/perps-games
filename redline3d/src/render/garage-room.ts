@@ -2,7 +2,7 @@ import * as THREE from "three";
 import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader.js";
 import { RoomEnvironment } from "three/examples/jsm/environments/RoomEnvironment.js";
 import { carNormScale } from "./car-scale";
-import { toonify } from "./toon";
+import { toonify, toonifyWorld } from "./toon";
 
 /** the bits of a CarOption the showroom needs to place a car on the turntable */
 export interface GarageCar {
@@ -295,6 +295,12 @@ export function createGarageRoom(renderer: THREE.WebGLRenderer): GarageRoom {
       (err) => { if (my === gen) { lastReq = ""; } console.warn("[garage] GLB failed:", opt.url, err); },
     );
   };
+
+  // ── cel-shade the showroom shell: floor, walls, ceiling, pegboard, bench, toolbox, tire stacks,
+  // turntable base/disc/columns become MeshToon and the chunky solids get outlines. Neon trim/sign/
+  // ceiling tubes and the light pool are left to bloom. The car (added async) toonifies itself. ──
+  const toonStats = toonifyWorld(group, { outlineWidth: 0.12, outlineMinSize: 1.5 });
+  console.info(`[toon] garage-room: ${toonStats.toonMats} toon mats, ${toonStats.hulls} outline hulls`);
 
   // ================= UPDATE =================
   let t = 0;

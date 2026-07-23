@@ -6,6 +6,7 @@
 // world-distance lookups, so car speed is real world speed everywhere. Nothing here touches
 // the game; it is imported only by the dev harness.
 import * as THREE from "three";
+import { toonifyWorld } from "./toon";
 
 export interface TrackPose { x: number; z: number; rot: number; tx: number; tz: number }
 export interface RaceTrack {
@@ -560,6 +561,11 @@ export function createRaceTrack(): RaceTrack {
   const boundingRadius = 0.5 * Math.hypot(size.x, size.z) + HALF_W;
 
   if (propWarn === 0) console.info(`[race-track] props OK: ${propOk} trackside props clear of the road`);
+
+  // cel-shade the circuit SOLIDS — the gantry structure + ground pick up outlines/toon banding; the
+  // MeshBasic road ribbons, kerbs, banners, sponsor boards and lamp heads are left to bloom/read flat.
+  const toonStats = toonifyWorld(group, { outlineWidth: 0.3, outlineMinSize: 4 });
+  console.info(`[toon] race-track: ${toonStats.toonMats} toon mats, ${toonStats.hulls} outline hulls`);
 
   let t = 0;
   return {

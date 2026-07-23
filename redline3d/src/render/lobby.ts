@@ -4,6 +4,7 @@ import type { PresenceEmote } from "../core/presence";
 import { buildBuilding } from "./buildings";
 import { buildLobbyBackdrop, type LobbyBackdrop } from "./lobby-backdrop";
 import { createRemoteCars, type RemoteCarResolver } from "./remote-cars";
+import { toonifyWorld } from "./toon";
 
 export interface RemoteCarState {
   id: string;
@@ -154,6 +155,7 @@ export function createLobby(
 
   // synthwave-dusk backdrop (sky dome + retro sun + skyline + stars) — its own group, dialable/black-able
   const backdrop = buildLobbyBackdrop(track);
+  backdrop.group.userData.toonSkip = true; // pure bloom/glow — never cel-shade or outline the sky art
   group.add(backdrop.group);
   animators.push((t) => backdrop.animate(t));
 
@@ -262,7 +264,14 @@ export function createLobby(
 
   // Remote drivers are presentation-only. They are not part of lobby layout or collision state.
   const remoteCars = createRemoteCars(resolveRemoteCar);
+  remoteCars.group.userData.toonSkip = true; // ghost cars load async + toon themselves — skip here
   group.add(remoteCars.group);
+
+  // ── cel-shade the town: buildings, walls, road slabs, junk heaps, crate/gantry bodies + entry
+  // pads become MeshToon and the chunky solids get inverted-hull outlines. Neon signs, glow strips,
+  // ring-road lines, the grid, dust and the backdrop are all left to bloom (see toonifyWorld). ──
+  const toonStats = toonifyWorld(group, { outlineWidth: 0.28, outlineMinSize: 2.5 });
+  console.info(`[toon] lobby: ${toonStats.toonMats} toon mats, ${toonStats.hulls} outline hulls`);
 
   let t = 0;
   return {
