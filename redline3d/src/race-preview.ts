@@ -24,6 +24,7 @@ import { buildWheelRig, type WheelRig } from "./render/wheels";
 import { tierOf, type Rarity } from "./core/rarity";
 import { createRaceTrack } from "./render/race-track";
 import { createRaceEnvironment } from "./render/race-environment";
+import { toonify } from "./render/toon";
 import { createRaceDirector, type DirectorCar, type DirectorMode } from "./render/race-director";
 import { createRaceHud, type RacePhase } from "./ui/race-hud";
 import { createBetPanel } from "./ui/bet-panel";
@@ -528,6 +529,7 @@ function loadCar(car: RaceCar): Promise<void> {
         car.anchor.updateMatrixWorld(true);
         car.rig = buildWheelRig(model, scale, { probe: false });
         car.anchor.rotation.y = savedRot;
+        toonify(model, { outlineWidth: 0.3 }); // cel-shade + bold outline (reads at chase distance)
         done();
       });
     }, undefined, (err) => { console.warn("[race-preview] GLB failed:", car.spec.url, err); done(); });

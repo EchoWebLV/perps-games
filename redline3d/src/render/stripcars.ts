@@ -1,6 +1,7 @@
 import * as THREE from "three";
 import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader.js";
 import { carNormScale } from "./car-scale";
+import { toonify } from "./toon";
 
 /**
  * Parked hero cars around the strip plaza — the "people meet here" dressing.
@@ -178,6 +179,7 @@ export function createStripCars(specs: StripCarSpec[]): StripCars {
           // its tag — float it just above the scaled roof, keeping short cars at the tuned 6.4 and
           // the neighbour stagger.
           sprite.position.y = Math.max(6.4, box2.max.y - box2.min.y + 2.2) + (i % 2) * 1.1;
+          toonify(model); // cel-shade + cartoon outline (parked lobby dressing cars)
           done();
         });
       }, undefined, (err) => { console.warn("[stripcars] GLB failed:", spec.url, err); done(); });

@@ -1,6 +1,7 @@
 import * as THREE from "three";
 import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader.js";
 import { buildWheelRig, type WheelRig } from "./wheels";
+import { toonify } from "./toon";
 import { finishById } from "../core/paint";
 import type { ModelLoadOutcome } from "../core/boot-reveal";
 import { carNormScale } from "./car-scale";
@@ -124,6 +125,8 @@ export function createCar(onReady?: (outcome: ModelLoadOutcome) => void, options
     }
   }
 
+  toonify(placeholder, { outlineWidth: 0.2 }); // cel-shade + outline the boot fallback wedge too
+
   // underglow — colored by equity, casts the win/lose cue onto the road (stays for both fallback + model)
   const glow = new THREE.PointLight(IDLE, 9, 22, 2);
   glow.position.set(0, 0.4, 0);
@@ -192,21 +195,24 @@ export function createCar(onReady?: (outcome: ModelLoadOutcome) => void, options
         model.position.set(-c.x, -box2.min.y, -c.z);
 
         // collect tintable materials
-        const mats: THREE.MeshStandardMaterial[] = [];
-        model.traverse((o) => {
-          const mesh = o as THREE.Mesh;
-          if (!mesh.isMesh) return;
-          const list = Array.isArray(mesh.material) ? mesh.material : [mesh.material];
-          for (const mm of list) {
-            if ((mm as THREE.MeshStandardMaterial).isMeshStandardMaterial) mats.push(mm as THREE.MeshStandardMaterial);
-          }
-        });
         if (current) {
           group.remove(current);
           disposeObject(current);
         }
         current = model;
-        rig = buildWheelRig(model, model.scale.x); // uniform scalar → world-unit radii
+        rig = buildWheelRig(model, model.scale.x); // uniform scalar → world-unit radii (before toon)
+        toonify(model, { outlineWidth: 0.2 });      // cel-shade + cartoon outline (game-wide art direction)
+        // collect the toon materials so the equity tint + paint finish still drive emissive/color
+        // (MeshToonMaterial has .emissive/.color; the .metalness/.roughness sets become harmless no-ops)
+        const mats: THREE.MeshStandardMaterial[] = [];
+        model.traverse((o) => {
+          const mesh = o as THREE.Mesh;
+          if (!mesh.isMesh || mesh.name === "__outline") return;
+          const list = Array.isArray(mesh.material) ? mesh.material : [mesh.material];
+          for (const mm of list) {
+            if ((mm as THREE.MeshToonMaterial).isMeshToonMaterial) mats.push(mm as unknown as THREE.MeshStandardMaterial);
+          }
+        });
         modelMats = mats.length ? mats : null;
         placeholder.visible = false;
         group.add(model);

@@ -2,6 +2,7 @@ import * as THREE from "three";
 import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader.js";
 import { tagTexture } from "./stripcars";
 import { buildWheelRig, type WheelRig } from "./wheels";
+import { toonify } from "./toon";
 
 /**
  * Ambient cruisers — a couple of cars slowly lapping the plaza so the strip never reads
@@ -92,6 +93,7 @@ export function createCruisers(specs: CruiserSpec[]): Cruisers {
           anchor.updateMatrixWorld(true);
           entry.rig = buildWheelRig(model, scale, { probe: false }); // null when the GLB has no rigged wheels
           anchor.rotation.y = savedRot;
+          toonify(model); // cel-shade + outline (after rig so wheel lookup is unaffected)
           done();
         });
       }, undefined, (err) => { console.warn("[cruisers] GLB failed:", spec.url, err); done(); });

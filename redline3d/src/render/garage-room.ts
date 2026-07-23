@@ -2,6 +2,7 @@ import * as THREE from "three";
 import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader.js";
 import { RoomEnvironment } from "three/examples/jsm/environments/RoomEnvironment.js";
 import { carNormScale } from "./car-scale";
+import { toonify } from "./toon";
 
 /** the bits of a CarOption the showroom needs to place a car on the turntable */
 export interface GarageCar {
@@ -285,6 +286,7 @@ export function createGarageRoom(renderer: THREE.WebGLRenderer): GarageRoom {
             if (sm.isMeshStandardMaterial) { sm.envMap = env; sm.envMapIntensity = 0.9; }
           }
         });
+        toonify(model, { outlineWidth: 0.15 }); // cel-shade + outline; thinner for the close-up showroom
         if (carObj) { turntable.remove(carObj); disposeTree(carObj); }
         carObj = model;
         turntable.add(model);
