@@ -2,6 +2,7 @@ import * as THREE from "three";
 import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader.js";
 import { carNormScale } from "./car-scale";
 import { toonify } from "./toon";
+import { makeBlobShadow } from "./blob-shadow";
 
 /**
  * Parked hero cars around the strip plaza — the "people meet here" dressing.
@@ -148,6 +149,8 @@ export function createStripCars(specs: StripCarSpec[]): StripCars {
     puddle.rotation.x = -Math.PI / 2;
     puddle.position.y = 0.04;
     anchor.add(puddle);
+    // dark contact shadow under the neon puddle so the parked car reads grounded, not floating
+    anchor.add(makeBlobShadow(6.5, 10.5));
 
     // gamertag sprite floating over the roofline — the future remote-player nameplate
     const sprite = new THREE.Sprite(track(new THREE.SpriteMaterial({

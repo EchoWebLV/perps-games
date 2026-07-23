@@ -2,6 +2,7 @@ import * as THREE from "three";
 import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader.js";
 import { buildWheelRig, type WheelRig } from "./wheels";
 import { toonify } from "./toon";
+import { makeBlobShadow } from "./blob-shadow";
 import { finishById } from "../core/paint";
 import type { ModelLoadOutcome } from "../core/boot-reveal";
 import { carNormScale } from "./car-scale";
@@ -126,6 +127,10 @@ export function createCar(onReady?: (outcome: ModelLoadOutcome) => void, options
   }
 
   toonify(placeholder, { outlineWidth: 0.2 }); // cel-shade + outline the boot fallback wedge too
+
+  // soft blob contact shadow so the cel-shaded car doesn't float on the unlit road (all drive modes;
+  // a sibling of the model → never toonified/outlined; shown in both art styles)
+  group.add(makeBlobShadow(6, 10.5));
 
   // underglow — colored by equity, casts the win/lose cue onto the road (stays for both fallback + model)
   const glow = new THREE.PointLight(IDLE, 9, 22, 2);

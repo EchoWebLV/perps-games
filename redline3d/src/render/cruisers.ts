@@ -3,6 +3,7 @@ import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader.js";
 import { tagTexture } from "./stripcars";
 import { buildWheelRig, type WheelRig } from "./wheels";
 import { toonify } from "./toon";
+import { makeBlobShadow } from "./blob-shadow";
 
 /**
  * Ambient cruisers — a couple of cars slowly lapping the plaza so the strip never reads
@@ -52,6 +53,7 @@ export function createCruisers(specs: CruiserSpec[]): Cruisers {
   specs.slice(0, 2).forEach((spec, i) => {
     const anchor = new THREE.Group();
     group.add(anchor);
+    anchor.add(makeBlobShadow(6, 10)); // ground the lapping cruiser (sibling of the toonified model)
     // rig filled in once the GLB streams in (null until then, and for wheel-less models like the magnet)
     const entry = { node: anchor, theta: i * Math.PI, rig: null as WheelRig | null };
     anchors.push(entry); // opposite sides of the lap
