@@ -42,9 +42,10 @@ lobby simply stops being constructed underneath them.
 
 **Loadscreen.** New small DOM module (`ui/loadscreen.ts`), shown immediately at boot,
 progress driven by the real boot promises (models manifest, save restore, identity) —
-honest progress, not a fake bar. Acid-green-on-black Slopwheels wordmark; CSS text
-fallback until the logo asset lands in the repo (asset must come from the user — the
-logo currently exists only as a chat image).
+honest progress, not a fake bar. Acid-green-on-black Slopwheels wordmark: asset lives at
+`redline3d/public/assets/brands/slopwheels.png` (processed from the user's source image —
+grey background keyed to black, glow preserved; unprocessed source sits untracked at the
+repo root).
 
 **Home UI.** New module (`ui/home.ts`). Renders from sources the game already trusts:
 `CAR_DEFS`, `inventory.owns()`, baked card art. Rarity-sorted owned cards plus locked
