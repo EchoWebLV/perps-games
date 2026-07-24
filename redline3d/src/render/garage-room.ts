@@ -2,7 +2,7 @@ import * as THREE from "three";
 import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader.js";
 import { RoomEnvironment } from "three/examples/jsm/environments/RoomEnvironment.js";
 import { carNormScale } from "./car-scale";
-import { toonify, toonifyWorld, unregisterToonRoot } from "./toon";
+import { toonify, toonifyWorld, reclaimToonVariants } from "./toon";
 import { registerLightLab } from "../ui/light-lab";
 import { pNum, pColor } from "../config/visual-presets";
 
@@ -265,13 +265,14 @@ export function createGarageRoom(renderer: THREE.WebGLRenderer): GarageRoom {
   let gen = 0;
   let lastReq = "";
   const disposeTree = (root: THREE.Object3D) => {
-    unregisterToonRoot(root); // drop from the style registry (no-op if never toonified) so it can GC
     root.traverse((o) => {
       const m = o as THREE.Mesh;
       if (!m.isMesh) return;
       m.geometry?.dispose();
       (Array.isArray(m.material) ? m.material : [m.material]).forEach((mm) => mm?.dispose());
     });
+    // reclaim the stashed off-style variants + drop from the style registry (no-op if never toonified)
+    for (const mm of reclaimToonVariants(root)) mm.dispose();
   };
 
   const setCar = (opt: GarageCar): void => {

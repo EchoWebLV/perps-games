@@ -6,7 +6,7 @@
 // world-distance lookups, so car speed is real world speed everywhere. Nothing here touches
 // the game; it is imported only by the dev harness.
 import * as THREE from "three";
-import { toonifyWorld, inkScale, isToonEnabled } from "./toon";
+import { toonifyWorld, disposeToonPass, inkScale, isToonEnabled } from "./toon";
 
 export interface TrackPose { x: number; z: number; rot: number; tx: number; tz: number }
 export interface RaceTrack {
@@ -647,6 +647,7 @@ export function createRaceTrack(): RaceTrack {
       for (const a of animators) a(t);
     },
     dispose() {
+      disposeToonPass(group); // free the cel variants + outline hull mats toonifyWorld added (drops from the style registry too)
       for (const d of disposables) d.dispose();
     },
   };

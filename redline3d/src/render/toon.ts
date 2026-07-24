@@ -77,19 +77,13 @@ function registerMat(mesh: THREE.Mesh, orig: MatOrArray, toon: MatOrArray): void
   if (!matVariants.has(mesh)) _restorable++;
   matVariants.set(mesh, { orig, toon });
 }
-/** drop a root from the style registry (call when its subtree is disposed) so it can't leak or be
- *  needlessly walked on future toggles. Materials in the WeakMap are released with the meshes. */
-export function unregisterToonRoot(root: THREE.Object3D): void {
-  const i = styleRoots.indexOf(root); if (i >= 0) styleRoots.splice(i, 1);
-}
-
 /** Full disposal companion for a subtree that's being torn down. Returns the INACTIVE style variant
  *  (the material `refreshToonStyle` isn't currently showing — its counterpart is still on
  *  `mesh.material` for the caller's own dispose walk) of every registered mesh under `root`, so the
  *  caller can release both variants in one deduped pass (a texture shared by both frees once). Also
  *  drops every registered root WITHIN `root` from the style registry (handles a group holding several
- *  toonified roots, unlike unregisterToonRoot which matches one exact root) so styleRoots keeps no
- *  dead subtree. Returns [] for a never-toonified subtree. */
+ *  toonified roots, not just one exact root) so styleRoots keeps no dead subtree. Returns [] for a
+ *  never-toonified subtree. */
 export function reclaimToonVariants(root: THREE.Object3D): THREE.Material[] {
   const inSubtree = new Set<THREE.Object3D>();
   const inactive: THREE.Material[] = [];
@@ -104,6 +98,22 @@ export function reclaimToonVariants(root: THREE.Object3D): THREE.Material[] {
   });
   for (let i = styleRoots.length - 1; i >= 0; i--) if (inSubtree.has(styleRoots[i])) styleRoots.splice(i, 1);
   return inactive;
+}
+
+/** One-call toon teardown for scenes whose disposers free their OWN tracked builds but never walk
+ *  mesh materials (worlds / lobbies / per-theme lamp rebuilds): disposes the off-duty variant of
+ *  every registered mesh (via reclaimToonVariants, which also drops the subtree's roots from the
+ *  style registry), then walks the subtree disposing any attached toon material plus each `__outline`
+ *  hull's material. Hull geometry is the source mesh's own — the owner's tracked pass frees it. */
+export function disposeToonPass(root: THREE.Object3D): void {
+  for (const m of reclaimToonVariants(root)) m.dispose();
+  root.traverse((o) => {
+    const mesh = o as THREE.Mesh;
+    if (!mesh.isMesh) return;
+    for (const m of Array.isArray(mesh.material) ? mesh.material : [mesh.material]) {
+      if ((m as THREE.MeshToonMaterial | undefined)?.isMeshToonMaterial || mesh.name === OUTLINE_NAME) m?.dispose();
+    }
+  });
 }
 
 /** true when the toon (cel + ink + dusk) style is active; false = the classic pre-toon neon look */

@@ -8,7 +8,7 @@
 // low via InstancedMesh + shared canvas textures + additive depthWrite:false layers.
 import * as THREE from "three";
 import type { RaceTrack } from "./race-track";
-import { toonifyWorld, isToonEnabled } from "./toon";
+import { toonifyWorld, disposeToonPass, isToonEnabled } from "./toon";
 
 export interface RaceEnvironment {
   group: THREE.Group;
@@ -451,6 +451,9 @@ export function createRaceEnvironment(track: RaceTrack): RaceEnvironment {
   return {
     group,
     update(dt) { t += dt; for (const a of animators) a(t); },
-    dispose() { for (const d of disposables) d.dispose(); },
+    dispose() {
+      disposeToonPass(group); // free the cel variants + outline hull mats toonifyWorld added (drops from the style registry too)
+      for (const d of disposables) d.dispose();
+    },
   };
 }

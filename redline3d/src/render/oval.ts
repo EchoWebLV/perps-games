@@ -1,6 +1,6 @@
 import * as THREE from "three";
 import { TRACK, LEN, sample, elevationAt, progress } from "../core/track";
-import { toonifyWorld, inkScale, isToonEnabled, onToonChanged } from "./toon";
+import { toonifyWorld, disposeToonPass, inkScale, isToonEnabled, onToonChanged } from "./toon";
 import { registerLightLab } from "../ui/light-lab";
 import { pNum, pColor } from "../config/visual-presets";
 
@@ -344,6 +344,7 @@ export function createOval(): Oval {
     setBillboard(l1, l2) { drawBillboard(l1, l2); },
     update(_dt) {},
     dispose() {
+      disposeToonPass(group); // free the cel variants + outline hull mats toonifyWorld added (drops from the style registry too)
       for (const d of disposables) d.dispose();
       remoteMap.clear();
     },
