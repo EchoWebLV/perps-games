@@ -33,7 +33,9 @@ export interface RaceGameOptions {
   hudParent: HTMLElement;             // race-hud / bet-panel / cam-controls mount here
   grid: GridEntrant[];                // from buildGrid(); player car may be grid[0]
   seed: number;                       // race outcome seed (mulberry32)
-  lowTier: boolean;                   // quality flag (mirrors main.ts quality.detail)
+  // Quality tier (mirrors main.ts quality.detail). RESERVED for the in-app host: Task 7 threads it
+  // through to gate render cost; unread today. Keep it in the interface so T7 needn't reshape the API.
+  lowTier: boolean;
   devHooks?: boolean;                 // install window.__raceState / __warp (harness only)
   onExit?: (result: RaceResult) => void; // fired when the player leaves after FINISH
 }
@@ -43,10 +45,12 @@ export interface RaceResult {
   poolTotal: number;                  // betting pool at lock, for podium math
 }
 export interface RaceGame {
-  update(dt: number): void;           // call from the host rAF loop
-  phase(): "LOADING" | "MARKET" | "COUNTDOWN" | "RACING" | "FINISH";
-  requestExit(): void;                // exits at the next safe phase boundary
-  dispose(): void;                    // full teardown: scene groups, HUD DOM, materials
+  update(dt: number): void;           // call from the host rAF loop; a NO-OP once disposed (a trailing
+                                      // rAF frame after dispose() must never touch freed geometry / DOM)
+  phase(): "LOADING" | "MARKET" | "COUNTDOWN" | "RACING" | "FINISH"; // after dispose(): the FROZEN last
+                                      // phase at teardown (state is never reset), so hosts can still read it
+  requestExit(): void;                // exits at the next safe phase boundary; a no-op once disposed
+  dispose(): void;                    // full teardown: scene groups, HUD DOM, materials. Idempotent.
 }
 
 // facing convention copied from cruisers.ts / car.ts: MODEL_YAW + per-car yaw makes every GLB face
@@ -430,7 +434,7 @@ export function createRaceGame(opts: RaceGameOptions): RaceGame {
   }
 
   // ── HUD / bet-panel push ────────────────────────────────────────────────────────────────────
-  function pushUi(dt: number) {
+  function pushUi() {
     const ord = order();
     hud.render({
       phase,
@@ -446,7 +450,6 @@ export function createRaceGame(opts: RaceGameOptions): RaceGame {
       marketRemaining: marketTimer,
       raceLeaderName: phase === "RACING" ? cars[ord[0]].entrant.name : null,
     });
-    void dt;
   }
 
   // ── exit path ───────────────────────────────────────────────────────────────────────────────
@@ -457,6 +460,7 @@ export function createRaceGame(opts: RaceGameOptions): RaceGame {
     }
   }
   function requestExit() {
+    if (disposed) return; // torn down — nothing to exit, and onExit must not fire against freed state
     exitRequested = true;
     fireExitIfReady(); // fire now if we're already at FINISH; otherwise enterFinish() will
   }
@@ -527,7 +531,7 @@ export function createRaceGame(opts: RaceGameOptions): RaceGame {
       runDirector(1 / 60);
       track.update(1 / 60);
       environment.update(1 / 60);
-      pushUi(1 / 60);
+      pushUi();
       return { phase, order: order().map((i) => cars[i].entrant.name), wallet: +betPanel.wallet().toFixed(2) };
     };
   }
@@ -539,15 +543,16 @@ export function createRaceGame(opts: RaceGameOptions): RaceGame {
 
   return {
     update(dt: number) {
+      if (disposed) return; // a trailing rAF frame after dispose() must not touch freed geometry / DOM
       if (phase === "LOADING") enterMarket(); // open the market on the first frame; models stream in
       step(dt);
       placeCars(dt);      // update world poses first so the director frames current positions
       runDirector(dt);
       track.update(dt);
       environment.update(dt);
-      pushUi(dt);
+      pushUi();
     },
-    phase: () => phase,
+    phase: () => phase, // frozen at teardown once disposed (see RaceGame doc); a bare read, always safe
     requestExit,
     dispose() {
       if (disposed) return;

@@ -28,9 +28,26 @@ function installCanvasStub() {
   vi.spyOn(HTMLCanvasElement.prototype, "getContext").mockReturnValue(ctx as never);
 }
 
+// Captured GLB loads, resolvable on demand so the dispose-during-load tests can drive the async race.
+interface PendingLoad { url: string; succeed(gltf: unknown): void }
+let pending: PendingLoad[] = [];
+
+// A tiny but REAL model so the toonify + disposeModel walk has geometry + a material to chew on.
+function modelFixture() {
+  const geometry = new THREE.BoxGeometry(2, 1, 4);
+  const material = new THREE.MeshStandardMaterial();
+  const group = new THREE.Group();
+  group.add(new THREE.Mesh(geometry, material));
+  return { gltf: { scene: group }, group, geometry, material };
+}
+
 beforeEach(() => {
   installCanvasStub();
-  vi.spyOn(GLTFLoader.prototype, "load").mockImplementation(() => undefined as never);
+  pending = [];
+  vi.spyOn(GLTFLoader.prototype, "load").mockImplementation((url, onLoad) => {
+    pending.push({ url, succeed: onLoad as (gltf: unknown) => void });
+    return undefined as never; // never auto-resolves; tests resolve pending[i] explicitly (or leave it)
+  });
 });
 
 afterEach(() => {
@@ -80,5 +97,38 @@ describe("createRaceGame", () => {
     expect([...new Set(a)].length).toBe(a.length);
     // a different seed is allowed to (and here does) reorder the field
     expect(c.length).toBe(DEFAULT_GRID.length);
+  });
+
+  it("disposes a model that loaded before dispose — scene returns to pre-game state, no throw", () => {
+    const scene = new THREE.Scene();
+    const before = scene.children.length;
+    const game = makeGame({ scene });
+    expect(pending.length).toBe(DEFAULT_GRID.length); // one GLB request per grid car
+    expect(scene.children.length).toBe(before + 1);   // the race group is mounted
+
+    const fix = modelFixture();
+    const disposeGeo = vi.spyOn(fix.geometry, "dispose");
+    pending[0].succeed(fix.gltf);                      // a car model lands and attaches under its anchor
+    expect(fix.group.parent).not.toBeNull();
+
+    expect(() => game.dispose()).not.toThrow();
+    expect(disposeGeo).toHaveBeenCalled();             // the attached model was torn down
+    expect(scene.children.length).toBe(before);        // race group removed → pre-game state
+  });
+
+  it("ignores + disposes a model that resolves AFTER dispose (the mid-load guard), nothing left on scene", () => {
+    const scene = new THREE.Scene();
+    const before = scene.children.length;
+    const game = makeGame({ scene });
+
+    game.dispose();
+    expect(scene.children.length).toBe(before);        // disposed → pre-game state already
+
+    const fix = modelFixture();
+    const disposeGeo = vi.spyOn(fix.geometry, "dispose");
+    expect(() => pending[0].succeed(fix.gltf)).not.toThrow(); // late arrival hits `if (disposed)`
+    expect(fix.group.parent).toBeNull();               // never attached to any anchor
+    expect(disposeGeo).toHaveBeenCalled();             // late model was disposed, not leaked
+    expect(scene.children.length).toBe(before);        // scene untouched by the late load
   });
 });
