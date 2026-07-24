@@ -36,6 +36,7 @@ import { CART_COIN_RATE, createPickups } from "./render/pickups";
 import { createFireTrail } from "./render/firetrail";
 import { createCarPicker, type CarAbility, type CarOption, type Garage } from "./ui/carpicker";
 import { createCrateBox } from "./ui/cratebox";
+import { createHome } from "./ui/home";
 import { createHowTo, howToSeen, markHowToSeen } from "./ui/howto";
 import { createTradeHistory } from "./ui/trade-history";
 import { createInventory } from "./core/inventory";
@@ -165,11 +166,12 @@ function setWorldTheme(key: string): string {
   next: () => setWorldTheme(nextThemeKey(world.currentTheme())),
   current: () => world.currentTheme(),
 };
-// dismiss the loading splash (index.html) once the real car model settles,
-// with a bounded fallback in case the loader never calls back
+// Home now owns the splash hide (enterHome calls hideSplash — "home-ready IS boot-ready"), so the
+// car-GLB settle no longer dismisses the splash. The bounded 20s fallback stays wired (belt-and-
+// suspenders: if boot wedged before enterHome, the timeout still frees a trapped player).
 const bootReveal = createBootReveal({
   timeoutMs: 20_000,
-  reveal: () => (window as Window & { hideSplash?: () => void }).hideSplash?.(),
+  reveal: () => (window as Window & { hideSplash?: () => void }).hideSplash?.(), // fallback only; enterHome is the normal path
 });
 const car = createCar((outcome) => bootReveal.modelSettled(outcome));
 const localEmoteResources = createEmoteVisualResources();
@@ -652,7 +654,24 @@ for (const c of CAR_DEFS) c.locked = !DEV_UNLOCK && poolable(c) && !inventory.ow
 // the equipped car (shown on the road) — mirrored onto the garage-showroom turntable
 let equippedCar: CarOption = CAR_DEFS[0];
 let garageRoom: ReturnType<typeof createGarageRoom> | null = null;
-const garage = createCarPicker(hudRoot, CAR_DEFS, (c) => { car.setModel(c.url, c.scale, c.yaw); setAbility(c.ability); carBaseLev = c.baseLev ?? 0; tach.rebuild(effRmax()); equippedCar = c; garageRoom?.setCar(c); }, () => upgrades.open(), [
+// Equip a car: swap the road GLB, apply its ability, raise the leverage ceiling, mirror onto the
+// showroom turntable. Shared by the garage carpicker AND home's equipByName (below).
+function equipCar(c: CarOption): void {
+  car.setModel(c.url, c.scale, c.yaw);
+  setAbility(c.ability);
+  carBaseLev = c.baseLev ?? 0;
+  tach.rebuild(effRmax());
+  equippedCar = c;
+  garageRoom?.setCar(c);
+}
+// Equip by roster name (home's [Drive lobby]). No-op if the name isn't found, or the card is locked
+// (not owned) / coming-soon — mirrors the carpicker's own select() gate so home can't equip the undrivable.
+function equipByName(name: string): void {
+  const c = CAR_DEFS.find((x) => x.name === name);
+  if (!c || c.locked || c.comingSoon) return;
+  equipCar(c);
+}
+const garage = createCarPicker(hudRoot, CAR_DEFS, (c) => equipCar(c), () => upgrades.open(), [
   { label: "Music", sub: "synthwave radio", glyph: "♫", get: () => radio.getVolume(), set: (v) => { radio.setVolume(v); writeVolume(MUSIC_VOL_KEY, v); } },
   { label: "SFX", sub: "engine & coins", glyph: "🔊", get: () => audio.getVolume(), set: (v) => { audio.setVolume(v); writeVolume(SFX_VOL_KEY, v); } },
 ], () => {
@@ -778,13 +797,27 @@ const crateBox = createCrateBox(hudRoot, {
   holdCoins: (n) => upgrades.holdCoins(n),
   settleHold: (n, commit) => upgrades.settleHold(n, commit),
   onVrfFail: (msg) => lobbyHud.toast(msg),
-  onClose: () => { if (mode === "lobby") lobbyHud.show(); },
+  onClose: () => { if (mode === "lobby") lobbyHud.show(); else if (mode === "home") home.show(); },
 });
 
 // First-run "How to Play" walkthrough — also reachable from the hamburger "How to play" row, which
 // dispatches `raider:howto` on hudRoot. Created here so it exists before the identity-gate callbacks.
 const howto = createHowTo(hudRoot);
 hudRoot.addEventListener("raider:howto", () => howto.open());
+
+// ── home: the Slopwheels collection screen — the game's boot surface. Booting here (instead of the
+// 3D strip) makes your card collection the front door; the lobby/race are reached FROM it. ──
+const home = createHome(hudRoot, {
+  cars: () => CAR_DEFS,
+  owns: (n) => inventory.owns(n),
+  equippedName: () => equippedCar.name,
+  onDriveLobby: (carName) => { equipByName(carName); exitHomeToLobby(); },
+  // Task 7 wires enterGrandprix here (replaces both coming-soon stubs)
+  onEnterRace: (_carName) => homeComingSoonToast(),
+  onWatchAndBet: () => homeComingSoonToast(),
+  onOpenStore: () => crateBox.open(),
+});
+function homeComingSoonToast(): void { home.toast("Races arrive in the next update"); }
 
 // ── lobby: the economy-hub town ─────────────────────────────────────────────
 // the map button drops you into a giant drivable neon lot with 4 functional buildings —
@@ -933,7 +966,8 @@ let prevDriveSpeed = 0; // freedrive speed last frame (lobby + highway accel der
 const SLOPE_SAMPLE = 3.4;
 const SLOPE_CLAMP = 0.35;
 let hwBillboardCd = 0; // billboard redraw cooldown (CanvasTexture upload ≈ not free)
-let mode: "race" | "lobby" | "highway" | "garage" = "race";
+// "grandprix" is wired by the NEXT task (in-app race) — adding it to the union now avoids churn.
+let mode: "race" | "lobby" | "highway" | "garage" | "home" | "grandprix" = "race";
 let garageEnterT = 0;        // seconds since entering the showroom (drives the reveal push-in)
 let garageMenuShown = false; // one-shot: auto-open the collection menu once the reveal has played
 let drive: DriveState = { x: LOBBY_SPAWN.x, z: LOBBY_SPAWN.z, heading: 0, speed: 0, steer: 0 };
@@ -993,7 +1027,7 @@ function enterLobby() {
   lobby.show();
   // cruise chrome: the world is the UI — balance + hamburger, nothing else
   setChrome("cruise");
-  mapBtn.setVisible(false);
+  mapBtn.setVisible(true); // the map pin backs the strip out to the Slopwheels collection (home)
   lobbyHud.show();
   syncPresenceLifecycle();
   audio.resume(); radio.resume();
@@ -1093,6 +1127,16 @@ function exitGarageToLobby() {
   enterLobby();
 }
 
+// ── home: the collection screen is the boot surface (a pure-DOM overlay; no 3D render behind it) ──
+function ensureWorlds(): void {} // Task 8 defers heavy world construction behind this; empty until then
+function enterHome(): void {
+  if (modeSwitchBlocked({ opening, phase: engine.getPhase() })) return;
+  mode = "home";
+  lobbyHud.hide(); home.show();
+  (window as Window & { hideSplash?: () => void }).hideSplash?.(); // home-ready IS boot-ready
+}
+function exitHomeToLobby(): void { home.hide(); ensureWorlds(); enterLobby(); }
+
 /** drive-into-a-building action. Economy screens open over the lobby; the Track gate leaves to the race. */
 function triggerBuilding(kind: BuildingKind) {
   switch (kind) {
@@ -1125,6 +1169,7 @@ const mapBtn = createMapButton(hudRoot, () => {
   if (mode === "race") enterLobby();
   else if (mode === "highway") exitHighwayToLobby();
   else if (mode === "garage") exitGarageToLobby();
+  else if (mode === "lobby") enterHome(); // the strip is no longer root — back it out to the collection
 });
 const lobbyHud = createLobbyHud(hudRoot);
 let presence: PresenceClient | null = null;
@@ -1818,6 +1863,8 @@ function frame(now: number) {
   const dt = Math.min(0.05, ctx.clock.getDelta()); // clamp so a frame hitch can't teleport the world
   updateEmoteVisual(localEmoteVisual, dt);
 
+  if (mode === "home") { requestAnimationFrame(frame); return; } // no 3D render while home is up
+
   if (mode === "lobby") {
     // touch (hold + drag) OR keyboard (W/↑ gas, S/↓ brake, A/D ←→ steer) — shared with the road
     const kSteer = controls.steer();
@@ -2163,9 +2210,9 @@ setInterval(async () => {
 // Warm every mode's shader programs while the splash still covers the canvas — first gate
 // entries then swap worlds without a single mid-drive glCompileShader (the hitch spike).
 precompileModes();
-// Boot into the strip: the hub IS the intro screen — clean cruise chrome from frame one.
-// The race world hosts runs; the bet sheet (TRACK gate / Space) launches into it.
-enterLobby();
+// Boot into the Slopwheels collection: the card grid IS the intro screen now (no 3D render behind
+// it). The lobby/track are reached FROM home — [Drive lobby] on a card lands in the 3D strip.
+enterHome();
 // The identity gate over the strip — the game's whole login screen. Shows on first
 // launch and after every log-out. Two doors:
 //   RIDE AS GUEST (name required) → practice mode: engine-only rounds, no wallet, ever.

@@ -1,5 +1,7 @@
 export interface PresenceLifecycleState {
-  mode: "race" | "lobby" | "highway" | "garage";
+  // home/grandprix carry no presence (neither connects nor shows the HUD) — the predicates below
+  // only ever light up for lobby/highway, so widening the union keeps them correctly dark.
+  mode: "race" | "lobby" | "highway" | "garage" | "home" | "grandprix";
   hasIdentity: boolean;
 }
 
