@@ -1145,19 +1145,11 @@ function exitHomeToLobby(): void { home.hide(); ensureWorlds(); enterLobby(); }
 // host just drives update()+render each frame and disposes on exit. Entered from home with the
 // tapped card's car (Enter race) or null (Watch & bet, all-house field). ──
 function enterGrandprix(playerCarName: string | null): void {
-  if (modeSwitchBlocked({ opening, phase: engine.getPhase() })) return; // no mode switch mid-GO
-  mode = "grandprix";
-  syncPresenceLifecycle(); // grandprix carries no presence (allowlist predicates keep it dark); this
-                           // still DISCONNECTS the lobby ghost when arriving from a presence mode
-  home.hide(); lobbyHud.hide();
-  mapBtn.setVisible(false); // the race exits via its own Done button, not the map pin
-  // The race owns the whole screen (race-hud board + bet panel). Hide the perps driving chrome
-  // that home was merely covering — the GO dock, tach, market tabs, price/timer/× chips (setMinimal)
-  // and the coin/scrap counters — so nothing bleeds through or fires behind the race. Every other
-  // mode re-establishes this via setChrome() on entry, so leaving grandprix restores it for free.
-  hud.setMinimal(true);
-  coins.setVisible(false); scrap.setVisible(false);
+  if (mode === "grandprix" || raceGame) return;                          // re-entry guard: a double-tapped race button (Android retargets the trailing click) would orphan + leak a whole race
+  if (modeSwitchBlocked({ opening, phase: engine.getPhase() })) return;  // no mode switch mid-GO
   const seed = (Math.random() * 1e9) >>> 0;
+  // Build the race FIRST: if construction throws (bad GLB path, track build) we bail here, BEFORE any
+  // irreversible mode/visibility/chrome mutation — the app stays on home instead of a half-torn state.
   // House field: unowned-but-unlocked defs stay eligible; buildGrid itself drops pool:false/comingSoon
   // and picks the player by name (an unowned/unknown name → all-house spectate).
   raceGame = createRaceGame({
@@ -1166,6 +1158,19 @@ function enterGrandprix(playerCarName: string | null): void {
     seed, lowTier: quality.tier === "low",
     onExit: () => exitGrandprixToHome(),
   });
+  mode = "grandprix";
+  syncPresenceLifecycle(); // grandprix carries no presence (allowlist predicates keep it dark); this
+                           // still DISCONNECTS the lobby ghost when arriving from a presence mode
+  home.hide(); lobbyHud.hide();
+  mapBtn.setVisible(false); // the race exits via its own Done button, not the map pin
+  // The race owns the whole screen (race-hud board + bet panel). Hide the perps 3D world — world +
+  // pickups + fire-trail AND the drivable car (it can poke into some race cam angles) — the same
+  // groups enterHighway hides, plus the car. Also hide the perps driving chrome (GO dock, tach,
+  // market tabs, price/timer/× via setMinimal; coin/scrap counters). enterLobby/exitLobby + setChrome
+  // re-establish every one of these downstream, so leaving grandprix restores it for free.
+  world.group.visible = false; pickups.group.visible = false; fireTrail.group.visible = false; car.group.visible = false;
+  hud.setMinimal(true);
+  coins.setVisible(false); scrap.setVisible(false);
 }
 function exitGrandprixToHome(): void {
   raceGame?.dispose(); raceGame = null;

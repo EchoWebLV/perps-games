@@ -142,4 +142,23 @@ describe("createRaceGame", () => {
     expect(hudParent.textContent).toContain("Podium — P1");
     game.dispose();
   });
+
+  it("frees a loaded model's textures on dispose but spares the shared toon gradientMap", () => {
+    const game = makeGame();
+    const fix = modelFixture();
+    // a GLB-owned map (must be freed → the leak this guards) and a stand-in for the shared toon cel
+    // ramp on gradientMap (a module singleton reused game-wide → must survive one race teardown).
+    const mapTex = new THREE.DataTexture(new Uint8Array([255, 255, 255, 255]), 1, 1);
+    const rampTex = new THREE.DataTexture(new Uint8Array([0, 0, 0, 255]), 1, 1);
+    fix.material.map = mapTex;
+    (fix.material as THREE.MeshStandardMaterial & { gradientMap: THREE.Texture }).gradientMap = rampTex;
+    const mapDisposed = vi.spyOn(mapTex, "dispose");
+    const rampDisposed = vi.spyOn(rampTex, "dispose");
+
+    pending[0].succeed(fix.gltf); // model attaches + toonifies (the toon variant reuses .map)
+    game.dispose();
+
+    expect(mapDisposed).toHaveBeenCalled();      // GLB-owned texture freed → no per-race texture leak
+    expect(rampDisposed).not.toHaveBeenCalled(); // gradientMap (shared cel ramp) left intact
+  });
 });

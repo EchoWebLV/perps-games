@@ -122,14 +122,36 @@ interface RaceCar {
   finishT: number;
 }
 
-/** Full-teardown disposer for a loaded car model — mirrors src/ui/reveal-car.ts disposeModel:
- *  reclaim the off-style toon variants, then walk the tree freeing geometry + materials. */
+/** Full-teardown disposer for a loaded car model — mirrors src/render/car.ts disposeObject:
+ *  collect geometries, materials AND their textures (from the active mesh materials plus the
+ *  reclaimed off-style toon variant) into dedup Sets, then free all three. Freeing the textures is
+ *  what stops the ~per-model GPU-texture leak across repeated race enter/dispose cycles.
+ *  EXCEPTION: `gradientMap` is skipped — the toon cel ramps (_ramp / _worldRamp in toon.ts) are
+ *  shared module singletons reused across the whole game and must survive a single race teardown. */
 function disposeModel(o: THREE.Object3D): void {
-  for (const mm of reclaimToonVariants(o)) mm.dispose();
+  const geometries = new Set<THREE.BufferGeometry>();
+  const materials = new Set<THREE.Material>();
+  const textures = new Set<THREE.Texture>();
+  const collectMaterial = (material: THREE.Material | null | undefined) => {
+    if (!material) return;
+    materials.add(material);
+    for (const [key, value] of Object.entries(material)) {
+      if (key === "gradientMap") continue; // shared toon ramp singleton — never dispose it here
+      if ((value as THREE.Texture | undefined)?.isTexture) textures.add(value as THREE.Texture);
+    }
+  };
   o.traverse((n) => {
     const m = n as THREE.Mesh;
-    if (m.isMesh) { m.geometry?.dispose(); (Array.isArray(m.material) ? m.material : [m.material]).forEach((mm) => mm?.dispose()); }
+    if (!m.isMesh) return;
+    if (m.geometry) geometries.add(m.geometry);
+    (Array.isArray(m.material) ? m.material : [m.material]).forEach((mm) => collectMaterial(mm));
   });
+  // toonify stashed each mesh's original material as the inactive variant; mesh.material only exposes
+  // the active one, so also reclaim the inactive variant (the Set dedups any shared map → frees once).
+  for (const mm of reclaimToonVariants(o)) collectMaterial(mm);
+  for (const t of textures) t.dispose();
+  for (const mm of materials) mm.dispose();
+  for (const g of geometries) g.dispose();
 }
 
 export function createRaceGame(opts: RaceGameOptions): RaceGame {
