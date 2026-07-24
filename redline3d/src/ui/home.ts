@@ -1,7 +1,9 @@
 // The Slopwheels boot surface: your collection is the game's front door.
-// Pure DOM (no three.js import) — home must cost nothing on the GPU.
+// Pure DOM (no three.js render) — home must cost nothing on the GPU. Clash-Royale/Hearthstone
+// collection idiom in the Slopwheels skin: near-black bg, acid-green accents, chunky comic borders,
+// cars arranged BY STARS (rarity tiers, 5★ first), unowned cars shown as gacha SILHOUETTES.
 import type { CarOption } from "./carpicker";
-import { carDisplayName } from "./carpicker";
+import { carDisplayName, icon } from "./carpicker";
 import { tierOf } from "../core/rarity";
 import { onTap } from "./tap";
 
@@ -29,21 +31,32 @@ export interface Home {
 export const cardSlug = (displayName: string): string =>
   displayName.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "");
 
-export function sortForCollection(defs: CarOption[], owns: (n: string) => boolean): CarOption[] {
-  return [...defs].sort((a, b) => {
-    const ao = owns(a.name) ? 1 : 0, bo = owns(b.name) ? 1 : 0;
-    if (ao !== bo) return bo - ao;
-    if ((a.rarity ?? 0) !== (b.rarity ?? 0)) return (b.rarity ?? 0) - (a.rarity ?? 0);
-    return a.name.localeCompare(b.name);
-  });
+export interface TierGroup { rarity: number; cars: CarOption[]; }
+/** Arrange the roster BY STARS: one section per rarity tier that has cars, highest rarity (5★) first.
+ *  Within a tier the owned cars lead, then the rest by name. Never mutates the caller's array. */
+export function groupByTier(defs: CarOption[], owns: (n: string) => boolean): TierGroup[] {
+  const byRarity = new Map<number, CarOption[]>();
+  for (const c of defs) {
+    const r = tierOf(c.rarity).id; // clamp to a real tier (missing/oob rarity → Common)
+    (byRarity.get(r) ?? byRarity.set(r, []).get(r)!).push(c);
+  }
+  const groups: TierGroup[] = [];
+  for (let r = 5; r >= 1; r--) {
+    const cars = byRarity.get(r);
+    if (!cars?.length) continue;
+    cars.sort((a, b) => {
+      const ao = owns(a.name) ? 1 : 0, bo = owns(b.name) ? 1 : 0;
+      if (ao !== bo) return bo - ao;            // owned first
+      return a.name.localeCompare(b.name);       // then by name
+    });
+    groups.push({ rarity: r, cars });
+  }
+  return groups;
 }
 
 // lock glyph (stroked, inherits currentColor) — no emoji, matches the carpicker/cratebox line-icon look
 const LOCK_SVG =
-  '<svg viewBox="0 0 24 24" width="26" height="26" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="5" y="11" width="14" height="9" rx="2"/><path d="M8 11V8a4 4 0 0 1 8 0v3"/></svg>';
-// generic car silhouette shown in the art window when the baked PNG is missing/broken
-const CAR_SVG =
-  '<svg viewBox="0 0 24 24" width="46" height="46" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M4 13l1.6-4.2A2.5 2.5 0 0 1 8 7h8a2.5 2.5 0 0 1 2.4 1.8L20 13v5h-2.4v-1.6h-11.2V18H4z"/><circle cx="7.6" cy="14.8" r="1.4"/><circle cx="16.4" cy="14.8" r="1.4"/></svg>';
+  '<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="5" y="11" width="14" height="9" rx="2"/><path d="M8 11V8a4 4 0 0 1 8 0v3"/></svg>';
 
 let stylesInjected = false;
 function injectStyles() {
@@ -54,64 +67,113 @@ function injectStyles() {
     /* z-index 30 sits below the access wall (40) and splash (50). The identity gate ALSO uses 30,
        so it wins over home purely by DOM append order (main.ts creates the gate after home) — keep
        that ordering if either is reworked, or bump one of the two to an explicit different layer. */
-    .sw-home{position:fixed;inset:0;z-index:30;display:none;flex-direction:column;pointer-events:auto;
-      background:radial-gradient(120% 90% at 50% -8%,rgba(39,231,255,.10),transparent 52%),
-        radial-gradient(120% 90% at 50% 108%,rgba(255,57,192,.10),transparent 55%),#05030d;
-      color:var(--ink,#e6ecf7);font-family:'Chakra Petch',ui-monospace,monospace;
+    .sw-home{--acid:#c1f832;--ink:#e8edf3;--mut:#79838f;--edge:#05070b;
+      position:fixed;inset:0;z-index:30;display:none;flex-direction:column;pointer-events:auto;
+      background:radial-gradient(130% 80% at 50% -10%,rgba(193,248,50,.08),transparent 55%),#0a0c10;
+      color:var(--ink);font-family:'Chakra Petch',ui-monospace,monospace;
       padding:max(14px,env(safe-area-inset-top)) max(12px,env(safe-area-inset-right)) 0 max(12px,env(safe-area-inset-left))}
     .sw-home.on{display:flex}
-    .sw-head{display:flex;align-items:center;justify-content:center;padding:6px 0 12px;flex:none}
-    .sw-wordmark{height:48px;width:auto;max-width:80vw;object-fit:contain;filter:drop-shadow(0 0 14px rgba(39,231,255,.35))}
-    .sw-tabs{display:flex;gap:8px;justify-content:center;padding:0 0 12px;flex:none}
-    .sw-tab{border:1px solid rgba(132,150,224,.28);background:rgba(18,14,40,.72);color:var(--mut,#9aa4b2);
-      padding:9px 20px;border-radius:11px;cursor:pointer;font:700 12px/1 'Chakra Petch',ui-monospace,monospace;
-      letter-spacing:.1em;text-transform:uppercase;transition:border-color .15s,background .15s,color .15s}
-    .sw-tab.on{border-color:var(--cyan,#27e7ff);color:#fff;background:rgba(30,24,62,.85);box-shadow:0 0 14px rgba(39,231,255,.28)}
-    .sw-tab:not(.on):hover{color:var(--ink,#e6ecf7);border-color:rgba(132,150,224,.5)}
-    .sw-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(146px,1fr));gap:12px;
-      overflow-y:auto;overflow-x:hidden;overscroll-behavior:contain;min-height:0;flex:1;
-      padding:4px 4px 16px;scrollbar-width:thin;scrollbar-color:rgba(132,150,224,.45) transparent}
-    .sw-grid::-webkit-scrollbar{width:8px}
-    .sw-grid::-webkit-scrollbar-thumb{background:rgba(132,150,224,.45);border-radius:8px}
-    .sw-card{position:relative;display:flex;flex-direction:column;gap:7px;padding:8px;border-radius:13px;
-      border:1.5px solid rgba(132,150,224,.24);background:linear-gradient(168deg,rgba(30,22,74,.9),rgba(14,10,30,.94));
-      box-shadow:0 8px 20px rgba(0,0,0,.5)}
-    .sw-card.equipped{border-color:var(--cyan,#27e7ff);box-shadow:0 0 0 1px var(--cyan,#27e7ff),0 10px 26px rgba(39,231,255,.4)}
-    .sw-card.locked{filter:grayscale(.55) brightness(.72)}
-    .sw-win{position:relative;height:104px;border-radius:10px;overflow:hidden;border:1px solid rgba(255,255,255,.14);
-      background:radial-gradient(120% 80% at 50% 98%,rgba(39,231,255,.16),rgba(255,57,192,.05) 54%,transparent 78%),linear-gradient(180deg,#231947,#0b0816 74%)}
-    .sw-silh{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:3px;
-      color:rgba(154,164,178,.6);text-align:center;padding:6px}
-    .sw-silh span{font:700 9px/1.2 'Chakra Petch',ui-monospace,monospace;letter-spacing:.08em;color:rgba(216,222,255,.5);
-      white-space:normal;max-width:100%;overflow:hidden}
-    .sw-art{position:absolute;inset:3px;width:calc(100% - 6px);height:calc(100% - 6px);object-fit:contain;opacity:0;transition:opacity .3s ease}
-    .sw-art.on{opacity:1}
-    .sw-lock{position:absolute;inset:0;display:grid;place-items:center;color:rgba(220,225,255,.85);pointer-events:none}
-    .sw-title{display:flex;align-items:center;justify-content:space-between;gap:6px;padding:0 2px}
-    .sw-name{font:700 12px/1.1 'Chakra Petch',ui-monospace,monospace;letter-spacing:.02em;color:#fff;text-transform:uppercase;
-      white-space:nowrap;overflow:hidden;text-overflow:ellipsis;text-shadow:0 0 8px rgba(39,231,255,.4)}
-    .sw-card.locked .sw-name{color:var(--mut,#9aa4b2);text-shadow:none}
-    .sw-pips{display:flex;gap:3px;flex:none}
-    .sw-pip{width:6px;height:6px;transform:rotate(45deg);border-radius:1px}
-    .sw-acts{display:flex;flex-direction:column;gap:6px}
-    .sw-row{display:flex;gap:6px}
-    .sw-btn{flex:1;border:0;border-radius:9px;padding:9px 6px;cursor:pointer;white-space:nowrap;
-      font:800 10px/1 'Chakra Petch',ui-monospace,monospace;letter-spacing:.05em;text-transform:uppercase}
-    .sw-btn.race{color:#04130d;background:linear-gradient(180deg,#48f0b6,#14c78c);box-shadow:0 3px 10px rgba(46,230,166,.3)}
-    .sw-btn.drive{color:#04222b;background:linear-gradient(180deg,#5cf0ff,#12c7e6);box-shadow:0 3px 10px rgba(39,231,255,.3)}
-    .sw-btn.crates{color:var(--amb,#ffd166);background:rgba(255,209,102,.12);border:1px solid rgba(255,209,102,.42)}
-    .sw-btn:hover{filter:brightness(1.08)}
-    .sw-foot{flex:none;padding:10px 0 max(12px,env(safe-area-inset-bottom));border-top:1px solid rgba(132,150,224,.18);
-      background:linear-gradient(0deg,#05030d,rgba(5,3,13,.2))}
-    .sw-watch{width:100%;border:0;border-radius:12px;padding:15px;cursor:pointer;
-      font:800 14px/1 'Chakra Petch',ui-monospace,monospace;letter-spacing:.1em;text-transform:uppercase;color:#fff;
-      background:linear-gradient(120deg,#7d1f6a,#3c1d6b 46%,#241a63);border:1px solid rgba(132,150,224,.4);
-      box-shadow:0 6px 20px rgba(125,31,106,.4),inset 0 1px 0 rgba(255,255,255,.12)}
-    .sw-watch:hover{filter:brightness(1.1)}
+    /* header: the transparent-alpha Slopwheels wordmark — NO plate behind it */
+    .sw-head{display:flex;align-items:center;justify-content:center;padding:4px 0 12px;flex:none}
+    .sw-wordmark{height:48px;width:auto;max-width:78vw;object-fit:contain;filter:drop-shadow(0 3px 10px rgba(0,0,0,.6))}
+    /* chunky comic segmented control: acid-green active (black text), dark inactive (green text) */
+    .sw-tabs{display:flex;gap:0;align-self:center;padding:3px;border:2.5px solid var(--edge);border-radius:13px;
+      background:#12151c;box-shadow:0 3px 0 var(--edge);margin-bottom:12px;flex:none}
+    .sw-tab{border:0;background:transparent;color:var(--acid);padding:9px 26px;border-radius:9px;cursor:pointer;
+      font:800 13px/1 'Chakra Petch',ui-monospace,monospace;letter-spacing:.12em;text-transform:uppercase;transition:background .12s,color .12s}
+    .sw-tab.on{background:var(--acid);color:#0a0c10}
+    .sw-tab:not(.on):hover{color:#eafcb0}
+    /* scroll body: alternating tier headers + card grids */
+    .sw-scroll{overflow-y:auto;overflow-x:hidden;overscroll-behavior:contain;min-height:0;flex:1;
+      padding:2px 2px 16px;scrollbar-width:thin;scrollbar-color:rgba(193,248,50,.4) transparent}
+    .sw-scroll::-webkit-scrollbar{width:8px}
+    .sw-scroll::-webkit-scrollbar-thumb{background:rgba(193,248,50,.4);border-radius:8px}
+    .sw-tierhead{display:flex;align-items:center;gap:9px;padding:14px 4px 9px}
+    .sw-tierhead:first-child{padding-top:2px}
+    .sw-tierstars{display:flex;gap:1px;font-size:15px;line-height:1;letter-spacing:1px;text-shadow:0 0 8px currentColor}
+    .sw-tiername{font:900 13px/1 'Chakra Petch',ui-monospace,monospace;letter-spacing:.18em;text-transform:uppercase}
+    .sw-tierrule{flex:1;height:2px;border-radius:2px;background:linear-gradient(90deg,currentColor,transparent)}
+    .sw-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:12px}
+    /* card = ART tile + name bar. Rarity-colored chunky border. NO buttons — tap opens the sheet. */
+    .sw-card{--tc:#9aa4b2;position:relative;display:flex;flex-direction:column;cursor:pointer;border-radius:13px;overflow:hidden;
+      border:2.5px solid color-mix(in srgb,var(--tc) 64%,var(--edge));background:#12151c;
+      box-shadow:0 4px 0 var(--edge),0 8px 18px rgba(0,0,0,.5);transition:transform .12s ease,box-shadow .12s ease}
+    .sw-card:hover{transform:translateY(-3px);box-shadow:0 6px 0 var(--edge),0 12px 24px rgba(0,0,0,.6)}
+    .sw-card:active{transform:translateY(-1px)}
+    .sw-card.equipped{border-color:var(--acid);box-shadow:0 0 0 2px var(--acid),0 4px 0 var(--edge),0 10px 22px rgba(193,248,50,.28)}
+    /* 3:4 art tile */
+    .sw-art-wrap{position:relative;aspect-ratio:3/4;overflow:hidden;
+      background:radial-gradient(120% 90% at 50% 8%,rgba(255,255,255,.06),transparent 60%),#0d1017}
+    .sw-card.locked .sw-art-wrap{background:radial-gradient(120% 90% at 50% 12%,rgba(150,166,196,.22),transparent 62%),linear-gradient(180deg,#232a37,#151a24)}
+    .sw-art{position:absolute;inset:6px;width:calc(100% - 12px);height:calc(100% - 12px);object-fit:contain;opacity:0;transition:opacity .3s ease}
+    .sw-card.has-art .sw-art{opacity:1}
+    /* SILHOUETTE: unowned = the real baked car crushed to a black shadow shape on the lighter tile */
+    .sw-card.locked .sw-art{filter:brightness(0);opacity:.9}
+    .sw-card.locked.has-art .sw-art{opacity:.9}
+    .sw-fallback{position:absolute;inset:0;display:none;place-items:center;font:900 46px/1 'Chakra Petch',ui-monospace,monospace;color:rgba(150,166,196,.5)}
+    .sw-card.no-art .sw-fallback{display:grid}
+    .sw-card.no-art .sw-art-wrap{background:linear-gradient(180deg,#14171f,#0c0e14)}
+    .sw-lock{position:absolute;top:6px;right:6px;display:grid;place-items:center;width:26px;height:26px;border-radius:8px;
+      color:#e8edf3;background:rgba(8,10,16,.72);border:1.5px solid rgba(255,255,255,.14)}
+    .sw-eqtag{position:absolute;top:6px;left:6px;padding:3px 8px;border-radius:7px;
+      font:900 9px/1 'Chakra Petch',ui-monospace,monospace;letter-spacing:.12em;color:#0a0c10;background:var(--acid);box-shadow:0 2px 6px rgba(0,0,0,.5)}
+    /* name bar under the art */
+    .sw-namebar{display:flex;flex-direction:column;gap:5px;padding:8px 9px 9px;border-top:2px solid var(--edge);background:#161a22}
+    .sw-name{font:800 12px/1.05 'Chakra Petch',ui-monospace,monospace;letter-spacing:.02em;color:#fff;text-transform:uppercase;
+      white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+    .sw-card.locked .sw-name{color:var(--mut)}
+    .sw-stars{display:flex;gap:1px;font-size:11px;line-height:1;letter-spacing:.5px}
+    .sw-star{text-shadow:0 0 6px currentColor}
+    /* sticky footer: WATCH & BET */
+    .sw-foot{flex:none;padding:10px 0 max(12px,env(safe-area-inset-bottom));border-top:2px solid var(--edge);
+      background:linear-gradient(0deg,#0a0c10,rgba(10,12,16,.2))}
+    .sw-watch{width:100%;border:2.5px solid var(--edge);border-radius:13px;padding:15px;cursor:pointer;
+      font:900 15px/1 'Chakra Petch',ui-monospace,monospace;letter-spacing:.14em;text-transform:uppercase;color:#0a0c10;
+      background:var(--acid);box-shadow:0 4px 0 var(--edge),0 8px 18px rgba(193,248,50,.28)}
+    .sw-watch:hover{filter:brightness(1.05)}
+    .sw-watch:active{transform:translateY(2px);box-shadow:0 2px 0 var(--edge)}
+    /* ── ONE action surface: the bottom sheet (kills the per-card button repetition) ── */
+    .sw-backdrop{position:fixed;inset:0;z-index:6;display:none;background:rgba(4,5,9,.72);backdrop-filter:blur(2px)}
+    .sw-backdrop.on{display:block}
+    .sw-sheet{--tc:#9aa4b2;position:fixed;left:0;right:0;bottom:0;z-index:7;transform:translateY(102%);transition:transform .26s cubic-bezier(.2,.8,.25,1);
+      display:flex;flex-direction:column;gap:13px;padding:16px 16px max(18px,env(safe-area-inset-bottom));
+      background:#0f1219;border-top:3px solid var(--tc);border-radius:20px 20px 0 0;box-shadow:0 -16px 40px rgba(0,0,0,.7);
+      max-height:88vh;overflow-y:auto}
+    .sw-sheet.on{transform:translateY(0)}
+    .sw-sheet-x{position:absolute;top:12px;right:12px;width:32px;height:32px;display:grid;place-items:center;border:0;border-radius:9px;cursor:pointer;
+      color:#e8edf3;background:rgba(255,255,255,.08);font:700 15px/1 'Chakra Petch',ui-monospace,monospace}
+    .sw-sheet-x:hover{background:rgba(255,255,255,.16)}
+    .sw-sheet-art{position:relative;align-self:center;width:min(260px,64vw);aspect-ratio:3/4;border-radius:14px;overflow:hidden;
+      border:2.5px solid color-mix(in srgb,var(--tc) 64%,var(--edge,#05070b));
+      background:radial-gradient(120% 90% at 50% 8%,rgba(255,255,255,.06),transparent 60%),#0d1017}
+    .sw-sheet-art.locked{background:radial-gradient(120% 90% at 50% 12%,rgba(150,166,196,.22),transparent 62%),linear-gradient(180deg,#232a37,#151a24)}
+    .sw-sheet-art .sw-art{position:absolute;inset:10px;width:calc(100% - 20px);height:calc(100% - 20px);object-fit:contain;opacity:1;transition:none}
+    .sw-sheet-art.locked .sw-art{filter:brightness(0);opacity:.9}
+    .sw-sheet-art .sw-fallback{font-size:64px}
+    .sw-sheet-art.no-art .sw-fallback{display:grid}
+    .sw-sheet-art .sw-lock{width:34px;height:34px;top:9px;right:9px}
+    .sw-sheet-head{display:flex;flex-direction:column;align-items:center;gap:6px;text-align:center}
+    .sw-sheet-name{font:900 22px/1 'Chakra Petch',ui-monospace,monospace;letter-spacing:.02em;color:#fff;text-transform:uppercase}
+    .sw-sheet-stars{display:flex;gap:3px;font-size:19px;line-height:1}
+    .sw-sheet-tier{font:900 11px/1 'Chakra Petch',ui-monospace,monospace;letter-spacing:.2em;text-transform:uppercase;text-shadow:0 0 10px currentColor}
+    .sw-perk{display:flex;align-items:flex-start;gap:11px;padding:11px 13px;border-radius:12px;
+      background:rgba(193,248,50,.07);border:1.5px solid rgba(193,248,50,.32)}
+    .sw-perk-ic{display:flex;color:var(--acid,#c1f832);margin-top:1px;flex:none;filter:drop-shadow(0 0 5px rgba(193,248,50,.5))}
+    .sw-perk-tx{display:flex;flex-direction:column;gap:3px;min-width:0}
+    .sw-perk-name{font:800 13px/1 'Chakra Petch',ui-monospace,monospace;letter-spacing:.05em;color:var(--acid,#c1f832);text-transform:uppercase}
+    .sw-perk-desc{font:500 11px/1.35 'Chakra Petch',ui-monospace,monospace;color:rgba(216,222,255,.72)}
+    .sw-sheet-acts{display:flex;gap:10px}
+    .sw-act{flex:1;border:2.5px solid var(--edge,#05070b);border-radius:12px;padding:14px 8px;cursor:pointer;white-space:nowrap;
+      font:900 13px/1 'Chakra Petch',ui-monospace,monospace;letter-spacing:.08em;text-transform:uppercase}
+    .sw-act.race{color:#0a0c10;background:var(--acid,#c1f832);box-shadow:0 3px 0 var(--edge,#05070b)}
+    .sw-act.drive{color:#e8edf3;background:#1b202a;box-shadow:0 3px 0 var(--edge,#05070b)}
+    .sw-act.crates{color:#0a0c10;background:var(--acid,#c1f832);box-shadow:0 3px 0 var(--edge,#05070b)}
+    .sw-act:hover{filter:brightness(1.08)}
+    .sw-act:active{transform:translateY(2px);box-shadow:0 1px 0 var(--edge,#05070b)}
     .sw-toast{position:fixed;left:50%;top:50%;transform:translate(-50%,-50%);z-index:31;
-      padding:12px 22px;border-radius:12px;font:700 15px/1 'Chakra Petch',ui-monospace,monospace;letter-spacing:.05em;
-      background:rgba(11,8,32,.94);border:1px solid var(--amb,#ffd166);color:var(--amb,#ffd166);
-      text-shadow:0 0 10px rgba(255,209,102,.45);opacity:0;pointer-events:none;transition:opacity .2s ease}
+      padding:12px 22px;border-radius:12px;font:800 15px/1 'Chakra Petch',ui-monospace,monospace;letter-spacing:.05em;
+      background:rgba(10,12,16,.95);border:2px solid var(--acid,#c1f832);color:var(--acid,#c1f832);
+      text-shadow:0 0 10px rgba(193,248,50,.4);opacity:0;pointer-events:none;transition:opacity .2s ease}
   `;
   document.head.appendChild(s);
 }
@@ -123,18 +185,18 @@ export function createHome(parent: HTMLElement, deps: HomeDeps): Home {
   el.className = "sw-home";
   el.dataset.home = "1";
 
-  // ── header: the Slopwheels wordmark ──
+  // ── header: the transparent-alpha Slopwheels wordmark (no black plate) ──
   const head = document.createElement("div");
   head.className = "sw-head";
   const wordmark = document.createElement("img");
   wordmark.className = "sw-wordmark";
-  wordmark.src = "/assets/brands/slopwheels.png";
+  wordmark.src = "/assets/brands/slopwheels-alpha.png";
   wordmark.alt = "Slopwheels";
   head.appendChild(wordmark);
   el.appendChild(head);
 
-  // ── tab strip: [Collection] [Store]. Store fires onOpenStore (its own overlay); Collection is
-  //    the only rendered content, so the Store tab never swaps the grid out from under it. ──
+  // ── tab strip: [Collection] [Store] segmented control. Store is a passthrough to the crate overlay;
+  //    Collection is the only rendered content, so tapping Store never swaps the grid out from under it. ──
   const tabs = document.createElement("div");
   tabs.className = "sw-tabs";
   const collectionTab = document.createElement("button");
@@ -146,10 +208,10 @@ export function createHome(parent: HTMLElement, deps: HomeDeps): Home {
   tabs.append(collectionTab, storeTab);
   el.appendChild(tabs);
 
-  // ── collection grid ──
-  const grid = document.createElement("div");
-  grid.className = "sw-grid";
-  el.appendChild(grid);
+  // ── collection body: tier sections (5★ first) ──
+  const scroll = document.createElement("div");
+  scroll.className = "sw-scroll";
+  el.appendChild(scroll);
 
   // ── sticky footer: Watch & bet ──
   const foot = document.createElement("div");
@@ -160,6 +222,13 @@ export function createHome(parent: HTMLElement, deps: HomeDeps): Home {
   foot.appendChild(watchBtn);
   el.appendChild(foot);
 
+  // ── the ONE action surface: a bottom sheet raised by tapping any card ──
+  const backdrop = document.createElement("div");
+  backdrop.className = "sw-backdrop";
+  const sheet = document.createElement("div");
+  sheet.className = "sw-sheet";
+  el.append(backdrop, sheet);
+
   const toastEl = document.createElement("div");
   toastEl.className = "sw-toast";
   el.appendChild(toastEl);
@@ -168,106 +237,211 @@ export function createHome(parent: HTMLElement, deps: HomeDeps): Home {
 
   // Opening the store hides home (the crate overlay sits BELOW home's z-index); crateBox.onClose
   // brings home back via show(), which also picks up any car just pulled from the crate.
-  const openStore = () => { hide(); deps.onOpenStore(); };
+  const openStore = () => { closeSheet(); hide(); deps.onOpenStore(); };
 
-  onTap(collectionTab, () => { collectionTab.classList.add("on"); storeTab.classList.remove("on"); });
   onTap(storeTab, openStore);
   onTap(watchBtn, () => deps.onWatchAndBet());
 
-  const addPips = (host: HTMLElement, rarity: number) => {
+  // star row (★ × rarity) tinted in the tier color; `size` in px. ★ is a static glyph (no user data).
+  const addStars = (host: HTMLElement, rarity: number, color: string) => {
     for (let i = 0; i < rarity; i++) {
-      const pip = document.createElement("span");
-      pip.className = "sw-pip";
-      const c = tierOf(rarity).color;
-      pip.style.background = c;
-      pip.style.boxShadow = `0 0 5px ${c}cc`;
-      host.appendChild(pip);
+      const st = document.createElement("span");
+      st.className = "sw-star";
+      st.textContent = "★";
+      st.style.color = color;
+      host.appendChild(st);
     }
   };
 
-  const buildCard = (c: CarOption): HTMLElement => {
+  // ── bottom action sheet: the single place any car's actions live ──
+  function closeSheet() {
+    backdrop.classList.remove("on");
+    sheet.classList.remove("on");
+  }
+  function openSheet(c: CarOption) {
     const owned = deps.owns(c.name);
     const display = carDisplayName(c);
-    const card = document.createElement("div");
-    // the equipped ring is OWNED-only: the boot road model defaults to an unowned car (e.g. DeLorean
-    // for a fresh guest), and a dimmed locked card must never wear the cyan "equipped" ring.
-    card.className = "sw-card" + (owned ? " owned" : " locked") +
-      (owned && c.name === deps.equippedName() ? " equipped" : "");
+    const rarity = tierOf(c.rarity).id;
+    const tier = tierOf(rarity);
+    sheet.style.setProperty("--tc", tier.color);
 
-    // art window: baked PNG on top of a silhouette fallback (name text + car glyph)
-    const win = document.createElement("div");
-    win.className = "sw-win";
-    const silh = document.createElement("div");
-    silh.className = "sw-silh";
-    silh.innerHTML = CAR_SVG; // static glyph, no dynamic data
-    const silhName = document.createElement("span");
-    silhName.textContent = display; // textContent — never inject a name as HTML
-    silh.appendChild(silhName);
-    win.appendChild(silh);
+    const x = document.createElement("button");
+    x.className = "sw-sheet-x";
+    x.setAttribute("aria-label", "Close");
+    x.textContent = "✕";
+    onTap(x, closeSheet);
+
+    // larger art (silhouette if unowned)
+    const artWrap = document.createElement("div");
+    artWrap.className = "sw-sheet-art" + (owned ? "" : " locked");
+    const fallback = document.createElement("div");
+    fallback.className = "sw-fallback";
+    fallback.textContent = "?";
     const art = document.createElement("img");
     art.className = "sw-art";
     art.alt = display;
     art.src = `/cards/${cardSlug(display)}.png`;
-    art.addEventListener("load", () => art.classList.add("on"));
-    art.addEventListener("error", () => { art.remove(); }); // drop broken art → silhouette shows
-    win.appendChild(art);
+    art.addEventListener("error", () => { art.remove(); artWrap.classList.add("no-art"); });
+    artWrap.append(fallback, art);
     if (!owned) {
       const lock = document.createElement("div");
       lock.className = "sw-lock";
-      lock.innerHTML = LOCK_SVG;
-      win.appendChild(lock);
+      lock.innerHTML = LOCK_SVG; // static glyph, no dynamic data
+      artWrap.appendChild(lock);
     }
-    card.appendChild(win);
 
-    // title row: name + rarity pips
-    const title = document.createElement("div");
-    title.className = "sw-title";
-    const name = document.createElement("span");
-    name.className = "sw-name";
-    name.textContent = display;
-    const pips = document.createElement("span");
-    pips.className = "sw-pips";
-    addPips(pips, c.rarity ?? 0);
-    title.append(name, pips);
-    card.appendChild(title);
+    // name + star row + tier label
+    const headRow = document.createElement("div");
+    headRow.className = "sw-sheet-head";
+    const nm = document.createElement("div");
+    nm.className = "sw-sheet-name";
+    nm.textContent = display; // textContent — never inject a name as HTML
+    const stars = document.createElement("div");
+    stars.className = "sw-sheet-stars";
+    addStars(stars, rarity, tier.color);
+    const tierLbl = document.createElement("div");
+    tierLbl.className = "sw-sheet-tier";
+    tierLbl.textContent = tier.name;
+    tierLbl.style.color = tier.color;
+    headRow.append(nm, stars, tierLbl);
 
-    // actions: owned → race / drive ; unowned → get crates
+    const parts: HTMLElement[] = [x, artWrap, headRow];
+
+    // perk info (when the car has a power) — icon id is a developer constant; name/desc via textContent
+    if (c.power) {
+      const perk = document.createElement("div");
+      perk.className = "sw-perk";
+      const ic = document.createElement("span");
+      ic.className = "sw-perk-ic";
+      ic.innerHTML = icon(c.power.icon, 20);
+      const tx = document.createElement("div");
+      tx.className = "sw-perk-tx";
+      const pn = document.createElement("div");
+      pn.className = "sw-perk-name";
+      pn.textContent = c.power.name;
+      const pd = document.createElement("div");
+      pd.className = "sw-perk-desc";
+      pd.textContent = c.power.desc;
+      tx.append(pn, pd);
+      perk.append(ic, tx);
+      parts.push(perk);
+    }
+
+    // actions: owned → Enter race + Drive lobby ; unowned → Get crates
     const acts = document.createElement("div");
-    acts.className = "sw-acts";
+    acts.className = "sw-sheet-acts";
     if (owned) {
-      const row = document.createElement("div");
-      row.className = "sw-row";
       const race = document.createElement("button");
-      race.className = "sw-btn race";
+      race.className = "sw-act race";
       race.textContent = "Enter race";
-      onTap(race, () => deps.onEnterRace(c.name));
+      onTap(race, () => { closeSheet(); deps.onEnterRace(c.name); });
       const drive = document.createElement("button");
-      drive.className = "sw-btn drive";
+      drive.className = "sw-act drive";
       drive.textContent = "Drive lobby";
-      onTap(drive, () => deps.onDriveLobby(c.name));
-      row.append(race, drive);
-      acts.appendChild(row);
+      onTap(drive, () => { closeSheet(); deps.onDriveLobby(c.name); });
+      acts.append(race, drive);
     } else {
       const get = document.createElement("button");
-      get.className = "sw-btn crates";
+      get.className = "sw-act crates";
       get.textContent = "Get crates";
       onTap(get, openStore);
       acts.appendChild(get);
     }
-    card.appendChild(acts);
+    parts.push(acts);
+
+    sheet.replaceChildren(...parts);
+    backdrop.classList.add("on");
+    sheet.classList.add("on");
+  }
+  onTap(backdrop, closeSheet);
+
+  // ── card: pure ART tile + name bar. No buttons — the whole card is a tap target for the sheet. ──
+  const buildCard = (c: CarOption): HTMLElement => {
+    const owned = deps.owns(c.name);
+    const display = carDisplayName(c);
+    const rarity = tierOf(c.rarity).id;
+    const tier = tierOf(rarity);
+    const card = document.createElement("div");
+    // the equipped ring is OWNED-only: the boot road model defaults to an unowned car (e.g. DeLorean
+    // for a fresh guest), and a dimmed locked card must never wear the acid-green "equipped" ring.
+    const equipped = owned && c.name === deps.equippedName();
+    card.className = "sw-card" + (owned ? " owned" : " locked") + (equipped ? " equipped" : "");
+    card.style.setProperty("--tc", tier.color);
+
+    // art tile: baked PNG (brightness(0) silhouette when unowned); "?" only if the PNG is missing
+    const wrap = document.createElement("div");
+    wrap.className = "sw-art-wrap";
+    const fallback = document.createElement("div");
+    fallback.className = "sw-fallback";
+    fallback.textContent = "?";
+    wrap.appendChild(fallback);
+    const art = document.createElement("img");
+    art.className = "sw-art";
+    art.alt = display;
+    art.src = `/cards/${cardSlug(display)}.png`;
+    art.addEventListener("load", () => card.classList.add("has-art"));
+    art.addEventListener("error", () => { art.remove(); card.classList.add("no-art"); }); // missing bake → "?" card
+    wrap.appendChild(art);
+    if (!owned) {
+      const lock = document.createElement("div");
+      lock.className = "sw-lock";
+      lock.innerHTML = LOCK_SVG;
+      wrap.appendChild(lock);
+    }
+    if (equipped) {
+      const tag = document.createElement("div");
+      tag.className = "sw-eqtag";
+      tag.textContent = "EQUIPPED";
+      wrap.appendChild(tag);
+    }
+    card.appendChild(wrap);
+
+    // name bar: name + star row (fully visible even when locked — the rarity always reads)
+    const bar = document.createElement("div");
+    bar.className = "sw-namebar";
+    const name = document.createElement("span");
+    name.className = "sw-name";
+    name.textContent = display;
+    const stars = document.createElement("span");
+    stars.className = "sw-stars";
+    addStars(stars, rarity, tier.color);
+    bar.append(name, stars);
+    card.appendChild(bar);
+
+    onTap(card, () => openSheet(c));
     return card;
   };
 
   const render = () => {
-    grid.replaceChildren(); // fresh build → old card elements + their listeners are discarded
-    for (const c of sortForCollection(deps.cars(), deps.owns)) grid.appendChild(buildCard(c));
+    scroll.replaceChildren(); // fresh build → old card elements + their listeners are discarded
+    for (const group of groupByTier(deps.cars(), deps.owns)) {
+      const tier = tierOf(group.rarity);
+      const headRow = document.createElement("div");
+      headRow.className = "sw-tierhead";
+      headRow.style.color = tier.color;
+      const stars = document.createElement("span");
+      stars.className = "sw-tierstars";
+      addStars(stars, group.rarity, tier.color);
+      const label = document.createElement("span");
+      label.className = "sw-tiername";
+      label.textContent = tier.name;
+      const rule = document.createElement("span");
+      rule.className = "sw-tierrule";
+      headRow.append(stars, label, rule);
+      scroll.appendChild(headRow);
+
+      const grid = document.createElement("div");
+      grid.className = "sw-grid";
+      for (const c of group.cars) grid.appendChild(buildCard(c));
+      scroll.appendChild(grid);
+    }
   };
 
   let toastTimer: ReturnType<typeof setTimeout> | undefined;
 
   function show() {
     render();
-    // returning from the store lands back on Collection (the only content tab)
+    closeSheet();                       // never re-open home with a stale sheet raised
     collectionTab.classList.add("on"); storeTab.classList.remove("on");
     el.classList.add("on");
   }

@@ -2260,7 +2260,15 @@ setInterval(async () => {
 precompileModes();
 // Boot into the Slopwheels collection: the card grid IS the intro screen now (no 3D render behind
 // it). The lobby/track are reached FROM home — [Drive lobby] on a card lands in the 3D strip.
-enterHome();
+// DEV-ONLY bake-harness hook: scripts/bake-cards.mjs drives the lobby's Garage to render card art, but
+// home now covers that chrome. `?nohome=1` (dev builds only — stripped from prod) boots straight to the
+// lobby and dismisses the splash so the baker can reach the hamburger → Garage.
+if (import.meta.env.DEV && new URLSearchParams(location.search).has("nohome")) {
+  enterLobby();
+  (window as Window & { hideSplash?: () => void }).hideSplash?.(); // no home path to dismiss the splash here
+} else {
+  enterHome();
+}
 // The identity gate over the strip — the game's whole login screen. Shows on first
 // launch and after every log-out. Two doors:
 //   RIDE AS GUEST (name required) → practice mode: engine-only rounds, no wallet, ever.

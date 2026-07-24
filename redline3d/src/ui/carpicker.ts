@@ -66,7 +66,9 @@ const ICONS: Record<string, string> = {
   bell: '<path d="M12 3.5a5.5 5.5 0 0 1 5.5 5.5v3.6l1.7 2.9H4.8l1.7-2.9V9A5.5 5.5 0 0 1 12 3.5z"/><path d="M10.3 18.5a1.8 1.8 0 0 0 3.4 0"/>',
   sparkle: '<path d="M12 3l1.8 5.2L19 10l-5.2 1.8L12 17l-1.8-5.2L5 10l5.2-1.8z"/><path d="M18 4.2l.6 1.7 1.7.6-1.7.6-.6 1.7-.6-1.7-1.7-.6 1.7-.6z"/>',
 };
-const icon = (id: string, size = 15) =>
+// exported so the Slopwheels home action-sheet can render a car's perk glyph from the SAME line-icon
+// set (id is a developer constant from CAR_DEFS, never user input — safe to inline as SVG).
+export const icon = (id: string, size = 15) =>
   `<svg viewBox="0 0 24 24" width="${size}" height="${size}" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">${ICONS[id] || ""}</svg>`;
 const backIcon = (size: number) => icon("chevron", size).replace('d="M9 6l6 6-6 6"', 'd="M15 6l-6 6 6 6"');
 // rarity pips: count = tier (1–5), each colored by its tier (gray→green→blue→purple→gold);

@@ -22,7 +22,11 @@ const CHROME = process.env.PUPPETEER_EXECUTABLE_PATH || [
 ].find((p) => existsSync(p));
 
 const PORT = 5188;
-const BASE = `http://localhost:${PORT}`;
+const ORIGIN = `http://localhost:${PORT}`;
+// The GAME lives at /play/ (root "/" is the marketing landing page — no garage there). `?nohome=1` is a
+// DEV-only boot hook in main.ts that skips the Slopwheels home overlay and lands in the lobby, so the
+// hamburger → Garage chrome this script drives is on screen.
+const BASE = `${ORIGIN}/play/?nohome=1`;
 const OUT = "public/cards";
 
 const waitForServer = (url, tries = 80) =>
@@ -52,6 +56,12 @@ try {
   });
   const page = await browser.newPage();
   page.on("console", (m) => m.type() === "error" && console.warn("  [page]", m.text()));
+  // Seed a guest identity BEFORE any page script runs, so the first-launch identity gate (which would
+  // otherwise cover the hamburger) never appears. Runs in the localhost origin on navigation; the
+  // about:blank pass throws on localStorage and is swallowed. Matches src/ui/identity.ts IDENT_KEY.
+  await page.evaluateOnNewDocument(() => {
+    try { localStorage.setItem("raider.identity", JSON.stringify({ name: "bake_bot", mode: "guest" })); } catch {}
+  });
   await page.goto(BASE, { waitUntil: "networkidle2" });
 
   // open the menu, go to the Garage — the app renders each car to a card image
