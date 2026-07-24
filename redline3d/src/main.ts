@@ -112,6 +112,9 @@ const hudRoot = document.getElementById("hud") as HTMLElement;
 const CRATE_TREASURY = (import.meta.env.VITE_CRATE_TREASURY_PUBKEY as string | undefined) ?? "";
 
 const ctx = createScene(canvas);
+// Boot milestones (30/55/75/90) reported to the splash bar. NB: today these all fire within a
+// single synchronous module eval, so the bar just eases straight to 90 — they only become
+// visibly stepped once boot gains async gaps (deferred world construction lands in a later task).
 (window as Window & { setSplashProgress?: (pct: number) => void }).setSplashProgress?.(30); // boot milestone: scene up
 
 // quality / post-processing (perf-gated) — the GPU string catches weak GPUs behind strong

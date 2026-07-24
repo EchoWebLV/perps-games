@@ -176,8 +176,10 @@
           pct = document.getElementById("splashpct"),
           splash = document.getElementById("splash");
         var current = 0, target = 10, done = false, t0 = Date.now();
-        // milestones drive the target (monotonic, capped at 99 — hideSplash owns 100)
+        // milestones drive the target (monotonic, capped at 99 — hideSplash owns 100).
+        // Once hidden (done), the contract is closed: late milestones are ignored.
         window.setSplashProgress = function (p) {
+          if (done) return;
           target = Math.max(target, Math.min(p, 99));
         };
         (function tick() {
