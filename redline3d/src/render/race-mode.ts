@@ -26,6 +26,8 @@ import { createCamControls } from "../ui/cam-controls";
 import { onTap } from "../ui/tap";
 import { STRENGTH, type GridEntrant } from "../core/race-grid";
 import { ownerPodiumPayout } from "../core/race-payout";
+import { pNum, pColor } from "../config/visual-presets";
+import { registerLightLab } from "../ui/light-lab";
 
 // ── public surface ────────────────────────────────────────────────────────────────────────────
 export interface RaceGameOptions {
@@ -39,6 +41,11 @@ export interface RaceGameOptions {
   // it's carried, not read — kept in the interface for when a low-tier render diet is actually built.
   lowTier: boolean;
   devHooks?: boolean;                 // install window.__raceState / __warp (harness only)
+  // In-app hosts (main.ts) set this: the race then mounts its OWN light rig (hemi/key/rim), dusk fog,
+  // and full IBL into the scene so it reads like the dev harness instead of the dark perps main-scene
+  // lights — and registers the DEV "race-track" Light Lab folder. The harness leaves it off: it already
+  // owns identical scene lights/fog/Light Lab (see race-preview.ts), so the race must not double them.
+  provideSceneLighting?: boolean;
   onExit?: (result: RaceResult) => void; // fired when the player leaves after FINISH
 }
 export interface RaceResult {
@@ -154,6 +161,31 @@ function disposeModel(o: THREE.Object3D): void {
   for (const g of geometries) g.dispose();
 }
 
+// ── in-app race lighting (provideSceneLighting) ────────────────────────────────────────────────
+// The DEV Light Lab has no unregister, and other scenes register once for a lifetime object. The race
+// is created/disposed per entry, so instead of re-registering we register the "race-track" folder ONCE
+// and bind its controls to whichever race is currently mounted through this module-level handle. Each
+// fresh race sets `activeLighting`; dispose clears it (setters then no-op, getters fall back to the
+// shipped preset). The folder edits the SAME "race-track" keys the harness honors → ★ SAVE ALL retunes
+// both from one source (visual-presets.json).
+interface RaceLighting { hemi: THREE.HemisphereLight; key: THREE.DirectionalLight; rim: THREE.DirectionalLight; scene: THREE.Scene }
+let activeLighting: RaceLighting | null = null;
+let raceLabRegistered = false;
+function ensureRaceTrackLab(): void {
+  if (raceLabRegistered) return; // DEV-gated + idempotent (registerLightLab is a no-op in prod)
+  raceLabRegistered = true;
+  const fog = (): THREE.Fog | null => (activeLighting?.scene.fog instanceof THREE.Fog ? activeLighting.scene.fog : null);
+  registerLightLab("race-track", { controls: [
+    { key: "hemi", label: "hemisphere", kind: "num", min: 0, max: 3, step: 0.01, get: () => activeLighting?.hemi.intensity ?? pNum("race-track", "hemi", 0.9), set: (v) => { if (activeLighting) activeLighting.hemi.intensity = v; } },
+    { key: "key", label: "key (directional)", kind: "num", min: 0, max: 3, step: 0.01, get: () => activeLighting?.key.intensity ?? pNum("race-track", "key", 1.15), set: (v) => { if (activeLighting) activeLighting.key.intensity = v; } },
+    { key: "keyColor", label: "key color", kind: "color", get: () => activeLighting ? "#" + activeLighting.key.color.getHexString() : pColor("race-track", "keyColor", "#ffffff"), set: (v) => { activeLighting?.key.color.set(v); } },
+    { key: "rim", label: "rim", kind: "num", min: 0, max: 3, step: 0.01, get: () => activeLighting?.rim.intensity ?? pNum("race-track", "rim", 0.55), set: (v) => { if (activeLighting) activeLighting.rim.intensity = v; } },
+    { key: "fogColor", label: "fog color", kind: "color", get: () => { const f = fog(); return f ? "#" + f.color.getHexString() : pColor("race-track", "fogColor", "#3a2246"); }, set: (v) => { fog()?.color.set(v); } },
+    { key: "fogNear", label: "fog near", kind: "num", min: 0, max: 1500, step: 1, get: () => fog()?.near ?? pNum("race-track", "fogNear", 260), set: (v) => { const f = fog(); if (f) f.near = v; } },
+    { key: "fogFar", label: "fog far", kind: "num", min: 0, max: 4000, step: 1, get: () => fog()?.far ?? pNum("race-track", "fogFar", 1300), set: (v) => { const f = fog(); if (f) f.far = v; } },
+  ] });
+}
+
 export function createRaceGame(opts: RaceGameOptions): RaceGame {
   const { scene, camera, hudParent, grid } = opts;
 
@@ -170,6 +202,8 @@ export function createRaceGame(opts: RaceGameOptions): RaceGame {
   let disposed = false;
   let exitRequested = false;
   let exited = false;
+  // set when provideSceneLighting swaps the global scene fog/background/env-intensity → restored in dispose()
+  let restoreSceneEnv: (() => void) | null = null;
   let lastResult: RaceResult = { finishOrder: [], playerRank: null, poolTotal: 0 };
 
   // THREE resources this module owns and must free in dispose()
@@ -567,6 +601,29 @@ export function createRaceGame(opts: RaceGameOptions): RaceGame {
     };
   }
 
+  // ── in-app lighting rig (provideSceneLighting) — installed LAST so a construction throw above bails
+  // before any global scene state is touched. Own hemi/key/rim mounted on the race group (so they
+  // mount/dispose with the race); values + fog read from the SAME "race-track" presets the harness
+  // honors, so the in-app race and the dev harness share one tuning source. Scene fog/background/
+  // env-intensity are GLOBAL → saved here, restored in dispose(). ──
+  if (opts.provideSceneLighting) {
+    const hemi = new THREE.HemisphereLight(0x9fc4ff, 0x120a24, pNum("race-track", "hemi", 0.9));
+    const key = new THREE.DirectionalLight(pColor("race-track", "keyColor", "#ffffff"), pNum("race-track", "key", 1.15)); // key for shape
+    key.position.set(80, 150, 60);
+    const rim = new THREE.DirectionalLight(0x6ab8ff, pNum("race-track", "rim", 0.55)); // cool rim from the skyline side
+    rim.position.set(-120, 60, -120);
+    raceGroup.add(hemi, key, rim);
+    // dusk atmosphere (matches race-preview.ts applyStyleFog toon branch): far fog pushed out to 1300 so
+    // the circuit + near skyline read, and full IBL (the perps scene dims env to 0.55 → washes the cars out)
+    const prevFog = scene.fog, prevBg = scene.background, prevEnvI = scene.environmentIntensity;
+    scene.fog = new THREE.Fog(pColor("race-track", "fogColor", "#3a2246"), pNum("race-track", "fogNear", 260), pNum("race-track", "fogFar", 1300));
+    scene.background = new THREE.Color(0x140a24);
+    scene.environmentIntensity = 1;
+    restoreSceneEnv = () => { scene.fog = prevFog; scene.background = prevBg; scene.environmentIntensity = prevEnvI; };
+    activeLighting = { hemi, key, rim, scene };
+    ensureRaceTrackLab(); // DEV: bind the "race-track" Light Lab folder to this race (no-op in prod)
+  }
+
   // ── boot: mount the race group; start GLB loads in the background (market opens on the first
   // update, so the anchors race whether or not the models have landed) ──
   scene.add(raceGroup);
@@ -593,6 +650,10 @@ export function createRaceGame(opts: RaceGameOptions): RaceGame {
         delete w.__raceState;
         delete w.__warp;
       }
+      // restore the perps scene's global fog/background/env-intensity + release the Light Lab binding
+      // (its controls fall back to the shipped presets until the next race mounts)
+      if (restoreSceneEnv) { restoreSceneEnv(); restoreSceneEnv = null; }
+      if (opts.provideSceneLighting) activeLighting = null;
       scene.remove(raceGroup);
       hud.dispose();
       betPanel.dispose();

@@ -911,6 +911,8 @@ registerLightLab("Global", { controls: [
     { key: "edgeThickness", label: "edge thickness px", kind: "num" as const, min: 0.5, max: 4, step: 0.05, get: () => post.edge.thickness, set: (v: number) => { post.edge.thickness = v; } },
   ] : []),
 ] });
+// stable handle to the perps-road Fog (grandprix swaps scene.fog out+back — see the fog controls below)
+const perpsRoadFog = ctx.scene.fog instanceof THREE.Fog ? ctx.scene.fog : null;
 registerLightLab("perps-road", { controls: [
   { key: "ambient", label: "ambient", kind: "num", min: 0, max: 3, step: 0.01, get: () => ctx.ambient.intensity, set: (v) => { ctx.ambient.intensity = v; } },
   { key: "ambientColor", label: "ambient color", kind: "color", get: () => "#" + ctx.ambient.color.getHexString(), set: (v) => ctx.ambient.color.set(v) },
@@ -921,10 +923,13 @@ registerLightLab("perps-road", { controls: [
     { key: "bloomRadius", label: "bloom radius", kind: "num" as const, min: 0, max: 1, step: 0.01, get: () => post.bloom.radius, set: (v: number) => { post.bloom.radius = v; } },
     { key: "bloomThreshold", label: "bloom threshold", kind: "num" as const, min: 0, max: 1, step: 0.01, get: () => post.bloom.threshold, set: (v: number) => { post.bloom.threshold = v; } },
   ] : []),
-  ...(ctx.scene.fog instanceof THREE.Fog ? [
-    { key: "fogColor", label: "fog color", kind: "color" as const, get: () => "#" + (ctx.scene.fog as THREE.Fog).color.getHexString(), set: (v: string) => (ctx.scene.fog as THREE.Fog).color.set(v) },
-    { key: "fogNear", label: "fog near", kind: "num" as const, min: 0, max: 800, step: 1, get: () => (ctx.scene.fog as THREE.Fog).near, set: (v: number) => { (ctx.scene.fog as THREE.Fog).near = v; } },
-    { key: "fogFar", label: "fog far", kind: "num" as const, min: 0, max: 2000, step: 1, get: () => (ctx.scene.fog as THREE.Fog).far, set: (v: number) => { (ctx.scene.fog as THREE.Fog).far = v; } },
+  // Bind to the perps-road Fog OBJECT captured at boot, NOT live `ctx.scene.fog`: grandprix temporarily
+  // swaps scene.fog for the race's dusk fog (restoring this same object on exit). Reading live scene.fog
+  // here would show — and worse, SAVE ALL would persist — the RACE fog into the perps-road preset.
+  ...(perpsRoadFog ? [
+    { key: "fogColor", label: "fog color", kind: "color" as const, get: () => "#" + perpsRoadFog.color.getHexString(), set: (v: string) => perpsRoadFog.color.set(v) },
+    { key: "fogNear", label: "fog near", kind: "num" as const, min: 0, max: 800, step: 1, get: () => perpsRoadFog.near, set: (v: number) => { perpsRoadFog.near = v; } },
+    { key: "fogFar", label: "fog far", kind: "num" as const, min: 0, max: 2000, step: 1, get: () => perpsRoadFog.far, set: (v: number) => { perpsRoadFog.far = v; } },
   ] : []),
 ] });
 // drive-in garage showroom: your equipped car hero-lit on a turntable (its own world, like the oval)
@@ -1156,24 +1161,40 @@ function enterGrandprix(playerCarName: string | null): void {
     scene: ctx.scene, camera: ctx.camera, hudParent: hudRoot,
     grid: buildGrid(CAR_DEFS.filter((c) => !c.locked || inventory.owns(c.name)), playerCarName, mulberry32(seed)),
     seed, lowTier: quality.tier === "low",
+    // race-mode lights the race like the dev harness (own hemi/key/rim + dusk fog + full IBL) and
+    // registers the DEV "race-track" Light Lab folder — the perps main-scene lights are too dark for it.
+    provideSceneLighting: true,
     onExit: () => exitGrandprixToHome(),
   });
   mode = "grandprix";
-  syncPresenceLifecycle(); // grandprix carries no presence (allowlist predicates keep it dark); this
-                           // still DISCONNECTS the lobby ghost when arriving from a presence mode
-  home.hide(); lobbyHud.hide();
-  mapBtn.setVisible(false); // the race exits via its own Done button, not the map pin
   // The race owns the whole screen (race-hud board + bet panel). Hide the perps 3D world — world +
   // pickups + fire-trail AND the drivable car (it can poke into some race cam angles) — the same
-  // groups enterHighway hides, plus the car. Also hide the perps driving chrome (GO dock, tach,
-  // market tabs, price/timer/× via setMinimal; coin/scrap counters). enterLobby/exitLobby + setChrome
-  // re-establish every one of these downstream, so leaving grandprix restores it for free.
+  // groups enterHighway hides, plus the car. Then MUTE the two perps main-scene lights (ambient + key,
+  // the scene-root pair from createScene): they're the only lights that reach the race group (every
+  // other group is hidden here), and their moody purple/pink wash is exactly what made the race look
+  // wrong. With them off the race renders under ONLY its harness-matched rig. exitGrandprix restores.
   world.group.visible = false; pickups.group.visible = false; fireTrail.group.visible = false; car.group.visible = false;
+  ctx.ambient.visible = false; ctx.key.visible = false;
+  // Kill the cold-entry compile freeze (the "dark spot at race start"): the race track + environment
+  // programs were never in precompileModes() (the race group doesn't exist at boot), so their first
+  // render used to glCompileShader ~30 programs mid-frame. Warm them NOW — while home still covers the
+  // canvas and under the final light config set just above — so the first VISIBLE race frame is already
+  // compiled. (Diagnosed in-browser: cold entry spiked one 124ms frame as programs jumped 116→145; a
+  // warm re-entry has no such spike.)
+  ctx.renderer.compile(ctx.scene, ctx.camera);
+  syncPresenceLifecycle(); // grandprix carries no presence (allowlist predicates keep it dark); this
+                           // still DISCONNECTS the lobby ghost when arriving from a presence mode
+  home.hide(); lobbyHud.hide(); // hide home LAST — it masked the compile stall a beat ago
+  mapBtn.setVisible(false); // the race exits via its own Done button, not the map pin
+  // Hide the perps driving chrome (GO dock, tach, market tabs, price/timer/× via setMinimal; coin/scrap
+  // counters). enterLobby/exitLobby + setChrome re-establish every one of these downstream, so leaving
+  // grandprix restores it for free.
   hud.setMinimal(true);
   coins.setVisible(false); scrap.setVisible(false);
 }
 function exitGrandprixToHome(): void {
-  raceGame?.dispose(); raceGame = null;
+  raceGame?.dispose(); raceGame = null; // dispose restores the scene fog/background/env-intensity
+  ctx.ambient.visible = true; ctx.key.visible = true; // un-mute the perps main-scene lights the race muted
   enterHome(); // handles mode, presence sync, home.show, idempotent hideSplash
 }
 

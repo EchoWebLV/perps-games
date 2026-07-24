@@ -161,4 +161,28 @@ describe("createRaceGame", () => {
     expect(mapDisposed).toHaveBeenCalled();      // GLB-owned texture freed → no per-race texture leak
     expect(rampDisposed).not.toHaveBeenCalled(); // gradientMap (shared cel ramp) left intact
   });
+
+  it("provideSceneLighting mounts a hemi/key/rim rig and saves+restores the global scene fog/env", () => {
+    const scene = new THREE.Scene();
+    const prevFog = new THREE.Fog(0x150a26, 60, 420); // stand-in for the perps main-scene fog
+    scene.fog = prevFog;
+    scene.environmentIntensity = 0.55;
+    const camera = new THREE.PerspectiveCamera(60, 1, 0.1, 100);
+    const hudParent = document.createElement("div");
+    const before = scene.children.length;
+
+    const game = createRaceGame({ scene, camera, hudParent, grid: DEFAULT_GRID, seed: 5, lowTier: true, provideSceneLighting: true });
+
+    let lights = 0;
+    scene.traverse((o) => { if ((o as THREE.Light).isLight) lights++; });
+    expect(lights).toBeGreaterThanOrEqual(3);              // hemi + key + rim mounted under the race group
+    expect(scene.fog).not.toBe(prevFog);                  // race dusk fog swapped in
+    expect((scene.fog as THREE.Fog).far).toBe(1300);       // far pushed out so the circuit reads
+    expect(scene.environmentIntensity).toBe(1);            // full IBL (perps dims it to 0.55)
+
+    game.dispose();
+    expect(scene.fog).toBe(prevFog);                       // original fog restored on teardown
+    expect(scene.environmentIntensity).toBe(0.55);         // original env-intensity restored
+    expect(scene.children.length).toBe(before);            // race group (with its lights) removed
+  });
 });
