@@ -167,7 +167,7 @@ describe("createRaceGame", () => {
     const prevFog = new THREE.Fog(0x150a26, 60, 420); // stand-in for the perps main-scene fog
     scene.fog = prevFog;
     scene.environmentIntensity = 0.55;
-    const camera = new THREE.PerspectiveCamera(60, 1, 0.1, 100);
+    const camera = new THREE.PerspectiveCamera(60, 1, 0.1, 2000); // app-parity far (scene.ts): lifted to 4000 during the race, restored on dispose
     const hudParent = document.createElement("div");
     const before = scene.children.length;
 
@@ -185,10 +185,12 @@ describe("createRaceGame", () => {
     expect(scene.fog).not.toBe(prevFog);                  // race dusk fog swapped in
     expect((scene.fog as THREE.Fog).far).toBe(1650);       // far pushed out so the circuit reads
     expect(scene.environmentIntensity).toBe(1);            // full IBL (perps dims it to 0.55)
+    expect(camera.far).toBe(4000);                         // host camera far lifted to harness parity so the below-horizon dome bowl isn't far-clipped into a black floor
 
     game.dispose();
     expect(scene.fog).toBe(prevFog);                       // original fog restored on teardown
     expect(scene.environmentIntensity).toBe(0.55);         // original env-intensity restored
+    expect(camera.far).toBe(2000);                         // original camera far restored on teardown
     expect(scene.children.length).toBe(before);            // race group (with its lights) removed
   });
 });

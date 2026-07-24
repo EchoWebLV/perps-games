@@ -627,7 +627,19 @@ export function createRaceGame(opts: RaceGameOptions): RaceGame {
     scene.fog = new THREE.Fog(pColor("race-track", "fogColor", "#3a2246"), pNum("race-track", "fogNear", 260), pNum("race-track", "fogFar", 1300));
     scene.background = new THREE.Color(0x140a24);
     scene.environmentIntensity = 1;
-    restoreSceneEnv = () => { scene.fog = prevFog; scene.background = prevBg; scene.environmentIntensity = prevEnvI; };
+    // Lift the host camera's far plane to harness parity (race-preview.ts uses 4000). The toon sky dome
+    // (race-environment.ts, radius ≈ R+1400 = 1791 about the track center) dips below the horizon and its
+    // warm-orange bowl is what backs the semi-transparent near-black floor into a warm dusk. From the orbit
+    // camera positions that bowl sits up to ~camera-distance+1791 away, so the app camera's default far of
+    // 2000 (scene.ts) far-clips it — the dark scene.background then shows through and the floor renders black.
+    // 4000 keeps the bowl inside the frustum. GLOBAL camera state → saved here, restored in restoreSceneEnv().
+    const prevFar = camera.far;
+    camera.far = 4000;
+    camera.updateProjectionMatrix();
+    restoreSceneEnv = () => {
+      scene.fog = prevFog; scene.background = prevBg; scene.environmentIntensity = prevEnvI;
+      camera.far = prevFar; camera.updateProjectionMatrix();
+    };
     ownLighting = { hemi, key, rim, scene, exposure: opts.exposure ?? null };
     activeLighting = ownLighting;
     ensureRaceTrackLab(); // DEV: bind the "race-track" Light Lab folder to this race (no-op in prod)
