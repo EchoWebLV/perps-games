@@ -5,6 +5,7 @@
 // card on finish. Wallet is module-level: survives RACE AGAIN, resets on page reload. No chain,
 // no server — this is a demo of the betting vision only.
 import { onTap } from "./tap";
+import { RAKE } from "../core/race-payout";
 
 export interface BetCar { id: number; name: string; color: string }
 export type BetPhase = "LOADING" | "MARKET" | "COUNTDOWN" | "RACING" | "FINISH";
@@ -35,7 +36,6 @@ export interface BetPanel {
   dispose(): void;
 }
 
-const RAKE = 0.05;          // 5% house rake on pari-mutuel payouts
 const FLOW_INTERVAL = 0.8;  // seconds between fake-bettor pool inflows
 const STAKES = [1, 5, 20];
 
