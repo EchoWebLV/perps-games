@@ -51,6 +51,9 @@ function injectStyles() {
   stylesInjected = true;
   const s = document.createElement("style");
   s.textContent = `
+    /* z-index 30 sits below the access wall (40) and splash (50). The identity gate ALSO uses 30,
+       so it wins over home purely by DOM append order (main.ts creates the gate after home) — keep
+       that ordering if either is reworked, or bump one of the two to an explicit different layer. */
     .sw-home{position:fixed;inset:0;z-index:30;display:none;flex-direction:column;pointer-events:auto;
       background:radial-gradient(120% 90% at 50% -8%,rgba(39,231,255,.10),transparent 52%),
         radial-gradient(120% 90% at 50% 108%,rgba(255,57,192,.10),transparent 55%),#05030d;
@@ -186,8 +189,10 @@ export function createHome(parent: HTMLElement, deps: HomeDeps): Home {
     const owned = deps.owns(c.name);
     const display = carDisplayName(c);
     const card = document.createElement("div");
+    // the equipped ring is OWNED-only: the boot road model defaults to an unowned car (e.g. DeLorean
+    // for a fresh guest), and a dimmed locked card must never wear the cyan "equipped" ring.
     card.className = "sw-card" + (owned ? " owned" : " locked") +
-      (c.name === deps.equippedName() ? " equipped" : "");
+      (owned && c.name === deps.equippedName() ? " equipped" : "");
 
     // art window: baked PNG on top of a silhouette fallback (name text + car glyph)
     const win = document.createElement("div");

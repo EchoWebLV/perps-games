@@ -1132,6 +1132,7 @@ function ensureWorlds(): void {} // Task 8 defers heavy world construction behin
 function enterHome(): void {
   if (modeSwitchBlocked({ opening, phase: engine.getPhase() })) return;
   mode = "home";
+  syncPresenceLifecycle(); // home carries no presence — drop the lobby ghost on the lobby→home back-out
   lobbyHud.hide(); home.show();
   (window as Window & { hideSplash?: () => void }).hideSplash?.(); // home-ready IS boot-ready
 }
