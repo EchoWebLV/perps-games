@@ -936,7 +936,11 @@ const SLOPE_CLAMP = 0.35;
 let hwBillboardCd = 0; // billboard redraw cooldown (CanvasTexture upload ≈ not free)
 // "grandprix" is the in-app race mode: entered from home with the player's owned car (createRaceGame
 // owns the track/sim/HUD; the host just drives update+render and disposes on exit).
-let mode: "race" | "lobby" | "highway" | "garage" | "home" | "grandprix" = "race";
+// Default "home": home IS the boot surface, and the boot tail always calls enterHome()/enterLobby()
+// (which sets this) before the first frame — so no code ever reads this default today. It's a safety
+// floor: if the boot tail is ever re-ordered so a frame runs first, "home" falls into the harmless
+// reschedule branch (frame() returns early for mode==="home") instead of the race branch's `world!` null-deref.
+let mode: "race" | "lobby" | "highway" | "garage" | "home" | "grandprix" = "home";
 let raceGame: RaceGame | null = null; // the live in-app race, or null when not in grandprix
 // perps renderer tone-mapping saved on grandprix entry, restored on its single exit (the race shares the
 // harness's ACES operator; the perps world runs NoToneMapping/1.0 with tone-mapping deferred to OutputPass)
@@ -963,6 +967,12 @@ function setChrome(state: "cruise" | "race") {
   garage.setMenuTop(state === "cruise"); // strip: hamburger rides the top row (price chip's slot)
 }
 
+// ── mode transitions ────────────────────────────────────────────────────────
+// Deferred-world ref idiom (Task 8): the 3D refs (world/lobby/oval/lobbyCam/strip*) are `T | null`,
+// built lazily by ensureWorlds(). Inside these mode fns and the frame branches — which run only AFTER
+// a mode entry that called ensureWorlds() — assert non-null with `!` and a comment naming that guarantee.
+// Reserve `?.` for genuinely out-of-flow callers (async presence/settle, dev hooks, pre-first-entry skin reads).
+//
 // When you drive OUT of a building (Track / Garage) the car should emerge AT that building's doorway
 // nosed BACK at the building it just left — you instantly see where you came from, not teleported to
 // the south entrance. Set when a building is entered, consumed once by the next enterLobby(). null →
@@ -2536,6 +2546,9 @@ function bootIdentity() {
 // Boot ALWAYS resumes the identity flow now; the wall is deferred into whichever path the player picks.
 bootIdentity();
 (window as Window & { setSplashProgress?: (pct: number) => void }).setSplashProgress?.(90); // boot milestone: identity resolved
+// Boot-order invariant: the enterHome()/enterLobby() in the boot tail above MUST run before this kick —
+// the first frame() dispatches on `mode`, and only home mode renders nothing (the 3D branches deref the
+// deferred world). rAF is async so it can't beat the synchronous boot tail; the "home" default backstops a re-order.
 requestAnimationFrame(frame);
 // Returning SIGNED-IN players see their money at the top immediately: silently restore the persisted
 // wallet session, hydrate the account, THEN wall on the account's access set — a returning account
