@@ -5,7 +5,7 @@ import { tierOf } from "../core/rarity";
 import { rollCrate, dupeScrap, pickLevel, clientRandom, CRATES, crateByKey, type CrateType, type CrateCar, type RandomnessProvider } from "../core/crate";
 import { createRevealCar } from "./reveal-car";
 import { scrapPileHtml, levelPosterHtml, type LevelPoster } from "./reveal-bits";
-import { toonify } from "../render/toon";
+import { toonify, reclaimToonVariants } from "../render/toon";
 
 // The Crate Shop: pick one of three crates (Wooden / Silver / Gold), buy with coins → roll a car by
 // that crate's rarity odds + bank the crate's scrap → reveal. A NEW car unlocks in the garage; a
@@ -286,6 +286,7 @@ export function createCrateBox(parent: HTMLElement, deps: CrateBoxDeps): CrateBo
         const ico = panel.querySelector(`[data-ico="${key}"]`) as HTMLElement | null;
         if (ico) { ico.style.backgroundImage = `url(${cratePng[key]})`; ico.classList.add("has3d"); }
         model.traverse((o) => { const m = o as THREE.Mesh; if (m.isMesh) { m.geometry?.dispose(); (Array.isArray(m.material) ? m.material : [m.material]).forEach((mm) => mm?.dispose()); } });
+        for (const mm of reclaimToonVariants(model)) mm.dispose(); // + the stashed off-style variants (also drops the crate from the style registry)
         next();
       }, undefined, (err) => { console.warn("[crate] GLB failed:", key, err); next(); });
     };

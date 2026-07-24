@@ -1,6 +1,6 @@
 import * as THREE from "three";
 import { type WorldTheme, type LampStyle, getTheme, loadThemeKey, saveThemeKey } from "./world-themes";
-import { toonifyWorld, unregisterToonRoot, isToonEnabled, onToonChanged } from "./toon";
+import { toonifyWorld, disposeToonPass, isToonEnabled, onToonChanged } from "./toon";
 import { ROAD_GRADE_ANCHOR_Z, roadGradeOffset, roadGradeSlope } from "../core/market-road";
 import type { MarketDirection } from "../core/market-pulse";
 import { marketShockLightBoost } from "./market-shock";
@@ -685,7 +685,7 @@ export function createWorld(detail: "full" | "reduced" = "full"): World {
     return { pole, neon, bulb, halo, beam };
   }
   function buildLamps(theme: WorldTheme): void {
-    if (lampGroup) { unregisterToonRoot(lampGroup); group.remove(lampGroup); for (const d of lampJunk) d.dispose(); lampJunk.length = 0; }
+    if (lampGroup) { disposeToonPass(lampGroup); group.remove(lampGroup); for (const d of lampJunk) d.dispose(); lampJunk.length = 0; } // disposeToonPass frees the cel variants + outline hull mats (and drops from the style registry); lampJunk frees the originals
     lamps.length = 0;
     const g = new THREE.Group();
     const matsA = lampMats(theme.lights[0]); // left side

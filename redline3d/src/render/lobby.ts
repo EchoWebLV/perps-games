@@ -4,7 +4,7 @@ import type { PresenceEmote } from "../core/presence";
 import { buildBuilding } from "./buildings";
 import { buildLobbyBackdrop, type LobbyBackdrop } from "./lobby-backdrop";
 import { createRemoteCars, type RemoteCarResolver } from "./remote-cars";
-import { toonifyWorld, isToonEnabled, onToonChanged } from "./toon";
+import { toonifyWorld, disposeToonPass, isToonEnabled, onToonChanged } from "./toon";
 import { registerLightLab } from "../ui/light-lab";
 import { pNum, pColor } from "../config/visual-presets";
 
@@ -315,6 +315,7 @@ export function createLobby(
     },
     dispose() {
       remoteCars.dispose();
+      disposeToonPass(group); // free the cel variants + outline hull mats toonifyWorld added (drops from the style registry too)
       for (const d of disposables) d.dispose();
     },
   };

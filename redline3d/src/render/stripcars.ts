@@ -1,7 +1,7 @@
 import * as THREE from "three";
 import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader.js";
 import { carNormScale } from "./car-scale";
-import { toonify } from "./toon";
+import { toonify, reclaimToonVariants } from "./toon";
 import { makeBlobShadow } from "./blob-shadow";
 
 /**
@@ -212,6 +212,9 @@ export function createStripCars(specs: StripCarSpec[]): StripCars {
         m.geometry?.dispose();
         (Array.isArray(m.material) ? m.material : [m.material]).forEach((mm) => mm?.dispose());
       });
+      // toonify stashed the off-style variant of every car material + registered each model root
+      // for style flips; reclaim both so the parked fleet doesn't outlive the strip (see car.ts)
+      for (const mm of reclaimToonVariants(group)) mm.dispose();
     },
   };
 }

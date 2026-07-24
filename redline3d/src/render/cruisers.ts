@@ -2,7 +2,7 @@ import * as THREE from "three";
 import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader.js";
 import { tagTexture } from "./stripcars";
 import { buildWheelRig, type WheelRig } from "./wheels";
-import { toonify } from "./toon";
+import { toonify, reclaimToonVariants } from "./toon";
 import { makeBlobShadow } from "./blob-shadow";
 
 /**
@@ -138,6 +138,9 @@ export function createCruisers(specs: CruiserSpec[]): Cruisers {
         const s = o as THREE.Sprite; // gamertag sprites: free the canvas texture + material
         if (s.isSprite) { s.material?.map?.dispose(); s.material?.dispose(); }
       });
+      // toonify stashed the off-style variant of every cruiser material + registered each model root
+      // for style flips; reclaim both so the lapping cars don't outlive the strip (see car.ts)
+      for (const mm of reclaimToonVariants(group)) mm.dispose();
     },
   };
 }
