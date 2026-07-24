@@ -25,6 +25,8 @@ export interface BetPanel {
   tick(dt: number): void;               // advance fake bettors (call during MARKET only)
   lock(): void;                         // freeze odds at market close
   settle(winnerId: number): SettleResult; // call once on entering FINISH; mutates wallet
+  /** Add non-bet winnings (owner podium) to the wallet; label shows in the results strip. */
+  credit(amount: number, label: string): void;
   render(ctx: BetRenderCtx): void;
   onSkip(fn: () => void): void;
   onRaceAgain(fn: () => void): void;
@@ -95,6 +97,7 @@ const CSS = `
 .bp-settle .paid{font-size:13px;color:#ffd166;margin-bottom:12px;}
 .bp-net{font-size:30px;font-weight:700;font-variant-numeric:tabular-nums;margin-bottom:2px;}
 .bp-net.up{color:#41d67f;}.bp-net.down{color:#ff6b8b;}
+.bp-credit{font-size:13px;font-weight:700;color:#41d67f;font-variant-numeric:tabular-nums;margin-bottom:6px;}
 .bp-walletbig{font-size:13px;color:#c9d6ff;margin-bottom:16px;}
 .bp-again{cursor:pointer;font-family:inherit;font-size:15px;font-weight:700;letter-spacing:.12em;text-transform:uppercase;color:#04121a;background:linear-gradient(180deg,#4ff0ff,#27b7e7);border:none;border-radius:10px;padding:11px 26px;box-shadow:0 0 22px rgba(39,231,255,.55);-webkit-tap-highlight-color:transparent;user-select:none;}
 .bp-again:active{transform:translateY(1px);}
@@ -135,6 +138,7 @@ body.toon-ui .bp-settle .win{font-weight:800;}
 body.toon-ui .bp-settle .paid{font-weight:700;}
 body.toon-ui .bp-net{font-size:32px;font-weight:800;}
 body.toon-ui .bp-net.up{color:#3ff08a;}
+body.toon-ui .bp-credit{color:#3ff08a;font-weight:800;}
 body.toon-ui .bp-walletbig{color:#e6ddff;font-weight:700;}
 body.toon-ui .bp-again{font-weight:800;letter-spacing:.10em;background:#2de2e6;border:3px solid #0a0812;border-radius:12px;box-shadow:4px 4px 0 rgba(8,5,16,.9);}
 body.toon-ui .bp-again:active{transform:translate(3px,3px);box-shadow:1px 1px 0 rgba(8,5,16,.9);}
@@ -167,6 +171,7 @@ export function createBetPanel(parent: HTMLElement = document.body): BetPanel {
       <div class="win"></div>
       <div class="paid"></div>
       <div class="bp-net"></div>
+      <div class="bp-credit" style="display:none"></div>
       <div class="bp-walletbig"></div>
       <button class="bp-again" type="button">Race Again</button>
     </div>`;
@@ -185,6 +190,7 @@ export function createBetPanel(parent: HTMLElement = document.body): BetPanel {
   const winEl = settleEl.querySelector(".win") as HTMLElement;
   const paidEl = settleEl.querySelector(".paid") as HTMLElement;
   const netEl = settleEl.querySelector(".bp-net") as HTMLElement;
+  const creditEl = settleEl.querySelector(".bp-credit") as HTMLElement;
   const walletBigEl = settleEl.querySelector(".bp-walletbig") as HTMLElement;
   const againBtn = settleEl.querySelector(".bp-again") as HTMLElement;
 
@@ -198,6 +204,7 @@ export function createBetPanel(parent: HTMLElement = document.body): BetPanel {
   let flowAcc = 0;
   let selStake = 5;
   let lastSettle: { winnerId: number; net: number; winnerMult: number } | null = null;
+  let creditLine: string | null = null; // non-bet winnings (owner podium) shown in the FINISH card
 
   // per-car row element refs
   const rows: Array<{ row: HTMLElement; prob: HTMLElement; mult: HTMLElement; pool: HTMLElement; bet: HTMLButtonElement }> = [];
@@ -263,6 +270,7 @@ export function createBetPanel(parent: HTMLElement = document.body): BetPanel {
       locked = false;
       flowAcc = 0;
       lastSettle = null;
+      creditLine = null;
     },
     tick(dt) {
       if (locked) return;
@@ -289,6 +297,11 @@ export function createBetPanel(parent: HTMLElement = document.body): BetPanel {
       const net = gross - staked;
       lastSettle = { winnerId, net, winnerMult: mult };
       return { net, walletAfter: wallet, winnerMult: mult };
+    },
+    credit(amount, label) {
+      if (!(amount > 0)) return;
+      wallet += amount;
+      creditLine = `${label}: +$${amount.toFixed(2)}`; // painted alongside the settle result in FINISH
     },
     render(ctx) {
       const showPanel = ctx.phase === "MARKET";
@@ -347,6 +360,13 @@ export function createBetPanel(parent: HTMLElement = document.body): BetPanel {
         netEl.textContent = `${up ? "+" : "−"}$${Math.abs(lastSettle.net).toFixed(2)}`;
         netEl.className = "bp-net " + (up ? "up" : "down");
         walletBigEl.textContent = `Wallet: $${wallet.toFixed(2)}`;
+      }
+
+      if (ctx.phase === "FINISH") {
+        creditEl.textContent = creditLine ?? "";
+        creditEl.style.display = creditLine ? "block" : "none";
+        // keep the settle-card wallet figure honest even when a credit lands without a bet settle
+        if (creditLine && !lastSettle) walletBigEl.textContent = `Wallet: $${wallet.toFixed(2)}`;
       }
     },
     onSkip(fn) { onTap(skipEl, () => fn()); },
