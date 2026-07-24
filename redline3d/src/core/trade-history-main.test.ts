@@ -76,7 +76,7 @@ describe("main trade history wiring", () => {
     expect(main).toContain("onSettled: (info) => finalizeSettled(info)");
     expect(between("async function closeRound", "const FRIENDLY_CODES")).toContain("finalizeSettled(res)");
     expect(between("async function doFlip", "function applyFlipReconcile")).toContain("finalizeSettled(res)");
-    expect(between("setInterval(async () =>", "// Warm every mode")).toContain("finalizeSettled(snap)");
+    expect(between("setInterval(async () =>", "// Boot into the Slopwheels collection")).toContain("finalizeSettled(snap)"); // end-marker follows the poll setInterval (was "// Warm every mode", removed when Task 8 deferred the boot precompileModes())
   });
 
   it("renders the settlement balance before starting background RPC reconciliation", () => {

@@ -8,7 +8,7 @@ import { installOutlineDevControls, refreshToonStyle, isToonEnabled, setToonEnab
 import { edgePassEnabled, setEdgePassEnabled } from "./render/edge-outline-pass";
 import { registerLightLab } from "./ui/light-lab";
 import { pNum } from "./config/visual-presets";
-import { THEMES, themeKeys, nextThemeKey } from "./render/world-themes";
+import { THEMES, themeKeys, nextThemeKey, loadThemeKey } from "./render/world-themes";
 import { createCar } from "./render/car";
 import { createChaseCam, ROAD_SPEED_MAX, roadSpeed } from "./render/camera";
 import { detectQuality, gpuRendererString, shouldRenderFrame } from "./platform/perf";
@@ -116,9 +116,10 @@ const hudRoot = document.getElementById("hud") as HTMLElement;
 const CRATE_TREASURY = (import.meta.env.VITE_CRATE_TREASURY_PUBKEY as string | undefined) ?? "";
 
 const ctx = createScene(canvas);
-// Boot milestones (30/55/75/90) reported to the splash bar. NB: today these all fire within a
-// single synchronous module eval, so the bar just eases straight to 90 — they only become
-// visibly stepped once boot gains async gaps (deferred world construction lands in a later task).
+// Boot milestones (30/55/75/90) reported to the splash bar. They still all fire within a single
+// synchronous module eval, so the bar eases straight to 90 — deferring the world/lobby/oval/garage
+// behind ensureWorlds() REMOVED sync work from boot (home now shows sooner) but added no async gap,
+// so the beats don't visibly step. The car GLB (async) is the only real gap, and home owns the hide.
 (window as Window & { setSplashProgress?: (pct: number) => void }).setSplashProgress?.(30); // boot milestone: scene up
 
 // quality / post-processing (perf-gated) — the GPU string catches weak GPUs behind strong
@@ -146,17 +147,20 @@ addEventListener("resize", applyViewportSize);
 // so a scene first built at a 0×0/stale viewport gets re-sized the moment the canvas lays out.
 if (typeof ResizeObserver !== "undefined") new ResizeObserver(applyViewportSize).observe(canvas);
 
-// world + car
-const world = createWorld(quality.detail);
-ctx.scene.add(world.group);
-installOutlineDevControls(); // DEV: [ / ] rescale every cel-shade outline live; window.__outline(x)
-// sync the saved art style now the world's toon'd/variant roots exist: applies material + hull +
-// geometry-variant state and sets the `toon-ui` body class. The persistent HUD chip toggles it live.
+// world + car — the race world (and the lobby/oval/garage below) is DEFERRED behind ensureWorlds():
+// the game boots straight to the 2D home with NO 3D world built. `let … | null`, assigned inside
+// ensureWorlds() on the first entry into any 3D mode. See ensureWorlds() near the mode functions.
+let world: ReturnType<typeof createWorld> | null = null;
+installOutlineDevControls(); // DEV: [ / ] rescale every cel-shade outline live; window.__outline(x) — world-independent, stays eager
+// Boot art-style sync: sets the `toon-ui` body class (the comic race-hud/bet-panel skin that
+// grandprix-entered-straight-from-home relies on) and toons any eager roots. ensureWorlds() calls
+// refreshToonStyle() AGAIN once the world's toon'd/variant roots exist. The HUD chip toggles it live.
 refreshToonStyle();
 /** swap the race-world skin AND re-warm its brand-new shader programs off the hot path —
  *  setTheme rebuilds env/lamp materials, and compiling them from a menu beats a first-corner
  *  stall on the next track entry (precompileModes is defined below, hoisted). */
 function setWorldTheme(key: string): string {
+  if (!world) return loadThemeKey(); // skin picker / __skin fired before the first 3D entry — the persisted key is exactly what a fresh world would boot with
   world.setTheme(key);
   requestAnimationFrame(() => precompileModes());
   return world.currentTheme();
@@ -166,8 +170,8 @@ function setWorldTheme(key: string): string {
 (window as any).__skin = {
   list: () => themeKeys(),
   set: (key: string) => setWorldTheme(key),
-  next: () => setWorldTheme(nextThemeKey(world.currentTheme())),
-  current: () => world.currentTheme(),
+  next: () => setWorldTheme(nextThemeKey(world?.currentTheme() ?? loadThemeKey())),
+  current: () => world?.currentTheme() ?? loadThemeKey(),
 };
 // Home now owns the splash hide (enterHome calls hideSplash — "home-ready IS boot-ready"), so the
 // car-GLB settle no longer dismisses the splash. The bounded 20s fallback stays wired (belt-and-
@@ -562,7 +566,7 @@ hud.onWallet(() => {
 // car picker — swap the GLB model live + apply the card's special ability
 const setAbility = (a?: CarAbility) => {
   ability = a;
-  world.setLaneBet(a === "laneBet");      // Clown Car colors the road green/red
+  world?.setLaneBet(a === "laneBet");     // Clown Car colors the road green/red — no-op before ensureWorlds(); enterLobby re-applies via setAbility(ability)
   controls.setLaneMode(a === "laneBet");  // keep LONG/SHORT visible as a live readout
   nitro.setEnabled(a === "nitro");        // Orion shows the Nitro Overdrive button
   flux.setEnabled(a === "flux");          // DeLorean shows the Flux Brake button
@@ -603,8 +607,11 @@ const inventory = createInventory("redline.owned.v1", ["Solana Paper"], localSto
   onGrant: (id) => accountSync.carGranted(id),
   onMelt: (id) => accountSync.carMelted(id),
 }); // Solana Paper is free; other cars pull from crates
-// level/world skins: the booted theme is owned; the rest unlock from crates (this gates the World picker below)
-const levels = createInventory("redline.levels.v1", [world.currentTheme()]);
+// level/world skins: the booted theme is owned; the rest unlock from crates (this gates the World picker below).
+// world isn't built yet (deferred behind ensureWorlds), but world.currentTheme() would be getTheme(loadThemeKey()).key,
+// which === loadThemeKey() (a resolved key round-trips through getTheme unchanged) — and createWorld itself boots via
+// setTheme(loadThemeKey()). So loadThemeKey() is the identical seed, preserving the booted-theme-is-owned invariant.
+const levels = createInventory("redline.levels.v1", [loadThemeKey()]);
 const themeOf = (k: string) => THEMES.find((t) => t.key === k) ?? THEMES[0];
 const CAR_DEFS: CarOption[] = [
   { name: "DeLorean", rarity: 4, url: "/models/delorean.glb", ability: "flux", power: { name: "Flux Brake", desc: "freeze your P&L ~4s", icon: "clock" } },
@@ -732,7 +739,7 @@ const garage = createCarPicker(hudRoot, CAR_DEFS, (c) => equipCar(c), () => upgr
   // locked car card) and can't be selected — they unlock from crates (Silver/Gold mostly).
   // setWorldTheme (world.setTheme + shader re-warm) is the shared seam.
   list: () => THEMES.map((t) => ({ key: t.key, name: t.name, colors: [t.sky[0], t.sky[1], t.roadEdge], locked: !DEV_UNLOCK && !levels.owns(t.key) })),
-  current: () => world.currentTheme(),
+  current: () => world?.currentTheme() ?? loadThemeKey(), // the picker opens from the lobby (world built), but fall back to the persisted key if ever read earlier
   set: (key: string) => { setWorldTheme(key); },
 }, {
   showGarageAndUpgrades,
@@ -821,77 +828,35 @@ const home = createHome(hudRoot, {
   onOpenStore: () => crateBox.open(),
 });
 
-// ── lobby: the economy-hub town ─────────────────────────────────────────────
-// the map button drops you into a giant drivable neon lot with 4 functional buildings —
-// Garage (cars), Upgrades, Crates (coming soon), Track (back to the race), plus live presence.
-const lobby = createLobby(quality.detail, (carId) => {
-  const carDef = CAR_DEFS.find(({ name }) => name === carId);
-  return carDef ? { url: carDef.url, scale: carDef.scale, yaw: carDef.yaw } : null;
-});
-ctx.scene.add(lobby.group);
+// ── lobby town · strip dressing · lobby cam · highway oval: ALL DEFERRED behind ensureWorlds() ──
+// Declared nullable here and constructed on the first 3D entry (see ensureWorlds() near the mode
+// functions). Nothing between here and that first entry renders, so none of this exists at the 2D home.
+let lobby: ReturnType<typeof createLobby> | null = null;
+let stripCars: ReturnType<typeof createStripCars> | null = null;
+let stripBoard: ReturnType<typeof createStripBillboard> | null = null;
+let cruisers: ReturnType<typeof createCruisers> | null = null;
+let lobbyCam: ReturnType<typeof createLobbyCam> | null = null;
+let oval: ReturnType<typeof createOval> | null = null;
 // live dial / kill-switch for the lobby's synthwave backdrop — tweak from the console:
-//   __backdrop.setOpacity(0.5) · __backdrop.black() · __backdrop.show()
+//   __backdrop.setOpacity(0.5) · __backdrop.black() · __backdrop.show()  (no-ops until the lobby is built)
 (window as any).__backdrop = {
-  setOpacity: (x: number) => lobby.backdrop.setOpacity(x),
-  black: () => lobby.backdrop.setVisible(false),
-  show: () => lobby.backdrop.setVisible(true),
-  current: () => lobby.backdrop.current(),
+  setOpacity: (x: number) => lobby?.backdrop.setOpacity(x),
+  black: () => lobby?.backdrop.setVisible(false),
+  show: () => lobby?.backdrop.setVisible(true),
+  current: () => lobby?.backdrop.current(),
 };
-// parked hero cars + gamertags around the plaza — the car-meet dressing (rides the lobby
-// group's visibility). Names are set dressing today; a presence feed fills these slots later.
-const stripMeetSpecs = [
-  { url: "/models/skull.glb", yaw: Math.PI / 2, tag: "liq_dodger", color: "#ff4d6d" },
-  { url: "/models/pink-rod.glb", yaw: Math.PI / 2, tag: "moonbag_mia", color: "#ff39c0" },
-  { url: "/models/six-wheeler.glb", yaw: Math.PI / 2, tag: "haulin_hal", color: "#ffd166" },
-  { url: "/models/clown-car.glb", yaw: Math.PI / 2, tag: "honkmaster", color: "#27e7ff" },
-  { url: "/models/slot-machine.glb", yaw: Math.PI / 2, tag: "triple7s_tony", color: "#14f195" },
-];
-// Low tier: the five hero GLBs are the vertex mountain facing the town square — park only
-// the two LIGHTEST (they land in the entrance-flanking slots, so the meet still reads).
-// The heavier three are never even fetched. High tier parks the full meet, untouched.
-const stripCars = createStripCars(quality.detail === "reduced" ? lightestSpecs(stripMeetSpecs, 2) : stripMeetSpecs);
-lobby.group.add(stripCars.group);
-// the jumbotron over the arc — recent action in lights. Simulated feed until presence
-// lands; the player's own settles push onto it live (finalizeSettled → noteSettle).
-const stripBoard = createStripBillboard();
-// centred on the far (north) side of the plaza, aimed straight back at the spawn so it reads
-// head-on the moment you enter — a stadium scoreboard facing the crowd at the starting point.
-const stripBoardPos = { x: 0, z: -150 };
-stripBoard.group.position.set(stripBoardPos.x, 0, stripBoardPos.z);
-stripBoard.group.rotation.y = Math.atan2(LOBBY_SPAWN.x - stripBoardPos.x, LOBBY_SPAWN.z - stripBoardPos.z); // face the starting point
-lobby.group.add(stripBoard.group);
-// two ambient cruisers lapping the plaza — motion so the strip never reads frozen.
-// (Two IS the low-tier dressing cap — cruisers.ts hard-slices to 2 — so no tier filter here;
-// on `reduced` they're distance-culled per frame with the parked meet instead.)
-const cruisers = createCruisers([
-  { url: "/models/magnet.glb", scale: 0.75, yaw: Math.PI / 2, tag: "coin_goblin", color: "#b06bff" },
-  { url: "/models/shopping-cart.glb", scale: 0.65, yaw: Math.PI / 2, tag: "cart_bandit", color: "#ff8c42" },
-]);
-lobby.group.add(cruisers.group);
 // Low tier: dressing beyond this player-distance stops rendering entirely (roots hidden).
 // Derived from the real lot scale (core/lobby-layout LOT_BOUNDS 180-half): 225 keeps the
 // whole meet + both cruisers visible from spawn, and drops the entrance meet only once
 // you're across the plaza at the north arc — where it's sub-pixel dressing anyway.
 const DRESSING_CULL_D = LOT_BOUNDS.z * 1.25;
-// Lobby-dressing GLBs (~120MB across 7 cars) used to start streaming at construction time —
-// decode + texture uploads landing as hitches under the first seconds of play. Load them
-// AFTER the first rendered frame instead (double rAF: frame() is registered later this same
-// tick, so tick 1 renders the strip, tick 2 starts the loads), SEQUENTIALLY (each GLB starts
-// when the previous is in — one long smear, never a burst), each shader-warmed via
-// compileAsync before it attaches. Pop-in of parked dressing is the accepted trade.
-requestAnimationFrame(() => requestAnimationFrame(() => {
-  const warm = (o: THREE.Object3D) => ctx.renderer.compileAsync(o, ctx.camera, ctx.scene);
-  void stripCars.load(warm).then(() => cruisers.load(warm));
-}));
-const lobbyCam = createLobbyCam();
-const oval = createOval();
-ctx.scene.add(oval.group);
 
 // toon depth-edge pass: exclude the solid cars (they already carry thick inverted-hull outlines, so a
 // thin screen edge would double-line them) and gate it to toon style + the `toon.edgePass` kill-switch
-// (localStorage, default ON). No-op when bloom/composer is off (low tier).
+// (localStorage, default ON). No-op when bloom/composer is off (low tier). The drivable car is excluded
+// EAGERLY (grandprix-from-home renders through this pass); ensureWorlds() appends the lobby dressing.
 if (post) {
-  post.edge.exclude = [car.group, cruisers.group, stripCars.group];
+  post.edge.exclude = [car.group];
   const applyEdge = (): void => { post.edge.enabled = isToonEnabled() && edgePassEnabled(); };
   applyEdge();
   onToonChanged(applyEdge);
@@ -933,19 +898,15 @@ registerLightLab("perps-road", { controls: [
     { key: "fogFar", label: "fog far", kind: "num" as const, min: 0, max: 2000, step: 1, get: () => perpsRoadFog.far, set: (v: number) => { perpsRoadFog.far = v; } },
   ] : []),
 ] });
-// drive-in garage showroom: your equipped car hero-lit on a turntable (its own world, like the oval)
-garageRoom = createGarageRoom(ctx.renderer);
-ctx.scene.add(garageRoom.group);
-garageRoom.setCar(equippedCar);
-
 // ── shader precompile: kill the first-sight compile stall ──────────────────
 // three builds one GPU program per (material × visible-light-set), and every mode — strip,
 // race road, highway, showroom — shows a DIFFERENT light set. Entering a mode for the first
 // time used to glCompileShader its whole program set mid-frame (a hitch spike right as you
-// drive through a gate). Warm each mode's visibility configuration up front (called at boot
-// under the splash, and again after setTheme builds fresh materials): flip only the `visible`
-// flags, compile, restore — nothing renders in between, so the player never sees the flip.
+// drive through a gate). Warm each mode's visibility configuration up front (run once at the end of
+// ensureWorlds() as part of the first build, and again after setTheme builds fresh materials): flip
+// only the `visible` flags, compile, restore — nothing renders in between, so the player never sees it.
 function precompileModes(): void {
+  if (!world || !lobby || !oval) return; // only meaningful once ensureWorlds() has built the groups (guards the setTheme re-warm rAF)
   const showroom = garageRoom?.group;
   const groups = [world.group, pickups.group, fireTrail.group, lobby.group, oval.group, ...(showroom ? [showroom] : [])];
   const configs = [
@@ -1022,6 +983,7 @@ function lobbyEntryPose(): DriveState {
 
 function enterLobby() {
   if (modeSwitchBlocked({ opening, phase: engine.getPhase() })) return; // no mode switch while a GO is in flight
+  ensureWorlds(); // build the 3D world/lobby/oval/garage on the first entry from home (memoized no-op after)
   mode = "lobby";
   highwayControls.hide();
   hud.setOpenPosition(false);
@@ -1033,11 +995,11 @@ function enterLobby() {
   // lean when heading east/west; every mode entry asserts its own order
   car.group.rotation.order = "YXZ";
   car.group.visible = true; // restore the drivable car (the garage showroom may have hidden it)
-  lobbyCam.reset();
-  world.group.visible = false;
+  lobbyCam!.reset();          // non-null: ensureWorlds() ran at the top of this function
+  world!.group.visible = false;
   pickups.group.visible = false;
   fireTrail.group.visible = false;
-  lobby.show();
+  lobby!.show();
   // cruise chrome: the world is the UI — balance + hamburger, nothing else
   setChrome("cruise");
   mapBtn.setVisible(true); // the map pin backs the strip out to the Slopwheels collection (home)
@@ -1047,13 +1009,14 @@ function enterLobby() {
 }
 
 function exitLobby() {
+  ensureWorlds(); // the only path into "race" mode — guarantees the world exists for the race frame branch (memoized no-op after the first)
   mode = "race";
   syncPresenceLifecycle();
   setChrome("race");
-  lobby.hide();
+  lobby!.hide();              // non-null: ensureWorlds() above
   lobbyHud.hide();
   lobbyHud.setPrompt(null);
-  world.group.visible = true;
+  world!.group.visible = true;
   pickups.group.visible = true;
   fireTrail.group.visible = true;
   mapBtn.setVisible(true);
@@ -1072,6 +1035,7 @@ function exitLobby() {
 // Direction selects the carriageway. Leverage controls automatic speed, not steering.
 function enterHighway(restoring = false) {
   if (!restoring && modeSwitchBlocked({ opening, phase: engine.getPhase(), roundActive })) return;
+  ensureWorlds(); // covers every enterHighway path: from-lobby, the boot-restore (restoring=true), and the __hw dev hook — all need the oval/world built
   mode = "highway";
   syncPresenceLifecycle();
   highwayConfirmedLev = highwayControls.value();
@@ -1079,11 +1043,11 @@ function enterHighway(restoring = false) {
   highwayControls.show();
   highwayMotion = seedHighwayMotion(session.address() || identity?.name || "practice", controls.dir());
   body = { roll: 0, pitch: 0 }; prevDriveSpeed = 0;
-  lobby.hide(); lobbyHud.hide(); lobbyHud.setPrompt(null);
-  world.group.visible = false;
+  lobby!.hide(); lobbyHud.hide(); lobbyHud.setPrompt(null); // non-null: ensureWorlds() above
+  world!.group.visible = false;
   pickups.group.visible = false;
   fireTrail.group.visible = false;
-  oval.show();
+  oval!.show();
   setChrome("race"); // the highway uses the full driving chrome
   mapBtn.setVisible(true); // "map" = back to the strip
   tach.rebuild(HIGHWAY_MAX_LEV);
@@ -1103,7 +1067,7 @@ function enterHighwayFromLobby(): void {
 
 function exitHighwayToLobby() {
   if (modeSwitchBlocked({ opening, phase: engine.getPhase(), roundActive })) return;
-  oval.hide();
+  oval?.hide(); // reached only from highway (worlds built); optional-chain guards the __hw dev hook called out-of-flow. enterLobby() at the end self-ensures anyway
   highwayPresenceGeneration += 1;
   verifiedHighwayCars = [];
   highwayControls.setSentiment(0, 0, 0);
@@ -1118,10 +1082,11 @@ function exitHighwayToLobby() {
 // ── garage: the drive-in showroom (your equipped car hero-lit on a turntable) ──────────────
 function enterGarage() {
   if (modeSwitchBlocked({ opening, phase: engine.getPhase(), roundActive })) return;
+  ensureWorlds(); // reached from the lobby (already built) or the __hw dev hook — memoized no-op after the first
   mode = "garage";
   syncPresenceLifecycle();
-  lobby.hide(); lobbyHud.hide(); lobbyHud.setPrompt(null);
-  world.group.visible = false;
+  lobby!.hide(); lobbyHud.hide(); lobbyHud.setPrompt(null); // non-null: ensureWorlds() above
+  world!.group.visible = false;
   pickups.group.visible = false;
   fireTrail.group.visible = false;
   car.group.visible = false; // the drivable car parks off-screen; the showroom has its own on the turntable
@@ -1141,7 +1106,92 @@ function exitGarageToLobby() {
 }
 
 // ── home: the collection screen is the boot surface (a pure-DOM overlay; no 3D render behind it) ──
-function ensureWorlds(): void {} // Task 8 defers heavy world construction behind this; empty until then
+// Deferred 3D construction. The game boots to the 2D home with NONE of this built; the FIRST entry into
+// any 3D mode (drive-lobby, race track, highway, garage) calls ensureWorlds() to build it once. Memoized
+// on `world` — the first non-null assignment latches it, so every later call is a no-op. Everything here
+// used to run eagerly at module load; moving it off the boot path is what lets home render instantly.
+function ensureWorlds(): void {
+  if (world) return; // already built — no-op
+  // ── race world (skinned per the persisted theme) ──
+  const w = createWorld(quality.detail);
+  world = w;
+  ctx.scene.add(w.group);
+  refreshToonStyle(); // cel-shade the freshly-built world roots (boot already set the toon-ui body class)
+
+  // ── lobby: the economy-hub town ──
+  // the map button drops you into a giant drivable neon lot with 4 functional buildings —
+  // Garage (cars), Upgrades, Crates (coming soon), Track (back to the race), plus live presence.
+  const lob = createLobby(quality.detail, (carId) => {
+    const carDef = CAR_DEFS.find(({ name }) => name === carId);
+    return carDef ? { url: carDef.url, scale: carDef.scale, yaw: carDef.yaw } : null;
+  });
+  lobby = lob;
+  ctx.scene.add(lob.group);
+
+  // parked hero cars + gamertags around the plaza — the car-meet dressing (rides the lobby
+  // group's visibility). Names are set dressing today; a presence feed fills these slots later.
+  const stripMeetSpecs = [
+    { url: "/models/skull.glb", yaw: Math.PI / 2, tag: "liq_dodger", color: "#ff4d6d" },
+    { url: "/models/pink-rod.glb", yaw: Math.PI / 2, tag: "moonbag_mia", color: "#ff39c0" },
+    { url: "/models/six-wheeler.glb", yaw: Math.PI / 2, tag: "haulin_hal", color: "#ffd166" },
+    { url: "/models/clown-car.glb", yaw: Math.PI / 2, tag: "honkmaster", color: "#27e7ff" },
+    { url: "/models/slot-machine.glb", yaw: Math.PI / 2, tag: "triple7s_tony", color: "#14f195" },
+  ];
+  // Low tier: the five hero GLBs are the vertex mountain facing the town square — park only
+  // the two LIGHTEST (they land in the entrance-flanking slots, so the meet still reads).
+  // The heavier three are never even fetched. High tier parks the full meet, untouched.
+  const sCars = createStripCars(quality.detail === "reduced" ? lightestSpecs(stripMeetSpecs, 2) : stripMeetSpecs);
+  stripCars = sCars;
+  lob.group.add(sCars.group);
+  // the jumbotron over the arc — recent action in lights. Simulated feed until presence
+  // lands; the player's own settles push onto it live (finalizeSettled → noteSettle).
+  const sBoard = createStripBillboard();
+  stripBoard = sBoard;
+  // centred on the far (north) side of the plaza, aimed straight back at the spawn so it reads
+  // head-on the moment you enter — a stadium scoreboard facing the crowd at the starting point.
+  const stripBoardPos = { x: 0, z: -150 };
+  sBoard.group.position.set(stripBoardPos.x, 0, stripBoardPos.z);
+  sBoard.group.rotation.y = Math.atan2(LOBBY_SPAWN.x - stripBoardPos.x, LOBBY_SPAWN.z - stripBoardPos.z); // face the starting point
+  lob.group.add(sBoard.group);
+  // two ambient cruisers lapping the plaza — motion so the strip never reads frozen.
+  // (Two IS the low-tier dressing cap — cruisers.ts hard-slices to 2 — so no tier filter here;
+  // on `reduced` they're distance-culled per frame with the parked meet instead.)
+  const cru = createCruisers([
+    { url: "/models/magnet.glb", scale: 0.75, yaw: Math.PI / 2, tag: "coin_goblin", color: "#b06bff" },
+    { url: "/models/shopping-cart.glb", scale: 0.65, yaw: Math.PI / 2, tag: "cart_bandit", color: "#ff8c42" },
+  ]);
+  cruisers = cru;
+  lob.group.add(cru.group);
+  // Lobby-dressing GLBs (~120MB across 7 cars) used to start streaming at construction time —
+  // decode + texture uploads landing as hitches under the first seconds of play. Load them
+  // AFTER the first rendered frame instead (double rAF: the first 3D frame renders the strip,
+  // the second starts the loads), SEQUENTIALLY (each GLB starts when the previous is in — one
+  // long smear, never a burst), each shader-warmed via compileAsync before it attaches.
+  requestAnimationFrame(() => requestAnimationFrame(() => {
+    const warm = (o: THREE.Object3D) => ctx.renderer.compileAsync(o, ctx.camera, ctx.scene);
+    void sCars.load(warm).then(() => cru.load(warm));
+  }));
+  // append the lobby dressing to the toon edge-pass exclusions (the drivable car was excluded eagerly)
+  if (post) post.edge.exclude = [car.group, cru.group, sCars.group];
+
+  // ── camera rig + highway oval ──
+  lobbyCam = createLobbyCam();
+  const ov = createOval();
+  oval = ov;
+  ctx.scene.add(ov.group);
+
+  // drive-in garage showroom: your equipped car hero-lit on a turntable (its own world, like the oval)
+  const gr = createGarageRoom(ctx.renderer);
+  garageRoom = gr;
+  ctx.scene.add(gr.group);
+  gr.setCar(equippedCar);
+
+  // Warm every mode's shader programs now the groups exist. This used to run at boot under the splash;
+  // with the world deferred it runs once here, as the tail of the first build — the FIRST 3D frame is
+  // then already compiled (no mid-drive glCompileShader hitch). Home dismissed the splash long ago, so
+  // this cost lands on the home→lobby transition instead (grandprix-from-home warms via its own compile).
+  precompileModes();
+}
 function enterHome(): void {
   if (modeSwitchBlocked({ opening, phase: engine.getPhase() })) return;
   mode = "home";
@@ -1180,7 +1230,8 @@ function enterGrandprix(playerCarName: string | null): void {
   // the scene-root pair from createScene): they're the only lights that reach the race group (every
   // other group is hidden here), and their moody purple/pink wash is exactly what made the race look
   // wrong. With them off the race renders under ONLY its harness-matched rig. exitGrandprix restores.
-  world.group.visible = false; pickups.group.visible = false; fireTrail.group.visible = false; car.group.visible = false;
+  if (world) world.group.visible = false; // may be null: grandprix is enterable straight from home before any lobby/3D visit ever built the world (nothing to hide then)
+  pickups.group.visible = false; fireTrail.group.visible = false; car.group.visible = false; // eager groups — always exist
   ctx.ambient.visible = false; ctx.key.visible = false;
   // Share the harness's tonal operator: the perps world runs NoToneMapping (tone-mapping deferred to the
   // composer's OutputPass, which reads renderer.toneMapping live), so ACES here rolls off the neon like the
@@ -1322,7 +1373,7 @@ presence = createPresenceClient({
   onSnapshot: (players, localId) => {
     try {
       if (mode === "highway") void updateVerifiedHighway(localId === null ? [] : players);
-      else lobby.setRemoteCars(localId === null ? [] : players);
+      else lobby?.setRemoteCars(localId === null ? [] : players); // presence is async — a snapshot could land before the first 3D entry built the lobby
     } catch {
       // Presence visuals are optional. A renderer failure must not interrupt local driving.
     }
@@ -1331,7 +1382,7 @@ presence = createPresenceClient({
   onLeave: (player) => lobbyHud.toast(`${player.name} rolled out`),
   onEmote: (event, localId) => routePresenceEmote(event, localId, {
     local: (kind) => localEmoteVisual.pulse(kind),
-    remote: (remoteEvent) => lobby.emoteRemote(remoteEvent),
+    remote: (remoteEvent) => lobby?.emoteRemote(remoteEvent), // async remote emote — guard against it arriving before the lobby is built
   }),
   onStatus: (status, count) => presenceHud.setState(status, count),
   onError: (code) => {
@@ -1561,7 +1612,7 @@ function finalizeSettled(info: { outcome: number; outcomeName: string; payout: b
   void session.refreshBalance(session.delegated()).then(() => syncOnchainBalance()).catch(() => {});
   void syncTableCap(); // a settle moved money between player and till — re-clamp the bet cap
   // your run goes up in lights — the board leads with real settles over the demo feed
-  stripBoard.noteSettle({ tag: identity?.name ?? "you", mult: liq ? 0 : finalEq, sol: liq ? undefined : payoutUnits / 100 });
+  stripBoard?.noteSettle({ tag: identity?.name ?? "you", mult: liq ? 0 : finalEq, sol: liq ? undefined : payoutUnits / 100 }); // only rounds settle here — worlds exist by then, but guard: settles fire off async chain polls
   // Settles keep you ON the track — the re-bet loop stays one GO away. The map pin (or
   // driving home via the lobby button) takes you back to the strip when you're done.
 }
@@ -1621,7 +1672,7 @@ function finalizePractice(snap: Snapshot) {
   if (liq) { fx.liquidate(); audio.liquidate(); navigator.vibrate?.([30, 40, 30, 40, 90]); }
   else { fx.confetti(); audio.cashout(); navigator.vibrate?.(35); }
   // practice runs hit the board too (that's the fun) — but never with a SOL figure
-  stripBoard.noteSettle({ tag: identity?.name ?? "guest", mult: liq ? 0 : snap.equity });
+  stripBoard?.noteSettle({ tag: identity?.name ?? "guest", mult: liq ? 0 : snap.equity }); // guard: practice settles can fire async; worlds normally exist by settle time
 }
 
 // Authoritative on-chain close. On a confirmed close we finalize immediately; on an RPC hiccup we
@@ -1984,7 +2035,7 @@ function frame(now: number) {
     // doors freeze while a GO is in flight (or a round is somehow active): parking into the
     // garage mid-launch would open an overlay over a race that starts behind it
     const hit = opening || roundActive ? null : entranceHit(drive.x, drive.z);
-    lobby.setActiveDoor(doorArmed ? hit : null); // flare the ring the car is parked in
+    lobby!.setActiveDoor(doorArmed ? hit : null); // non-null: "lobby" mode is only entered via enterLobby(), which ran ensureWorlds()
     lobbyHud.setPrompt(doorArmed ? hit : null);
     if (doorArmed && hit) {
       doorDwell += dt;
@@ -2003,16 +2054,16 @@ function frame(now: number) {
     hud.setTimer(effMaxSec(), false);
     minimap.draw({ hist: priceHist, inRun: false, equity: game.equity, entryPx: round.entryPx, liqPx: 0, dir: round.dir });
 
-    lobby.update(dt);
-    stripBoard.update(dt); // jumbotron cycles its action feed
-    cruisers.update(dt);   // ambient laps around the plaza
+    lobby!.update(dt);        // non-null throughout this "lobby" branch: entered via enterLobby() → ensureWorlds()
+    stripBoard!.update(dt); // jumbotron cycles its action feed
+    cruisers!.update(dt);   // ambient laps around the plaza
     if (quality.detail === "reduced") {
       // low tier: far-side dressing is sub-pixel on a phone but still the heaviest draws in
       // the square — hide whole car anchors beyond the lot-scaled radius (no alloc, roots only)
-      stripCars.cull(drive.x, drive.z, DRESSING_CULL_D);
-      cruisers.cull(drive.x, drive.z, DRESSING_CULL_D);
+      stripCars!.cull(drive.x, drive.z, DRESSING_CULL_D);
+      cruisers!.cull(drive.x, drive.z, DRESSING_CULL_D);
     }
-    lobbyCam.update(ctx.camera, dt, drive.x, drive.z, drive.heading);
+    lobbyCam!.update(ctx.camera, dt, drive.x, drive.z, drive.heading);
 
     if (post) post.render();
     else ctx.renderer.render(ctx.scene, ctx.camera);
@@ -2047,7 +2098,7 @@ function frame(now: number) {
     if (hwBillboardCd <= 0) {
       hwBillboardCd = 0.5;
       const px = solSmooth || roundPrice;
-      oval.setBillboard(asset, px > 0 ? px.toLocaleString("en-US", { maximumFractionDigits: 2 }) : "—");
+      oval!.setBillboard(asset, px > 0 ? px.toLocaleString("en-US", { maximumFractionDigits: 2 }) : "—"); // non-null: "highway" mode is entered via enterHighway() → ensureWorlds()
     }
 
     const speedFrac = autoSpeed / speedForLeverage(HIGHWAY_MAX_LEV);
@@ -2076,17 +2127,17 @@ function frame(now: number) {
     const liqPx = engine.getPhase() === "live" ? liqPriceOf(round.entryPx, round.dir, highwayConfirmedLev, CONFIG.LIQ) : 0;
     minimap.draw({ hist: priceHist, inRun: engine.getPhase() === "live", equity: game.equity, entryPx: round.entryPx, liqPx, dir: round.dir });
 
-    oval.update(dt);
+    oval!.update(dt);
     const verifiedRemoteStates = verifiedHighwayCars.map((remote) => {
       remote.motion = stepHighwayMotion(remote.motion, remote.lev, dt);
       const remotePose = highwayPose(remote.motion);
       return { id: remote.id, x: remotePose.x, z: remotePose.z, heading: remotePose.heading, dir: remote.dir };
     });
-    oval.setRemoteCars(
+    oval!.setRemoteCars(
       ((window as any).__hwGhostStates as import("./render/oval").OvalRemoteCar[] | undefined)
       ?? verifiedRemoteStates,
     );
-    lobbyCam.update(ctx.camera, dt, pose.x, pose.z, pose.heading, yHere);
+    lobbyCam!.update(ctx.camera, dt, pose.x, pose.z, pose.heading, yHere); // non-null: highway → ensureWorlds()
 
     if (post) post.render();
     else ctx.renderer.render(ctx.scene, ctx.camera);
@@ -2213,11 +2264,12 @@ function frame(now: number) {
   const speedFrac = drivable ? Math.min(1, speed / ROAD_SPEED_MAX) : 0;
   const previousLaneX = lane.x;
   lane = laneStep(lane, carXTarget, speedFrac, dt);
-  world.update(dt, speed, 0);
+  const w = world!; // non-null: this "race" branch is only reached in mode==="race", entered solely via exitLobby() → ensureWorlds()
+  w.update(dt, speed, 0);
 
   // car hugs the road: ride the surface height + pitch to the local slope, lean into turns
-  const carY = world.surfaceY(CAR_Z);
-  const aheadY = world.surfaceY(CAR_Z - SLOPE_SAMPLE), behindY = world.surfaceY(CAR_Z + SLOPE_SAMPLE);
+  const carY = w.surfaceY(CAR_Z);
+  const aheadY = w.surfaceY(CAR_Z - SLOPE_SAMPLE), behindY = w.surfaceY(CAR_Z + SLOPE_SAMPLE);
   car.update(dt, speed);
   car.group.position.x = lane.x;
   car.group.position.y = carY;
@@ -2245,11 +2297,11 @@ function frame(now: number) {
   const wfRoll = worldFlip.update(dt, drivable);
   if (wfRoll !== 0) ctx.camera.rotateZ(wfRoll);
 
-  fireTrail.update(dt, speed, frozen, lane.x, CAR_Z, world.surfaceY); // flux time-jump: burning wheel traces
+  fireTrail.update(dt, speed, frozen, lane.x, CAR_Z, w.surfaceY); // flux time-jump: burning wheel traces
 
   // collectible coins: cosmetic only — they must NOT affect P&L, or every
   // round becomes a guaranteed win and the long/short bet stops mattering
-  const hit = pickups.update(dt, speed, lane.x, world.surfaceY, drivable, {
+  const hit = pickups.update(dt, speed, lane.x, w.surfaceY, drivable, {
     previousX: previousLaneX,
     yaw: car.group.rotation.y,
     z: CAR_Z,
@@ -2292,16 +2344,15 @@ setInterval(async () => {
   finally { polling = false; }
 }, 650);
 
-// Warm every mode's shader programs while the splash still covers the canvas — first gate
-// entries then swap worlds without a single mid-drive glCompileShader (the hitch spike).
-precompileModes();
-// Boot into the Slopwheels collection: the card grid IS the intro screen now (no 3D render behind
-// it). The lobby/track are reached FROM home — [Drive lobby] on a card lands in the 3D strip.
+// Boot into the Slopwheels collection: the card grid IS the intro screen now (no 3D render behind it,
+// and no 3D world built — ensureWorlds() defers all of that to the first entry FROM home). The lobby/
+// track are reached FROM home — [Drive lobby] on a card lands in the 3D strip. Shader warming (the old
+// boot-time precompileModes() call) now rides that first ensureWorlds(), since nothing 3D exists yet.
 // DEV-ONLY bake-harness hook: scripts/bake-cards.mjs drives the lobby's Garage to render card art, but
 // home now covers that chrome. `?nohome=1` (dev builds only — stripped from prod) boots straight to the
 // lobby and dismisses the splash so the baker can reach the hamburger → Garage.
 if (import.meta.env.DEV && new URLSearchParams(location.search).has("nohome")) {
-  enterLobby();
+  enterLobby(); // self-ensures worlds (ensureWorlds() at its top) before the baker touches the 3D lobby
   (window as Window & { hideSplash?: () => void }).hideSplash?.(); // no home path to dismiss the splash here
 } else {
   enterHome();

@@ -77,7 +77,7 @@ describe("price source", () => {
     expect(main).toContain("latestAssetPrices.set(key, v)");
     expect(main).toContain("priceSource.switchTo(selectedPrice)");
     expect(main).toContain("lastLivePrice = selectedPrice ?? 0");
-    expect(main).toContain("world.update(dt, speed, 0)");
+    expect(main).toContain("w.update(dt, speed, 0)"); // `w` is the non-null world alias in the race branch (Task 8 deferred-worlds); the load-bearing check is the 3rd arg `0` — no price-driven terrain grade
     expect(main).not.toContain("createMarketPulse");
     expect(main).not.toContain("createMarketShock");
     expect(main).not.toContain("terrainGrade({");
