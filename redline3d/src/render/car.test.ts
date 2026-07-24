@@ -2,6 +2,7 @@ import * as THREE from "three";
 import { GLTFLoader, type GLTF } from "three/examples/jsm/loaders/GLTFLoader.js";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createCar } from "./car";
+import { setToonEnabled } from "./toon";
 
 interface PendingLoad {
   url: string;
@@ -136,12 +137,30 @@ describe("createCar GLTF lifecycle", () => {
   it("uses a neutral rough fallback body before a GLB arrives", () => {
     const car = createCar(undefined, { loadDefault: false });
     const placeholder = car.group.children[0] as THREE.Group;
+    expect(placeholder.children.length).toBeGreaterThan(0); // the wedge exists pre-GLB
     const body = placeholder.children[0] as THREE.Mesh;
-    const material = body.material as THREE.MeshStandardMaterial;
-    expect(material.color.getHexString()).toBe("b5bbc4");
-    expect(material.metalness).toBe(0.4);
-    expect(material.roughness).toBe(0.76);
-    expect(material.emissive.getHexString()).toBe("59616d");
-    expect(material.emissiveIntensity).toBe(0.32);
+
+    // toon is the boot default: the attached body material is the cel variant, which carries the
+    // wedge's color + emissive (MeshToonMaterial has no metalness/roughness — those are dropped).
+    const toon = body.material as THREE.MeshToonMaterial;
+    expect(toon.isMeshToonMaterial).toBe(true);
+    expect(toon.color.getHexString()).toBe("b5bbc4");
+    expect(toon.emissive.getHexString()).toBe("59616d");
+    expect(toon.emissiveIntensity).toBe(0.32);
+
+    // flipping to classic swaps in the registered original, which keeps the neutral rough-metal
+    // PBR values the lobby's pink directional light reads off the fallback.
+    setToonEnabled(false);
+    try {
+      const classic = body.material as THREE.MeshStandardMaterial;
+      expect(classic.isMeshStandardMaterial).toBe(true);
+      expect(classic.color.getHexString()).toBe("b5bbc4");
+      expect(classic.metalness).toBe(0.4);
+      expect(classic.roughness).toBe(0.76);
+      expect(classic.emissive.getHexString()).toBe("59616d");
+      expect(classic.emissiveIntensity).toBe(0.32);
+    } finally {
+      setToonEnabled(true); // restore the boot default for the rest of the suite
+    }
   });
 });

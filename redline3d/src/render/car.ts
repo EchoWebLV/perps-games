@@ -1,7 +1,7 @@
 import * as THREE from "three";
 import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader.js";
 import { buildWheelRig, type WheelRig } from "./wheels";
-import { toonify } from "./toon";
+import { toonify, reclaimToonVariants } from "./toon";
 import { makeBlobShadow } from "./blob-shadow";
 import { finishById } from "../core/paint";
 import type { ModelLoadOutcome } from "../core/boot-reveal";
@@ -41,19 +41,24 @@ function disposeObject(root: THREE.Object3D): void {
   const geometries = new Set<THREE.BufferGeometry>();
   const materials = new Set<THREE.Material>();
   const textures = new Set<THREE.Texture>();
+  const collectMaterial = (material: THREE.Material | null | undefined) => {
+    if (!material) return;
+    materials.add(material);
+    for (const value of Object.values(material)) {
+      if ((value as THREE.Texture | undefined)?.isTexture) textures.add(value as THREE.Texture);
+    }
+  };
   root.traverse((object) => {
     const mesh = object as THREE.Mesh;
     if (!mesh.isMesh) return;
     if (mesh.geometry) geometries.add(mesh.geometry);
     const meshMaterials = Array.isArray(mesh.material) ? mesh.material : [mesh.material];
-    for (const material of meshMaterials) {
-      if (!material) continue;
-      materials.add(material);
-      for (const value of Object.values(material)) {
-        if ((value as THREE.Texture | undefined)?.isTexture) textures.add(value as THREE.Texture);
-      }
-    }
+    for (const material of meshMaterials) collectMaterial(material);
   });
+  // toonify swapped each mesh to a cel variant and stashed the original; mesh.material only exposes
+  // whichever is active, so also reclaim the INACTIVE variant (Set dedups the shared textures → each
+  // frees once) and drop the disposed roots from the toon style registry so styleRoots keeps none.
+  for (const material of reclaimToonVariants(root)) collectMaterial(material);
   for (const texture of textures) texture.dispose();
   for (const material of materials) material.dispose();
   for (const geometry of geometries) geometry.dispose();

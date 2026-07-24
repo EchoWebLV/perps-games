@@ -83,6 +83,29 @@ export function unregisterToonRoot(root: THREE.Object3D): void {
   const i = styleRoots.indexOf(root); if (i >= 0) styleRoots.splice(i, 1);
 }
 
+/** Full disposal companion for a subtree that's being torn down. Returns the INACTIVE style variant
+ *  (the material `refreshToonStyle` isn't currently showing — its counterpart is still on
+ *  `mesh.material` for the caller's own dispose walk) of every registered mesh under `root`, so the
+ *  caller can release both variants in one deduped pass (a texture shared by both frees once). Also
+ *  drops every registered root WITHIN `root` from the style registry (handles a group holding several
+ *  toonified roots, unlike unregisterToonRoot which matches one exact root) so styleRoots keeps no
+ *  dead subtree. Returns [] for a never-toonified subtree. */
+export function reclaimToonVariants(root: THREE.Object3D): THREE.Material[] {
+  const inSubtree = new Set<THREE.Object3D>();
+  const inactive: THREE.Material[] = [];
+  root.traverse((o) => {
+    inSubtree.add(o);
+    const mesh = o as THREE.Mesh;
+    if (!mesh.isMesh) return;
+    const v = matVariants.get(mesh); if (!v) return;
+    const off = mesh.material === v.toon ? v.orig : v.toon;
+    for (const m of Array.isArray(off) ? off : [off]) inactive.push(m);
+    matVariants.delete(mesh); _restorable--;
+  });
+  for (let i = styleRoots.length - 1; i >= 0; i--) if (inSubtree.has(styleRoots[i])) styleRoots.splice(i, 1);
+  return inactive;
+}
+
 /** true when the toon (cel + ink + dusk) style is active; false = the classic pre-toon neon look */
 export function isToonEnabled(): boolean { return _toonEnabled; }
 /** register a callback fired (with the new state) whenever the style flips or is (re)synced at boot */
