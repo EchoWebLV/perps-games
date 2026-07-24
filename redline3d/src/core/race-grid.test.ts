@@ -7,7 +7,7 @@ const car = (name: string, rarity: 1 | 2 | 3 | 4 | 5, extra: Partial<CarOption> 
 
 const ROSTER: CarOption[] = [
   car("Alpha", 1), car("Bravo", 2), car("Charlie", 3), car("Delta", 4, { ability: "nitro" }),
-  car("Echo", 5), car("Foxtrot", 3), car("Golf", 2), car("Hotel", 1), car("India", 4),
+  car("Echo", 5, { scale: 1.3, yaw: Math.PI / 2 }), car("Foxtrot", 3), car("Golf", 2), car("Hotel", 1), car("India", 4),
 ];
 
 // deterministic rng stub: cycles a fixed tape so tests never flake
@@ -30,6 +30,8 @@ describe("buildGrid", () => {
   it("carries model url/scale/yaw and maps rarity to strength", () => {
     const grid = buildGrid(ROSTER, "Echo", rngTape([0.2, 0.4, 0.6, 0.8]));
     expect(grid[0].url).toBe("/models/echo.glb");
+    expect(grid[0].scale).toBe(1.3);
+    expect(grid[0].yaw).toBe(Math.PI / 2);
     expect(grid[0].strength).toBe(STRENGTH[5]);
   });
   it("gives ability cars their surge amp bonus", () => {

@@ -22,6 +22,8 @@ export interface GridEntrant {
   rarity: Rarity; strength: number; surgeAmpBonus: number; isPlayer: boolean;
 }
 
+// Intentionally duplicates `poolable` from ./rarity: crate-droppable and race-eligible are
+// distinct axes that merely coincide today — keep them separate so they can diverge later.
 const raceable = (c: CarOption): boolean => c.pool !== false && !c.comingSoon;
 
 function toEntrant(c: CarOption, isPlayer: boolean): GridEntrant {
@@ -32,9 +34,11 @@ function toEntrant(c: CarOption, isPlayer: boolean): GridEntrant {
   };
 }
 
-/** Player car (by name, or null to spectate) + house fill, no duplicates, GRID_SIZE total. */
+/** Player car (by name, or null to spectate) + house fill, no duplicates, up to GRID_SIZE. */
 export function buildGrid(roster: CarOption[], playerCarName: string | null, rng: () => number): GridEntrant[] {
   const grid: GridEntrant[] = [];
+  // Player car is exempt from the `raceable` filter — you race whatever you equipped. An
+  // unknown playerCarName (or null) finds no player, so the grid is all-house.
   const player = playerCarName ? roster.find((c) => c.name === playerCarName) : undefined;
   if (player) grid.push(toEntrant(player, true));
   const pool = roster.filter((c) => raceable(c) && c.name !== player?.name);
