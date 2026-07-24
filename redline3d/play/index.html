@@ -3,7 +3,7 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover" />
-    <title>Perps Rider</title>
+    <title>Slopwheels</title>
     <!-- installable PWA (Add to Home Screen / Install app on the Seeker) -->
     <link rel="manifest" href="/manifest.webmanifest" />
     <meta name="theme-color" content="#05030d" />
@@ -132,22 +132,23 @@
       @keyframes fxshake{0%,100%{transform:none}15%{transform:translate(-5px,3px)}30%{transform:translate(6px,-4px)}45%{transform:translate(-6px,-2px)}60%{transform:translate(5px,4px)}75%{transform:translate(-4px,2px)}90%{transform:translate(3px,-2px)}}
       #gl.fxshake{animation:fxshake .45s ease-out}
 
-      /* ---- loading splash: the Ferto welcome video + a neon loading bar ---- */
-      #splash{position:fixed;inset:0;z-index:50;background:#05030d;overflow:hidden;opacity:1;transition:opacity .55s ease}
+      /* ---- loading splash: the Slopwheels wordmark on black + an acid-green loading bar ---- */
+      #splash{position:fixed;inset:0;z-index:50;background:#000;overflow:hidden;opacity:1;transition:opacity .55s ease;
+        display:grid;place-items:center}
       #splash.hide{opacity:0;pointer-events:none}
-      #splashvid{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;object-position:center}
-      @media (orientation:landscape){#splashvid{object-fit:contain}}
-      /* the image is a finished composition — only a faint veil behind the bar */
+      /* the wordmark is a finished composition on black — center it and let it scale on mobile */
+      #splashvid{width:auto;height:auto;max-width:80vw;max-height:62vh;object-fit:contain}
+      /* faint veil behind the bar so it reads over any bloom near the bottom */
       #splashveil{position:absolute;inset:0;pointer-events:none;
-        background:linear-gradient(to bottom,transparent 76%,rgba(5,3,13,.4) 90%,rgba(5,3,13,.82) 100%)}
+        background:linear-gradient(to bottom,transparent 76%,rgba(0,0,0,.4) 90%,rgba(0,0,0,.82) 100%)}
       #splashui{position:absolute;left:0;right:0;bottom:max(40px,calc(env(safe-area-inset-bottom) + 28px));
         padding:0 26px;text-align:center}
-      #splashbar{width:min(360px,78%);height:10px;margin:0 auto;border-radius:6px;background:rgba(255,255,255,.13);
-        border:1px solid rgba(255,255,255,.24);overflow:hidden}
+      #splashbar{width:min(360px,78%);height:10px;margin:0 auto;border-radius:6px;background:rgba(255,255,255,.10);
+        border:1px solid rgba(193,248,50,.35);overflow:hidden}
       #splashfill{height:100%;width:0;border-radius:6px;transition:width .25s ease;
-        background:linear-gradient(90deg,#27e7ff,#ff39c0);box-shadow:0 0 16px rgba(39,231,255,.65)}
+        background:#c1f832;box-shadow:0 0 16px rgba(193,248,50,.65)}
       #splashpct{margin-top:11px;font-family:"Chakra Petch";font-size:11px;letter-spacing:.24em;
-        text-transform:uppercase;color:#9fb0d8}
+        text-transform:uppercase;color:#c1f832}
     </style>
   </head>
   <body>
@@ -155,7 +156,7 @@
     <div id="hud"></div>
 
     <div id="splash">
-      <img id="splashvid" src="/loadingscreen.png" alt="" />
+      <img id="splashvid" src="/assets/brands/slopwheels.png" alt="Slopwheels" />
       <div id="splashveil"></div>
       <div id="splashui">
         <div id="splashbar"><div id="splashfill"></div></div>
@@ -163,20 +164,28 @@
       </div>
     </div>
     <script>
-      // Loading bar runs immediately (before the module bundle). It eases toward
-      // 90% while assets load; main.ts calls window.hideSplash() when the scene +
-      // car model are ready, which fills to 100% and fades out (min on-screen time
-      // so it never just flashes; a bounded 20s fallback keeps the player from being trapped).
+      // Loading bar runs immediately (before the module bundle). The target only
+      // advances when main.ts reports a real boot milestone via setSplashProgress
+      // (createScene→30, HUD→55, garage→75, identity→90); the rAF eases the visible
+      // fill toward that stepped target. main.ts calls window.hideSplash() when the
+      // scene + car model are ready, which fills to 100% and fades out (min on-screen
+      // time so it never just flashes; a bounded 20s fallback keeps the player from
+      // being trapped).
       (function () {
         var fill = document.getElementById("splashfill"),
           pct = document.getElementById("splashpct"),
           splash = document.getElementById("splash");
-        var p = 0, done = false, t0 = Date.now();
+        var current = 0, target = 10, done = false, t0 = Date.now();
+        // milestones drive the target (monotonic, capped at 99 — hideSplash owns 100)
+        window.setSplashProgress = function (p) {
+          target = Math.max(target, Math.min(p, 99));
+        };
         (function tick() {
           if (done) return;
-          p += (90 - p) * 0.04 + 0.35;
-          if (p > 90) p = 90;
-          fill.style.width = p.toFixed(1) + "%";
+          current += (target - current) * 0.04 + 0.35;
+          if (current > target) current = target;
+          fill.style.width = current.toFixed(1) + "%";
+          pct.textContent = Math.round(current) + "%";
           requestAnimationFrame(tick);
         })();
         window.hideSplash = function () {

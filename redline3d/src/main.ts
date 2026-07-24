@@ -112,6 +112,7 @@ const hudRoot = document.getElementById("hud") as HTMLElement;
 const CRATE_TREASURY = (import.meta.env.VITE_CRATE_TREASURY_PUBKEY as string | undefined) ?? "";
 
 const ctx = createScene(canvas);
+(window as Window & { setSplashProgress?: (pct: number) => void }).setSplashProgress?.(30); // boot milestone: scene up
 
 // quality / post-processing (perf-gated) — the GPU string catches weak GPUs behind strong
 // CPUs (Seeker: 8GB/8-core but Mali-G615); ?perf=low|high overrides for on-device tuning
@@ -367,6 +368,7 @@ const highwayControls = createHighwayControls(hud.highwayMount, {
   },
 });
 const minimap = createMinimap(hud.miniCanvas, quality.pixelRatioCap);
+(window as Window & { setSplashProgress?: (pct: number) => void }).setSplashProgress?.(55); // boot milestone: HUD up
 const fx = createFx();
 const deathsDoor = createDeathsDoor(); // Skull car: near-death sequence at the liq floor
 const worldFlip = createWorldFlipCore(); // Helmet spectacle: the level barrel-rolls on the flip
@@ -722,6 +724,7 @@ const garage = createCarPicker(hudRoot, CAR_DEFS, (c) => { car.setModel(c.url, c
   },
 });
 garageForHydration = garage;
+(window as Window & { setSplashProgress?: (pct: number) => void }).setSplashProgress?.(75); // boot milestone: inventory + garage up
 
 // Crate Shop (lobby Crates building): buy a crate → roll a car by rarity odds → reveal. A NEW car
 // unlocks in the garage; a DUPLICATE melts to Scrap. Account crates use MagicBlock VRF; only guests
@@ -2338,6 +2341,7 @@ function bootIdentity() {
 }
 // Boot ALWAYS resumes the identity flow now; the wall is deferred into whichever path the player picks.
 bootIdentity();
+(window as Window & { setSplashProgress?: (pct: number) => void }).setSplashProgress?.(90); // boot milestone: identity resolved
 requestAnimationFrame(frame);
 // Returning SIGNED-IN players see their money at the top immediately: silently restore the persisted
 // wallet session, hydrate the account, THEN wall on the account's access set — a returning account
