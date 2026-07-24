@@ -103,3 +103,53 @@ explicitly deferred.
 Server-authoritative entries and real pools; matchmaking real players' cars; VRF race
 outcomes; win records/form guides; full rebrand sweep (landing page, README, domain);
 any change to real-money balances or the perps economy; garage changes.
+
+## Implemented (2026-07-24)
+
+Shipped and proven end-to-end on a fresh guest: boot → Slopwheels loadscreen → home →
+crate pull (silhouette becomes owned card in colour) → open the new car's action sheet →
+enter its owner race → bet on your own car → settlement. Gates green — `npx vitest run`
+= 1077 passed | 9 skipped, `tsc --noEmit` clean, `npm run build` clean (no race-preview
+harness chunk leaks into the `play` bundle). Live browser proof: wallet arithmetic
+verified to the cent (a P1 Banana win paid a $104.02 bet net at the locked x21.80 plus a
+$7.10 owner-podium credit → $211.12 from a $100 start); zero console errors across the
+session; GPU objects plateau across race enter/dispose (geometries/textures return to the
+home baseline, shader programs peak in-race and settle back — no per-race leak).
+
+Deliberate deviations from the design above, and why:
+
+1. **Loadscreen is a restyled inline `#splash`, not a `ui/loadscreen.ts` module.** Boot
+   progress is reported through a `window.setSplashProgress(pct)` hook called at fixed
+   milestones (scene 30 → HUD 55 → inventory/garage 75 → home hides it). Those milestones
+   currently collapse into a single synchronous boot tick, so the bar reads as one jump to
+   READY rather than an animated fill — honest (it never claims more than boot has done)
+   but not yet incremental. Commits dcdb988, b6273f7, e705e52.
+
+2. **Card art is baked PNGs, not live 3D thumbnails.** `npm run bake:cards`
+   (`scripts/bake-cards.mjs`) renders each car to a PNG via the DEV-only `?nohome=1` boot
+   hook (stripped from prod); the home grid shows the baked art for owned cars and a
+   brightness-0 silhouette of the *same* PNG for unowned ones.
+
+3. **The in-app race mode is named `grandprix`, not `race`** — `race` was already the
+   perps-road mode, so the collection race path is `enterGrandprix()` over `createRaceGame`
+   (the harness consumes the same builder). Commits e8c749d (podium math), d384026 +
+   908d91c (grid + stats), 973253b (owner credit), 80c3429 (extract sim), cd4fb6e +
+   fd91cd0 (grandprix mode + isolation/re-entry/texture reclaim).
+
+4. **One memoized `ensureWorlds()` builder** replaces the planned separate
+   `ensureLobby`/`ensureRace`: the first 3D entry (lobby, garage, or grandprix-from-home)
+   builds the whole world once and later entries reuse it, keeping the home boot cheap.
+   Commit 0417bbf; boot-order invariants hardened in ba5629d.
+
+5. **Home was redesigned post-launch on user feedback.** The shipped home has rarity
+   **tier sections** (Legendary→Common, owned cars first), a **car action sheet**
+   (Enter race / Drive lobby / Get crates), and the **alpha Slopwheels wordmark**,
+   replacing the flat grid sketched in the body. Commits 7224267 (redesign), be3b970 +
+   1ef727a (home boot mode + owned-only equipped ring), plus the task commits above.
+
+6. **The in-app race shares the dev harness's `race-track` lighting preset.** It mounts its
+   own hemi/key/rim rig with dusk fog and full IBL, and applies ACES tone-mapping +
+   exposure over the host renderer, instead of the moody perps main-scene lights; it also
+   registers a DEV `race-track` Light Lab folder so the look is tunable in-app from the
+   same tuning source the harness uses. Commits 10994ea (light like harness + warm race
+   shaders on entry), f5034fb (share ACES + exposure).
