@@ -183,7 +183,7 @@ describe("createRaceGame", () => {
     scene.traverse((o) => { if ((o as THREE.Light).isLight) lights++; });
     expect(lights).toBeGreaterThanOrEqual(3);              // hemi + key + rim mounted under the race group
     expect(scene.fog).not.toBe(prevFog);                  // race dusk fog swapped in
-    expect((scene.fog as THREE.Fog).far).toBe(1300);       // far pushed out so the circuit reads
+    expect((scene.fog as THREE.Fog).far).toBe(1650);       // far pushed out so the circuit reads
     expect(scene.environmentIntensity).toBe(1);            // full IBL (perps dims it to 0.55)
 
     game.dispose();

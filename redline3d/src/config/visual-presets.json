@@ -44,7 +44,7 @@
     "bloomRadius": 0.4,
     "bloomThreshold": 0.62,
     "fogColor": "#3a2246",
-    "fogNear": 260,
-    "fogFar": 1300
+    "fogNear": 0,
+    "fogFar": 1650
   }
 }
