@@ -92,6 +92,8 @@ import { entranceHit, LOT_BOUNDS, LOBBY_SPAWN, doorExitPose, type BuildingKind }
 import { modeSwitchBlocked } from "./core/mode-guard";
 import { createOval } from "./render/oval";
 import { createGarageRoom } from "./render/garage-room";
+import { createRaceGame, mulberry32, type RaceGame } from "./render/race-mode";
+import { buildGrid } from "./core/race-grid";
 import { elevationAt } from "./core/track";
 import { HIGHWAY_MAX_LEV, highwayPose, seedHighwayMotion, speedForLeverage, stepHighwayMotion, synchronizedHighwayMotion, type HighwayMotion } from "./core/highway-auto";
 import { PublicKey } from "@solana/web3.js";
@@ -812,12 +814,11 @@ const home = createHome(hudRoot, {
   owns: (n) => inventory.owns(n),
   equippedName: () => equippedCar.name,
   onDriveLobby: (carName) => { equipByName(carName); exitHomeToLobby(); },
-  // Task 7 wires enterGrandprix here (replaces both coming-soon stubs)
-  onEnterRace: (_carName) => homeComingSoonToast(),
-  onWatchAndBet: () => homeComingSoonToast(),
+  // Enter the in-app race: with the tapped card's car, or null (spectate) for Watch & bet.
+  onEnterRace: (carName) => enterGrandprix(carName),
+  onWatchAndBet: () => enterGrandprix(null),
   onOpenStore: () => crateBox.open(),
 });
-function homeComingSoonToast(): void { home.toast("Races arrive in the next update"); }
 
 // ── lobby: the economy-hub town ─────────────────────────────────────────────
 // the map button drops you into a giant drivable neon lot with 4 functional buildings —
@@ -966,8 +967,10 @@ let prevDriveSpeed = 0; // freedrive speed last frame (lobby + highway accel der
 const SLOPE_SAMPLE = 3.4;
 const SLOPE_CLAMP = 0.35;
 let hwBillboardCd = 0; // billboard redraw cooldown (CanvasTexture upload ≈ not free)
-// "grandprix" is wired by the NEXT task (in-app race) — adding it to the union now avoids churn.
+// "grandprix" is the in-app race mode: entered from home with the player's owned car (createRaceGame
+// owns the track/sim/HUD; the host just drives update+render and disposes on exit).
 let mode: "race" | "lobby" | "highway" | "garage" | "home" | "grandprix" = "race";
+let raceGame: RaceGame | null = null; // the live in-app race, or null when not in grandprix
 let garageEnterT = 0;        // seconds since entering the showroom (drives the reveal push-in)
 let garageMenuShown = false; // one-shot: auto-open the collection menu once the reveal has played
 let drive: DriveState = { x: LOBBY_SPAWN.x, z: LOBBY_SPAWN.z, heading: 0, speed: 0, steer: 0 };
@@ -1137,6 +1140,37 @@ function enterHome(): void {
   (window as Window & { hideSplash?: () => void }).hideSplash?.(); // home-ready IS boot-ready
 }
 function exitHomeToLobby(): void { home.hide(); ensureWorlds(); enterLobby(); }
+
+// ── grandprix: the in-app spectator/owner race — createRaceGame owns the track, sim, and HUD; the
+// host just drives update()+render each frame and disposes on exit. Entered from home with the
+// tapped card's car (Enter race) or null (Watch & bet, all-house field). ──
+function enterGrandprix(playerCarName: string | null): void {
+  if (modeSwitchBlocked({ opening, phase: engine.getPhase() })) return; // no mode switch mid-GO
+  mode = "grandprix";
+  syncPresenceLifecycle(); // grandprix carries no presence (allowlist predicates keep it dark); this
+                           // still DISCONNECTS the lobby ghost when arriving from a presence mode
+  home.hide(); lobbyHud.hide();
+  mapBtn.setVisible(false); // the race exits via its own Done button, not the map pin
+  // The race owns the whole screen (race-hud board + bet panel). Hide the perps driving chrome
+  // that home was merely covering — the GO dock, tach, market tabs, price/timer/× chips (setMinimal)
+  // and the coin/scrap counters — so nothing bleeds through or fires behind the race. Every other
+  // mode re-establishes this via setChrome() on entry, so leaving grandprix restores it for free.
+  hud.setMinimal(true);
+  coins.setVisible(false); scrap.setVisible(false);
+  const seed = (Math.random() * 1e9) >>> 0;
+  // House field: unowned-but-unlocked defs stay eligible; buildGrid itself drops pool:false/comingSoon
+  // and picks the player by name (an unowned/unknown name → all-house spectate).
+  raceGame = createRaceGame({
+    scene: ctx.scene, camera: ctx.camera, hudParent: hudRoot,
+    grid: buildGrid(CAR_DEFS.filter((c) => !c.locked || inventory.owns(c.name)), playerCarName, mulberry32(seed)),
+    seed, lowTier: quality.tier === "low",
+    onExit: () => exitGrandprixToHome(),
+  });
+}
+function exitGrandprixToHome(): void {
+  raceGame?.dispose(); raceGame = null;
+  enterHome(); // handles mode, presence sync, home.show, idempotent hideSplash
+}
 
 /** drive-into-a-building action. Economy screens open over the lobby; the Track gate leaves to the race. */
 function triggerBuilding(kind: BuildingKind) {
@@ -1583,7 +1617,7 @@ const FRIENDLY_CODES = new Set(["delegate_busy", "bankroll_full", "wallet_unfund
 // the track (lobby/showroom), nor behind an open shop/crate/garage/how-to overlay. Wiring the
 // panels' isOpen() here is the check main.ts was previously missing entirely.
 controls.setKeyLaunchBlocked(() =>
-  mode === "lobby" || mode === "garage" ||
+  mode === "lobby" || mode === "garage" || mode === "grandprix" ||
   upgrades.isOpen() || garage.isOpen() || crateBox.isOpen() || howto.isOpen() || tradeHistory.isOpen(),
 );
 
@@ -1591,7 +1625,7 @@ controls.onLaunch(async () => {
   // GO launches from the strip too — but never behind an open panel (garage menu or upgrades
   // shop over the world; Space/Enter would otherwise start a round invisibly behind it)
   // the strip has no betting UI — GO lives on the track (Space in the lot must not launch)
-  if (mode === "lobby" || mode === "garage") return; // no launching from the strip or the showroom
+  if (mode === "lobby" || mode === "garage" || mode === "grandprix") return; // no launching from the strip, showroom, or an in-app race
   audio.resume(); radio.resume();
   if (opening || settling || roundActive || engine.getPhase() === "live") return; // re-entrancy
   if (!identity) { showIdentityGate(); return; } // no driver yet → the gate is the front door
@@ -1865,6 +1899,14 @@ function frame(now: number) {
   updateEmoteVisual(localEmoteVisual, dt);
 
   if (mode === "home") { requestAnimationFrame(frame); return; } // no 3D render while home is up
+
+  if (mode === "grandprix") {
+    raceGame?.update(dt); // the race owns its sim; a no-op once disposed (guards the trailing frame)
+    if (post) post.render();
+    else ctx.renderer.render(ctx.scene, ctx.camera);
+    requestAnimationFrame(frame);
+    return;
+  }
 
   if (mode === "lobby") {
     // touch (hold + drag) OR keyboard (W/↑ gas, S/↓ brake, A/D ←→ steer) — shared with the road
@@ -2421,6 +2463,7 @@ console.log("Perps Rider render up");
 if (import.meta.env.DEV) {
   (window as any).__hw = {
     enterHighway, exitHighwayToLobby, enterLobby, exitLobby, triggerBuilding,
+    enterGrandprix, exitGrandprixToHome,
     // sets the persistent override the frame loop reads (a direct setRemoteCars call
     // would be wiped by the very next frame)
     ghosts: (states: import("./render/oval").OvalRemoteCar[] | undefined) => { (window as any).__hwGhostStates = states; },

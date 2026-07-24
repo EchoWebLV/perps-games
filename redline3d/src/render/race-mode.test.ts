@@ -131,4 +131,15 @@ describe("createRaceGame", () => {
     expect(disposeGeo).toHaveBeenCalled();             // late model was disposed, not leaked
     expect(scene.children.length).toBe(before);        // scene untouched by the late load
   });
+
+  it("credits the podium owner in the results when the player's car places", () => {
+    const grid = DEFAULT_GRID.map((g, i) => ({ ...g, isPlayer: i === 0, strength: i === 0 ? 99 : 1 }));
+    const scene = new THREE.Scene(); const camera = new THREE.PerspectiveCamera(60, 1, 0.1, 100);
+    const hudParent = document.createElement("div");
+    const game = createRaceGame({ scene, camera, hudParent, grid, seed: 3, lowTier: true, onExit: () => {} });
+    for (let t = 0; t < 300 && game.phase() !== "FINISH"; t += 1 / 30) game.update(1 / 30);
+    expect(game.phase()).toBe("FINISH");
+    expect(hudParent.textContent).toContain("Podium — P1");
+    game.dispose();
+  });
 });

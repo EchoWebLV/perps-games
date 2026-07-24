@@ -25,6 +25,7 @@ import { createBetPanel } from "../ui/bet-panel";
 import { createCamControls } from "../ui/cam-controls";
 import { onTap } from "../ui/tap";
 import { STRENGTH, type GridEntrant } from "../core/race-grid";
+import { ownerPodiumPayout } from "../core/race-payout";
 
 // ── public surface ────────────────────────────────────────────────────────────────────────────
 export interface RaceGameOptions {
@@ -33,8 +34,9 @@ export interface RaceGameOptions {
   hudParent: HTMLElement;             // race-hud / bet-panel / cam-controls mount here
   grid: GridEntrant[];                // from buildGrid(); player car may be grid[0]
   seed: number;                       // race outcome seed (mulberry32)
-  // Quality tier (mirrors main.ts quality.detail). RESERVED for the in-app host: Task 7 threads it
-  // through to gate render cost; unread today. Keep it in the interface so T7 needn't reshape the API.
+  // Quality tier (mirrors main.ts quality: true on the low/"reduced" tier). The in-app host passes the
+  // REAL tier here; race-mode itself still doesn't branch on it (no render-cost gating exists yet), so
+  // it's carried, not read — kept in the interface for when a low-tier render diet is actually built.
   lowTier: boolean;
   devHooks?: boolean;                 // install window.__raceState / __warp (harness only)
   onExit?: (result: RaceResult) => void; // fired when the player leaves after FINISH
@@ -321,6 +323,13 @@ export function createRaceGame(opts: RaceGameOptions): RaceGame {
       poolTotal: betPanel.poolTotal(),
     };
     betPanel.settle(finishOrder[0]);
+    // Owner podium credit: the player SEES their payout on the FINISH card. Must come AFTER settle so
+    // the credit line never paints without a settled result behind it (ownerPodiumPayout returns 0
+    // beyond rank 2, so no extra rank check is needed — off-podium finishes credit nothing).
+    if (lastResult.playerRank !== null) {
+      const pay = ownerPodiumPayout(lastResult.poolTotal, lastResult.playerRank);
+      if (pay > 0) betPanel.credit(pay, `Podium — P${lastResult.playerRank + 1}`);
+    }
     fireExitIfReady();
   }
 
