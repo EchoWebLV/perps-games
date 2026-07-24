@@ -21,8 +21,6 @@ export interface Home {
   show(): void;                          // (re)renders the grid from current ownership
   hide(): void;
   isOpen(): boolean;
-  /** minimal transient toast in home's visual style (the "coming soon" stubs use it) */
-  toast(msg: string): void;
   dispose(): void;
 }
 
@@ -170,10 +168,6 @@ function injectStyles() {
     .sw-act.crates{color:#0a0c10;background:var(--acid,#c1f832);box-shadow:0 3px 0 var(--edge,#05070b)}
     .sw-act:hover{filter:brightness(1.08)}
     .sw-act:active{transform:translateY(2px);box-shadow:0 1px 0 var(--edge,#05070b)}
-    .sw-toast{position:fixed;left:50%;top:50%;transform:translate(-50%,-50%);z-index:31;
-      padding:12px 22px;border-radius:12px;font:800 15px/1 'Chakra Petch',ui-monospace,monospace;letter-spacing:.05em;
-      background:rgba(10,12,16,.95);border:2px solid var(--acid,#c1f832);color:var(--acid,#c1f832);
-      text-shadow:0 0 10px rgba(193,248,50,.4);opacity:0;pointer-events:none;transition:opacity .2s ease}
   `;
   document.head.appendChild(s);
 }
@@ -228,10 +222,6 @@ export function createHome(parent: HTMLElement, deps: HomeDeps): Home {
   const sheet = document.createElement("div");
   sheet.className = "sw-sheet";
   el.append(backdrop, sheet);
-
-  const toastEl = document.createElement("div");
-  toastEl.className = "sw-toast";
-  el.appendChild(toastEl);
 
   parent.appendChild(el);
 
@@ -437,8 +427,6 @@ export function createHome(parent: HTMLElement, deps: HomeDeps): Home {
     }
   };
 
-  let toastTimer: ReturnType<typeof setTimeout> | undefined;
-
   function show() {
     render();
     closeSheet();                       // never re-open home with a stale sheet raised
@@ -452,14 +440,7 @@ export function createHome(parent: HTMLElement, deps: HomeDeps): Home {
     show,
     hide,
     isOpen: () => el.classList.contains("on"),
-    toast(msg) {
-      toastEl.textContent = msg;
-      toastEl.style.opacity = "1";
-      if (toastTimer) clearTimeout(toastTimer);
-      toastTimer = setTimeout(() => { toastEl.style.opacity = "0"; }, 1600);
-    },
     dispose() {
-      if (toastTimer) clearTimeout(toastTimer);
       el.remove(); // card/button listeners live on removed descendants → GC'd with the tree
     },
   };

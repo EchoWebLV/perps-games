@@ -153,3 +153,11 @@ Deliberate deviations from the design above, and why:
    registers a DEV `race-track` Light Lab folder so the look is tunable in-app from the
    same tuning source the harness uses. Commits 10994ea (light like harness + warm race
    shaders on entry), f5034fb (share ACES + exposure).
+
+7. **The race is fully created and disposed per entry, not kept warm.** This supersedes
+   the body's "the race scene stays warm across entries" wording (§Race mode): each
+   `enterGrandprix()` builds a fresh `createRaceGame` and `exitGrandprixToHome()` disposes
+   it whole (track/environment/HUD/bet-panel + the car models via the reclaim pattern).
+   Verified leak-clean — geometries and textures plateau across repeated enter/dispose
+   cycles (residual textures ~34 per cycle, not the growth an un-freed model would show).
+   Commit fd91cd0.

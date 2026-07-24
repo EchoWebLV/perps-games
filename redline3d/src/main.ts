@@ -1045,6 +1045,7 @@ function exitLobby() {
 // Direction selects the carriageway. Leverage controls automatic speed, not steering.
 function enterHighway(restoring = false) {
   if (!restoring && modeSwitchBlocked({ opening, phase: engine.getPhase(), roundActive })) return;
+  unwindGrandprix(); // the async boot-restore fires enterHighway(true) whatever mode the player reached; if they were mid-grandprix, tear the race down (dispose + lights/tone/car restore) BEFORE the highway takes over. No-op when no race is live, so from-lobby entry is unaffected. Chosen here (not restoreHighwayPosition) because enterHighway is the single choke point for EVERY highway path — current and future.
   ensureWorlds(); // covers every enterHighway path: from-lobby, the boot-restore (restoring=true), and the __hw dev hook — all need the oval/world built
   mode = "highway";
   syncPresenceLifecycle();
@@ -1267,11 +1268,23 @@ function enterGrandprix(playerCarName: string | null): void {
   hud.setMinimal(true);
   coins.setVisible(false); scrap.setVisible(false);
 }
-function exitGrandprixToHome(): void {
-  raceGame?.dispose(); raceGame = null; // dispose restores the scene fog/background/env-intensity
+// Tear a live in-app race down and hand every host resource it borrowed back to the perps world:
+// dispose() (which restores the scene fog/background/env-intensity) + null the ref, un-mute the two
+// main-scene lights, restore the saved tone-mapping operator + exposure, and re-show the drivable car
+// the race hid. IDEMPOTENT — a no-op when no race is live — so any mode that can preempt grandprix must
+// call it defensively before taking over, or the race's mutations strand (track group + HUD/bet-panel
+// DOM left up, ambient/key muted, ACES exposure live, car.group hidden). The async highway boot-restore
+// is exactly such a preemptor: it fires enterHighway() long after boot, whatever mode the player reached.
+function unwindGrandprix(): void {
+  if (!raceGame) return; // no in-app race live → nothing stranded (idempotent no-op)
+  raceGame.dispose(); raceGame = null; // dispose restores the scene fog/background/env-intensity
   ctx.ambient.visible = true; ctx.key.visible = true; // un-mute the perps main-scene lights the race muted
   ctx.renderer.toneMapping = prevRaceToneMapping; // hand the perps world back its NoToneMapping operator
   ctx.renderer.toneMappingExposure = prevRaceExposure;
+  car.group.visible = true; // re-show the drivable car the race hid (enterHighway/enterHome won't)
+}
+function exitGrandprixToHome(): void {
+  unwindGrandprix();
   enterHome(); // handles mode, presence sync, home.show, idempotent hideSplash
 }
 
