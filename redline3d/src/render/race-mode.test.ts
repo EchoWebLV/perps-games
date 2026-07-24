@@ -171,7 +171,13 @@ describe("createRaceGame", () => {
     const hudParent = document.createElement("div");
     const before = scene.children.length;
 
-    const game = createRaceGame({ scene, camera, hudParent, grid: DEFAULT_GRID, seed: 5, lowTier: true, provideSceneLighting: true });
+    // exposure accessor: the host-owned renderer knob the race-track Light Lab exposes (main.ts wires the
+    // real one; here a stub proves construction/dispose tolerate it and never touch the renderer directly).
+    let exposure = 1.05;
+    const game = createRaceGame({
+      scene, camera, hudParent, grid: DEFAULT_GRID, seed: 5, lowTier: true, provideSceneLighting: true,
+      exposure: { get: () => exposure, set: (v) => { exposure = v; } },
+    });
 
     let lights = 0;
     scene.traverse((o) => { if ((o as THREE.Light).isLight) lights++; });

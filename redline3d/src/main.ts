@@ -7,6 +7,7 @@ import { createWorld } from "./render/world";
 import { installOutlineDevControls, refreshToonStyle, isToonEnabled, setToonEnabled, onToonChanged, getOutlineWidth, setOutlineWidth, getWorldRampBand, setWorldRampBand } from "./render/toon";
 import { edgePassEnabled, setEdgePassEnabled } from "./render/edge-outline-pass";
 import { registerLightLab } from "./ui/light-lab";
+import { pNum } from "./config/visual-presets";
 import { THEMES, themeKeys, nextThemeKey } from "./render/world-themes";
 import { createCar } from "./render/car";
 import { createChaseCam, ROAD_SPEED_MAX, roadSpeed } from "./render/camera";
@@ -976,6 +977,10 @@ let hwBillboardCd = 0; // billboard redraw cooldown (CanvasTexture upload ≈ no
 // owns the track/sim/HUD; the host just drives update+render and disposes on exit).
 let mode: "race" | "lobby" | "highway" | "garage" | "home" | "grandprix" = "race";
 let raceGame: RaceGame | null = null; // the live in-app race, or null when not in grandprix
+// perps renderer tone-mapping saved on grandprix entry, restored on its single exit (the race shares the
+// harness's ACES operator; the perps world runs NoToneMapping/1.0 with tone-mapping deferred to OutputPass)
+let prevRaceToneMapping: THREE.ToneMapping = ctx.renderer.toneMapping;
+let prevRaceExposure = ctx.renderer.toneMappingExposure;
 let garageEnterT = 0;        // seconds since entering the showroom (drives the reveal push-in)
 let garageMenuShown = false; // one-shot: auto-open the collection menu once the reveal has played
 let drive: DriveState = { x: LOBBY_SPAWN.x, z: LOBBY_SPAWN.z, heading: 0, speed: 0, steer: 0 };
@@ -1164,6 +1169,8 @@ function enterGrandprix(playerCarName: string | null): void {
     // race-mode lights the race like the dev harness (own hemi/key/rim + dusk fog + full IBL) and
     // registers the DEV "race-track" Light Lab folder — the perps main-scene lights are too dark for it.
     provideSceneLighting: true,
+    // thin accessor so the race-track Light Lab can expose an "exposure" knob over the host renderer
+    exposure: { get: () => ctx.renderer.toneMappingExposure, set: (v) => { ctx.renderer.toneMappingExposure = v; } },
     onExit: () => exitGrandprixToHome(),
   });
   mode = "grandprix";
@@ -1175,6 +1182,13 @@ function enterGrandprix(playerCarName: string | null): void {
   // wrong. With them off the race renders under ONLY its harness-matched rig. exitGrandprix restores.
   world.group.visible = false; pickups.group.visible = false; fireTrail.group.visible = false; car.group.visible = false;
   ctx.ambient.visible = false; ctx.key.visible = false;
+  // Share the harness's tonal operator: the perps world runs NoToneMapping (tone-mapping deferred to the
+  // composer's OutputPass, which reads renderer.toneMapping live), so ACES here rolls off the neon like the
+  // harness — its original "flat neon fix". Save + restore on exit; exposure comes from the race-track preset.
+  prevRaceToneMapping = ctx.renderer.toneMapping;
+  prevRaceExposure = ctx.renderer.toneMappingExposure;
+  ctx.renderer.toneMapping = THREE.ACESFilmicToneMapping;
+  ctx.renderer.toneMappingExposure = pNum("race-track", "exposure", 1.05);
   // Kill the cold-entry compile freeze (the "dark spot at race start"): the race track + environment
   // programs were never in precompileModes() (the race group doesn't exist at boot), so their first
   // render used to glCompileShader ~30 programs mid-frame. Warm them NOW — while home still covers the
@@ -1195,6 +1209,8 @@ function enterGrandprix(playerCarName: string | null): void {
 function exitGrandprixToHome(): void {
   raceGame?.dispose(); raceGame = null; // dispose restores the scene fog/background/env-intensity
   ctx.ambient.visible = true; ctx.key.visible = true; // un-mute the perps main-scene lights the race muted
+  ctx.renderer.toneMapping = prevRaceToneMapping; // hand the perps world back its NoToneMapping operator
+  ctx.renderer.toneMappingExposure = prevRaceExposure;
   enterHome(); // handles mode, presence sync, home.show, idempotent hideSplash
 }
 

@@ -46,6 +46,10 @@ export interface RaceGameOptions {
   // lights — and registers the DEV "race-track" Light Lab folder. The harness leaves it off: it already
   // owns identical scene lights/fog/Light Lab (see race-preview.ts), so the race must not double them.
   provideSceneLighting?: boolean;
+  // Host-owned renderer tone-mapping EXPOSURE accessor (main.ts). The renderer is not the race's to hold,
+  // so the host applies/restores the ACES operator itself (beside its light mute); this thin get/set just
+  // lets the "race-track" Light Lab expose an `exposure` knob that tunes the live value end-to-end in-game.
+  exposure?: { get(): number; set(v: number): void };
   onExit?: (result: RaceResult) => void; // fired when the player leaves after FINISH
 }
 export interface RaceResult {
@@ -168,7 +172,7 @@ function disposeModel(o: THREE.Object3D): void {
 // fresh race sets `activeLighting`; dispose clears it (setters then no-op, getters fall back to the
 // shipped preset). The folder edits the SAME "race-track" keys the harness honors → ★ SAVE ALL retunes
 // both from one source (visual-presets.json).
-interface RaceLighting { hemi: THREE.HemisphereLight; key: THREE.DirectionalLight; rim: THREE.DirectionalLight; scene: THREE.Scene }
+interface RaceLighting { hemi: THREE.HemisphereLight; key: THREE.DirectionalLight; rim: THREE.DirectionalLight; scene: THREE.Scene; exposure: { get(): number; set(v: number): void } | null }
 let activeLighting: RaceLighting | null = null;
 let raceLabRegistered = false;
 function ensureRaceTrackLab(): void {
@@ -176,6 +180,9 @@ function ensureRaceTrackLab(): void {
   raceLabRegistered = true;
   const fog = (): THREE.Fog | null => (activeLighting?.scene.fog instanceof THREE.Fog ? activeLighting.scene.fog : null);
   registerLightLab("race-track", { controls: [
+    // exposure tunes the host renderer's ACES toneMappingExposure (main.ts applies/restores the operator);
+    // this knob only bites while a race is mounted, else it reads the shipped preset
+    { key: "exposure", label: "exposure", kind: "num", min: 0, max: 3, step: 0.01, get: () => activeLighting?.exposure?.get() ?? pNum("race-track", "exposure", 1.05), set: (v) => { activeLighting?.exposure?.set(v); } },
     { key: "hemi", label: "hemisphere", kind: "num", min: 0, max: 3, step: 0.01, get: () => activeLighting?.hemi.intensity ?? pNum("race-track", "hemi", 0.9), set: (v) => { if (activeLighting) activeLighting.hemi.intensity = v; } },
     { key: "key", label: "key (directional)", kind: "num", min: 0, max: 3, step: 0.01, get: () => activeLighting?.key.intensity ?? pNum("race-track", "key", 1.15), set: (v) => { if (activeLighting) activeLighting.key.intensity = v; } },
     { key: "keyColor", label: "key color", kind: "color", get: () => activeLighting ? "#" + activeLighting.key.color.getHexString() : pColor("race-track", "keyColor", "#ffffff"), set: (v) => { activeLighting?.key.color.set(v); } },
@@ -204,6 +211,7 @@ export function createRaceGame(opts: RaceGameOptions): RaceGame {
   let exited = false;
   // set when provideSceneLighting swaps the global scene fog/background/env-intensity → restored in dispose()
   let restoreSceneEnv: (() => void) | null = null;
+  let ownLighting: RaceLighting | null = null; // this race's Light Lab binding (identity-checked on dispose)
   let lastResult: RaceResult = { finishOrder: [], playerRank: null, poolTotal: 0 };
 
   // THREE resources this module owns and must free in dispose()
@@ -620,7 +628,8 @@ export function createRaceGame(opts: RaceGameOptions): RaceGame {
     scene.background = new THREE.Color(0x140a24);
     scene.environmentIntensity = 1;
     restoreSceneEnv = () => { scene.fog = prevFog; scene.background = prevBg; scene.environmentIntensity = prevEnvI; };
-    activeLighting = { hemi, key, rim, scene };
+    ownLighting = { hemi, key, rim, scene, exposure: opts.exposure ?? null };
+    activeLighting = ownLighting;
     ensureRaceTrackLab(); // DEV: bind the "race-track" Light Lab folder to this race (no-op in prod)
   }
 
@@ -651,9 +660,10 @@ export function createRaceGame(opts: RaceGameOptions): RaceGame {
         delete w.__warp;
       }
       // restore the perps scene's global fog/background/env-intensity + release the Light Lab binding
-      // (its controls fall back to the shipped presets until the next race mounts)
+      // (its controls fall back to the shipped presets until the next race mounts). Identity-checked so a
+      // teardown can never blank a DIFFERENT race's binding if the single-race guarantee ever weakens.
       if (restoreSceneEnv) { restoreSceneEnv(); restoreSceneEnv = null; }
-      if (opts.provideSceneLighting) activeLighting = null;
+      if (ownLighting && activeLighting === ownLighting) activeLighting = null;
       scene.remove(raceGroup);
       hud.dispose();
       betPanel.dispose();
