@@ -648,7 +648,7 @@ html.motion-paused .stop-grid article:hover .strip-building img {
   top: 42%;
   left: 50%;
   color: var(--magenta);
-  content: "PERPS RIDER";
+  content: "SLOPWHEELS";
   font-size: 26px;
   font-style: italic;
   font-weight: 700;
@@ -1658,7 +1658,6 @@ html.motion-paused .stop-grid article:hover .strip-building img {
 
 .site-footer .wordmark {
   justify-self: start;
-  font-size: 17px;
 }
 
 .site-footer p {

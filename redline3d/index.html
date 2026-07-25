@@ -33,7 +33,7 @@
 
     <header class="site-header" data-site-header>
       <a class="wordmark" href="/" aria-label="Slopwheels home">
-        <img src="/assets/brands/slopwheels-alpha.png" alt="Slopwheels" />
+        <img src="/assets/brands/slopwheels-alpha.png" width="1024" height="538" alt="Slopwheels" />
       </a>
       <button class="menu-toggle" type="button" aria-expanded="false" aria-controls="landing-nav" data-menu-toggle>
         <span></span><span></span><span></span><span class="sr-only">Open navigation</span>
@@ -49,28 +49,28 @@
     <main id="main">
       <section class="hero section-shell" aria-labelledby="hero-title">
         <div class="hero-copy" data-reveal>
-          <div class="eyebrow"><span class="live-dot"></span> Live price arcade on Solana devnet</div>
+          <div class="eyebrow"><span class="live-dot"></span> Gacha racing arcade on Solana devnet</div>
           <h1 id="hero-title">Crack a crate.<br />Bet the race.</h1>
-          <p class="hero-lede">Pick a market. Call long or short. Rev the engine to set your leverage, then race the price and bank your position before the road takes it back.</p>
+          <p class="hero-lede">Pull crates for a garage of gloriously stupid cars — five rarity tiers, dupes melt to scrap. Send yours to the grand prix, bet the pari-mutuel pool against seven rivals, and take a cut of the rake when your car podiums.</p>
           <div class="hero-actions">
             <a class="launch-button" href="/play/"><span>Launch game</span><b aria-hidden="true">GO!</b></a>
             <a class="apk-button" href="/downloads/perps-rider.apk" download><span>Download Seeker APK</span><b aria-hidden="true">↓</b></a>
             <a class="text-link" href="#how">See how it works <span aria-hidden="true">↓</span></a>
           </div>
-          <p class="play-note"><b>Practice free.</b> Sign in only when you want to play for real SOL.</p>
+          <p class="play-note"><b>Practice free.</b> Sign in only when you want real VRF pulls and real SOL.</p>
           <div class="proof-row" aria-label="Game highlights">
-            <span><small>MARKETS</small> BTC · ETH · SOL</span>
-            <span><small>LEVERAGE</small> 10× to 3000×</span>
-            <span><small>SETTLEMENT</small> On-chain</span>
+            <span><small>CARS</small> 20+ and counting</span>
+            <span><small>RARITY TIERS</small> 5</span>
+            <span><small>PODIUM</small> Owners get paid</span>
           </div>
         </div>
 
         <figure class="hero-poster" data-reveal>
           <div class="poster-glow"></div>
-          <img src="/loadingscreen.png" alt="Perps Rider car racing down a neon synthwave road" data-hero-art />
+          <img src="/assets/landing/hero-grandprix.png" alt="Slopwheels toon cars lined up on the grand-prix grid" data-hero-art />
           <figcaption>
-            <span><i></i> PRICE FEED CONNECTED</span>
-            <b>RIDE THE MARKET</b>
+            <span><i></i> GRID FORMING</span>
+            <b>BET THE RACE</b>
           </figcaption>
           <div class="poster-corner poster-corner-a"></div>
           <div class="poster-corner poster-corner-b"></div>
@@ -80,36 +80,27 @@
       <section id="how" class="section-shell content-section" aria-labelledby="how-title" data-motion-section="tutorial">
         <div class="section-heading" data-reveal>
           <div><span class="section-index">01</span><span class="eyebrow">How it works</span></div>
-          <h2 id="how-title">Three moves.<br /><em>One live road.</em></h2>
-          <p>The position is the race. Every control maps to a real trading decision.</p>
+          <h2 id="how-title">Three moves.<br /><em>One grid.</em></h2>
+          <p>Every pull, every bet, every payout is one loop: collect the slop, back it with money.</p>
         </div>
         <div class="step-grid">
           <article class="step-card step-cyan" data-reveal>
             <div class="step-media">
-              <video loop muted playsinline preload="metadata" poster="/tutorial/market-side.webp" data-tutorial-video aria-hidden="true">
-                <source src="/tutorial/market-side.webm" type="video/webm" />
-                <source src="/tutorial/market-side.mp4" type="video/mp4" />
-              </video>
+              <video loop muted playsinline preload="metadata" poster="/assets/landing/step-pull.webp" aria-hidden="true"></video>
             </div>
-            <div class="step-copy"><span>01 / CALL</span><h3>Pick your side</h3><p>Long if the price goes up. Short if it goes down. Choose BTC, ETH, or SOL.</p></div>
+            <div class="step-copy"><span>01 / PULL</span><h3>Crack crates</h3><p>Every pull rolls the odds — five tiers from junk to legendary. Dupes melt into scrap.</p></div>
           </article>
           <article class="step-card step-amber" data-reveal>
             <div class="step-media">
-              <video loop muted playsinline preload="metadata" poster="/tutorial/leverage.webp" data-tutorial-video aria-hidden="true">
-                <source src="/tutorial/leverage.webm" type="video/webm" />
-                <source src="/tutorial/leverage.mp4" type="video/mp4" />
-              </video>
+              <video loop muted playsinline preload="metadata" poster="/assets/landing/step-bet.webp" aria-hidden="true"></video>
             </div>
-            <div class="step-copy"><span>02 / REV</span><h3>Choose your risk</h3><p>More revs means more leverage. Bigger moves hit harder in both directions.</p></div>
+            <div class="step-copy"><span>02 / BET</span><h3>Back your car</h3><p>Send it to the grid and bet the pari-mutuel pool. No car? Watch and bet anyway.</p></div>
           </article>
           <article class="step-card step-magenta" data-reveal>
             <div class="step-media">
-              <video loop muted playsinline preload="metadata" poster="/tutorial/cash-out.webp" data-tutorial-video aria-hidden="true">
-                <source src="/tutorial/cash-out.webm" type="video/webm" />
-                <source src="/tutorial/cash-out.mp4" type="video/mp4" />
-              </video>
+              <video loop muted playsinline preload="metadata" poster="/assets/landing/step-win.webp" aria-hidden="true"></video>
             </div>
-            <div class="step-copy"><span>03 / BANK</span><h3>Exit before impact</h3><p>Cash out to keep the win. Hit liquidation and the play amount is gone.</p></div>
+            <div class="step-copy"><span>03 / WIN</span><h3>Get paid</h3><p>The pool settles to the cent. Top-3 finishers pay their owners a slice of the rake.</p></div>
           </article>
         </div>
       </section>
@@ -224,7 +215,7 @@
     </main>
 
     <footer class="site-footer section-shell">
-      <a class="wordmark" href="/"><img src="/assets/brands/slopwheels-alpha.png" alt="Slopwheels" /></a>
+      <a class="wordmark" href="/"><img src="/assets/brands/slopwheels-alpha.png" width="1024" height="538" alt="Slopwheels" /></a>
       <p>Built for the slop. Running on Solana devnet.</p>
       <div class="footer-links"><a href="/play/">Enter game ↗</a><a href="/downloads/perps-rider.apk" download>Seeker APK ↓</a></div>
     </footer>

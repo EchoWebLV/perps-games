@@ -31,7 +31,7 @@ const brandDocs = import.meta.glob("../../public/assets/brands/README.md", {
   query: "?raw",
 });
 
-describe("Perps Rider landing shell", () => {
+describe("Slopwheels landing shell", () => {
   it("makes root the landing page with a direct game link", () => {
     const html = landingHtml;
 
@@ -41,6 +41,17 @@ describe("Perps Rider landing shell", () => {
     expect(html).toContain("You can lose your play amount"); // risk note survives
     expect(html).not.toContain('/src/main.ts');
     expect(html).not.toContain("A real perp you drive");
+  });
+
+  it("tells the gacha story: pull, bet, win", () => {
+    expect(landingHtml).toContain("Crack a crate.");
+    expect(landingHtml).toContain("Bet the race.");
+    expect(landingHtml).toMatch(/01 \/ PULL/);
+    expect(landingHtml).toMatch(/02 \/ BET/);
+    expect(landingHtml).toMatch(/03 \/ WIN/);
+    expect(landingHtml).toContain("CARS</small> 20+");
+    expect(landingHtml).toContain("pari-mutuel");
+    expect(landingHtml).not.toContain("Rev the engine");
   });
 
   it("wears the Slopwheels brand everywhere the shell shows a name", () => {
@@ -126,17 +137,16 @@ describe("Perps Rider landing shell", () => {
     expect(sources).toContain("Retrieved: 2026-07-13");
   });
 
-  it("uses JS-controlled resilient native video loops for every tutorial step", () => {
+  it("renders the how-it-works steps as poster-only stills without tutorial wiring", () => {
     const videos = landingHtml.match(/<video\b[\s\S]*?<\/video>/g) ?? [];
 
     expect(videos).toHaveLength(3);
     for (const video of videos) {
-      expect(video).toContain("data-tutorial-video");
+      expect(video).not.toContain("data-tutorial-video");
+      expect(video).not.toContain("<source");
       expect(video).not.toContain("autoplay");
       expect(video).toMatch(/<video[^>]*\bloop\b[^>]*\bmuted\b[^>]*\bplaysinline\b/);
-      expect(video).toMatch(/poster="\/tutorial\/(market-side|leverage|cash-out)\.webp"/);
-      expect(video).toContain('type="video/webm"');
-      expect(video).toContain('type="video/mp4"');
+      expect(video).toMatch(/poster="\/assets\/landing\/step-(pull|bet|win)\.webp"/);
       expect(video).toContain('aria-hidden="true"');
     }
     expect(landingHtml).not.toMatch(/<div class="step-media"><img/);
