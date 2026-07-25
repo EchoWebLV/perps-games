@@ -159,6 +159,10 @@ describe("Slopwheels landing shell", () => {
     expect(landingHtml).toContain("10× to 3000×");
     expect(landingHtml).toContain("/tutorial/leverage.webm");
     expect(landingHtml).toContain('href="#mode2"');
+
+    expect(landingHtml.match(/data-tutorial-video/g) ?? []).toHaveLength(2);
+    const mode2 = landingHtml.slice(landingHtml.indexOf('id="mode2"'), landingHtml.indexOf('id="built-on"'));
+    expect(mode2.match(/data-tutorial-video/g) ?? []).toHaveLength(2);
   });
 
   it("actively starts tutorial loops when motion is allowed", () => {
