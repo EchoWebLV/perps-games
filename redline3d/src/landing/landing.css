@@ -884,6 +884,58 @@ html.motion-paused .stop-grid article:hover .strip-building img {
   grid-template-columns: 0.7fr 1.7fr 1fr;
 }
 
+/* "Crack one open" demo — a centered, no-sign-in pull that reuses the shared crate cinematic. */
+.demo-crate {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 30px;
+  text-align: center;
+}
+
+.demo-crate .section-heading {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 14px;
+  max-width: 640px;
+  margin-bottom: 0;
+}
+
+.demo-crate .section-heading > p {
+  max-width: 520px;
+}
+
+.demo-open {
+  margin-top: 4px;
+}
+
+/* Card face the cinematic flips in (filled by demo-crate.ts via onCardSlot). */
+.demo-card {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 16px;
+}
+
+.demo-card-art {
+  display: block;
+  max-width: min(320px, 70vw);
+  border-radius: 14px;
+}
+
+.demo-card-name {
+  color: var(--tc, #fff);
+  font-size: 20px;
+  font-weight: 800;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.demo-keep {
+  margin-top: 4px;
+}
+
 .stop-grid {
   display: grid;
   grid-template-columns: repeat(4, 1fr);

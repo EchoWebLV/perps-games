@@ -1,4 +1,5 @@
   import { initialMotionState, motionEnabled, reduceMotionState, technologyMotionEnabled, videoPlaybackEnabled } from "./motion-state";
+  import { initDemoCrate } from "./demo-crate";
 
   const root = document.documentElement;
   const header = document.querySelector<HTMLElement>("[data-site-header]");
@@ -119,3 +120,5 @@
     }, { rootMargin: "0px 0px -8%", threshold: 0.12 });
     reveals.forEach((element) => observer.observe(element));
   }
+
+  initDemoCrate();

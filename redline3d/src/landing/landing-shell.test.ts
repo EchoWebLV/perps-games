@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import crateCinematicSrc from "../ui/crate-cinematic.ts?raw";
+import demoCrateSrc from "./demo-crate.ts?raw";
 import landingHtml from "../../index.html?raw";
 import manifestText from "../../public/manifest.webmanifest?raw";
 import viteConfig from "../../vite.config.ts?raw";
@@ -92,6 +93,15 @@ describe("Slopwheels landing shell", () => {
     expect(crateCinematicSrc).not.toContain('from "three"');
     expect(crateCinematicSrc).not.toContain('"../main"');
     expect(crateCinematicSrc).not.toContain('"./cratebox"');
+  });
+
+  it("lets any visitor crack one open with the shared cinematic, no game bundle", () => {
+    expect(landingHtml).toContain("data-demo-crate");
+    expect(landingHtml).toContain('id="crack"');
+    expect(landingHtml).toContain("Crack one open.");
+    // Same isolation guard as the cinematic: the demo module must never drag three/game code in.
+    expect(demoCrateSrc).not.toContain('from "three"');
+    expect(demoCrateSrc).not.toContain('"../main"');
   });
 
   it("contains decorative poster overflow within the hero artwork", async () => {
@@ -203,7 +213,7 @@ describe("Slopwheels landing shell", () => {
     expect(entry).toContain('matchMedia("(prefers-reduced-motion: reduce)")');
     expect(entry).toContain('reduceMotion.addEventListener("change"');
     expect(entry).toContain('addEventListener("visibilitychange"');
-    expect(landingHtml).toContain('data-motion-section="tutorial"');
+    expect(landingHtml).toContain('data-motion-section="mode2"');
     expect(landingHtml).toContain('data-motion-section="technology"');
   });
 
