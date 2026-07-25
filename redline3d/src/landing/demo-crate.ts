@@ -37,14 +37,17 @@ export const DEMO_CARS: DemoCar[] = [
 
 // Fair-crate odds derived straight from the rarity table (50/28/14/6/2) so the demo can never drift
 // from the real curve. Keyed by tier id → weight, matching rollCrate's tierWeights parameter.
-const FAIR_WEIGHTS: Partial<Record<Rarity, number>> = TIERS.reduce(
-  (weights, tier) => ({ ...weights, [tier.id]: tier.weight }),
-  {} as Partial<Record<Rarity, number>>,
+const FAIR_WEIGHTS: Partial<Record<Rarity, number>> = Object.fromEntries(
+  TIERS.map((tier): [Rarity, number] => [tier.id, tier.weight]),
 );
 
 /** Roll a demo car with the real tier odds — a pure passthrough to the game's rollCrate. */
 export const rollDemo = (rTier: number, rCar: number): DemoCar | null =>
   rollCrate(DEMO_CARS, FAIR_WEIGHTS, rTier, rCar);
+
+// The pause before the rip: must stay > the cinematic's 500ms drop-in phase so the crate settles and
+// the shake breathes before it bursts open. (The reveal escalation adds SHAKE_EXTRA_MS on top.)
+const PRE_REVEAL_MS = 900;
 
 export function initDemoCrate(): void {
   const mount = document.querySelector<HTMLElement>("[data-demo-crate]");
@@ -54,8 +57,9 @@ export function initDemoCrate(): void {
 
   // The live run, closed over by onDone so "Crack another" (the Done button) tears the overlay down
   // and returns the visitor to the section — abort() is idempotent, so repeat activations are safe.
+  // Focus returns to the trigger so keyboard/SR users aren't dropped onto <body> when it closes.
   let run: CrateCinematicRun | null = null;
-  const cx = createCrateCinematic({ onDone: () => run?.abort() });
+  const cx = createCrateCinematic({ onDone: () => { run?.abort(); button.focus(); } });
   mount.appendChild(cx.el);
 
   button.addEventListener("click", () => {
@@ -77,6 +81,6 @@ export function initDemoCrate(): void {
             `<a class="launch-button demo-keep" href="/play/"><span>Play to keep what you pull</span><b aria-hidden="true">GO!</b></a>` +
           `</div>`;
       },
-    }), 900);
+    }), PRE_REVEAL_MS);
   });
 }

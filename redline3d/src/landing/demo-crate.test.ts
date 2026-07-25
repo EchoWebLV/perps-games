@@ -11,7 +11,7 @@ describe("landing demo crate", () => {
     const defs = [...mainSrc.matchAll(/\{ name: "([^"]+)"[^\n]*?rarity: (\d)[^\n]*/g)]
       .filter((m) => !/pool: false|comingSoon: true/.test(m[0]))
       .map((m) => ({ name: m[1], rarity: Number(m[2]) }));
-    expect(defs.length).toBeGreaterThanOrEqual(20);
+    expect(defs.length).toBe(DEMO_CARS.length); // exact parity: a reformatted pullable car can't silently drift
     expect(DEMO_CARS.map((c) => c.name).sort()).toEqual(defs.map((d) => d.name).sort());
     for (const d of defs) expect(DEMO_CARS.find((c) => c.name === d.name)!.rarity).toBe(d.rarity);
   });
