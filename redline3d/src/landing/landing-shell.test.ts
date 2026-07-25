@@ -201,7 +201,7 @@ describe("Slopwheels landing shell", () => {
   });
 
   it("presents a four-stage animated technology pipeline", () => {
-    for (const scene of ["price", "execution", "settlement", "world"]) {
+    for (const scene of ["execution", "tote", "settlement", "world"]) {
       expect(landingHtml).toContain(`data-tech-scene="${scene}"`);
     }
     expect(landingHtml.match(/class="tech-scene/g)).toHaveLength(4);
@@ -211,50 +211,30 @@ describe("Slopwheels landing shell", () => {
     expect(landingHtml).not.toContain("<canvas");
   });
 
-  it("shows three distinct market quotes with staggered flips and a pulsing live badge", async () => {
+  it("rethemes the tech rack to pulls, pools, settlement, world", () => {
+    expect(landingHtml).toContain("EPHEMERAL VRF / PROVABLY FAIR");
+    expect(landingHtml).toContain("Pari-mutuel");
+    expect(landingHtml).toContain("settles to the cent");
+    expect(landingHtml).not.toContain("scene-price");
+  });
+
+  it("animates the pari-mutuel tote payline while gating on motion", async () => {
     const nodeFs = "node:fs/promises";
     const { readFile } = await import(nodeFs);
     const stylesheet = await readFile(new URL("./landing.css", import.meta.url), "utf8");
 
-    const expectedQuotes = [
-      ["btc", "BTC", "$118,240"],
-      ["eth", "ETH", "$3,842.16"],
-      ["sol", "SOL", "$186.42"],
-    ] as const;
-    const quoteHooks = landingHtml.match(/data-price-quote=/g) ?? [];
-    expect(quoteHooks).toHaveLength(expectedQuotes.length);
-    const quotePhases: string[] = [];
-    for (const [hook, symbol, value] of expectedQuotes) {
-      expect(landingHtml).toMatch(
-        new RegExp(`class="price-quote price-quote-${hook}" data-price-quote="${hook}">\\s*<span>${symbol}<\\/span>\\s*<b>${value.replace("$", "\\$")}<\\/b>`),
-      );
-      const phase = stylesheet.match(
-        new RegExp(`\\.price-quote-${hook} \\{[^}]*--tech-phase-delay: (\\d*\\.?\\d+s);`),
-      )?.[1];
-      expect(phase).toBeDefined();
-      quotePhases.push(phase ?? "");
-    }
-    expect(new Set(expectedQuotes.map(([, , value]) => value)).size).toBe(expectedQuotes.length);
-    expect(quotePhases).toEqual(["0s", ".24s", ".48s"]);
-    expect(new Set(quotePhases).size).toBe(expectedQuotes.length);
-    expect(landingHtml).toContain('<i class="price-live">LIVE</i>');
-    expect(stylesheet).toMatch(/\.price-quote b \{[^}]*animation: ticker-flip [^;]* infinite;/);
-    expect(stylesheet).toMatch(/\.price-live \{[^}]*animation: live-pulse [^;]* infinite;/);
-    const livePulseStart = stylesheet.indexOf("@keyframes live-pulse");
-    expect(livePulseStart).toBeGreaterThanOrEqual(0);
-    const livePulseEnd = stylesheet.indexOf("@keyframes", livePulseStart + 1);
-    const livePulse = stylesheet.slice(livePulseStart, livePulseEnd);
-    expect(livePulse).toContain("transform:");
-    expect(livePulse).toContain("opacity:");
-    expect(livePulse).not.toMatch(/(?:background|color|filter|box-shadow):/);
-
-    const staticStateRule = stylesheet.match(
-      /:where\(html\.motion-paused, html:not\(\.tech-motion-active\)\) \.tech-scene :is\(([\s\S]*?)\) \{([^}]*)\}/,
+    expect(landingHtml).toContain('data-tech-scene="tote"');
+    expect(landingHtml).toContain('<g class="tote-odds"><text x="240" y="30">x21.8</text>');
+    expect(stylesheet).toMatch(/\.scene-tote \.tote-payline \{[^}]*animation: tote-pay [^;]* infinite;/);
+    expect(stylesheet).toContain("@keyframes tote-pay");
+    // The tote payline is a .tech-scene descendant, so the generic gate kills it when paused.
+    expect(stylesheet).toMatch(
+      /:where\(html\.motion-paused, html:not\(\.tech-motion-active\)\) \.tech-scene \*:not\(\.tech-brand\) \{[^}]*animation: none !important;/,
     );
-    expect(staticStateRule?.[1]).toContain(".price-quote b");
-    expect(staticStateRule?.[1]).toContain(".price-live");
-    expect(staticStateRule?.[2]).toContain("opacity: 1;");
-    expect(staticStateRule?.[2]).toContain("transform: none;");
+    expect(stylesheet).not.toContain(".price-quote");
+    expect(stylesheet).not.toContain("@keyframes ticker-flip");
+    expect(stylesheet).not.toContain("@keyframes live-pulse");
+    expect(stylesheet).not.toContain("@keyframes price-scan");
   });
 
   it("moves both world cars inward with signed travel variables", async () => {
@@ -303,7 +283,7 @@ describe("Slopwheels landing shell", () => {
     expect(landingHtml).toContain('src="/assets/brands/solana-mark.svg"');
     expect(landingHtml).toContain('data-tech-brand="solana"');
     expect(landingHtml.match(/class="pipeline-pulse"/g)).toHaveLength(1);
-    for (const hook of ["price-ticker", "rollup-chamber", "settlement-gate", "world-destination"]) {
+    for (const hook of ["tote-rows", "rollup-chamber", "settlement-gate", "world-destination"]) {
       expect(landingHtml).toContain(`class="${hook}`);
     }
     expect(landingHtml.match(/class="tech-brand/g)).toHaveLength(2);
@@ -367,8 +347,6 @@ describe("Slopwheels landing shell", () => {
     );
     expect(staticStateRule).not.toBeNull();
     for (const hook of [
-      ".price-quote b",
-      ".price-live",
       ".rollup-pressure",
       ".tx-shard",
       ".settlement-rail",

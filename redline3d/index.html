@@ -174,26 +174,12 @@
         <div class="section-heading" data-reveal>
           <div><span class="section-index">04</span><span class="eyebrow">Under the hood</span></div>
           <h2 id="tech-title">Arcade feel.<br /><em>Real rails.</em></h2>
-          <p>The game stays fast without turning the position into pretend money or a hidden server result.</p>
+          <p>The slop is silly. The rails are not.</p>
         </div>
         <div class="tech-grid">
           <i class="pipeline-pulse" aria-hidden="true"></i>
           <article style="--tech-delay: 0s" data-reveal>
             <span>01</span>
-            <div class="tech-scene scene-price" data-tech-scene="price" aria-hidden="true">
-              <svg viewBox="0 0 280 130"><path class="scene-grid" d="M0 24H280M0 56H280M0 88H280M0 120H280M52 0V130M112 0V130M172 0V130M232 0V130"/><path class="price-ghost" d="M6 103L36 97L62 107L91 71L119 79L147 53L178 64L208 30L239 45L274 16"/><path class="price-trace" d="M6 103L36 97L62 107L91 71L119 79L147 53L178 64L208 30L239 45L274 16"/><g class="price-nodes"><circle cx="91" cy="71" r="4"/><circle cx="147" cy="53" r="4"/><circle cx="208" cy="30" r="4"/><circle cx="274" cy="16" r="4"/></g><path class="price-crosshair" d="M201 30H215M208 23V37"/><rect class="price-laser" x="0" y="0" width="3" height="130"/></svg>
-              <div class="price-ticker">
-                <div class="price-quote price-quote-btc" data-price-quote="btc"><span>BTC</span><b>$118,240</b></div>
-                <div class="price-quote price-quote-eth" data-price-quote="eth"><span>ETH</span><b>$3,842.16</b></div>
-                <div class="price-quote price-quote-sol" data-price-quote="sol"><span>SOL</span><b>$186.42</b></div>
-                <i class="price-live">LIVE</i>
-              </div>
-              <span class="scene-status">BTC · ETH · SOL / LIVE</span>
-            </div>
-            <div><small>PRICE</small><h3>Pyth Lazer</h3><p>Live market prices shape the road and your position.</p></div>
-          </article>
-          <article style="--tech-delay: .35s" data-reveal>
-            <span>02</span>
             <div class="tech-scene scene-execution" data-tech-scene="execution" aria-hidden="true">
               <svg viewBox="0 0 280 130"><path class="execution-rail rail-top" d="M4 25H92L112 45H276"/><path class="execution-rail rail-mid" d="M4 65H276"/><path class="execution-rail rail-bottom" d="M4 105H92L112 85H276"/><g class="execution-ticks"><path d="M22 18V32M43 18V32M64 18V32M22 98V112M43 98V112M64 98V112"/></g><path class="execution-chevron" d="M248 55L260 65L248 75"/></svg>
               <div class="rollup-chamber">
@@ -201,9 +187,26 @@
                 <img class="tech-brand tech-brand-magicblock" data-tech-brand="magicblock" src="/assets/brands/magicblock-logo.svg" width="162" height="32" alt="" />
               </div>
               <i class="tx-shard tx-shard-a"></i><i class="tx-shard tx-shard-b"></i><i class="tx-shard tx-shard-c"></i><i class="confirmed-bolt"></i>
-              <span class="scene-status">EPHEMERAL ROLLUP / CONFIRMED</span>
+              <span class="scene-status">EPHEMERAL VRF / PROVABLY FAIR</span>
             </div>
-            <div><small>EXECUTION</small><h3>MagicBlock</h3><p>Fast on-chain rounds through an Ephemeral Rollup.</p></div>
+            <div><small>PULLS</small><h3>MagicBlock VRF</h3><p>Signed-in crate pulls roll on-chain randomness — provably fair, not a server dice.</p></div>
+          </article>
+          <article style="--tech-delay: .35s" data-reveal>
+            <span>02</span>
+            <div class="tech-scene scene-tote" data-tech-scene="tote" aria-hidden="true">
+              <svg viewBox="0 0 280 130">
+                <path class="tote-grid" d="M0 30H280M0 60H280M0 90H280M70 8V122M140 8V122M210 8V122"/>
+                <g class="tote-rows">
+                  <rect x="12" y="18" width="120" height="14" rx="4"/>
+                  <rect x="12" y="48" width="96" height="14" rx="4"/>
+                  <rect x="12" y="78" width="140" height="14" rx="4"/>
+                </g>
+                <g class="tote-odds"><text x="240" y="30">x21.8</text><text x="240" y="60">x4.2</text><text x="240" y="90">x1.9</text></g>
+                <path class="tote-payline" d="M8 112H272"/>
+              </svg>
+              <span class="scene-status">POOL LOCKED / SETTLED TO THE CENT</span>
+            </div>
+            <div><small>RACES</small><h3>Pari-mutuel pools</h3><p>Odds come from the pool, not the house. 5% rake — and podium owners get a slice of it. Settles to the cent.</p></div>
           </article>
           <article style="--tech-delay: .7s" data-reveal>
             <span>03</span>

@@ -284,8 +284,6 @@ img {
 }
 
 :where(html.motion-paused, html:not(.tech-motion-active)) .tech-scene :is(
-  .price-quote b,
-  .price-live,
   .rollup-pressure,
   .tx-shard,
   .confirmed-bolt,
@@ -1163,10 +1161,6 @@ html.motion-paused .stop-grid article:hover .strip-building img {
 .scene-grid,
 .world-grid { opacity: 0.14; }
 
-.price-ghost { opacity: 0.12; transform: translateY(8px); }
-.price-trace { stroke-width: 2.4; stroke-linecap: round; stroke-linejoin: round; }
-.price-crosshair { opacity: 0.72; }
-.price-nodes circle,
 .world-nodes circle,
 .world-car,
 .city-windows rect { fill: currentColor; stroke: none; }
@@ -1189,82 +1183,16 @@ html.motion-paused .stop-grid article:hover .strip-building img {
   letter-spacing: 0.12em;
 }
 
-.price-laser {
-  fill: currentColor;
-  stroke: none;
-  animation: price-scan 3.2s ease-in-out infinite;
-}
-
-.price-nodes circle,
 .world-nodes circle {
   transform-box: fill-box;
   transform-origin: center;
   animation: node-pulse 2.2s ease-in-out infinite;
 }
 
-.price-ticker {
-  position: absolute;
-  z-index: 4;
-  top: 24px;
-  left: 16px;
-  width: 132px;
-  max-width: calc(100% - 32px);
-  padding: 6px 8px;
-  border-left: 2px solid currentColor;
-  background: rgba(4, 4, 14, 0.82);
-  box-shadow: 0 0 28px color-mix(in srgb, var(--tech-accent) 14%, transparent);
-}
-
-.price-quote {
-  display: grid;
-  min-height: 20px;
-  grid-template-columns: 24px minmax(0, 1fr);
-  align-items: center;
-  gap: 5px;
-  border-bottom: 1px solid color-mix(in srgb, currentColor 16%, transparent);
-}
-
-.price-quote:last-of-type {
-  border-bottom: 0;
-}
-
-.price-quote span {
-  color: color-mix(in srgb, currentColor 76%, white);
-  font-size: 6px;
-  font-weight: 700;
-  letter-spacing: 0.1em;
-}
-
-.price-quote b {
-  display: block;
-  color: #f7fbff;
-  font-size: 10px;
-  font-variant-numeric: tabular-nums;
-  line-height: 1;
-  text-align: right;
-  transform-origin: center;
-  animation: ticker-flip 3.2s steps(1, end) infinite;
-}
-
-.price-quote-btc { --tech-phase-delay: 0s; }
-.price-quote-eth { --tech-phase-delay: .24s; }
-.price-quote-sol { --tech-phase-delay: .48s; }
-
-.price-live {
-  --tech-phase-delay: .72s;
-  position: absolute;
-  top: -7px;
-  right: -6px;
-  padding: 2px 4px;
-  border: 1px solid currentColor;
-  background: rgba(4, 4, 14, 0.94);
-  color: currentColor;
-  font-size: 6px;
-  font-style: normal;
-  letter-spacing: 0.12em;
-  transform-origin: center;
-  animation: live-pulse 1.8s ease-in-out infinite;
-}
+.scene-tote .tote-grid { stroke: var(--line); fill: none; }
+.scene-tote .tote-rows rect { fill: var(--panel-solid); stroke: var(--line-strong); }
+.scene-tote .tote-odds text { fill: var(--brand); stroke: none; font: 700 13px var(--font); }
+.scene-tote .tote-payline { stroke: var(--brand); stroke-dasharray: 8 6; animation: tote-pay 2.4s linear infinite; }
 
 .tech-brand {
   position: relative;
@@ -1472,28 +1400,13 @@ html.motion-paused .stop-grid article:hover .strip-building img {
   animation-delay: calc(var(--tech-delay, 0s) + var(--tech-phase-delay, 0s));
 }
 
-@keyframes price-scan {
-  0%, 12% { transform: translateX(0); opacity: 0; }
-  25% { opacity: 1; }
-  75% { opacity: 1; }
-  88%, 100% { transform: translateX(270px); opacity: 0; }
+@keyframes tote-pay {
+  to { stroke-dashoffset: -28; }
 }
 
 @keyframes node-pulse {
   0%, 100% { opacity: 0.32; transform: scale(0.8); }
   50% { opacity: 1; transform: scale(1.35); }
-}
-
-@keyframes ticker-flip {
-  0%, 42% { transform: translate3d(0, 0, 0); opacity: 1; }
-  48% { transform: translate3d(0, -8px, 0); opacity: 0; }
-  54% { transform: translate3d(0, 8px, 0); opacity: 0; }
-  60%, 100% { transform: translate3d(0, 0, 0); opacity: 1; }
-}
-
-@keyframes live-pulse {
-  0%, 100% { transform: scale(0.86); opacity: 0.55; }
-  50% { transform: scale(1.08); opacity: 1; }
 }
 
 @keyframes chamber-pressure {
