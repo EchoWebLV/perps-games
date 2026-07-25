@@ -37,9 +37,19 @@ describe("Perps Rider landing shell", () => {
 
     expect(html).toContain("data-landing-page");
     expect(html).toContain('href="/play/"');
-    expect(html).toContain("A real perp you drive");
-    expect(html).toContain("You can lose your play amount");
+    expect(html).toContain("Crack a crate");                 // was "A real perp you drive"
+    expect(html).toContain("You can lose your play amount"); // risk note survives
     expect(html).not.toContain('/src/main.ts');
+    expect(html).not.toContain("A real perp you drive");
+  });
+
+  it("wears the Slopwheels brand everywhere the shell shows a name", () => {
+    expect(landingHtml).toContain("<title>Slopwheels");
+    expect(landingHtml).toContain("assets/brands/slopwheels-alpha.png");
+    expect(landingHtml).not.toContain("PERPS</span>");
+    const manifest = JSON.parse(manifestText);
+    expect(manifest.name).toBe("Slopwheels");
+    expect(manifest.short_name).toBe("Slopwheels");
   });
 
   it("offers judges a direct Seeker APK download", () => {

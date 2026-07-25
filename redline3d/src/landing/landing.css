@@ -13,6 +13,8 @@
   --green: #2ee6a6;
   --red: #ff4d6d;
   --amber: #ffd166;
+  --brand: #c0f030;
+  --brand-soft: rgba(192, 240, 48, 0.16);
   --shell: min(1180px, calc(100vw - 48px));
   --font: "Chakra Petch", ui-monospace, monospace;
   --motion-x: 0;
@@ -256,23 +258,17 @@ img {
 .wordmark {
   display: inline-flex;
   align-items: center;
-  font-size: clamp(18px, 2vw, 25px);
-  font-style: italic;
-  font-weight: 700;
-  letter-spacing: -0.06em;
   line-height: 1;
-  text-transform: uppercase;
-  transform: skewX(-7deg);
 }
 
-.wordmark span {
-  color: var(--cyan);
-  text-shadow: 0 0 18px rgba(39, 231, 255, 0.55);
+.wordmark img {
+  height: 34px;
+  width: auto;
+  display: block;
 }
 
-.wordmark strong {
-  color: var(--magenta);
-  text-shadow: 0 0 18px rgba(255, 57, 192, 0.55);
+.site-footer .wordmark img {
+  height: 28px;
 }
 
 :where(html.motion-paused, html:not(.tech-motion-active)) .tech-scene *:not(.tech-brand) {
@@ -382,9 +378,9 @@ html.motion-paused .stop-grid article:hover .strip-building img {
 
 .site-nav .nav-launch {
   padding: 12px 17px;
-  border: 1px solid rgba(46, 230, 166, 0.5);
-  background: rgba(46, 230, 166, 0.08);
-  color: var(--green);
+  border: 1px solid var(--brand);
+  background: var(--brand-soft);
+  color: var(--brand);
   clip-path: polygon(9px 0, 100% 0, 100% calc(100% - 9px), calc(100% - 9px) 100%, 0 100%, 0 9px);
 }
 
@@ -455,8 +451,8 @@ html.motion-paused .stop-grid article:hover .strip-building img {
   width: 7px;
   height: 7px;
   border-radius: 50%;
-  background: var(--green);
-  box-shadow: 0 0 0 4px rgba(46, 230, 166, 0.1), 0 0 14px var(--green);
+  background: var(--brand);
+  box-shadow: 0 0 0 4px var(--brand-soft), 0 0 14px var(--brand);
 }
 
 .hero h1 {
@@ -502,8 +498,8 @@ html.motion-paused .stop-grid article:hover .strip-building img {
   gap: 24px;
   padding: 0 18px 0 24px;
   overflow: hidden;
-  background: linear-gradient(180deg, #56f2be, #14c78c);
-  box-shadow: 0 16px 45px rgba(46, 230, 166, 0.28);
+  background: var(--brand);
+  box-shadow: 0 16px 45px var(--brand-soft);
   color: #04130d;
   clip-path: polygon(13px 0, 100% 0, 100% calc(100% - 13px), calc(100% - 13px) 100%, 0 100%, 0 13px);
   font-size: 14px;
