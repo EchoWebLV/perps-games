@@ -214,7 +214,8 @@ describe("Slopwheels landing shell", () => {
   it("rethemes the tech rack to pulls, pools, settlement, world", () => {
     expect(landingHtml).toContain("EPHEMERAL VRF / PROVABLY FAIR");
     expect(landingHtml).toContain("Pari-mutuel");
-    expect(landingHtml).toContain("settles to the cent");
+    expect(landingHtml).toContain("podium owners get a slice");
+    expect(landingHtml).toContain("Settles to the cent.");
     expect(landingHtml).not.toContain("scene-price");
   });
 
