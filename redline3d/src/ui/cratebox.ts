@@ -153,10 +153,7 @@ function injectStyles() {
     .cb-coin:disabled{cursor:not-allowed;color:var(--mut);background:rgba(255,255,255,.08);box-shadow:none}
     .cb-sol{border:1px solid rgba(255,209,102,.4);border-radius:9px;padding:7px 4px;cursor:pointer;font:800 11px/1 'Chakra Petch',ui-monospace,monospace;width:100%;
       color:var(--amb);background:rgba(255,209,102,.1)}
-    /* reveal */
-    .cb-stage{display:none;flex-direction:column;align-items:center;gap:14px;padding:6px 0 2px;position:relative;min-height:230px;justify-content:center}
-    .cb-stage.on{display:flex}
-    /* the reward card lives inside the shared cinematic's slot; this mirrors the old .cb-stage layout */
+    /* reveal — the card is mounted inside the shared cinematic's slot; .cb-reveal gives it a column */
     .cb-reveal{display:flex;flex-direction:column;align-items:center;gap:14px;position:relative;justify-content:center;min-height:230px}
     .cb-vrf{display:inline-flex;align-items:center;gap:5px;margin-top:7px;padding:4px 9px;border-radius:6px;
       font:700 9px/1 'Chakra Petch',ui-monospace,monospace;letter-spacing:.08em;color:#a7f0d9;
@@ -228,27 +225,26 @@ export function createCrateBox(parent: HTMLElement, deps: CrateBoxDeps): CrateBo
     </div>`).join("");
   panel.innerHTML =
     `<div class="cb-head"><span class="lbl">crate shop · devnet</span><span class="cb-coins">◈ <span data-cb="coins">0</span></span><button class="cb-x" data-cb="close" aria-label="Close">✕</button></div>` +
-    `<div class="cb-cols" data-cb="rows">${rowsHtml}</div>` +
-    `<div class="cb-stage" data-cb="stage"></div>` +
-    `<div class="cb-btns" data-cb="btns" style="display:none"></div>`;
+    `<div class="cb-cols" data-cb="rows">${rowsHtml}</div>`;
   overlay.appendChild(panel);
   parent.appendChild(overlay);
 
   const q = (k: string) => panel.querySelector(`[data-cb="${k}"]`) as HTMLElement;
-  const coinsEl = q("coins"), rows = q("rows"), stage = q("stage"), btns = q("btns");
+  const coinsEl = q("coins"), rows = q("rows");
   const revealCar = createRevealCar({ lowTier: deps.lowTier });
   let opening = false, giftMode = false; // giftMode: the free welcome open → its reveal "Done" closes to the strip
   let pendingSol: { crateKey: string; signature: string } | null = null;
 
   // Opening choreography (drop → shake → burst → card flip) is delegated to the shared cinematic —
-  // the SAME module the marketing landing uses. It owns a full-screen fixed overlay (z-index 10000);
-  // we mount it inside `panel` so its slot content stays reachable by panel's click delegation and by
-  // `panel.querySelector`, while its fixed containing block (an ancestor of panel) escapes panel's
-  // overflow:hidden clip. `onDone` never actually fires (we pass hideDone), but stays safe/idempotent.
+  // the SAME module the marketing landing uses. It owns a full-screen fixed overlay (z-index 10000)
+  // whose containing block is the viewport, so panel's overflow:hidden never clips it. We mount it
+  // inside `panel` purely for lifecycle; the overlay carries its OWN click seam (see below), so its
+  // buttons never depend on bubbling into panel. `onDone` is suppressed by hideDone, but routes
+  // through the same finishReveal() as the Done button so it stays correct if ever surfaced.
   let run: CrateCinematicRun | null = null;
   const cinematic = createCrateCinematic({
     lowTier: deps.lowTier,
-    onDone: () => { if (giftMode) { giftMode = false; close(); } else showShop(); },
+    onDone: () => finishReveal(),
   });
   panel.appendChild(cinematic.el);
 
@@ -306,18 +302,20 @@ export function createCrateBox(parent: HTMLElement, deps: CrateBoxDeps): CrateBo
     opening = false;
     run?.abort(); run = null; // tear down any live cinematic overlay so the shop is never left behind it
     rows.style.display = ""; // revert to the CSS grid (3 columns), not flex
-    stage.classList.remove("on"); stage.innerHTML = "";
     revealCar.clear();
-    btns.style.display = "none"; btns.innerHTML = "";
     syncCoins();
   };
 
-  // Fill the cinematic's card face with the reward: the SAME halo/plate/loot markup that used to live
-  // in `stage`, re-targeted at the module `slot`. The Done / <crate> again buttons render INSIDE the
-  // slot (not the panel's own btns bar) because the cinematic overlay covers the panel — placing them
-  // on the overlay is the only way they stay visible AND clickable. They keep their `data-cb="done"` /
-  // `data-open` hooks, so the existing panel click-delegation handles them unchanged (the slot is a DOM
-  // descendant of panel). `.cb-reveal` restores the column layout the old `.cb-stage` provided.
+  // End the reveal the way today's Done does: a welcome (gift) open closes the whole crate UI back to
+  // the strip; any other open returns to the shop. Shared by the cinematic onDone and the Done button.
+  const finishReveal = () => { if (giftMode) { giftMode = false; close(); } else showShop(); };
+
+  // Fill the cinematic's card face with the reward: the SAME halo/plate/loot markup the panel used to
+  // render, re-targeted at the module `slot`. The Done / <crate> again buttons render INSIDE the slot
+  // (not a panel bar) because the cinematic overlay covers the panel — placing them on the overlay is
+  // the only way they stay visible AND clickable. Their `data-cb="done"` / `data-open` hooks are
+  // handled by the overlay's own click seam (see handleControlClick). `.cb-reveal` gives the column
+  // layout the reveal needs (the module slot is a centering flex box).
   const mountRevealContent = (slot: HTMLElement, crate: CrateType, car: CrateCar, isNew: boolean, scrap: number, lvlKey: string | null, vrf: boolean) => {
     opening = false;
     const t = tierOf(car.rarity);
@@ -353,9 +351,7 @@ export function createCrateBox(parent: HTMLElement, deps: CrateBoxDeps): CrateBo
   // shaking (VRF/SOL paths wait on the oracle); otherwise a single settle → shake. A missing
   // cratePng[key] (3D not rendered yet) → the module falls back to its colored box, as before.
   const showCrateAnim = (crate: CrateType, loop: boolean) => {
-    rows.style.display = "none";
-    btns.style.display = "none"; btns.innerHTML = "";
-    stage.classList.remove("on"); stage.innerHTML = ""; // the reveal now lives in the cinematic overlay
+    rows.style.display = "none"; // the reveal now lives entirely in the cinematic overlay above the panel
     run = cinematic.open({ crateImgUrl: cratePng[crate.key], crateColor: crate.color, loop });
   };
   // The burst → reveal handoff (shared): the cinematic runs the escalation/burst/flip, then fills its
@@ -494,15 +490,21 @@ export function createCrateBox(parent: HTMLElement, deps: CrateBoxDeps): CrateBo
     });
   };
 
-  panel.addEventListener("click", (e) => {
+  // One control-click handler for both the shop panel and the cinematic overlay. The overlay gets its
+  // OWN listener (not just panel bubbling) so its Done / again buttons keep working even if the overlay
+  // is later mounted elsewhere (e.g. document.body). While it is still a panel descendant, its listener
+  // stopPropagation()s so the shared handler never also fires via panel (no double-dispatch).
+  const handleControlClick = (e: Event) => {
     const el = (e.target as HTMLElement).closest("[data-open],[data-sol],[data-cb]") as HTMLElement | null;
     if (!el) return;
     if (el.dataset.open) { const c = CRATES.find((x) => x.key === el.dataset.open); if (c) doOpen(c); return; }
     if (el.dataset.sol) { const c = CRATES.find((x) => x.key === el.dataset.sol); if (c) doOpen(c, false, "sol"); return; }
     const k = el.dataset.cb;
-    if (k === "done") { if (giftMode) { giftMode = false; close(); } else showShop(); }
+    if (k === "done") finishReveal();
     else if (k === "close") close();
-  });
+  };
+  panel.addEventListener("click", handleControlClick);
+  cinematic.el.addEventListener("click", (e) => { e.stopPropagation(); handleControlClick(e); });
   overlay.addEventListener("click", (e) => { if (e.target === overlay) close(); });
   addEventListener("keydown", (e) => { if (e.key === "Escape" && overlay.style.display !== "none") close(); });
 

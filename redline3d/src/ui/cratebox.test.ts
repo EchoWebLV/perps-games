@@ -158,13 +158,18 @@ describe("cinematic reveal integration", () => {
       parent.querySelector<HTMLButtonElement>('[data-open="wooden"]')!.click();
       vi.advanceTimersByTime(1500);       // drop → burst → flip → onCardSlot fills the card face
 
-      // the reward card renders inside the module's slot, not the panel's own stage
+      // the reward card renders inside the cinematic overlay's slot, on top of the panel
       expect(panel.querySelector(".ccx-slot .cb-plate")).not.toBeNull();
       // cratebox's Done lives in the slot too (so it clears the covering overlay)
       const done = panel.querySelector<HTMLElement>('.ccx-slot [data-cb="done"]');
       expect(done?.textContent).toBe("Done");
       // ...while the module's OWN Done stays suppressed (hideDone)
       expect(panel.querySelector<HTMLButtonElement>(".ccx-done")?.hidden).toBe(true);
+
+      // clicking that Done is served by the overlay's OWN click seam (not panel bubbling) → the
+      // cinematic aborts and the reward card is torn down, back to the shop.
+      done!.click();
+      expect(panel.querySelector(".ccx-slot")).toBeNull();
     } finally {
       vi.useRealTimers();
     }
