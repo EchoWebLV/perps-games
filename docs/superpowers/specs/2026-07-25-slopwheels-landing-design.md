@@ -106,15 +106,52 @@ All new raster assets live under `public/assets/landing/`:
   workers' choice; result committed).
 - Building `.webp` art and existing tutorial videos stay as-is on disk.
 
-## 4. Testing & verification
+## 4. Opening experience (shared cinematic crate reveal)
+
+User-added requirement (2026-07-25), reference: watch.claynosaurz.com/pioneer-collection —
+a drop page whose signature moment is a full-screen cinematic pack opening ending in
+your cards. Slopwheels builds the equivalent **once, as a shared module**, used by both
+the game's real pulls and a no-stakes landing demo ("Both, shared module" — user-picked).
+
+- **Module `src/ui/crate-cinematic.ts`** — presentation-only, full-screen overlay. Input:
+  crate tier, prize list (car name/rarity + scrap + optional level skin), an **art
+  adapter**, and `lowTier`. Beats: crate drops in → shake with rarity-scaled intensity
+  and duration (commons quick, legendary slow-burn) → rip/burst flash → staged card
+  flip(s) revealing every prize → summary row → done callback. Real-time DOM/CSS
+  animation (no pre-rendered video, no new art pipeline). `lowTier` tones particles.
+  No imports from `main.ts`, inventory, or the economy — pure presentation, so the
+  landing bundle can take it without dragging the game in.
+- **Game integration.** `cratebox.ts` (513 lines; already has shake → burst → reveal
+  stages) delegates those stages to the module. VRF flow, pricing, grants, dupes→scrap,
+  and the welcome crate are untouched. The existing `reveal-car` 3D viewer plugs in as
+  the game's art adapter (live GLB reveal stays). `cratebox` tests updated.
+- **Landing integration.** New "Crack one open" demo section high on the page (directly
+  under the hero, above How-it-works — it IS the hook). A crate button any visitor can
+  tap; a client-RNG pull weighted by the real odds (import `core/crate.ts` +
+  `core/rarity.ts` — verified DOM-free) over a small static manifest of pullable cars
+  with baked card art (`public/cards/*.png`, 24 exist). The demo's art adapter shows the
+  baked PNG instead of a live GLB. End card: "Play to keep what you pull" CTA →
+  `/play/`. Nothing persists; no sign-in.
+- The step-01 PULL still (Media plan) can be a frame of this cinematic instead of a
+  separate capture if that reads better — worker's choice.
+
+## 5. Testing & verification
 
 - Update `src/landing/landing-shell.test.ts` / `main.test.ts` expectations to the new
   content (wordmark img, new section ids, step labels, manifest name). `motion-state`
   and `building-renderer` untouched unless section renames require it.
-- `npx vitest run` and `tsc --noEmit` green; `npm run build` clean.
+- New unit tests: `crate-cinematic` beat sequencing (rarity → shake duration mapping,
+  staged flips, done callback) and the landing demo pull (odds come from
+  `core/rarity.ts`, manifest entries resolve to existing card art paths). Updated
+  `cratebox` tests prove the game flow still grants/reveals identically.
+- `npx vitest run` and `tsc --noEmit` green; `npm run build` clean — and the landing
+  bundle must not pull in `main.ts`/game chunks (check the build output like the
+  race-preview harness check).
 - Live browser proof (standing rule): landing loads with zero console errors at desktop
   and 375×812 — wordmark renders, nav anchors scroll, step stills load, perps section
-  video plays, CTA links to `/play/`. Screenshot shared as proof.
+  video plays, demo crate cracks through the full cinematic to the CTA, CTA links to
+  `/play/`; in-game Store pull still reveals correctly with the new cinematic.
+  Screenshots shared as proof.
 
 ## Out of scope
 
