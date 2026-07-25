@@ -54,6 +54,8 @@ describe("Slopwheels landing shell", () => {
     expect(landingHtml).toContain("CARS</small> 20+");
     expect(landingHtml).toContain("pari-mutuel");
     expect(landingHtml).not.toContain("Rev the engine");
+    expect(landingHtml).toContain("Launch Slopwheels");
+    expect(landingHtml).not.toContain("Launch Perps Rider");
   });
 
   it("wears the Slopwheels brand everywhere the shell shows a name", () => {
