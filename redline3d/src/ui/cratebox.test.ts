@@ -135,6 +135,42 @@ describe("SOL crate purchases", () => {
   });
 });
 
+describe("cinematic reveal integration", () => {
+  // A paid coin pull runs its drop → shake → burst through the shared cinematic and fills the
+  // module's own card slot with the reward. cratebox passes hideDone, so the module's Done stays
+  // hidden and cratebox renders its own Done / "again" buttons inside that same slot (the cinematic
+  // overlay covers the panel, so the buttons must sit on the overlay to stay visible + clickable).
+  test("a paid coin pull mounts the reveal content inside the cinematic card slot", () => {
+    vi.useFakeTimers();
+    try {
+      const parent = document.createElement("div");
+      createCrateBox(parent, {
+        ...stubDeps(),
+        lowTier: true,                    // static reveal car → no WebGL in jsdom, and collapses the dwell
+        coins: () => 1000,                // afford Wooden (250) + an "again"
+        // absolute URL: the reveal car's GLTFLoader parses `new URL(url)` synchronously (jsdom rejects
+        // a bare "/path"); the load itself then just fails async into a harmless onError console.warn
+        cars: () => [{ name: "Common", rarity: 1, url: "http://localhost/common.glb" }],
+        rng: { next: () => 0 },           // deterministic draw → the roster's only (tier-1) car
+      });
+      const panel = parent.querySelector(".cb-panel") as HTMLElement;
+
+      parent.querySelector<HTMLButtonElement>('[data-open="wooden"]')!.click();
+      vi.advanceTimersByTime(1500);       // drop → burst → flip → onCardSlot fills the card face
+
+      // the reward card renders inside the module's slot, not the panel's own stage
+      expect(panel.querySelector(".ccx-slot .cb-plate")).not.toBeNull();
+      // cratebox's Done lives in the slot too (so it clears the covering overlay)
+      const done = panel.querySelector<HTMLElement>('.ccx-slot [data-cb="done"]');
+      expect(done?.textContent).toBe("Done");
+      // ...while the module's OWN Done stays suppressed (hideDone)
+      expect(panel.querySelector<HTMLButtonElement>(".ccx-done")?.hidden).toBe(true);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+});
+
 describe("crate randomness policy", () => {
   test("requires VRF for every signed-in crate, including free welcome crates", () => {
     const mode = (crateboxModule as unknown as {

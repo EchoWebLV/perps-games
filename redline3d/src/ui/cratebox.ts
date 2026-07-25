@@ -4,6 +4,7 @@ import { RoomEnvironment } from "three/examples/jsm/environments/RoomEnvironment
 import { tierOf } from "../core/rarity";
 import { rollCrate, dupeScrap, pickLevel, clientRandom, CRATES, crateByKey, type CrateType, type CrateCar, type RandomnessProvider } from "../core/crate";
 import { createRevealCar } from "./reveal-car";
+import { createCrateCinematic, type CrateCinematicRun } from "./crate-cinematic";
 import { scrapPileHtml, levelPosterHtml, type LevelPoster } from "./reveal-bits";
 import { toonify, reclaimToonVariants } from "../render/toon";
 
@@ -117,12 +118,9 @@ function injectStyles() {
   stylesInjected = true;
   const s = document.createElement("style");
   s.textContent = `
-    @keyframes cbBurst{0%{transform:scale(1);opacity:1}100%{transform:scale(1.9);opacity:0}}
-    @keyframes cbFlash{0%{opacity:0}30%{opacity:.95}100%{opacity:0}}
     @keyframes cbCardIn{0%{transform:translateY(20px) scale(.6) rotateY(85deg);opacity:0}60%{transform:translateY(0) scale(1.05) rotateY(0);opacity:1}100%{transform:scale(1)}}
     @keyframes cbScrapIn{0%{transform:translateY(10px);opacity:0}100%{transform:translateY(0);opacity:1}}
     @keyframes cbGlow{0%,100%{opacity:.55}50%{opacity:.95}}
-    @keyframes cbShake{10%,90%{transform:translate3d(-1px,0,0)}30%,50%,70%{transform:translate3d(-4px,0,0) rotate(-3deg)}40%,60%{transform:translate3d(4px,0,0) rotate(3deg)}}
     @keyframes cbBob{0%,100%{transform:translateY(0)}50%{transform:translateY(-5px)}}
     @keyframes cbSheen{0%,100%{background-position:150% 0}55%{background-position:-60% 0}}
     .cb-panel{width:min(560px,96vw);padding:16px;display:flex;flex-direction:column;gap:12px;background:rgba(12,10,26,.94);
@@ -158,20 +156,11 @@ function injectStyles() {
     /* reveal */
     .cb-stage{display:none;flex-direction:column;align-items:center;gap:14px;padding:6px 0 2px;position:relative;min-height:230px;justify-content:center}
     .cb-stage.on{display:flex}
-    .cb-crate{width:96px;height:84px;border-radius:11px;position:relative;background:linear-gradient(160deg,color-mix(in srgb,var(--cc) 55%,#1a1330),#150e28);
-      border:2px solid var(--cc);box-shadow:0 0 22px color-mix(in srgb,var(--cc) 50%,transparent)}
-    .cb-crate::after{content:"";position:absolute;left:0;right:0;top:50%;height:12px;transform:translateY(-50%);background:var(--cc);opacity:.9}
-    .cb-crate.shake{animation:cbShake .5s cubic-bezier(.36,.07,.19,.97) both}
-    .cb-crate.gone{animation:cbBurst .3s ease-out forwards}
-    .cb-crate3d{width:124px;height:112px;object-fit:contain;filter:drop-shadow(0 0 20px var(--cc,#fff))}
-    .cb-crate3d.shake{animation:cbShake .5s cubic-bezier(.36,.07,.19,.97) both}
-    .cb-crate3d.gone{animation:cbBurst .3s ease-out forwards}
-    .cb-crate3d.shakeloop,.cb-crate.shakeloop{animation:cbShake .5s cubic-bezier(.36,.07,.19,.97) infinite}
+    /* the reward card lives inside the shared cinematic's slot; this mirrors the old .cb-stage layout */
+    .cb-reveal{display:flex;flex-direction:column;align-items:center;gap:14px;position:relative;justify-content:center;min-height:230px}
     .cb-vrf{display:inline-flex;align-items:center;gap:5px;margin-top:7px;padding:4px 9px;border-radius:6px;
       font:700 9px/1 'Chakra Petch',ui-monospace,monospace;letter-spacing:.08em;color:#a7f0d9;
       background:rgba(20,199,140,.12);border:1px solid rgba(20,199,140,.4)}
-    .cb-flash{position:absolute;top:20px;width:200px;height:200px;background:radial-gradient(circle,#fff,transparent 62%);opacity:0;pointer-events:none}
-    .cb-flash.go{animation:cbFlash .5s ease-out}
     .cb-halo{position:absolute;top:8px;width:210px;height:210px;border-radius:50%;background:radial-gradient(circle,var(--tc),transparent 66%);opacity:.6;animation:cbGlow 2.4s ease-in-out infinite;pointer-events:none}
     .cb-card{position:relative;width:180px;padding:14px;border-radius:14px;text-align:center;background:linear-gradient(180deg,rgba(20,14,40,.96),rgba(10,7,22,.98));
       border:2px solid var(--tc);box-shadow:0 0 26px var(--tc);animation:cbCardIn .55s cubic-bezier(.22,1.2,.36,1) both}
@@ -251,6 +240,18 @@ export function createCrateBox(parent: HTMLElement, deps: CrateBoxDeps): CrateBo
   let opening = false, giftMode = false; // giftMode: the free welcome open → its reveal "Done" closes to the strip
   let pendingSol: { crateKey: string; signature: string } | null = null;
 
+  // Opening choreography (drop → shake → burst → card flip) is delegated to the shared cinematic —
+  // the SAME module the marketing landing uses. It owns a full-screen fixed overlay (z-index 10000);
+  // we mount it inside `panel` so its slot content stays reachable by panel's click delegation and by
+  // `panel.querySelector`, while its fixed containing block (an ancestor of panel) escapes panel's
+  // overflow:hidden clip. `onDone` never actually fires (we pass hideDone), but stays safe/idempotent.
+  let run: CrateCinematicRun | null = null;
+  const cinematic = createCrateCinematic({
+    lowTier: deps.lowTier,
+    onDone: () => { if (giftMode) { giftMode = false; close(); } else showShop(); },
+  });
+  panel.appendChild(cinematic.el);
+
   // ---- render the 3D crate GLBs to images once (transient renderer, disposed after) → used for the
   // shop icons + the opening animation. Mirrors the car-card render in carpicker.ts. ----
   const cratePng: Record<string, string> = {};
@@ -303,6 +304,7 @@ export function createCrateBox(parent: HTMLElement, deps: CrateBoxDeps): CrateBo
 
   const showShop = () => {
     opening = false;
+    run?.abort(); run = null; // tear down any live cinematic overlay so the shop is never left behind it
     rows.style.display = ""; // revert to the CSS grid (3 columns), not flex
     stage.classList.remove("on"); stage.innerHTML = "";
     revealCar.clear();
@@ -310,12 +312,20 @@ export function createCrateBox(parent: HTMLElement, deps: CrateBoxDeps): CrateBo
     syncCoins();
   };
 
-  const showReveal = (crate: CrateType, car: CrateCar, isNew: boolean, scrap: number, lvlKey: string | null, vrf: boolean) => {
+  // Fill the cinematic's card face with the reward: the SAME halo/plate/loot markup that used to live
+  // in `stage`, re-targeted at the module `slot`. The Done / <crate> again buttons render INSIDE the
+  // slot (not the panel's own btns bar) because the cinematic overlay covers the panel — placing them
+  // on the overlay is the only way they stay visible AND clickable. They keep their `data-cb="done"` /
+  // `data-open` hooks, so the existing panel click-delegation handles them unchanged (the slot is a DOM
+  // descendant of panel). `.cb-reveal` restores the column layout the old `.cb-stage` provided.
+  const mountRevealContent = (slot: HTMLElement, crate: CrateType, car: CrateCar, isNew: boolean, scrap: number, lvlKey: string | null, vrf: boolean) => {
     opening = false;
     const t = tierOf(car.rarity);
     const lvl = lvlKey ? deps.levelInfo(lvlKey) : null;
     const bigBurst = t.id >= 4; // epic/legendary get a larger halo
-    stage.innerHTML =
+    const again = deps.coins() >= crate.priceCoins;
+    slot.innerHTML =
+      `<div class="cb-reveal">` +
       `<div class="cb-halo${bigBurst ? " big" : ""}" style="--tc:${t.color}"></div>` +
       `<div class="cb-hero" data-cb="carslot"></div>` +
       `<div class="cb-plate">` +
@@ -328,36 +338,35 @@ export function createCrateBox(parent: HTMLElement, deps: CrateBoxDeps): CrateBo
       `<div class="cb-loot">` +
         scrapPileHtml(scrap) +
         (lvl ? levelPosterHtml(lvl) : "") +
+      `</div>` +
+      `<div class="cb-btns">` +
+        `<button class="cb-btn ghost" data-cb="done">Done</button>` +
+        (again ? `<button class="cb-btn" data-open="${crate.key}">${crate.name.split(" ")[0]} again · ${crate.priceCoins} ◈</button>` : "") +
+      `</div>` +
       `</div>`;
-    stage.classList.add("on");
-    const slot = stage.querySelector('[data-cb="carslot"]') as HTMLElement;
-    slot.appendChild(revealCar.el);
+    const carslot = slot.querySelector('[data-cb="carslot"]') as HTMLElement;
+    carslot.appendChild(revealCar.el);
     revealCar.show({ url: car.url ?? "", scale: car.scale, yaw: car.yaw, tierColor: t.color });
-    const again = deps.coins() >= crate.priceCoins;
-    btns.style.display = "flex";
-    btns.innerHTML =
-      `<button class="cb-btn ghost" data-cb="done">Done</button>` +
-      (again ? `<button class="cb-btn" data-open="${crate.key}">${crate.name.split(" ")[0]} again · ${crate.priceCoins} ◈</button>` : "");
   };
 
-  // The crate-shaking cosmetic (shared by both paths): hide the shop rows, drop the crate art in.
-  // `loop` = keep shaking (VRF path waits on the oracle); otherwise a single 500ms shake.
+  // Hide the shop and hand the drop → shake choreography to the cinematic. `loop` keeps the crate
+  // shaking (VRF/SOL paths wait on the oracle); otherwise a single settle → shake. A missing
+  // cratePng[key] (3D not rendered yet) → the module falls back to its colored box, as before.
   const showCrateAnim = (crate: CrateType, loop: boolean) => {
     rows.style.display = "none";
     btns.style.display = "none"; btns.innerHTML = "";
-    stage.innerHTML = (cratePng[crate.key]
-      ? `<img class="cb-crate3d ${loop ? "shakeloop" : "shake"}" src="${cratePng[crate.key]}" style="--cc:${crate.color}">`
-      : `<div class="cb-crate ${loop ? "shakeloop" : "shake"}" style="--cc:${crate.color}"></div>`) + `<div class="cb-flash"></div>`;
-    stage.classList.add("on");
+    stage.classList.remove("on"); stage.innerHTML = ""; // the reveal now lives in the cinematic overlay
+    run = cinematic.open({ crateImgUrl: cratePng[crate.key], crateColor: crate.color, loop });
   };
-  // The burst → reveal handoff (shared): stop the shake, flash, then swap to the reward card.
+  // The burst → reveal handoff (shared): the cinematic runs the escalation/burst/flip, then fills its
+  // card face via onCardSlot. Chips are suppressed (scrap/level/VRF already render inside the card, so
+  // chips would only duplicate them); Done stays ours (hideDone) and renders inside the slot.
   const burstToReveal = (crate: CrateType, car: CrateCar, isNew: boolean, scrap: number, lvlKey: string | null, vrf: boolean) => {
-    const crateEl = stage.querySelector(".cb-crate3d, .cb-crate") as HTMLElement;
-    const flash = stage.querySelector(".cb-flash") as HTMLElement;
-    if (tierOf(car.rarity).id >= 4) flash.style.transform = "scale(1.5)";
-    crateEl.classList.remove("shake", "shakeloop"); crateEl.classList.add("gone");
-    flash.classList.add("go");
-    window.setTimeout(() => showReveal(crate, car, isNew, scrap, lvlKey, vrf), 230);
+    run?.reveal({
+      rarity: car.rarity ?? 1,
+      hideDone: true,
+      onCardSlot: (slot) => mountRevealContent(slot, crate, car, isNew, scrap, lvlKey, vrf),
+    });
   };
   // Map the resolved draws → car/scrap/level grants → reveal. false if nothing droppable (never happens
   // with the full roster, but keeps both paths honest about not charging for an empty pull).
@@ -499,6 +508,7 @@ export function createCrateBox(parent: HTMLElement, deps: CrateBoxDeps): CrateBo
 
   function close() {
     if (opening) return; // don't bail mid-open (the grant already happened)
+    run?.abort(); run = null; // clear any reward overlay left up by the cinematic
     overlay.style.display = "none";
     revealCar.clear();
     deps.onClose?.();
