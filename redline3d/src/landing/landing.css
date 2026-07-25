@@ -1158,7 +1158,6 @@ html.motion-paused .stop-grid article:hover .strip-building img {
   stroke-width: 2;
 }
 
-.scene-grid,
 .world-grid { opacity: 0.14; }
 
 .world-nodes circle,
