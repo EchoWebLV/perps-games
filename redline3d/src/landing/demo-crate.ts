@@ -60,7 +60,10 @@ export function initDemoCrate(): void {
   // Focus returns to the trigger so keyboard/SR users aren't dropped onto <body> when it closes.
   let run: CrateCinematicRun | null = null;
   const cx = createCrateCinematic({ onDone: () => { run?.abort(); button.focus(); } });
-  mount.appendChild(cx.el);
+  // Portal the (position:fixed, z-index 10000) overlay to <body>, NOT under #crack: mounting it
+  // inside <main> (position:relative; z-index:1) would trap it in main's stacking context, letting
+  // the fixed .site-header (z-index:30) paint over the "full-screen" opening.
+  document.body.appendChild(cx.el);
 
   button.addEventListener("click", () => {
     const car = rollDemo(Math.random(), Math.random());

@@ -37,7 +37,8 @@ describe("demo crate DOM wiring", () => {
     const button = mountCrackSection();
     initDemoCrate();
 
-    const overlay = document.querySelector<HTMLElement>("[data-demo-crate] .ccx-root")!;
+    // The overlay is portaled to <body> (not under #crack) so it escapes main's stacking context.
+    const overlay = document.querySelector<HTMLElement>("body > .ccx-root")!;
     expect(overlay).toBeTruthy();
     expect(overlay.classList.contains("ccx-on")).toBe(false); // nothing until the visitor cracks it
 
