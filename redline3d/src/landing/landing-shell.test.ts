@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import crateCinematicSrc from "../ui/crate-cinematic.ts?raw";
 import landingHtml from "../../index.html?raw";
 import manifestText from "../../public/manifest.webmanifest?raw";
 import viteConfig from "../../vite.config.ts?raw";
@@ -85,6 +86,12 @@ describe("Slopwheels landing shell", () => {
     expect(entry).not.toContain('from "../main"');
     expect(landingHtml).toContain('/src/landing/landing.css');
     expect(landingHtml).toContain('/src/landing/main.ts');
+  });
+
+  it("keeps the crate cinematic importable by the landing bundle", () => {
+    expect(crateCinematicSrc).not.toContain('from "three"');
+    expect(crateCinematicSrc).not.toContain('"../main"');
+    expect(crateCinematicSrc).not.toContain('"./cratebox"');
   });
 
   it("contains decorative poster overflow within the hero artwork", async () => {
