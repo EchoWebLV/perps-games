@@ -85,7 +85,11 @@ const CSS = `
 @media (prefers-reduced-motion: reduce){
   .ccx-crate.drop-in,.ccx-crate.shake,.ccx-crate.shakeloop,.ccx-crate.gone,.ccx-flash.go,.ccx-card.flip-in{animation:ccx-fade .2s ease both}
   .ccx-chip{transition:opacity .2s ease}
-}`;
+}
+/* Low-GPU tier collapses the same motion as reduced-motion, but always-on (JS adds .ccx-lite).
+   @media rules can't be reused, so the same collapse is restated here scoped to the lite root. */
+.ccx-root.ccx-lite .ccx-crate.drop-in,.ccx-root.ccx-lite .ccx-crate.shake,.ccx-root.ccx-lite .ccx-crate.shakeloop,.ccx-root.ccx-lite .ccx-crate.gone,.ccx-root.ccx-lite .ccx-flash.go,.ccx-root.ccx-lite .ccx-card.flip-in{animation:ccx-fade .2s ease both}
+.ccx-root.ccx-lite .ccx-chip{transition:opacity .2s ease}`;
 
 function injectStyles(): void {
   if (typeof document === "undefined" || document.getElementById(STYLE_ID)) return;
@@ -102,7 +106,7 @@ export function createCrateCinematic({ lowTier, onDone }: { lowTier?: boolean; o
   injectStyles();
 
   const root = document.createElement("div");
-  root.className = "ccx-root";
+  root.className = lowTier ? "ccx-root ccx-lite" : "ccx-root"; // lite → always-on motion collapse
   const stage = document.createElement("div");
   stage.className = "ccx-stage";
   root.appendChild(stage);
@@ -116,22 +120,29 @@ export function createCrateCinematic({ lowTier, onDone }: { lowTier?: boolean; o
   };
   const clearTimers = (): void => { for (const id of timers) clearTimeout(id); timers.clear(); };
 
-  let teardownActive: (() => void) | null = null; // the live run's abort, so a new open() unwinds it
-
+  // Monotonic run id: only the top run may touch the live stage, so a superseded run's held
+  // abort()/reveal() become no-ops (see isCurrent). Timers are also killed on each teardown.
+  let runSeq = 0;
+  let escHandler: ((e: KeyboardEvent) => void) | null = null;
+  const removeEsc = (): void => {
+    if (escHandler) { window.removeEventListener("keydown", escHandler); escHandler = null; }
+  };
   const resetStage = (): void => {
     clearTimers();
+    removeEsc();
     stage.textContent = "";
     root.classList.remove("ccx-on");
   };
 
   function open(opts: { crateImgUrl?: string; crateColor: string; loop?: boolean }): CrateCinematicRun {
-    if (teardownActive) teardownActive(); // re-entrancy: implicitly abort the previous run
+    const myId = ++runSeq; // supersede any prior run — its abort()/reveal() become no-ops below
     resetStage();
+    const isCurrent = (): boolean => myId === runSeq;
 
     const { crateImgUrl, crateColor, loop } = opts;
     const crate = document.createElement(crateImgUrl ? "img" : "div");
     crate.className = crateImgUrl ? "ccx-crate drop-in" : "ccx-crate ccx-box drop-in";
-    if (crateImgUrl) (crate as HTMLImageElement).src = crateImgUrl;
+    if (crateImgUrl) { const img = crate as HTMLImageElement; img.src = crateImgUrl; img.alt = ""; } // decorative
     crate.style.setProperty("--cc", crateColor); // colored-box fallback + drop-shadow glow
 
     const flash = document.createElement("div"); flash.className = "ccx-flash";
@@ -147,28 +158,47 @@ export function createCrateCinematic({ lowTier, onDone }: { lowTier?: boolean; o
     stage.append(crate, flash, card, chipsRow, done);
     root.classList.add("ccx-on");
 
-    after(DROP_MS, () => { crate.classList.remove("drop-in"); crate.classList.add(loop ? "shakeloop" : "shake"); });
-
     let revealed = false;
     let aborted = false;
+
+    // Escape offers a keyboard exit, but ONLY through the Done button and only once it is shown —
+    // hidden during the pull, and permanently hidden in hideDone mode. It never aborts a live pull.
+    escHandler = (e: KeyboardEvent): void => {
+      if (e.key === "Escape" && root.classList.contains("ccx-on") && !done.hidden) {
+        e.preventDefault();
+        done.click();
+      }
+    };
+    window.addEventListener("keydown", escHandler);
+
+    after(DROP_MS, () => {
+      if (!isCurrent() || revealed) return; // an early reveal already owns the shake state — don't re-add
+      crate.classList.remove("drop-in");
+      crate.classList.add(loop ? "shakeloop" : "shake");
+    });
 
     const showDone = (o: CinematicRevealOpts): void => {
       if (o.hideDone) return; // game mode keeps its own buttons; module never surfaces Done
       done.textContent = o.doneLabel ?? "Done";
       done.hidden = false;
+      done.focus(); // a11y: land keyboard focus on the primary action
     };
 
     const reveal = (o: CinematicRevealOpts): void => {
-      if (revealed || aborted) return; // second reveal is a no-op
+      if (!isCurrent() || revealed || aborted) return; // superseded, or a second reveal → no-op
       revealed = true;
       const r = o.rarity;
       const tc = tierOf(r).color;
       crate.style.setProperty("--tc", tc); // escalation glow tint
-      crate.classList.add(`shake-r${r}`);
+      // Loop the shake through the whole dwell so the crate never freezes: the non-loop `.shake` is a
+      // one-shot 0.5s animation that would sit static for up to SHAKE_EXTRA_MS. The escalated `--amp`
+      // still applies. (Also drops drop-in in case reveal preceded the 500ms drop timer.)
+      crate.classList.remove("drop-in", "shake");
+      crate.classList.add("shakeloop", `shake-r${r}`);
 
       const escalate = (lowTier || prefersReducedMotion()) ? 0 : SHAKE_EXTRA_MS[r];
       after(escalate, () => {
-        crate.classList.remove("shake", "shakeloop", "drop-in", `shake-r${r}`);
+        crate.classList.remove("shake", "shakeloop", `shake-r${r}`);
         crate.classList.add("gone");
         flash.classList.add("go");
         if (r >= 4) flash.style.transform = "scale(1.5)"; // epic+ gets a bigger burst (mirrors cratebox)
@@ -196,11 +226,10 @@ export function createCrateCinematic({ lowTier, onDone }: { lowTier?: boolean; o
     };
 
     const abort = (): void => {
+      if (!isCurrent() || aborted) return; // a superseded run must never reset the live stage
       aborted = true;
       resetStage();
-      teardownActive = null;
     };
-    teardownActive = abort;
     return { reveal, abort };
   }
 
@@ -208,7 +237,8 @@ export function createCrateCinematic({ lowTier, onDone }: { lowTier?: boolean; o
     el: root,
     open,
     dispose() {
-      if (teardownActive) teardownActive(); else resetStage();
+      ++runSeq;      // supersede the live run so a dangling reveal()/abort() no-ops
+      resetStage();
       root.remove(); // instance DOM only; the shared module-level <style> stays
     },
   };

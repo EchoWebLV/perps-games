@@ -149,6 +149,7 @@ describe("crate-cinematic", () => {
     run.reveal({ rarity: 5, onCardSlot: () => {} });
     vi.advanceTimersByTime(0); // escalation is instant, no slow-burn
     expect(crate.classList.contains("gone")).toBe(true);
+    expect(cx.el.classList.contains("ccx-lite")).toBe(true); // lite root → CSS collapses motion
   });
 
   it("honors OS reduced-motion by skipping the escalation wait", () => {
@@ -168,6 +169,7 @@ describe("crate-cinematic", () => {
     const crate = cx.el.querySelector(".ccx-crate")!;
     expect(crate.tagName).toBe("IMG");
     expect((crate as HTMLImageElement).getAttribute("src")).toBe("/models/crate.png");
+    expect((crate as HTMLImageElement).alt).toBe(""); // decorative — a11y empty alt
   });
 
   it("dispose() tears the overlay out of the DOM", () => {
@@ -176,5 +178,86 @@ describe("crate-cinematic", () => {
     expect(document.body.contains(cx.el)).toBe(true);
     cx.dispose();
     expect(document.body.contains(cx.el)).toBe(false);
+  });
+
+  it("keeps the crate shaking through a non-loop escalation dwell", () => {
+    const { cx } = boot();
+    const run = cx.open({ crateColor: "#ffd166" }); // non-loop coin/demo path
+    vi.advanceTimersByTime(500);
+    run.reveal({ rarity: 5, onCardSlot: () => {} });
+    const crate = cx.el.querySelector(".ccx-crate")!;
+    // one-shot .shake would freeze during the dwell — the reveal swaps it to the looping shake
+    expect(crate.classList.contains("shakeloop")).toBe(true);
+    expect(crate.classList.contains("shake")).toBe(false);
+  });
+
+  it("no-ops a superseded run's abort so the live overlay survives", () => {
+    const { cx } = boot();
+    const a = cx.open({ crateColor: "#ffd166" });
+    const b = cx.open({ crateColor: "#c3ccd8" }); // B supersedes A
+    a.abort(); // stale — must not touch B's stage
+    expect(cx.el.classList.contains("ccx-on")).toBe(true);
+    // B is still fully drivable
+    vi.advanceTimersByTime(500);
+    expect(cx.el.querySelector(".ccx-crate")!.classList.contains("shake")).toBe(true);
+    b.abort();
+    expect(cx.el.classList.contains("ccx-on")).toBe(false);
+  });
+
+  it("does not resurrect the shake if reveal precedes the drop timer", () => {
+    const onDone = vi.fn();
+    const cx = createCrateCinematic({ lowTier: true, onDone });
+    document.body.appendChild(cx.el);
+    const run = cx.open({ crateColor: "#ffd166" });
+    const crate = cx.el.querySelector(".ccx-crate")!;
+    run.reveal({ rarity: 5, onCardSlot: () => {} }); // instant reveal BEFORE the 500ms drop settle
+    vi.advanceTimersByTime(0); // lowTier escalate is instant → gone
+    expect(crate.classList.contains("gone")).toBe(true);
+    vi.advanceTimersByTime(500); // the stale drop timer must not re-add shake to a gone crate
+    expect(crate.classList.contains("gone")).toBe(true);
+    expect(crate.classList.contains("shake")).toBe(false);
+    expect(crate.classList.contains("shakeloop")).toBe(false);
+  });
+
+  it("moves keyboard focus to Done when it appears", () => {
+    const { cx } = boot();
+    const run = cx.open({ crateColor: "#ffd166" });
+    vi.advanceTimersByTime(500);
+    run.reveal({ rarity: 2, onCardSlot: () => {} });
+    vi.runAllTimers();
+    expect(document.activeElement).toBe(cx.el.querySelector(".ccx-done"));
+  });
+
+  it("lets Escape trigger Done once offered, but never mid-pull", () => {
+    const { cx, onDone } = boot();
+    const run = cx.open({ crateColor: "#ffd166" });
+    vi.advanceTimersByTime(500);
+    run.reveal({ rarity: 3, onCardSlot: () => {} });
+    window.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape" })); // mid-pull → inert
+    expect(onDone).not.toHaveBeenCalled();
+    vi.runAllTimers(); // Done now visible
+    window.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape" }));
+    expect(onDone).toHaveBeenCalledOnce();
+  });
+
+  it("never lets Escape act in hideDone mode", () => {
+    const { cx, onDone } = boot();
+    const run = cx.open({ crateColor: "#ffd166" });
+    vi.advanceTimersByTime(500);
+    run.reveal({ rarity: 3, onCardSlot: () => {}, hideDone: true });
+    vi.runAllTimers();
+    window.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape" }));
+    expect(onDone).not.toHaveBeenCalled();
+  });
+
+  it("drops the keydown listener on dispose", () => {
+    const { cx, onDone } = boot();
+    const run = cx.open({ crateColor: "#ffd166" });
+    vi.advanceTimersByTime(500);
+    run.reveal({ rarity: 2, onCardSlot: () => {} });
+    vi.runAllTimers();
+    cx.dispose();
+    window.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape" }));
+    expect(onDone).not.toHaveBeenCalled(); // listener torn down with the instance
   });
 });
