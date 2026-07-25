@@ -1,4 +1,4 @@
-  import { initialMotionState, motionEnabled, reduceMotionState, technologyMotionEnabled, tutorialPlaybackEnabled } from "./motion-state";
+  import { initialMotionState, motionEnabled, reduceMotionState, technologyMotionEnabled, videoPlaybackEnabled } from "./motion-state";
 
   const root = document.documentElement;
   const header = document.querySelector<HTMLElement>("[data-site-header]");
@@ -7,7 +7,6 @@
   const heroArt = document.querySelector<HTMLImageElement>("[data-hero-art]");
   const reduceMotion = matchMedia("(prefers-reduced-motion: reduce)");
   const motionBackground = document.querySelector<HTMLElement>("[data-motion-bg]");
-  const tutorialVideos = document.querySelectorAll<HTMLVideoElement>("[data-tutorial-video]");
   let motionState = reduceMotionState(
     initialMotionState(reduceMotion.matches),
     { type: "document-visible", visible: !document.hidden },
@@ -32,9 +31,13 @@
     const enabled = motionEnabled(motionState);
     root.classList.toggle("motion-paused", !enabled);
     root.classList.toggle("tech-motion-active", technologyMotionEnabled(motionState));
-    tutorialVideos.forEach((video) => {
-      if (tutorialPlaybackEnabled(motionState)) void video.play().catch(() => undefined);
-      else video.pause();
+    document.querySelectorAll<HTMLElement>("[data-motion-section]").forEach((sec) => {
+      const id = sec.dataset.motionSection!;
+      if (id === "technology") return;
+      sec.querySelectorAll<HTMLVideoElement>("[data-tutorial-video]").forEach((video) => {
+        if (videoPlaybackEnabled(motionState, id)) void video.play().catch(() => undefined);
+        else video.pause();
+      });
     });
   };
 
@@ -50,13 +53,18 @@
   if (supportsIntersectionObserver) {
     const sectionObserver = new IntersectionObserver((entries) => entries.forEach((entry) => {
       const section = (entry.target as HTMLElement).dataset.motionSection;
-      if (section === "tutorial") dispatchMotion({ type: "tutorial-visible", visible: entry.isIntersecting });
+      if (!section) return;
       if (section === "technology") dispatchMotion({ type: "technology-visible", visible: entry.isIntersecting });
+      else dispatchMotion({ type: "video-section", id: section, visible: entry.isIntersecting });
     }), { threshold: 0.12 });
     document.querySelectorAll<HTMLElement>("[data-motion-section]").forEach((section) => sectionObserver.observe(section));
   } else {
-    dispatchMotion({ type: "tutorial-visible", visible: false });
-    dispatchMotion({ type: "technology-visible", visible: false });
+    document.querySelectorAll<HTMLElement>("[data-motion-section]").forEach((section) => {
+      const id = section.dataset.motionSection;
+      if (!id) return;
+      if (id === "technology") dispatchMotion({ type: "technology-visible", visible: false });
+      else dispatchMotion({ type: "video-section", id, visible: false });
+    });
   }
   renderMotionState();
 

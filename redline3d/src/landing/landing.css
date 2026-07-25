@@ -779,6 +779,10 @@ html.motion-paused .stop-grid article:hover .strip-building img {
   gap: 17px;
 }
 
+.mode2-grid {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
 .step-card {
   position: relative;
   min-width: 0;
@@ -1890,6 +1894,7 @@ html.landing-ready [data-reveal].is-visible {
   }
 
   .step-grid,
+  .mode2-grid,
   .tech-grid {
     grid-template-columns: 1fr;
   }

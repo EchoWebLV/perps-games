@@ -138,7 +138,8 @@ describe("Slopwheels landing shell", () => {
   });
 
   it("renders the how-it-works steps as poster-only stills without tutorial wiring", () => {
-    const videos = landingHtml.match(/<video\b[\s\S]*?<\/video>/g) ?? [];
+    const howSection = landingHtml.slice(landingHtml.indexOf('id="how"'), landingHtml.indexOf('id="strip"'));
+    const videos = howSection.match(/<video\b[\s\S]*?<\/video>/g) ?? [];
 
     expect(videos).toHaveLength(3);
     for (const video of videos) {
@@ -150,6 +151,14 @@ describe("Slopwheels landing shell", () => {
       expect(video).toContain('aria-hidden="true"');
     }
     expect(landingHtml).not.toMatch(/<div class="step-media"><img/);
+  });
+
+  it("keeps perps as mode 2 with its real numbers", () => {
+    expect(landingHtml).toContain('id="mode2"');
+    expect(landingHtml).toContain("real perp");
+    expect(landingHtml).toContain("10× to 3000×");
+    expect(landingHtml).toContain("/tutorial/leverage.webm");
+    expect(landingHtml).toContain('href="#mode2"');
   });
 
   it("actively starts tutorial loops when motion is allowed", () => {

@@ -15,21 +15,31 @@ describe("landing motion state", () => {
     expect(state).toEqual({
       systemReduced: true,
       documentVisible: true,
-      tutorialVisible: false,
+      videoSections: new Set(),
       technologyVisible: false,
     });
     expect(motionEnabled(state)).toBe(false);
   });
 
-  it("runs tutorial and technology motion only while visible", async () => {
-    const { initialMotionState, reduceMotionState, technologyMotionEnabled, tutorialPlaybackEnabled } = await loadMotionState();
+  it("runs video and technology motion only while visible", async () => {
+    const { initialMotionState, reduceMotionState, technologyMotionEnabled, videoPlaybackEnabled } = await loadMotionState();
     let state = initialMotionState(false);
-    expect(tutorialPlaybackEnabled(state)).toBe(false);
+    expect(videoPlaybackEnabled(state, "mode2")).toBe(false);
     expect(technologyMotionEnabled(state)).toBe(false);
-    state = reduceMotionState(state, { type: "tutorial-visible", visible: true });
+    state = reduceMotionState(state, { type: "video-section", id: "mode2", visible: true });
     state = reduceMotionState(state, { type: "technology-visible", visible: true });
-    expect(tutorialPlaybackEnabled(state)).toBe(true);
+    expect(videoPlaybackEnabled(state, "mode2")).toBe(true);
     expect(technologyMotionEnabled(state)).toBe(true);
+  });
+
+  it("tracks video sections independently", async () => {
+    const { initialMotionState, reduceMotionState, videoPlaybackEnabled } = await loadMotionState();
+    let s = initialMotionState(false);
+    s = reduceMotionState(s, { type: "video-section", id: "tutorial", visible: true });
+    s = reduceMotionState(s, { type: "video-section", id: "mode2", visible: true });
+    s = reduceMotionState(s, { type: "video-section", id: "tutorial", visible: false });
+    expect(videoPlaybackEnabled(s, "mode2")).toBe(true);
+    expect(videoPlaybackEnabled(s, "tutorial")).toBe(false);
   });
 
   it("stops everything while the document is hidden", async () => {
