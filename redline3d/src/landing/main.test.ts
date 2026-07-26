@@ -19,13 +19,14 @@ class FakeIntersectionObserver {
 const intersectionObservers: FakeIntersectionObserver[] = [];
 let playVideo: ReturnType<typeof vi.spyOn>;
 let pauseVideo: ReturnType<typeof vi.spyOn>;
-let reducedMotionQuery: MediaQueryList;
+let reduceMotionQuery: MediaQueryList;
+let desktopQuery: MediaQueryList;
 
-function mediaQueryList(matches = false): MediaQueryList {
+function mediaQueryList(matches: boolean, media: string): MediaQueryList {
   const events = new EventTarget();
   return {
     matches,
-    media: "(prefers-reduced-motion: reduce)",
+    media,
     onchange: null,
     addEventListener: events.addEventListener.bind(events),
     removeEventListener: events.removeEventListener.bind(events),
@@ -40,22 +41,24 @@ function mountLanding(hidden = false) {
   document.documentElement.removeAttribute("style");
   document.head.innerHTML = "";
   document.body.innerHTML = `
-    <div data-motion-bg></div>
-    <header data-site-header>
+    <header data-nav>
       <button type="button" aria-expanded="false" data-menu-toggle>Menu</button>
-      <nav data-menu><a href="#mode2">Mode 2</a></nav>
+      <nav data-menu><a href="#perps">Perps</a></nav>
+      <div class="cluster3d">
+        <model-viewer src="/assets/hero3d/clown-car.glb"></model-viewer>
+        <model-viewer data-mvsrc="/assets/hero3d/dragon.glb"></model-viewer>
+      </div>
     </header>
     <main>
-      <section id="mode2" data-motion-section="mode2">
+      <section id="lobby" data-motion-section="lobby">
         <video data-tutorial-video></video>
         <div data-reveal>Reveal</div>
       </section>
-      <section id="extra" data-motion-section="extra">
+      <section id="perps" data-motion-section="perps">
         <video data-tutorial-video></video>
       </section>
-      <section data-motion-section="technology"><div class="tech-scene"></div></section>
+      <div class="gcard" data-tilt></div>
     </main>
-    <img data-hero-art />
   `;
   Object.defineProperty(document, "hidden", { configurable: true, value: hidden });
 }
@@ -73,7 +76,7 @@ function videoIn(section: string) {
 function markSection(section: string, isIntersecting = true) {
   const target = document.querySelector<HTMLElement>(`[data-motion-section="${section}"]`);
   if (!target) throw new Error(`Missing ${section} section`);
-  const observer = intersectionObservers[0];
+  const observer = intersectionObservers[0]; // main.ts creates the section observer first
   const entry = { target, isIntersecting } as unknown as IntersectionObserverEntry;
   observer.callback([entry], observer as unknown as IntersectionObserver);
 }
@@ -83,8 +86,11 @@ beforeEach(() => {
   vi.unstubAllGlobals();
   intersectionObservers.length = 0;
   mountLanding();
-  reducedMotionQuery = mediaQueryList();
-  vi.stubGlobal("matchMedia", vi.fn(() => reducedMotionQuery));
+  reduceMotionQuery = mediaQueryList(false, "(prefers-reduced-motion: reduce)");
+  desktopQuery = mediaQueryList(true, "(min-width: 768px)");
+  vi.stubGlobal("matchMedia", vi.fn((query: string) =>
+    query.includes("reduced-motion") ? reduceMotionQuery : desktopQuery,
+  ));
   vi.stubGlobal("IntersectionObserver", FakeIntersectionObserver);
   vi.stubGlobal("requestAnimationFrame", vi.fn(() => 1));
   playVideo = vi.spyOn(HTMLMediaElement.prototype, "play").mockResolvedValue(undefined);
@@ -96,21 +102,19 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
-describe("landing motion runtime", () => {
+describe("landing runtime", () => {
   it("reacts to live OS reduced-motion changes", async () => {
     await loadLanding();
-    markSection("mode2");
+    markSection("lobby");
     expect(playVideo).toHaveBeenCalled();
     playVideo.mockClear();
     pauseVideo.mockClear();
 
-    reducedMotionQuery.dispatchEvent(Object.assign(new Event("change"), { matches: true }));
-
+    reduceMotionQuery.dispatchEvent(Object.assign(new Event("change"), { matches: true }));
     expect(document.documentElement.classList.contains("motion-paused")).toBe(true);
     expect(pauseVideo).toHaveBeenCalled();
 
-    reducedMotionQuery.dispatchEvent(Object.assign(new Event("change"), { matches: false }));
-
+    reduceMotionQuery.dispatchEvent(Object.assign(new Event("change"), { matches: false }));
     expect(document.documentElement.classList.contains("motion-paused")).toBe(false);
     expect(playVideo).toHaveBeenCalled();
   });
@@ -118,34 +122,32 @@ describe("landing motion runtime", () => {
   it("plays and pauses each video section independently", async () => {
     await loadLanding();
 
-    const mode2Video = videoIn("mode2");
-    const extraVideo = videoIn("extra");
-    const mode2Play = vi.spyOn(mode2Video, "play").mockResolvedValue(undefined);
-    const mode2Pause = vi.spyOn(mode2Video, "pause").mockImplementation(() => undefined);
-    const extraPlay = vi.spyOn(extraVideo, "play").mockResolvedValue(undefined);
-    const extraPause = vi.spyOn(extraVideo, "pause").mockImplementation(() => undefined);
+    const lobbyVideo = videoIn("lobby");
+    const perpsVideo = videoIn("perps");
+    const lobbyPlay = vi.spyOn(lobbyVideo, "play").mockResolvedValue(undefined);
+    const lobbyPause = vi.spyOn(lobbyVideo, "pause").mockImplementation(() => undefined);
+    const perpsPlay = vi.spyOn(perpsVideo, "play").mockResolvedValue(undefined);
+    const perpsPause = vi.spyOn(perpsVideo, "pause").mockImplementation(() => undefined);
 
-    markSection("mode2", true);
-    expect(mode2Play).toHaveBeenCalled();
-    expect(extraPlay).not.toHaveBeenCalled();
+    markSection("lobby", true);
+    expect(lobbyPlay).toHaveBeenCalled();
+    expect(perpsPlay).not.toHaveBeenCalled();
 
-    markSection("extra", true);
-    expect(extraPlay).toHaveBeenCalled();
+    markSection("perps", true);
+    expect(perpsPlay).toHaveBeenCalled();
 
-    mode2Play.mockClear();
-    mode2Pause.mockClear();
-    extraPause.mockClear();
+    lobbyPlay.mockClear();
+    lobbyPause.mockClear();
+    perpsPause.mockClear();
 
-    // mode2 leaves the viewport while extra is still visible.
-    markSection("mode2", false);
-    expect(mode2Pause).toHaveBeenCalled();
-    expect(mode2Play).not.toHaveBeenCalled();
-    expect(extraPause).not.toHaveBeenCalled();
+    markSection("lobby", false);
+    expect(lobbyPause).toHaveBeenCalled();
+    expect(lobbyPlay).not.toHaveBeenCalled();
+    expect(perpsPause).not.toHaveBeenCalled();
   });
 
   it("starts paused when the OS initially requests reduced motion", async () => {
-    reducedMotionQuery = mediaQueryList(true);
-
+    reduceMotionQuery = mediaQueryList(true, "(prefers-reduced-motion: reduce)");
     await loadLanding();
 
     expect(document.documentElement.classList.contains("motion-paused")).toBe(true);
@@ -154,34 +156,48 @@ describe("landing motion runtime", () => {
 
   it("starts paused when the document is initially hidden", async () => {
     Object.defineProperty(document, "hidden", { configurable: true, value: true });
-
     await loadLanding();
 
     expect(document.documentElement.classList.contains("motion-paused")).toBe(true);
     expect(pauseVideo).toHaveBeenCalled();
   });
 
-  it("initializes reveals and navigation without IntersectionObserver", async () => {
-    Reflect.deleteProperty(window, "IntersectionObserver");
+  it("promotes flanking hero GLBs on desktop, but never on phones", async () => {
+    await loadLanding();
+    const flank = document.querySelector<HTMLElement>("model-viewer[data-mvsrc]")!;
+    expect(flank.getAttribute("src")).toBe("/assets/hero3d/dragon.glb");
 
+    // a phone-width viewport must NOT promote the flanks (only the eager center GLB loads)
+    vi.resetModules();
+    mountLanding();
+    desktopQuery = mediaQueryList(false, "(min-width: 768px)");
+    await loadLanding();
+    const phoneFlank = document.querySelector<HTMLElement>("model-viewer[data-mvsrc]")!;
+    expect(phoneFlank.getAttribute("src")).toBeNull();
+  });
+
+  it("initializes reveals and the burger nav without IntersectionObserver", async () => {
+    Reflect.deleteProperty(window, "IntersectionObserver");
     await loadLanding();
 
     expect(document.documentElement.classList.contains("landing-ready")).toBe(true);
-    expect(document.querySelector("[data-reveal]")?.classList.contains("is-visible")).toBe(true);
+    expect(document.querySelector("[data-reveal]")?.classList.contains("in")).toBe(true);
 
-    const menuToggle = document.querySelector<HTMLButtonElement>("[data-menu-toggle]")!;
-    menuToggle.click();
-    expect(menuToggle.getAttribute("aria-expanded")).toBe("true");
+    const toggle = document.querySelector<HTMLButtonElement>("[data-menu-toggle]")!;
+    toggle.click();
+    expect(toggle.getAttribute("aria-expanded")).toBe("true");
     expect(document.querySelector("[data-menu]")?.classList.contains("is-open")).toBe(true);
+
+    document.querySelector<HTMLAnchorElement>("[data-menu] a")!.click(); // a nav link closes the menu
+    expect(toggle.getAttribute("aria-expanded")).toBe("false");
+    expect(document.querySelector("[data-menu]")?.classList.contains("is-open")).toBe(false);
   });
 
-  it("keeps optional section motion inactive without IntersectionObserver", async () => {
+  it("keeps section video motion inactive without IntersectionObserver", async () => {
     Reflect.deleteProperty(window, "IntersectionObserver");
-
     await loadLanding();
 
     expect(playVideo).not.toHaveBeenCalled();
     expect(pauseVideo).toHaveBeenCalled();
-    expect(document.documentElement.classList.contains("tech-motion-active")).toBe(false);
   });
 });

@@ -3,264 +3,396 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover" />
-    <title>Slopwheels | Crack crates. Bet the race.</title>
-    <meta name="description" content="Crack crates, collect slop cars across five rarity tiers, and bet the pari-mutuel pool on chaotic grand-prix races. Podium owners take a cut of the rake." />
-    <meta name="theme-color" content="#05030d" />
+    <title>Slopwheels · The Slop Drop</title>
+    <meta name="description" content="Slopwheels is a racing game: open crates to collect cartoon cars, enter them in races, and bet on the winner. When a car you own finishes on the podium, you get paid a share of the pot. Every crate counts toward the upcoming $SLOP token." />
+    <meta name="theme-color" content="#0f1120" />
     <meta name="mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
     <meta name="apple-mobile-web-app-title" content="Slopwheels" />
-    <meta property="og:title" content="Slopwheels" />
-    <meta property="og:description" content="Crack a crate. Bet the race." />
+    <meta property="og:title" content="Slopwheels · The Slop Drop" />
+    <meta property="og:description" content="Open crates, collect cartoon cars, race them, and bet on the winner. When a car you own finishes on the podium you get paid, and every crate counts toward the upcoming $SLOP." />
     <meta property="og:image" content="/assets/landing/og-slopwheels.png" />
     <link rel="manifest" href="/manifest.webmanifest" />
     <link rel="icon" href="/icon.svg" type="image/svg+xml" />
     <link rel="apple-touch-icon" href="/icon-192.png" />
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-    <link href="https://fonts.googleapis.com/css2?family=Chakra+Petch:wght@500;600;700&display=swap" rel="stylesheet" />
+    <link href="https://fonts.googleapis.com/css2?family=Titan+One&family=Nunito:ital,wght@0,400;0,600;0,700;0,800;0,900;1,800&display=swap" rel="stylesheet" />
     <link rel="stylesheet" href="/src/landing/landing.css" />
   </head>
   <body data-landing-page>
     <a class="skip-link" href="#main">Skip to content</a>
 
-    <div class="motion-bg" data-motion-bg aria-hidden="true">
-      <div class="motion-layer motion-plasma"><span></span></div>
-      <div class="motion-layer motion-grid"><span></span></div>
-      <div class="motion-layer motion-streaks"><span></span></div>
-      <div class="motion-layer motion-particles"><span></span></div>
-    </div>
-
-    <header class="site-header" data-site-header>
-      <a class="wordmark" href="/" aria-label="Slopwheels home">
-        <img src="/assets/brands/slopwheels-alpha.png" width="1024" height="538" alt="Slopwheels" />
-      </a>
-      <button class="menu-toggle" type="button" aria-expanded="false" aria-controls="landing-nav" data-menu-toggle>
-        <span></span><span></span><span></span><span class="sr-only">Open navigation</span>
-      </button>
-      <nav id="landing-nav" class="site-nav" aria-label="Primary navigation" data-menu>
-        <a href="#how">How it works</a>
-        <a href="#strip">The strip</a>
-        <a href="#mode2">Mode 2</a>
-        <a href="#built-on">Built on</a>
-        <a class="nav-launch" href="/play/">Launch game <span aria-hidden="true">↗</span></a>
-      </nav>
+    <!-- ============ NAV ============ -->
+    <header class="nav" data-nav>
+      <div class="nav-in">
+        <a class="brand" href="/" aria-label="Slopwheels home">
+          <img src="/assets/brands/slopface.png" width="900" height="850" decoding="async" alt="" />
+        </a>
+        <nav class="nav-links" id="landing-nav" aria-label="Primary" data-menu>
+          <a class="pill" href="#drop">Crack Crates</a>
+          <a class="pill" href="#garage">Garage</a>
+          <a class="pill" href="#perps">Perps</a>
+          <a class="nav-launch" href="/play/">Launch Game <span aria-hidden="true">↗</span></a>
+        </nav>
+        <button class="nav-burger" type="button" aria-label="Open menu" aria-expanded="false" aria-controls="landing-nav" data-menu-toggle><span></span><span></span><span></span></button>
+      </div>
     </header>
 
     <main id="main">
-      <section class="hero section-shell" aria-labelledby="hero-title">
-        <div class="hero-copy" data-reveal>
-          <div class="eyebrow"><span class="live-dot"></span> Gacha racing arcade on Solana devnet</div>
-          <h1 id="hero-title">Crack a crate.<br />Bet the race.</h1>
-          <p class="hero-lede">Pull crates for a garage of gloriously stupid cars — five rarity tiers, dupes melt to scrap. Send yours to the grand prix, bet the pari-mutuel pool against seven rivals, and take a cut of the rake when your car podiums.</p>
-          <div class="hero-actions">
-            <a class="launch-button" href="/play/"><span>Launch game</span><b aria-hidden="true">GO!</b></a>
-            <a class="apk-button" href="/downloads/perps-rider.apk" download><span>Download Seeker APK</span><b aria-hidden="true">↓</b></a>
-            <a class="text-link" href="#how">See how it works <span aria-hidden="true">↓</span></a>
+      <!-- ============ HERO ============ -->
+      <section class="hero" aria-labelledby="hero-title">
+        <div class="hero-bg" aria-hidden="true"></div>
+        <div class="hero-veil" aria-hidden="true"></div>
+        <div class="hero-in">
+          <div class="hero-face">
+            <div class="halo" aria-hidden="true"></div>
+            <img src="/assets/brands/slopface.png" width="900" height="850" fetchpriority="high" decoding="async" alt="Slopwheels slopface" />
           </div>
-          <p class="play-note"><b>Practice free.</b> Sign in only when you want real VRF pulls and real SOL.</p>
-          <div class="proof-row" aria-label="Game highlights">
-            <span><small>CARS</small> 20+ and counting</span>
-            <span><small>RARITY TIERS</small> 5</span>
-            <span><small>PODIUM</small> Owners get paid</span>
+          <div class="hero-eyebrow"><span class="eyebrow"><span class="dot"></span> Season 1 · The Slop Drop (Soon)</span></div>
+          <h1 id="hero-title">Crack crates.<span>Collect slop.</span></h1>
+
+          <!-- Live 3D trading-card hand: rarity-framed cards with a spinning Draco model in the art
+               window. Real tiers per src/main.ts CAR_DEFS + src/core/rarity.ts colors. Only the center
+               (legendary) card ships an eager src; flanks carry data-mvsrc and are promoted to src only
+               on desktop (min-width:768px, in main.ts) so phones fetch exactly one GLB. -->
+          <div class="cluster3d hero-hand" aria-label="Live 3D collectible cars, framed as trading cards">
+            <article class="hcard t-common pos-0" style="--tc:var(--r-common)">
+              <div class="hcard-frame">
+                <div class="hcard-art">
+                  <model-viewer class="mv" data-mvsrc="/assets/hero3d/banana.glb" alt="Banana — a common toon car" loading="lazy" reveal="auto"
+                    auto-rotate rotation-per-second="18deg" auto-rotate-delay="0" camera-controls disable-zoom disable-pan disable-tap
+                    interaction-prompt="none" environment-image="neutral" shadow-intensity="0.9" shadow-softness="1"
+                    camera-orbit="25deg 78deg auto" field-of-view="30deg"></model-viewer>
+                </div>
+                <div class="hcard-plate"><b class="hcard-name">Banana</b><span class="hcard-tier">Common</span></div>
+              </div>
+            </article>
+            <article class="hcard t-epic pos-1" style="--tc:var(--r-epic)">
+              <div class="hcard-frame">
+                <div class="hcard-art">
+                  <model-viewer class="mv" data-mvsrc="/assets/hero3d/delorean.glb" alt="DeLorean — an epic toon car" loading="lazy" reveal="auto"
+                    auto-rotate rotation-per-second="16deg" auto-rotate-delay="0" camera-controls disable-zoom disable-pan disable-tap
+                    interaction-prompt="none" environment-image="neutral" shadow-intensity="0.9" shadow-softness="1"
+                    camera-orbit="-25deg 76deg auto" field-of-view="30deg"></model-viewer>
+                </div>
+                <div class="hcard-plate"><b class="hcard-name">DeLorean</b><span class="hcard-tier">Epic</span></div>
+              </div>
+            </article>
+            <article class="hcard t-legend pos-2" style="--tc:var(--r-legend)">
+              <div class="hcard-frame">
+                <div class="hcard-art">
+                  <model-viewer class="mv" src="/assets/hero3d/clown-car.glb" alt="Clown Car — the legendary mascot" loading="eager" reveal="auto"
+                    auto-rotate rotation-per-second="14deg" auto-rotate-delay="0" camera-controls disable-zoom disable-pan disable-tap
+                    interaction-prompt="none" environment-image="neutral" shadow-intensity="1" shadow-softness="1"
+                    camera-orbit="-20deg 74deg auto" field-of-view="32deg"></model-viewer>
+                </div>
+                <div class="hcard-plate"><b class="hcard-name">Clown Car</b><span class="hcard-tier">Legendary</span></div>
+              </div>
+            </article>
+            <article class="hcard t-rare pos-3" style="--tc:var(--r-rare)">
+              <div class="hcard-frame">
+                <div class="hcard-art">
+                  <model-viewer class="mv" data-mvsrc="/assets/hero3d/vaporwave.glb" alt="Vaporwave — a rare toon car" loading="lazy" reveal="auto"
+                    auto-rotate rotation-per-second="16deg" auto-rotate-delay="0" camera-controls disable-zoom disable-pan disable-tap
+                    interaction-prompt="none" environment-image="neutral" shadow-intensity="0.9" shadow-softness="1"
+                    camera-orbit="20deg 78deg auto" field-of-view="30deg"></model-viewer>
+                </div>
+                <div class="hcard-plate"><b class="hcard-name">Vaporwave</b><span class="hcard-tier">Rare</span></div>
+              </div>
+            </article>
+            <article class="hcard t-common pos-4" style="--tc:var(--r-common)">
+              <div class="hcard-frame">
+                <div class="hcard-art">
+                  <model-viewer class="mv" data-mvsrc="/assets/hero3d/dragon.glb" alt="Dragon — a common toon car" loading="lazy" reveal="auto"
+                    auto-rotate rotation-per-second="18deg" auto-rotate-delay="0" camera-controls disable-zoom disable-pan disable-tap
+                    interaction-prompt="none" environment-image="neutral" shadow-intensity="0.9" shadow-softness="1"
+                    camera-orbit="35deg 76deg auto" field-of-view="30deg"></model-viewer>
+                </div>
+                <div class="hcard-plate"><b class="hcard-name">Dragon</b><span class="hcard-tier">Common</span></div>
+              </div>
+            </article>
+          </div>
+
+          <p class="hero-sub"><b>Slopwheels is a racing game where you open crates and collect cartoon cars.</b> There are more than 20 to find across five rarity tiers — some common, some seriously rare. You race the cars you collect, bet on who wins, and when a car you own finishes on the podium you get paid a share of the pot. Every crate you open also counts toward your allocation of the upcoming $SLOP token.</p>
+
+          <div class="hero-cta-wrap">
+            <a class="cta cta-xl" href="/play/">Crack crates now <span class="arw" aria-hidden="true">→</span></a>
+            <p class="hero-note"><b>Every crate is provably fair.</b> Practice for free — you don't need a wallet to look around.</p>
           </div>
         </div>
-
-        <figure class="hero-poster" data-reveal>
-          <div class="poster-glow"></div>
-          <img src="/assets/landing/hero-grandprix.png" alt="Slopwheels toon cars lined up on the grand-prix grid" data-hero-art />
-          <figcaption>
-            <span><i></i> GRID FORMING</span>
-            <b>BET THE RACE</b>
-          </figcaption>
-          <div class="poster-corner poster-corner-a"></div>
-          <div class="poster-corner poster-corner-b"></div>
-        </figure>
       </section>
 
-      <section id="crack" class="section-shell content-section demo-crate" aria-labelledby="crack-title" data-demo-crate>
-        <div class="section-heading compact" data-reveal>
-          <div><span class="eyebrow">Try it right here</span></div>
-          <h2 id="crack-title">Crack one open.</h2>
-          <p>Same odds as the real thing — 50 / 28 / 14 / 6 / 2. This one's on the house and stays on this page.</p>
+      <!-- goo seam -->
+      <div class="goo" aria-hidden="true">
+        <svg viewBox="0 0 1440 80" preserveAspectRatio="none">
+          <defs><linearGradient id="goograd" x1="0" y1="0" x2="0" y2="1">
+            <stop offset="0" stop-color="#d6ff5a"/><stop offset="1" stop-color="#93bf1f"/>
+          </linearGradient></defs>
+          <path class="fill" d="M0 0 H1440 V22 L1430.9 22 C1430.9 29.6 1413.2 37.2 1395.5 37.2 C1377.7 37.2 1360.0 29.6 1360.0 22.0 L1320.6 22 C1320.6 46.9 1299.3 71.8 1278.1 71.8 C1256.8 71.8 1235.6 46.9 1235.6 22.0 L1191.6 22 C1191.6 47.5 1175.6 73.0 1159.6 73.0 C1143.7 73.0 1127.7 47.5 1127.7 22.0 L1098.1 22 C1098.1 33.1 1081.2 44.2 1064.2 44.2 C1047.3 44.2 1030.3 33.1 1030.3 22.0 L976.1 22 C976.1 33.5 952.5 45.0 928.8 45.0 C905.2 45.0 881.5 33.5 881.5 22.0 L863.9 22 C863.9 39.2 842.0 56.4 820.2 56.4 C798.3 56.4 776.4 39.2 776.4 22.0 L748.0 22 C748.0 38.5 731.9 55.0 715.8 55.0 C699.6 55.0 683.5 38.5 683.5 22.0 L639.2 22 C639.2 31.3 616.9 40.7 594.6 40.7 C572.3 40.7 550.0 31.3 550.0 22.0 L538.7 22 C538.7 33.6 517.4 45.2 496.1 45.2 C474.7 45.2 453.4 33.6 453.4 22.0 L433.0 22 C433.0 33.3 409.6 44.6 386.1 44.6 C362.7 44.6 339.3 33.3 339.3 22.0 L326.0 22 C326.0 32.1 304.8 42.3 283.5 42.3 C262.3 42.3 241.1 32.1 241.1 22.0 L212.6 22 C212.6 45.4 189.8 68.8 167.0 68.8 C144.2 68.8 121.4 45.4 121.4 22.0 L81.7 22 C81.7 47.6 65.0 73.2 48.3 73.2 C31.7 73.2 15.0 47.6 15.0 22.0 L0 22 Z"/>
+        </svg>
+      </div>
+
+      <!-- ============ EARN BLOCK ============ -->
+      <section class="section earn wrap" id="drop">
+        <div data-reveal>
+          <span class="eyebrow">Get in early, get counted</span>
+          <h2>Collect the slop.<br /><span class="slime-text">Earn your $SLOP.</span></h2>
         </div>
-        <button class="launch-button demo-open" type="button" data-demo-open><span>Crack a crate</span><b aria-hidden="true">RIP</b></button>
+        <div class="cols" data-reveal>
+          <p><b>Season 1 is dropping soon.</b> Behind the crates is a whole garage of gloriously stupid cartoon cars, waiting for someone to rip them open. When it opens, that someone is you.</p>
+          <p>Every crate holds real cars you keep and collect. And everything you do — every crate you open, every race you enter — quietly stacks toward your allocation of <span class="tk">the upcoming $SLOP token</span>. Show up early, and it all counts.</p>
+        </div>
       </section>
 
-      <section id="how" class="section-shell content-section" aria-labelledby="how-title">
-        <div class="section-heading" data-reveal>
-          <div><span class="section-index">01</span><span class="eyebrow">How it works</span></div>
-          <h2 id="how-title">Three moves.<br /><em>One grid.</em></h2>
-          <p>Every pull, every bet, every payout is one loop: collect the slop, back it with money.</p>
+      <!-- ============ LIVE DEMO CRATE ============ -->
+      <section class="section wrap demo-crack" id="crack" data-demo-crate>
+        <div class="demo-crack-panel" data-reveal>
+          <span class="badge-live"><span class="dot"></span> Try it right here</span>
+          <h2>Crack one <span class="slime-text">open.</span></h2>
+          <p>This free crate uses the exact same odds as the real game — the five rarity tiers drop at <b>50 / 28 / 14 / 6 / 2 percent</b>. Give it a try; nothing here leaves this page.</p>
+          <button class="cta cta-xl demo-open" type="button" data-demo-open>Crack a crate <span class="arw" aria-hidden="true">→</span></button>
         </div>
-        <div class="step-grid">
-          <article class="step-card step-cyan" data-reveal>
-            <div class="step-media">
-              <video loop muted playsinline preload="metadata" poster="/assets/landing/step-pull.webp" aria-hidden="true"></video>
+      </section>
+
+      <!-- ============ HOW THE DROP WORKS ============ -->
+      <section class="section wrap">
+        <div class="section-head" data-reveal>
+          <span class="eyebrow">The rundown</span>
+          <h2>How the drop works</h2>
+        </div>
+        <div class="drop-grid">
+          <div class="drop-item" data-reveal><div class="n">1</div><div><h3>Open a crate, see it instantly</h3><p>You open a crate and see the car you pulled straight away. No waiting, and no reveal event weeks later.</p></div></div>
+          <div class="drop-item" data-reveal><div class="n">2</div><div><h3>Every crate counts</h3><p>Every crate you open is counted toward your allocation of <b>the upcoming $SLOP token</b>. Collecting is the whole point.</p></div></div>
+          <div class="drop-item" data-reveal><div class="n">3</div><div><h3>20+ cars, 5 tiers</h3><p>There are more than twenty cartoon cars to collect, spread across five rarity tiers — from common junkers to rare legendaries.</p></div></div>
+          <div class="drop-item" data-reveal><div class="n">4</div><div><h3>Race what you collect</h3><p>Enter the cars you collect in races. When a car you own finishes on the podium, <b>you get paid</b> a cut of the pot.</p></div></div>
+        </div>
+      </section>
+
+      <!-- ============ WHY COLLECT ============ -->
+      <section class="section wrap why" id="why">
+        <div class="section-head" data-reveal style="margin-bottom:26px">
+          <span class="eyebrow">Why collect?</span>
+          <h2>Not all crates hit the same.</h2>
+        </div>
+        <div class="why-lines" data-reveal>
+          <p>The rarer the car, the harder it is to pull from a crate.</p>
+          <p>The rarest cars aren't for sale — <b class="hl">you can only get them by opening crates.</b></p>
+          <p>Your garage is your collection, and it's the proof that <b>you were here first.</b></p>
+        </div>
+      </section>
+
+      <!-- ============ $SLOP TEASER ============ -->
+      <section class="section wrap">
+        <div class="slops-wrap" data-reveal>
+          <div class="slops">
+            <span class="badge">◆ Upcoming</span>
+            <h2>What is <span class="tk">$SLOP?</span></h2>
+            <p>$SLOP is <b>the upcoming token for Slopwheels.</b> It isn't live yet — there's nothing to buy and nothing to trade. What you can do today is play. Everyone who collects and races early is <b>first in line:</b> every crate you open and every race you enter is counted toward your future $SLOP allocation.</p>
+            <div class="pills">
+              <span>Collectors first</span><span>Racers first</span><span>Counted from day one</span>
             </div>
-            <div class="step-copy"><span>01 / PULL</span><h3>Crack crates</h3><p>Every pull rolls the odds — five tiers from junk to legendary. Dupes melt into scrap.</p></div>
-          </article>
-          <article class="step-card step-amber" data-reveal>
-            <div class="step-media">
-              <video loop muted playsinline preload="metadata" poster="/assets/landing/step-bet.webp" aria-hidden="true"></video>
-            </div>
-            <div class="step-copy"><span>02 / BET</span><h3>Back your car</h3><p>Send it to the grid and bet the pari-mutuel pool. No car? Watch and bet anyway.</p></div>
-          </article>
-          <article class="step-card step-magenta" data-reveal>
-            <div class="step-media">
-              <video loop muted playsinline preload="metadata" poster="/assets/landing/step-win.webp" aria-hidden="true"></video>
-            </div>
-            <div class="step-copy"><span>03 / WIN</span><h3>Get paid</h3><p>The pool settles to the cent. Top-3 finishers pay their owners a slice of the rake.</p></div>
-          </article>
-        </div>
-      </section>
-
-      <section id="strip" class="strip-section" aria-labelledby="strip-title">
-        <div class="section-shell strip-inner">
-          <div class="section-heading compact" data-reveal>
-            <div><span class="section-index">02</span><span class="eyebrow">The strip</span></div>
-            <h2 id="strip-title">More than a trade screen.</h2>
-            <p>Drive the lobby between races — every stop feeds the collection.</p>
           </div>
-          <div class="stop-grid" data-reveal>
-            <article>
-              <div class="strip-building">
-                <img src="/assets/landing/building-track.webp" width="1024" height="720" loading="lazy" decoding="async" alt="" />
-              </div>
-              <b>TRACK</b><p>Send a car to the grand prix.</p><small>RACE</small>
-            </article>
-            <article>
-              <div class="strip-building">
-                <img src="/assets/landing/building-garage.webp" width="1024" height="720" loading="lazy" decoding="async" alt="" />
-              </div>
-              <b>GARAGE</b><p>Show off what you pulled.</p><small>COLLECT</small>
-            </article>
-            <article>
-              <div class="strip-building">
-                <img src="/assets/landing/building-upgrades.webp" width="1024" height="720" loading="lazy" decoding="async" alt="" />
-              </div>
-              <b>UPGRADES</b><p>Push risk, time, and control.</p><small>TUNE</small>
-            </article>
-            <article>
-              <div class="strip-building">
-                <img src="/assets/landing/building-crates.webp" width="1024" height="720" loading="lazy" decoding="async" alt="" />
-              </div>
-              <b>CRATES</b><p>Where the pulls happen.</p><small>OPEN</small>
-            </article>
+          <div class="slops-melt" aria-hidden="true">
+            <svg viewBox="0 0 1440 80" preserveAspectRatio="none">
+              <defs><linearGradient id="meltgrad" x1="0" y1="0" x2="0" y2="1">
+                <stop offset="0" stop-color="#242a52"/><stop offset="1" stop-color="#191d34"/>
+              </linearGradient></defs>
+              <path fill="url(#meltgrad)" d="M0 0 H1440 V22 L1416.5 22 C1416.5 40.6 1395.5 59.3 1374.6 59.3 C1353.7 59.3 1332.7 40.6 1332.7 22.0 L1311.7 22 C1311.7 39.4 1288.1 56.7 1264.6 56.7 C1241.0 56.7 1217.4 39.4 1217.4 22.0 L1191.6 22 C1191.6 43.9 1169.1 65.8 1146.7 65.8 C1124.2 65.8 1101.7 43.9 1101.7 22.0 L1097.1 22 C1097.1 30.3 1072.0 38.5 1047.0 38.5 C1021.9 38.5 996.9 30.3 996.9 22.0 L969.1 22 C969.1 28.9 952.6 35.9 936.1 35.9 C919.6 35.9 903.2 28.9 903.2 22.0 L889.4 22 C889.4 39.7 865.9 57.4 842.3 57.4 C818.8 57.4 795.2 39.7 795.2 22.0 L778.1 22 C778.1 38.3 752.8 54.5 727.6 54.5 C702.4 54.5 677.2 38.3 677.2 22.0 L652.7 22 C652.7 38.6 629.0 55.2 605.2 55.2 C581.4 55.2 557.6 38.6 557.6 22.0 L544.9 22 C544.9 45.1 523.7 68.2 502.4 68.2 C481.1 68.2 459.9 45.1 459.9 22.0 L430.0 22 C430.0 28.0 412.3 33.9 394.5 33.9 C376.7 33.9 358.9 28.0 358.9 22.0 L305.6 22 C305.6 28.7 287.8 35.4 269.9 35.4 C252.1 35.4 234.3 28.7 234.3 22.0 L196.6 22 C196.6 32.8 174.7 43.7 152.9 43.7 C131.0 43.7 109.2 32.8 109.2 22.0 L86.1 22 C86.1 34.8 68.5 47.5 50.9 47.5 C33.3 47.5 15.7 34.8 15.7 22.0 L0 22 Z"/>
+            </svg>
           </div>
         </div>
       </section>
 
-      <section id="mode2" class="section-shell content-section" aria-labelledby="mode2-title" data-motion-section="mode2">
-        <div class="section-heading" data-reveal>
-          <div><span class="section-index">03</span><span class="eyebrow">Mode 2 · The highway</span></div>
-          <h2 id="mode2-title">There's a real perp<br /><em>under the hood.</em></h2>
-          <p>The original Perps Rider mode lives inside Slopwheels. Pick BTC, ETH, or SOL, rev your leverage from 10× to 3000×, and bank the position before liquidation becomes a wreck. Live prices by Pyth Lazer.</p>
+      <!-- ============ PULL / BET / WIN ============ -->
+      <section class="section wrap" id="how">
+        <div class="section-head" data-reveal>
+          <span class="eyebrow">Open · Bet · Win</span>
+          <h2>Three moves, one loop</h2>
+          <p>Open crates to collect cars, put money on a race, and watch the pot pay out to the cent.</p>
         </div>
-        <div class="step-grid mode2-grid">
-          <article class="step-card step-cyan" data-reveal>
-            <div class="step-media">
-              <video loop muted playsinline preload="metadata" poster="/tutorial/leverage.webp" data-tutorial-video aria-hidden="true">
-                <source src="/tutorial/leverage.webm" type="video/webm" />
-                <source src="/tutorial/leverage.mp4" type="video/mp4" />
+        <div class="steps">
+          <article class="step" data-reveal>
+            <div class="shot"><span class="num">01 · Open</span><img src="/assets/landing/step-pull.webp" width="640" height="360" loading="lazy" decoding="async" alt="Opening a crate to reveal cartoon cars" /></div>
+            <div class="body"><h3>Open a crate</h3><p>Open a crate and see what you pull. The five rarity tiers drop at the same fixed odds every time — <b>50 / 28 / 14 / 6 / 2 percent</b>.</p></div>
+          </article>
+          <article class="step" data-reveal>
+            <div class="shot"><span class="num">02 · Bet</span><img src="/assets/landing/step-bet.webp" width="640" height="360" loading="lazy" decoding="async" alt="Placing a bet on a race" /></div>
+            <div class="body"><h3>Bet on a race</h3><p>Enter your car in a race and place a bet. Everyone's bets go into <b>one shared pot</b>. Don't own a car? You can still bet on someone else's.</p></div>
+          </article>
+          <article class="step" data-reveal>
+            <div class="shot"><span class="num">03 · Win</span><img src="/assets/landing/step-win.webp" width="640" height="360" loading="lazy" decoding="async" alt="The pot paying out after the race" /></div>
+            <div class="body"><h3>Get paid</h3><p>When the race ends, the pot <b>pays out to the cent</b>. If a car you own finishes on the podium, you take an extra slice.</p></div>
+          </article>
+        </div>
+      </section>
+
+      <!-- goo seam -->
+      <div class="goo" aria-hidden="true">
+        <svg viewBox="0 0 1440 80" preserveAspectRatio="none">
+          <path class="fill" d="M0 0 H1440 V22 L1413.5 22 C1413.5 36.4 1390.8 50.7 1368.1 50.7 C1345.4 50.7 1322.7 36.4 1322.7 22.0 L1313.8 22 C1313.8 46.9 1289.3 71.7 1264.8 71.7 C1240.3 71.7 1215.8 46.9 1215.8 22.0 L1189.3 22 C1189.3 27.5 1168.4 33.1 1147.5 33.1 C1126.6 33.1 1105.7 27.5 1105.7 22.0 L1102.2 22 C1102.2 35.0 1084.6 48.0 1066.9 48.0 C1049.2 48.0 1031.6 35.0 1031.6 22.0 L974.4 22 C974.4 27.6 956.7 33.2 939.0 33.2 C921.2 33.2 903.5 27.6 903.5 22.0 L864.4 22 C864.4 37.4 846.5 52.8 828.7 52.8 C810.9 52.8 793.0 37.4 793.0 22.0 L751.2 22 C751.2 31.6 731.1 41.2 711.1 41.2 C691.0 41.2 670.9 31.6 670.9 22.0 L650.0 22 C650.0 27.5 626.1 32.9 602.2 32.9 C578.4 32.9 554.5 27.5 554.5 22.0 L535.1 22 C535.1 40.5 517.7 59.0 500.3 59.0 C483.0 59.0 465.6 40.5 465.6 22.0 L437.5 22 C437.5 45.1 420.8 68.1 404.1 68.1 C387.3 68.1 370.6 45.1 370.6 22.0 L316.6 22 C316.6 42.2 294.0 62.3 271.4 62.3 C248.8 62.3 226.2 42.2 226.2 22.0 L228.2 22 C228.2 35.9 204.4 49.7 180.7 49.7 C156.9 49.7 133.1 35.9 133.1 22.0 L103.8 22 C103.8 33.4 82.4 44.7 61.0 44.7 C39.7 44.7 18.3 33.4 18.3 22.0 L0 22 Z"/>
+        </svg>
+      </div>
+
+      <!-- ============ CARD GARAGE GRID ============ -->
+      <section class="section wrap" id="garage">
+        <div class="section-head" data-reveal>
+          <span class="eyebrow">Season 1 lineup</span>
+          <h2>The garage</h2>
+          <p>A preview of the cars waiting behind the crates. More than twenty, and counting.</p>
+        </div>
+        <!-- sorted ascending by rarity: Common → Uncommon → Rare → Epic → Legendary -->
+        <div class="grid" data-reveal>
+          <div class="gcard t-common" data-tilt style="--tc:var(--r-common)"><div class="pic"><img src="/cards/banana.png" alt="Banana" width="600" height="448" loading="lazy" decoding="async" /></div><div class="meta"><b>Banana</b><span class="r">Common</span></div></div>
+          <div class="gcard t-common" data-tilt style="--tc:var(--r-common)"><div class="pic"><img src="/cards/trabant.png" alt="Trabant" width="600" height="448" loading="lazy" decoding="async" /></div><div class="meta"><b>Trabant</b><span class="r">Common</span></div></div>
+          <div class="gcard t-uncommon" data-tilt style="--tc:var(--r-uncommon)"><div class="pic"><img src="/cards/cook-wagon.png" alt="Cook Wagon" width="600" height="448" loading="lazy" decoding="async" /></div><div class="meta"><b>Cook Wagon</b><span class="r">Uncmn</span></div></div>
+          <div class="gcard t-uncommon" data-tilt style="--tc:var(--r-uncommon)"><div class="pic"><img src="/cards/big-frank.png" alt="Big Frank" width="600" height="448" loading="lazy" decoding="async" /></div><div class="meta"><b>Big Frank</b><span class="r">Uncmn</span></div></div>
+          <div class="gcard t-rare" data-tilt style="--tc:var(--r-rare)"><div class="pic"><img src="/cards/the-kraken.png" alt="The Kraken" width="600" height="448" loading="lazy" decoding="async" /></div><div class="meta"><b>The Kraken</b><span class="r">Rare</span></div></div>
+          <div class="gcard t-rare" data-tilt style="--tc:var(--r-rare)"><div class="pic"><img src="/cards/vaporwave.png" alt="Vaporwave" width="600" height="448" loading="lazy" decoding="async" /></div><div class="meta"><b>Vaporwave</b><span class="r">Rare</span></div></div>
+          <div class="gcard t-rare" data-tilt style="--tc:var(--r-rare)"><div class="pic"><img src="/cards/skull.png" alt="Skull" width="600" height="448" loading="lazy" decoding="async" /></div><div class="meta"><b>Skull</b><span class="r">Rare</span></div></div>
+          <div class="gcard t-epic" data-tilt style="--tc:var(--r-epic)"><div class="pic"><img src="/cards/cybertruck.png" alt="Cybertruck" width="600" height="448" loading="lazy" decoding="async" /></div><div class="meta"><b>Cybertruck</b><span class="r">Epic</span></div></div>
+          <div class="gcard t-epic" data-tilt style="--tc:var(--r-epic)"><div class="pic"><img src="/cards/delorean.png" alt="DeLorean" width="600" height="448" loading="lazy" decoding="async" /></div><div class="meta"><b>DeLorean</b><span class="r">Epic</span></div></div>
+          <div class="gcard t-epic" data-tilt style="--tc:var(--r-epic)"><div class="pic"><img src="/cards/slot-machine.png" alt="Slot Machine" width="600" height="448" loading="lazy" decoding="async" /></div><div class="meta"><b>Slot Machine</b><span class="r">Epic</span></div></div>
+          <div class="gcard t-legend" data-tilt style="--tc:var(--r-legend)"><div class="pic"><img src="/cards/dragon.png" alt="Dragon" width="600" height="448" loading="lazy" decoding="async" /></div><div class="meta"><b>Dragon</b><span class="r">Legend</span></div></div>
+          <div class="gcard t-legend" data-tilt style="--tc:var(--r-legend)"><div class="pic"><img src="/cards/clown-car.png" alt="Clown Car" width="600" height="448" loading="lazy" decoding="async" /></div><div class="meta"><b>Clown Car</b><span class="r">Legend</span></div></div>
+        </div>
+      </section>
+
+      <!-- ============ THE LOBBY (big) ============ -->
+      <section class="lobby-sec" id="lobby" data-motion-section="lobby">
+        <div class="wrap">
+          <div class="section-head" data-reveal>
+            <span class="eyebrow">The strip · Open world</span>
+            <h2>The lobby is a place<br />you <em>drive.</em></h2>
+            <p>Between races you actually drive around a lobby, and every place you stop feeds your collection.</p>
+          </div>
+          <figure class="lobby-stage" data-reveal>
+            <video class="vid" muted loop playsinline preload="none" width="640" height="360"
+              poster="/tutorial/lobby.webp" data-tutorial-video aria-label="Cruising the open-world strip">
+              <source src="/tutorial/lobby.webm" type="video/webm" />
+              <source src="/tutorial/lobby.mp4" type="video/mp4" />
+            </video>
+            <div class="lobby-veil" aria-hidden="true"></div>
+            <figcaption>
+              <span class="tagline">More than a trade screen.</span>
+              <b>Cruise the strip in the cars you've collected. Your garage isn't a menu — it's a place you drive.</b>
+            </figcaption>
+          </figure>
+          <div class="stops" data-reveal>
+            <article class="stop">
+              <div class="stop-img"><img src="/assets/landing/building-track.webp" width="1024" height="720" loading="lazy" decoding="async" alt="" /></div>
+              <div class="stop-body"><small>Race</small><b>Track</b><p>Enter a car in a race.</p></div>
+            </article>
+            <article class="stop">
+              <div class="stop-img"><img src="/assets/landing/building-garage.webp" width="1024" height="720" loading="lazy" decoding="async" alt="" /></div>
+              <div class="stop-body"><small>Collect</small><b>Garage</b><p>Show off the cars you've collected.</p></div>
+            </article>
+            <article class="stop">
+              <div class="stop-img"><img src="/assets/landing/building-upgrades.webp" width="1024" height="720" loading="lazy" decoding="async" alt="" /></div>
+              <div class="stop-body"><small>Tune</small><b>Upgrades</b><p>Upgrade your risk, timing, and control.</p></div>
+            </article>
+            <article class="stop">
+              <div class="stop-img"><img src="/assets/landing/building-crates.webp" width="1024" height="720" loading="lazy" decoding="async" alt="" /></div>
+              <div class="stop-body"><small>Open</small><b>Crates</b><p>Open crates to pull new cars.</p></div>
+            </article>
+          </div>
+        </div>
+      </section>
+
+      <!-- ============ PERPS RIDER (biggest) ============ -->
+      <section class="perps" id="perps" data-motion-section="perps">
+        <div class="perps-bg" aria-hidden="true"></div>
+        <div class="wrap perps-in">
+          <div class="perps-head" data-reveal>
+            <span class="eyebrow">Perps · The highway</span>
+            <h2 class="perps-title">Perps Rider</h2>
+            <p class="perps-sub">There's a real perp <em>under the hood.</em></p>
+          </div>
+
+          <div class="perps-hero" data-reveal>
+            <figure class="perps-clip">
+              <video class="vid" muted loop playsinline preload="none" width="640" height="360"
+                poster="/tutorial/drive.webp" data-tutorial-video aria-label="Perps Rider gameplay">
+                <source src="/tutorial/drive.webm" type="video/webm" />
+                <source src="/tutorial/drive.mp4" type="video/mp4" />
               </video>
+              <span class="clip-badge"><i></i> Live · Pyth Lazer</span>
+            </figure>
+            <div class="perps-lev">
+              <div class="lev-lbl">Leverage throttle</div>
+              <div class="lev-num">10<span>×</span><em>→</em>3000<span>×</span></div>
+              <p>Slopwheels also includes the original Perps Rider mode. Pick BTC, ETH, or SOL, turn your leverage from 10× to 3000×, and cash out before the price moves against you and wipes the position. Prices are live from Pyth Lazer.</p>
+              <div class="lev-markets"><span>BTC</span><span>ETH</span><span>SOL</span></div>
             </div>
-            <div class="step-copy"><span>REV</span><h3>Leverage is the throttle</h3><p>More revs, more leverage. Both directions hit harder.</p></div>
-          </article>
-          <article class="step-card step-magenta" data-reveal>
-            <div class="step-media">
-              <video loop muted playsinline preload="metadata" poster="/tutorial/cash-out.webp" data-tutorial-video aria-hidden="true">
-                <source src="/tutorial/cash-out.webm" type="video/webm" />
-                <source src="/tutorial/cash-out.mp4" type="video/mp4" />
-              </video>
-            </div>
-            <div class="step-copy"><span>BANK</span><h3>Exit before impact</h3><p>Cash out to keep it. Liquidation takes the play amount.</p></div>
-          </article>
+          </div>
+
+          <div class="perps-mechs" data-reveal>
+            <article class="mech">
+              <figure class="mech-clip">
+                <video class="vid" muted loop playsinline preload="none" width="640" height="360"
+                  poster="/tutorial/leverage.webp" data-tutorial-video aria-label="Revving leverage">
+                  <source src="/tutorial/leverage.webm" type="video/webm" />
+                  <source src="/tutorial/leverage.mp4" type="video/mp4" />
+                </video>
+              </figure>
+              <div class="mech-copy"><small>Rev</small><h3>Leverage is the throttle</h3><p>The more you rev, the more leverage you take on — and every price move, up or down, hits harder.</p></div>
+            </article>
+            <article class="mech">
+              <figure class="mech-clip">
+                <video class="vid" muted loop playsinline preload="none" width="640" height="360"
+                  poster="/tutorial/cash-out.webp" data-tutorial-video aria-label="Cashing out before liquidation">
+                  <source src="/tutorial/cash-out.webm" type="video/webm" />
+                  <source src="/tutorial/cash-out.mp4" type="video/mp4" />
+                </video>
+              </figure>
+              <div class="mech-copy"><small>Bank</small><h3>Exit before impact</h3><p>Cash out in time and you keep your winnings. Get liquidated and you lose the amount you put in.</p></div>
+            </article>
+          </div>
         </div>
       </section>
 
-      <section id="built-on" class="section-shell content-section technology" aria-labelledby="tech-title" data-motion-section="technology">
-        <div class="section-heading" data-reveal>
-          <div><span class="section-index">04</span><span class="eyebrow">Under the hood</span></div>
-          <h2 id="tech-title">Arcade feel.<br /><em>Real rails.</em></h2>
-          <p>The slop is silly. The rails are not.</p>
-        </div>
-        <div class="tech-grid">
-          <i class="pipeline-pulse" aria-hidden="true"></i>
-          <article style="--tech-delay: 0s" data-reveal>
-            <span>01</span>
-            <div class="tech-scene scene-execution" data-tech-scene="execution" aria-hidden="true">
-              <svg viewBox="0 0 280 130"><path class="execution-rail rail-top" d="M4 25H92L112 45H276"/><path class="execution-rail rail-mid" d="M4 65H276"/><path class="execution-rail rail-bottom" d="M4 105H92L112 85H276"/><g class="execution-ticks"><path d="M22 18V32M43 18V32M64 18V32M22 98V112M43 98V112M64 98V112"/></g><path class="execution-chevron" d="M248 55L260 65L248 75"/></svg>
-              <div class="rollup-chamber">
-                <span class="rollup-pressure"></span>
-                <img class="tech-brand tech-brand-magicblock" data-tech-brand="magicblock" src="/assets/brands/magicblock-logo.svg" width="162" height="32" alt="" />
-              </div>
-              <i class="tx-shard tx-shard-a"></i><i class="tx-shard tx-shard-b"></i><i class="tx-shard tx-shard-c"></i><i class="confirmed-bolt"></i>
-              <span class="scene-status">EPHEMERAL VRF / PROVABLY FAIR</span>
-            </div>
-            <div><small>PULLS</small><h3>MagicBlock VRF</h3><p>Signed-in crate pulls roll on-chain randomness — provably fair, not a server dice.</p></div>
-          </article>
-          <article style="--tech-delay: .35s" data-reveal>
-            <span>02</span>
-            <div class="tech-scene scene-tote" data-tech-scene="tote" aria-hidden="true">
-              <svg viewBox="0 0 280 130">
-                <path class="tote-grid" d="M0 30H280M0 60H280M0 90H280M70 8V122M140 8V122M210 8V122"/>
-                <g class="tote-rows">
-                  <rect x="12" y="18" width="120" height="14" rx="4"/>
-                  <rect x="12" y="48" width="96" height="14" rx="4"/>
-                  <rect x="12" y="78" width="140" height="14" rx="4"/>
-                </g>
-                <g class="tote-odds"><text x="240" y="30">x21.8</text><text x="240" y="60">x4.2</text><text x="240" y="90">x1.9</text></g>
-                <path class="tote-payline" d="M8 112H272"/>
-              </svg>
-              <span class="scene-status">POOL LOCKED / SETTLED TO THE CENT</span>
-            </div>
-            <div><small>RACES</small><h3>Pari-mutuel pools</h3><p>Odds come from the pool, not the house. 5% rake — and podium owners get a slice of it. Settles to the cent.</p></div>
-          </article>
-          <article style="--tech-delay: .7s" data-reveal>
-            <span>03</span>
-            <div class="tech-scene scene-settlement" data-tech-scene="settlement" aria-hidden="true">
-              <svg viewBox="0 0 280 130"><circle class="signature-ring ring-a" cx="140" cy="63" r="52"/><circle class="signature-ring ring-b" cx="140" cy="63" r="39"/><path class="signature-axis" d="M140 4V17M140 109V122M81 63H94M186 63H199"/><path class="settlement-horizon" d="M8 116H272"/><g class="settlement-coordinates"><path d="M21 111V121M43 111V121M237 111V121M259 111V121"/></g></svg>
-              <div class="settlement-gate">
-                <span class="settlement-rail rail-a"></span><span class="settlement-rail rail-b"></span><span class="settlement-rail rail-c"></span>
-                <span class="solana-plinth"><img class="tech-brand tech-brand-solana" data-tech-brand="solana" src="/assets/brands/solana-mark.svg" width="101" height="88" alt="" /></span>
-                <i class="settlement-seal"></i>
-              </div>
-              <span class="scene-status">SIGNED / SETTLED</span>
-            </div>
-            <div><small>SETTLEMENT</small><h3>Solana</h3><p>Your signed-in wallet holds the SOL you bring to play.</p></div>
-          </article>
-          <article style="--tech-delay: 1.05s" data-reveal>
-            <span>04</span>
-            <div class="tech-scene scene-world" data-tech-scene="world" aria-hidden="true">
-              <svg viewBox="0 0 280 130"><path class="world-grid" d="M4 122L140 19L276 122M39 122L140 45L241 122M77 122L140 74L203 122M4 122H276M35 99H245M68 76H212"/><path class="city-silhouette" d="M66 95V50H91V35H116V95M164 95V29H192V51H215V95"/><g class="city-windows"><rect x="74" y="58" width="6" height="7"/><rect x="97" y="45" width="6" height="7"/><rect x="74" y="75" width="6" height="7"/><rect x="173" y="39" width="7" height="7"/><rect x="173" y="58" width="7" height="7"/><rect x="199" y="60" width="7" height="7"/><rect x="199" y="78" width="7" height="7"/></g><g class="world-nodes"><circle cx="39" cy="99" r="4"/><circle cx="140" cy="45" r="4"/><circle cx="241" cy="99" r="4"/></g><rect class="world-car car-a" x="42" y="108" width="18" height="8" rx="3"/><rect class="world-car car-b" x="220" y="108" width="18" height="8" rx="3"/></svg>
-              <div class="world-destination"><i></i><b>THE STRIP</b></div>
-              <span class="driver driver-a"></span><span class="driver driver-b"></span><span class="driver driver-c"></span>
-              <span class="scene-status">DRIVERS ONLINE / SHARED STRIP</span>
-            </div>
-            <div><small>WORLD</small><h3>Social Open World</h3><p>Drive the Strip with other traders, show off your garage, and enter shared destinations together.</p></div>
-          </article>
+      <!-- ============ BUILT ON ============ -->
+      <section class="section wrap">
+        <div class="built">
+          <div class="section-head" data-reveal style="margin-bottom:6px">
+            <span class="eyebrow">Under the hood</span>
+            <h2>Arcade feel. Real rails.</h2>
+          </div>
+          <div class="logos" data-reveal>
+            <div class="plinth"><img class="sol" src="/assets/brands/solana-mark.svg" width="101" height="88" loading="lazy" decoding="async" alt="Solana" /><span>Settlement</span></div>
+            <div class="plinth"><img src="/assets/brands/magicblock-logo.svg" width="162" height="32" loading="lazy" decoding="async" alt="MagicBlock" /><span>Provably fair VRF</span></div>
+          </div>
+          <p class="vrf" data-reveal>When you open a crate, the result comes from <b>on-chain randomness through MagicBlock VRF</b> — provably fair, not a number our server made up. Everything settles on Solana.</p>
         </div>
       </section>
 
-      <section class="final-cta section-shell" aria-labelledby="final-title" data-reveal>
-        <div class="final-lines" aria-hidden="true"></div>
-        <div class="final-copy">
-          <span class="eyebrow">The grid is forming</span>
-          <h2 id="final-title">What are you<br /><em>pulling next?</em></h2>
-          <p>Crack a crate in practice, then sign in when you want the pulls on-chain.</p>
-        </div>
-        <a class="launch-button launch-large" href="/play/"><span>Launch Slopwheels</span><b aria-hidden="true">GO!</b></a>
-        <p class="risk-note"><strong>REAL SOL INVOLVES REAL RISK.</strong> You can lose your play amount. Only play with what you can afford to lose.</p>
+      <!-- ============ FINAL CTA ============ -->
+      <section class="final wrap" data-reveal>
+        <span class="eyebrow">The grid is forming</span>
+        <h2>What are you<br /><em>pulling next?</em></h2>
+        <p>Try a practice crate first, then sign in when you want real pulls on-chain with real SOL.</p>
+        <a class="cta cta-xl" href="/play/">Crack crates now <span class="arw" aria-hidden="true">→</span></a>
       </section>
     </main>
 
-    <footer class="site-footer section-shell">
-      <a class="wordmark" href="/"><img src="/assets/brands/slopwheels-alpha.png" width="1024" height="538" alt="Slopwheels" /></a>
-      <p>Built for the slop. Running on Solana devnet.</p>
-      <div class="footer-links"><a href="/play/">Enter game ↗</a><a href="/downloads/perps-rider.apk" download>Seeker APK ↓</a></div>
+    <!-- ============ FOOTER ============ -->
+    <footer class="foot">
+      <div class="wrap foot-in">
+        <a class="brand" href="/" aria-label="Slopwheels home"><img src="/assets/brands/slopface.png" width="900" height="850" loading="lazy" decoding="async" alt="" /></a>
+        <div class="links">
+          <a href="/play/">Launch game ↗</a>
+          <a href="#garage">The garage</a>
+          <a href="#perps">Perps</a>
+        </div>
+        <p class="risk"><strong>REAL SOL INVOLVES REAL RISK.</strong> You can lose your play amount. Only play with what you can afford to lose.</p>
+        <p class="copy">© 2026 Slopwheels · Built for the slop, running on Solana devnet. $SLOP is upcoming and not yet available.</p>
+      </div>
     </footer>
 
+    <!-- model-viewer: self-hosted stack. type=module is deferred, never blocks first paint. Draco decoder
+         is configured from main.ts after customElements.whenDefined — decode happens post-fetch. -->
+    <script type="module" src="/vendor/model-viewer.min.js"></script>
     <script type="module" src="/src/landing/main.ts"></script>
   </body>
 </html>

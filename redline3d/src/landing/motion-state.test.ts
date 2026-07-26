@@ -24,22 +24,22 @@ describe("landing motion state", () => {
   it("runs video and technology motion only while visible", async () => {
     const { initialMotionState, reduceMotionState, technologyMotionEnabled, videoPlaybackEnabled } = await loadMotionState();
     let state = initialMotionState(false);
-    expect(videoPlaybackEnabled(state, "mode2")).toBe(false);
+    expect(videoPlaybackEnabled(state, "perps")).toBe(false);
     expect(technologyMotionEnabled(state)).toBe(false);
-    state = reduceMotionState(state, { type: "video-section", id: "mode2", visible: true });
+    state = reduceMotionState(state, { type: "video-section", id: "perps", visible: true });
     state = reduceMotionState(state, { type: "technology-visible", visible: true });
-    expect(videoPlaybackEnabled(state, "mode2")).toBe(true);
+    expect(videoPlaybackEnabled(state, "perps")).toBe(true);
     expect(technologyMotionEnabled(state)).toBe(true);
   });
 
-  it("tracks video sections independently", async () => {
+  it("tracks the lobby and perps video sections independently", async () => {
     const { initialMotionState, reduceMotionState, videoPlaybackEnabled } = await loadMotionState();
     let s = initialMotionState(false);
-    s = reduceMotionState(s, { type: "video-section", id: "tutorial", visible: true });
-    s = reduceMotionState(s, { type: "video-section", id: "mode2", visible: true });
-    s = reduceMotionState(s, { type: "video-section", id: "tutorial", visible: false });
-    expect(videoPlaybackEnabled(s, "mode2")).toBe(true);
-    expect(videoPlaybackEnabled(s, "tutorial")).toBe(false);
+    s = reduceMotionState(s, { type: "video-section", id: "lobby", visible: true });
+    s = reduceMotionState(s, { type: "video-section", id: "perps", visible: true });
+    s = reduceMotionState(s, { type: "video-section", id: "lobby", visible: false });
+    expect(videoPlaybackEnabled(s, "perps")).toBe(true);
+    expect(videoPlaybackEnabled(s, "lobby")).toBe(false);
   });
 
   it("stops everything while the document is hidden", async () => {

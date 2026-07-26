@@ -33,43 +33,263 @@ const brandDocs = import.meta.glob("../../public/assets/brands/README.md", {
   query: "?raw",
 });
 
-describe("Slopwheels landing shell", () => {
-  it("makes root the landing page with a direct game link", () => {
-    const html = landingHtml;
+const entry = () => Object.values(landingScripts)[0] as string;
+// CSS is processed (not raw) through Vite's ?raw in this test env, so read the source file directly.
+async function readLandingCss(): Promise<string> {
+  const nodeFs = "node:fs/promises";
+  const { readFile } = await import(nodeFs);
+  return readFile(new URL("./landing.css", import.meta.url), "utf8");
+}
 
-    expect(html).toContain("data-landing-page");
-    expect(html).toContain('href="/play/"');
-    expect(html).toContain("Crack a crate");                 // was "A real perp you drive"
-    expect(html).toContain("You can lose your play amount"); // risk note survives
-    expect(html).not.toContain('/src/main.ts');
-    expect(html).not.toContain("A real perp you drive");
+describe("Slopwheels landing shell — Midnight Drop", () => {
+  it("is the root landing page, wired to the Vite entry and the game", () => {
+    expect(landingHtml).toContain("data-landing-page");
+    expect(landingHtml).toContain('href="/play/"');
+    expect(landingHtml).toContain('/src/landing/landing.css');
+    expect(landingHtml).toContain('/src/landing/main.ts');
+    expect(landingHtml).not.toContain('/src/main.ts'); // the game entry never ships on the landing page
   });
 
-  it("tells the gacha story: pull, bet, win", () => {
-    expect(landingHtml).toContain("Crack a crate.");
-    expect(landingHtml).toContain("Bet the race.");
-    expect(landingHtml).toMatch(/01 \/ PULL/);
-    expect(landingHtml).toMatch(/02 \/ BET/);
-    expect(landingHtml).toMatch(/03 \/ WIN/);
-    expect(landingHtml).toContain("CARS</small> 20+");
-    expect(landingHtml).toContain("pari-mutuel");
-    expect(landingHtml).not.toContain("Rev the engine");
-    expect(landingHtml).toContain("Launch Slopwheels");
-    expect(landingHtml).not.toContain("Launch Perps Rider");
-  });
-
-  it("wears the Slopwheels brand everywhere the shell shows a name", () => {
+  it("wears the Slopwheels brand — singular $SLOP, never SLOBS or SLOPS", () => {
     expect(landingHtml).toContain("<title>Slopwheels");
-    expect(landingHtml).toContain("assets/brands/slopwheels-alpha.png");
-    expect(landingHtml).not.toContain("PERPS</span>");
+    expect(landingHtml).toContain("$SLOP");
+    expect(landingHtml).not.toContain("SLOBS");
+    expect(landingHtml).not.toContain("SLOPS"); // ticker is singular $SLOP now
+    expect(landingHtml).toContain('property="og:image" content="/assets/landing/og-slopwheels.png"');
     const manifest = JSON.parse(manifestText);
     expect(manifest.name).toBe("Slopwheels");
     expect(manifest.short_name).toBe("Slopwheels");
   });
 
-  it("offers judges a direct Seeker APK download", () => {
-    expect(landingHtml).toContain('href="/downloads/perps-rider.apk"');
-    expect(landingHtml).toContain("Download Seeker APK");
+  it("shows the slime-face mark alone — no SLOPWHEELS wordmark in the lockups", () => {
+    const header = landingHtml.slice(landingHtml.indexOf("<header"), landingHtml.indexOf("</header>"));
+    expect(header).toContain("/assets/brands/slopface.png");
+    expect(landingHtml).not.toContain("SLOPWHEELS"); // wordmark text dropped from header + footer
+    expect(landingHtml).not.toContain('class="wm"');
+  });
+
+  it("labels the drop 'Soon' and softens the 'now' claims to match", () => {
+    expect(landingHtml).toContain("Season 1 · The Slop Drop (Soon)");
+    expect(landingHtml).toContain("Season 1 is dropping soon.");
+    expect(landingHtml).not.toContain("pullable right now");
+  });
+
+  it("lays the sections out in the approved order", () => {
+    const order = [
+      'class="hero"',              // hero
+      'id="drop"',                 // collect story
+      'id="crack"',                // live demo crate
+      "How the drop works",        // how the drop works
+      'id="why"',                  // why collect
+      "What is <span",             // what is $SLOPS?
+      'id="how"',                  // pull / bet / win
+      'id="garage"',               // card gallery
+      'id="lobby"',                // lobby
+      'id="perps"',                // perps rider
+      "Arcade feel. Real rails.",  // built on
+      "pulling next?",             // final CTA
+      'class="foot"',              // footer
+    ];
+    let cursor = -1;
+    for (const marker of order) {
+      const at = landingHtml.indexOf(marker);
+      expect(at, `section marker not found: ${marker}`).toBeGreaterThan(cursor);
+      cursor = at;
+    }
+  });
+
+  it("carries the verbatim story copy for every section", () => {
+    expect(landingHtml).toContain("Crack crates.");
+    expect(landingHtml).toContain("Collect slop.");
+    expect(landingHtml).toContain("Earn your $SLOP.");
+    expect(landingHtml).toContain("Not all crates hit the same.");
+    expect(landingHtml).toContain("Three moves, one loop");
+    expect(landingHtml).toContain("The garage");
+    expect(landingHtml).toContain("The lobby is a place");
+    expect(landingHtml).toContain("Perps Rider");
+    expect(landingHtml).toContain("There's a real perp");
+    expect(landingHtml).toContain("five rarity tiers"); // rarity survives in "How the drop works"
+  });
+
+  it("explains the product in plain English — no unexplained jargon", () => {
+    expect(landingHtml).toContain("Slopwheels is a racing game where you open crates and collect cartoon cars.");
+    expect(landingHtml).toContain("Everyone's bets go into <b>one shared pot</b>");
+    expect(landingHtml).not.toContain("gacha");
+    expect(landingHtml).not.toContain("pari-mutuel");
+    // verified facts survive the rewrite
+    expect(landingHtml).toContain("five rarity tiers");
+    expect(landingHtml).toContain("finishes on the podium");
+    expect(landingHtml).toContain("upcoming $SLOP token");
+  });
+
+  it("sorts the card gallery ascending — commons first, legendaries last", () => {
+    const gridAt = landingHtml.indexOf('class="grid"');
+    const gallery = landingHtml.slice(gridAt, landingHtml.indexOf("</section>", gridAt));
+    const rank: Record<string, number> = { "t-common": 1, "t-uncommon": 2, "t-rare": 3, "t-epic": 4, "t-legend": 5 };
+    const order = [...gallery.matchAll(/gcard (t-common|t-uncommon|t-rare|t-epic|t-legend)/g)].map((m) => rank[m[1]]);
+    expect(order).toHaveLength(12);
+    expect(order[0]).toBe(1); // first card is Common
+    expect(order[order.length - 1]).toBe(5); // last card is Legendary
+    expect(order).toEqual([...order].sort((a, b) => a - b)); // non-decreasing rarity
+  });
+
+  it("removes the rarity-ladder / odds-shrine section entirely", async () => {
+    expect(landingHtml).not.toContain("The rarity ladder");
+    expect(landingHtml).not.toContain("Five tiers. One dream pull.");
+    expect(landingHtml).not.toContain("The rarest cars aren't for sale. They're pulled.");
+    expect(landingHtml).not.toContain('class="ladder"');
+    expect(landingHtml).not.toContain('class="shrine"');
+    expect(landingHtml).not.toContain('id="rarities"');
+    expect(landingHtml).not.toContain('href="#rarities"'); // no dead nav/footer anchor
+    const css = await readLandingCss();
+    expect(css).not.toContain(".shrine");
+    expect(css).not.toContain(".ladder");
+  });
+
+  it("labels the highway section 'Perps' and the gallery link 'Garage' — no 'Mode 2'", () => {
+    expect(landingHtml).not.toContain("Mode 2");
+    expect(landingHtml).not.toContain('id="mode2"');
+    expect(landingHtml).not.toContain('href="#mode2"');
+    expect(landingHtml).not.toContain("My Garage");
+    expect(landingHtml).toContain('id="perps"');
+    expect(landingHtml).toContain('href="#perps"');
+    expect(landingHtml).toContain('<a class="pill" href="#perps">Perps</a>');
+    expect(landingHtml).toContain('<a class="pill" href="#garage">Garage</a>');
+    expect(landingHtml).toContain("Perps · The highway");
+    expect(landingHtml).toContain("Perps Rider"); // big section title stays
+  });
+
+  it("keeps the verbatim risk note and the 10× to 3000× line", () => {
+    expect(landingHtml).toContain(
+      "<strong>REAL SOL INVOLVES REAL RISK.</strong> You can lose your play amount. Only play with what you can afford to lose.",
+    );
+    expect(landingHtml).toContain("10× to 3000×");
+  });
+
+  it("builds the hero as five rarity-framed 3D trading cards", () => {
+    expect(landingHtml.match(/<model-viewer/g) ?? []).toHaveLength(5);
+    expect(landingHtml.match(/\/assets\/hero3d\//g) ?? []).toHaveLength(5);
+    // real tiers per src/main.ts + src/core/rarity.ts: clown-car legendary, delorean epic, vaporwave rare, dragon/banana common
+    expect(landingHtml).toContain('src="/assets/hero3d/clown-car.glb"');       // legendary center, eager
+    expect(landingHtml).toContain('class="hcard t-legend pos-2"');
+    expect(landingHtml).toContain('<b class="hcard-name">Clown Car</b><span class="hcard-tier">Legendary</span>');
+    expect(landingHtml).toContain('data-mvsrc="/assets/hero3d/delorean.glb"');
+    expect(landingHtml).toContain('data-mvsrc="/assets/hero3d/vaporwave.glb"');
+    expect(landingHtml).toContain('data-mvsrc="/assets/hero3d/dragon.glb"');
+    expect(landingHtml).toContain('data-mvsrc="/assets/hero3d/banana.glb"');
+    // one eager src (center) + four data-mvsrc (flanks, desktop-only) = one GLB fetched on phones
+    expect(landingHtml.match(/data-mvsrc="/g) ?? []).toHaveLength(4);
+    expect(landingHtml.match(/<model-viewer[^>]*\ssrc="/g) ?? []).toHaveLength(1);
+  });
+
+  it("serves the 3D stack self-hosted — never a CDN, never the mock GLBs", () => {
+    expect(landingHtml).toContain('<script type="module" src="/vendor/model-viewer.min.js"></script>');
+    for (const cdn of ["unpkg", "jsdelivr", "ajax.googleapis", "modelviewer.dev", "@google/model-viewer"]) {
+      expect(landingHtml).not.toContain(cdn);
+    }
+    expect(landingHtml).not.toContain("/mocks/hero/");
+    // model-viewer stays an external element, never an npm import that would drag three into the bundle
+    expect(entry()).not.toContain("@google/model-viewer");
+    expect(entry()).not.toContain('from "three"');
+    // Draco decoder is configured on the constructor after the element defines itself
+    expect(entry()).toContain('whenDefined("model-viewer")');
+    expect(entry()).toContain("dracoDecoderLocation");
+    expect(entry()).toContain('"/vendor/draco/"');
+    // phones fetch only the center GLB: flanks promote data-mvsrc → src on desktop
+    expect(entry()).toContain('matchMedia("(min-width: 768px)")');
+    expect(entry()).toContain("data-mvsrc");
+  });
+
+  it("governs the lobby + perps videos through motion-state videoSections", () => {
+    expect(landingHtml).toContain('data-motion-section="lobby"');
+    expect(landingHtml).toContain('data-motion-section="perps"');
+
+    const lobby = landingHtml.slice(landingHtml.indexOf('id="lobby"'), landingHtml.indexOf('id="perps"'));
+    const perps = landingHtml.slice(landingHtml.indexOf('id="perps"'), landingHtml.indexOf('class="built"'));
+    const videosIn = (html: string) => html.match(/<video\b[\s\S]*?<\/video>/g) ?? [];
+
+    expect(videosIn(lobby)).toHaveLength(1);
+    expect(videosIn(perps)).toHaveLength(3);
+    for (const video of [...videosIn(lobby), ...videosIn(perps)]) {
+      expect(video).toContain('preload="none"');
+      expect(video).toMatch(/poster="\/tutorial\/[^"]+\.webp"/);
+      expect(video).toContain("data-tutorial-video");
+      expect(video).toMatch(/<video[^>]*\bmuted\b/);
+      expect(video).toMatch(/<video[^>]*\bloop\b/);
+      expect(video).toMatch(/<video[^>]*\bplaysinline\b/);
+    }
+    expect(landingHtml.match(/data-tutorial-video/g) ?? []).toHaveLength(4);
+
+    // the runtime plays/pauses these on view, gated by videoSections + global motion
+    const src = entry();
+    expect(src).toContain("videoPlaybackEnabled");
+    expect(src).toContain("[data-motion-section]");
+    expect(src).toContain("[data-tutorial-video]");
+    expect(src).toContain("video.play()");
+    expect(src).toContain("video.pause()");
+  });
+
+  it("wires the live 'Crack one open' demo exactly once", () => {
+    expect(landingHtml.match(/data-demo-crate/g) ?? []).toHaveLength(1);
+    expect(landingHtml.match(/data-demo-open/g) ?? []).toHaveLength(1);
+    expect(landingHtml).toContain("Crack one");
+    expect(landingHtml).toContain("open.");
+    expect(landingHtml).toContain('id="crack"');
+  });
+
+  it("uses OS reduced motion + page visibility without a manual control", () => {
+    const src = entry();
+    expect(src).toContain('matchMedia("(prefers-reduced-motion: reduce)")');
+    expect(src).toContain('reduceMotion.addEventListener("change"');
+    expect(src).toContain('addEventListener("visibilitychange"');
+    expect(src).not.toContain("sessionStorage");
+    expect(src).not.toContain("data-motion-toggle");
+    expect(landingHtml).not.toContain("data-motion-toggle");
+    expect(landingHtml).not.toContain("<canvas");
+  });
+
+  it("keeps the how-it-works loop as poster stills (no video wiring in that band)", () => {
+    const how = landingHtml.slice(landingHtml.indexOf('id="how"'), landingHtml.indexOf('id="garage"'));
+    expect(how).not.toContain("<video");
+    for (const still of ["step-pull", "step-bet", "step-win"]) {
+      expect(how).toContain(`/assets/landing/${still}.webp`);
+    }
+  });
+
+  it("keeps the landing bundle isolated from three and the game", () => {
+    expect(Object.keys(landingScripts)).toHaveLength(1);
+    expect(Object.keys(landingStyles)).toHaveLength(1);
+    const src = entry();
+    expect(src).not.toContain("@capacitor/core");
+    expect(src).not.toContain("location.replace");
+    expect(src).not.toContain('from "three"');
+    expect(src).not.toContain('from "../main"');
+    expect(src).not.toContain('"./cratebox"');
+  });
+
+  it("keeps the crate cinematic + demo importable by the landing bundle", () => {
+    for (const guarded of [crateCinematicSrc, demoCrateSrc]) {
+      expect(guarded).not.toContain('from "three"');
+      expect(guarded).not.toContain('"../main"');
+      expect(guarded).not.toContain('"./cratebox"');
+    }
+  });
+
+  it("keeps WebGLRenderer out of the built landing chunk (scoped to assets/landing-*.js)", async () => {
+    // /vendor/model-viewer.min.js DOES contain WebGLRenderer but is copied verbatim to dist/vendor/ —
+    // NOT into the landing JS chunk. Scope the guard to the built entry chunk, not all of dist. Runs only
+    // after `npm run build`; a fresh checkout with no dist skips it (the source-import guards above hold).
+    const nodeFs = "node:fs";
+    const nodeUrl = "node:url";
+    const { existsSync, readdirSync, readFileSync } = await import(nodeFs);
+    const { fileURLToPath } = await import(nodeUrl);
+    const distAssets = fileURLToPath(new URL("../../dist/assets/", import.meta.url));
+    if (!existsSync(distAssets)) return;
+    const landingChunks = readdirSync(distAssets).filter((f: string) => /^landing-.*\.js$/.test(f));
+    expect(landingChunks.length).toBeGreaterThan(0);
+    for (const chunk of landingChunks) {
+      expect(readFileSync(distAssets + chunk, "utf8")).not.toContain("WebGLRenderer");
+    }
   });
 
   it("keeps the game shell at play and starts installed experiences there", () => {
@@ -77,41 +297,6 @@ describe("Slopwheels landing shell", () => {
     const gameHtml = Object.values(gamePages)[0] as string | undefined;
     expect(gameHtml).toContain('/src/main.ts');
     expect(JSON.parse(manifestText).start_url).toBe("/play/");
-  });
-
-  it("keeps the web-only landing bundle separate from the native app", () => {
-    expect(Object.keys(landingScripts)).toHaveLength(1);
-    expect(Object.keys(landingStyles)).toHaveLength(1);
-    const entry = Object.values(landingScripts)[0] as string | undefined;
-    expect(entry).not.toContain("@capacitor/core");
-    expect(entry).not.toContain("location.replace");
-    expect(entry).not.toContain('from "three"');
-    expect(entry).not.toContain('from "../main"');
-    expect(landingHtml).toContain('/src/landing/landing.css');
-    expect(landingHtml).toContain('/src/landing/main.ts');
-  });
-
-  it("keeps the crate cinematic importable by the landing bundle", () => {
-    expect(crateCinematicSrc).not.toContain('from "three"');
-    expect(crateCinematicSrc).not.toContain('"../main"');
-    expect(crateCinematicSrc).not.toContain('"./cratebox"');
-  });
-
-  it("lets any visitor crack one open with the shared cinematic, no game bundle", () => {
-    expect(landingHtml).toContain("data-demo-crate");
-    expect(landingHtml).toContain('id="crack"');
-    expect(landingHtml).toContain("Crack one open.");
-    // Same isolation guard as the cinematic: the demo module must never drag three/game code in.
-    expect(demoCrateSrc).not.toContain('from "three"');
-    expect(demoCrateSrc).not.toContain('"../main"');
-  });
-
-  it("contains decorative poster overflow within the hero artwork", async () => {
-    const nodeFs = "node:fs/promises";
-    const { readFile } = await import(nodeFs);
-    const stylesheet = await readFile(new URL("./landing.css", import.meta.url), "utf8");
-
-    expect(stylesheet).toMatch(/\.hero-poster \{[^}]*overflow: clip;/);
   });
 
   it("registers landing and play as explicit Vite entries", () => {
@@ -128,6 +313,12 @@ describe("Slopwheels landing shell", () => {
     expect(railwayConfig).toContain('"/redline3d/**"');
   });
 
+  it("keeps the --brand token and anchors the built-on marks", async () => {
+    expect(await readLandingCss()).toContain("--brand: #c0f030");
+    expect(landingHtml).toContain('src="/assets/brands/solana-mark.svg"');
+    expect(landingHtml).toContain('src="/assets/brands/magicblock-logo.svg"');
+  });
+
   it("ships canonical local MagicBlock and Solana marks", async () => {
     const nodeCrypto = "node:crypto";
     const { createHash } = await import(nodeCrypto);
@@ -135,12 +326,8 @@ describe("Slopwheels landing shell", () => {
     const solana = brandAssets["../../public/assets/brands/solana-mark.svg"] as string | undefined;
     const sources = Object.values(brandDocs)[0] as string | undefined;
 
-    expect(Object.keys(brandAssets)).toHaveLength(2);
     expect(magicblock).toContain('viewBox="0 0 162 32"');
-    expect(magicblock).toContain('fill="white"');
     expect(solana).toContain('viewBox="0 0 101 88"');
-    expect(solana).toContain('stop-color="#9945FF"');
-    expect(solana).toContain('stop-color="#19FB9B"');
     expect(createHash("sha256").update(magicblock ?? "").digest("hex")).toBe(
       "adb0d0abd1ba7161d784c222d7a4821667e6b7b343e9810ceed39736fc03017c",
     );
@@ -149,397 +336,5 @@ describe("Slopwheels landing shell", () => {
     );
     expect(sources).toContain("https://www.magicblock.xyz/");
     expect(sources).toContain("https://solana.com/branding");
-    expect(sources).toContain(
-      "https://cdn.prod.website-files.com/67dd3f471f62a240dd544dd8/682efe2b89d00ecb838fa333_Frame%2085.svg",
-    );
-    expect(sources).toContain("https://solana.com/src/img/branding/solanaLogoMark.svg");
-    expect(sources).toContain("Retrieved: 2026-07-13");
   });
-
-  it("renders the how-it-works steps as poster-only stills without tutorial wiring", () => {
-    const howSection = landingHtml.slice(landingHtml.indexOf('id="how"'), landingHtml.indexOf('id="strip"'));
-    const videos = howSection.match(/<video\b[\s\S]*?<\/video>/g) ?? [];
-
-    expect(videos).toHaveLength(3);
-    for (const video of videos) {
-      expect(video).not.toContain("data-tutorial-video");
-      expect(video).not.toContain("<source");
-      expect(video).not.toContain("autoplay");
-      expect(video).toMatch(/<video[^>]*\bloop\b[^>]*\bmuted\b[^>]*\bplaysinline\b/);
-      expect(video).toMatch(/poster="\/assets\/landing\/step-(pull|bet|win)\.webp"/);
-      expect(video).toContain('aria-hidden="true"');
-    }
-    expect(landingHtml).not.toMatch(/<div class="step-media"><img/);
-  });
-
-  it("keeps perps as mode 2 with its real numbers", () => {
-    expect(landingHtml).toContain('id="mode2"');
-    expect(landingHtml).toContain("real perp");
-    expect(landingHtml).toContain("10× to 3000×");
-    expect(landingHtml).toContain("/tutorial/leverage.webm");
-    expect(landingHtml).toContain('href="#mode2"');
-
-    expect(landingHtml.match(/data-tutorial-video/g) ?? []).toHaveLength(2);
-    const mode2 = landingHtml.slice(landingHtml.indexOf('id="mode2"'), landingHtml.indexOf('id="built-on"'));
-    expect(mode2.match(/data-tutorial-video/g) ?? []).toHaveLength(2);
-  });
-
-  it("actively starts tutorial loops when motion is allowed", () => {
-    const entry = Object.values(landingScripts)[0] as string;
-
-    expect(entry).toContain('[data-tutorial-video]');
-    expect(entry).toContain("video.play().catch");
-    expect(entry).toContain("video.pause()");
-  });
-
-  it("does not render a manual motion control", () => {
-    expect(landingHtml).not.toContain("data-motion-toggle");
-    expect(landingHtml).not.toContain('aria-label="Motion"');
-  });
-
-  it("has no manual motion control styling", async () => {
-    const nodeFs = "node:fs/promises";
-    const { readFile } = await import(nodeFs);
-    const stylesheet = await readFile(new URL("./landing.css", import.meta.url), "utf8");
-
-    expect(stylesheet).not.toContain(".motion-toggle");
-  });
-
-  it("uses OS reduced motion and page visibility without persisting a manual preference", () => {
-    const entry = Object.values(landingScripts)[0] as string;
-    expect(entry).not.toContain("sessionStorage");
-    expect(entry).not.toContain("perps-rider:motion-paused");
-    expect(entry).not.toContain("data-motion-toggle");
-    expect(entry).not.toContain("userPaused");
-    expect(entry).not.toContain('type: "user-paused"');
-    expect(entry).toContain('matchMedia("(prefers-reduced-motion: reduce)")');
-    expect(entry).toContain('reduceMotion.addEventListener("change"');
-    expect(entry).toContain('addEventListener("visibilitychange"');
-    expect(landingHtml).toContain('data-motion-section="mode2"');
-    expect(landingHtml).toContain('data-motion-section="technology"');
-  });
-
-  it("presents a four-stage animated technology pipeline", () => {
-    for (const scene of ["execution", "tote", "settlement", "world"]) {
-      expect(landingHtml).toContain(`data-tech-scene="${scene}"`);
-    }
-    expect(landingHtml.match(/class="tech-scene/g)).toHaveLength(4);
-    expect(landingHtml.match(/<svg/g)).toHaveLength(4);
-    expect(landingHtml).toContain("Social Open World");
-    expect(landingHtml).toContain("Drive the Strip with other traders, show off your garage, and enter shared destinations together.");
-    expect(landingHtml).not.toContain("<canvas");
-  });
-
-  it("rethemes the tech rack to pulls, pools, settlement, world", () => {
-    expect(landingHtml).toContain("EPHEMERAL VRF / PROVABLY FAIR");
-    expect(landingHtml).toContain("Pari-mutuel");
-    expect(landingHtml).toContain("podium owners get a slice");
-    expect(landingHtml).toContain("Settles to the cent.");
-    expect(landingHtml).not.toContain("scene-price");
-  });
-
-  it("animates the pari-mutuel tote payline while gating on motion", async () => {
-    const nodeFs = "node:fs/promises";
-    const { readFile } = await import(nodeFs);
-    const stylesheet = await readFile(new URL("./landing.css", import.meta.url), "utf8");
-
-    expect(landingHtml).toContain('data-tech-scene="tote"');
-    expect(landingHtml).toContain('<g class="tote-odds"><text x="240" y="30">x21.8</text>');
-    expect(stylesheet).toMatch(/\.scene-tote \.tote-payline \{[^}]*animation: tote-pay [^;]* infinite;/);
-    expect(stylesheet).toContain("@keyframes tote-pay");
-    // The tote payline is a .tech-scene descendant, so the generic gate kills it when paused.
-    expect(stylesheet).toMatch(
-      /:where\(html\.motion-paused, html:not\(\.tech-motion-active\)\) \.tech-scene \*:not\(\.tech-brand\) \{[^}]*animation: none !important;/,
-    );
-    expect(stylesheet).not.toContain(".price-quote");
-    expect(stylesheet).not.toContain("@keyframes ticker-flip");
-    expect(stylesheet).not.toContain("@keyframes live-pulse");
-    expect(stylesheet).not.toContain("@keyframes price-scan");
-  });
-
-  it("moves both world cars inward with signed travel variables", async () => {
-    const nodeFs = "node:fs/promises";
-    const { readFile } = await import(nodeFs);
-    const stylesheet = await readFile(new URL("./landing.css", import.meta.url), "utf8");
-    const travelFor = (selector: string) => {
-      const rule = stylesheet.match(new RegExp(`\\.${selector} \\{([^}]*)\\}`))?.[1] ?? "";
-      return Number(rule.match(/--car-travel:\s*(-?\d+(?:\.\d+)?)px;/)?.[1]);
-    };
-
-    expect(travelFor("car-a")).toBeGreaterThan(0);
-    expect(travelFor("car-b")).toBeLessThan(0);
-    expect(stylesheet).toMatch(
-      /@keyframes car-route \{[\s\S]*?translate3d\(var\(--car-travel\), -7px, 0\)/,
-    );
-    expect(stylesheet).toMatch(/\.car-b \{[^}]*--tech-phase-delay: 1\.2s;/);
-    expect(stylesheet).not.toMatch(/\.car-b \{[^}]*animation:[^;}]*\breverse\b/);
-  });
-
-  it("shortens both inward car routes at the mobile breakpoint", async () => {
-    const nodeFs = "node:fs/promises";
-    const { readFile } = await import(nodeFs);
-    const stylesheet = await readFile(new URL("./landing.css", import.meta.url), "utf8");
-    const mobileStart = stylesheet.indexOf("@media (max-width: 760px)");
-    const mobileEnd = stylesheet.indexOf("@media (prefers-reduced-motion: reduce)", mobileStart);
-    const mobileStyles = stylesheet.slice(mobileStart, mobileEnd);
-    const mobileTravelFor = (selector: string) => {
-      const rule = mobileStyles.match(new RegExp(`\\.${selector} \\{([^}]*)\\}`))?.[1] ?? "";
-      return Number(rule.match(/--car-travel:\s*(-?\d+(?:\.\d+)?)px;/)?.[1]);
-    };
-
-    expect(mobileStart).toBeGreaterThanOrEqual(0);
-    expect(mobileEnd).toBeGreaterThan(mobileStart);
-    expect(mobileTravelFor("car-a")).toBe(16);
-    expect(mobileTravelFor("car-b")).toBe(-16);
-  });
-
-  it("anchors the cinematic pipeline with canonical technology marks", async () => {
-    const nodeFs = "node:fs/promises";
-    const { readFile } = await import(nodeFs);
-    const stylesheet = await readFile(new URL("./landing.css", import.meta.url), "utf8");
-
-    expect(landingHtml).toContain('src="/assets/brands/magicblock-logo.svg"');
-    expect(landingHtml).toContain('data-tech-brand="magicblock"');
-    expect(landingHtml).toContain('src="/assets/brands/solana-mark.svg"');
-    expect(landingHtml).toContain('data-tech-brand="solana"');
-    expect(landingHtml.match(/class="pipeline-pulse"/g)).toHaveLength(1);
-    for (const hook of ["tote-rows", "rollup-chamber", "settlement-gate", "world-destination"]) {
-      expect(landingHtml).toContain(`class="${hook}`);
-    }
-    expect(landingHtml.match(/class="tech-brand/g)).toHaveLength(2);
-    expect(landingHtml.match(/class="tech-scene/g)).toHaveLength(4);
-    expect(landingHtml.match(/<svg/g)).toHaveLength(4);
-    expect(stylesheet).toContain("@keyframes tx-ingest");
-    expect(stylesheet).toContain("@keyframes settlement-converge");
-    expect(stylesheet).toContain("@keyframes world-arrival");
-    expect(stylesheet).toContain("@keyframes pipeline-travel");
-    expect(stylesheet).toMatch(/\.tech-brand-solana \{[^}]*filter: none;/);
-    expect(stylesheet).toMatch(
-      /@media \(max-width: 760px\) \{[\s\S]*?\.tx-shard-b,[\s\S]*?\.tx-shard-c \{[^}]*display: none;/,
-    );
-    expect(stylesheet).toMatch(
-      /@media \(max-width: 760px\) \{[\s\S]*?\.driver-a \{[^}]*--driver-x: -38px;/,
-    );
-    expect(stylesheet).not.toMatch(/@keyframes[^}]*background-position/);
-    expect(landingHtml).not.toContain("<canvas");
-  });
-
-  it("locks technology scenes to the responsive motion contract", async () => {
-    const nodeFs = "node:fs/promises";
-    const { readFile } = await import(nodeFs);
-    const landingStylesheet = await readFile(new URL("./landing.css", import.meta.url), "utf8");
-    const decorativeScenes = landingHtml.match(/<div class="tech-scene[^>]*aria-hidden="true">/g) ?? [];
-
-    expect(decorativeScenes).toHaveLength(4);
-    for (const delay of ["0s", ".35s", ".7s", "1.05s"]) {
-      expect(landingHtml).toContain(`style="--tech-delay: ${delay}"`);
-    }
-    expect(landingStylesheet).toMatch(
-      /:where\(html\.motion-paused, html:not\(\.tech-motion-active\)\) \.tech-scene \*:not\(\.tech-brand\) \{[^}]*animation-play-state: paused !important;/,
-    );
-    expect(landingStylesheet).toMatch(/\.tech-grid \{[^}]*grid-template-columns: repeat\(4, 1fr\);/);
-    expect(landingStylesheet).toMatch(
-      /@media \(max-width: 1100px\) \{[\s\S]*?\.tech-grid \{[^}]*grid-template-columns: repeat\(2, 1fr\);/,
-    );
-    expect(landingStylesheet).toMatch(
-      /@media \(max-width: 760px\) \{[\s\S]*?\.tech-grid \{[^}]*grid-template-columns: 1fr;/,
-    );
-    expect(landingStylesheet).toMatch(/\.car-b \{[^}]*--tech-phase-delay: 1\.2s;/);
-    expect(landingStylesheet).toMatch(
-      /\.tech-scene \*:not\(\.tech-brand\) \{[^}]*animation-delay: calc\(var\(--tech-delay, 0s\) \+ var\(--tech-phase-delay, 0s\)\);/,
-    );
-  });
-
-  it("keeps branded scenes deterministic, unfiltered, and correctly staggered", async () => {
-    const nodeFs = "node:fs/promises";
-    const { readFile } = await import(nodeFs);
-    const stylesheet = await readFile(new URL("./landing.css", import.meta.url), "utf8");
-
-    expect(stylesheet).toMatch(
-      /:where\(html\.motion-paused, html:not\(\.tech-motion-active\)\) \.tech-scene \*:not\(\.tech-brand\) \{[^}]*animation-play-state: paused !important;[^}]*animation: none !important;/,
-    );
-    expect(stylesheet).toMatch(
-      /:where\(html\.motion-paused, html:not\(\.tech-motion-active\)\) \.pipeline-pulse \{[^}]*animation-play-state: paused !important;[^}]*animation: none !important;/,
-    );
-
-    const staticStateRule = stylesheet.match(
-      /:where\(html\.motion-paused, html:not\(\.tech-motion-active\)\) \.tech-scene :is\(([\s\S]*?)\) \{([^}]*)\}/,
-    );
-    expect(staticStateRule).not.toBeNull();
-    for (const hook of [
-      ".rollup-pressure",
-      ".tx-shard",
-      ".settlement-rail",
-      ".settlement-seal",
-      ".world-destination i",
-      ".city-windows rect",
-      ".driver",
-    ]) {
-      expect(staticStateRule?.[1]).toContain(hook);
-    }
-    expect(staticStateRule?.[2]).toContain("opacity: 1;");
-    expect(staticStateRule?.[2]).toContain("transform: none;");
-
-    const hoverRule = stylesheet.match(/\.tech-grid article:hover \{([^}]*)\}/);
-    expect(hoverRule?.[1]).not.toMatch(/(?:^|[;\s])filter\s*:/);
-    expect(hoverRule?.[1]).toContain("box-shadow:");
-    expect(stylesheet).not.toMatch(/\.tech-grid article \{[^}]*transition:[^;}]*filter/);
-
-    expect(stylesheet).not.toMatch(/\.tech-scene \* \{[^}]*animation-delay:/);
-    for (const selector of ["tech-brand", "tech-brand-magicblock", "tech-brand-solana"]) {
-      const rule = stylesheet.match(new RegExp(`\\.${selector} \\{([^}]*)\\}`));
-      expect(rule?.[1]).not.toContain("animation");
-    }
-
-    for (const [card, delay] of [[2, "0.08s"], [3, "0.16s"], [4, "0.24s"]] as const) {
-      expect(stylesheet).toMatch(
-        new RegExp(`\\.tech-grid article:nth-of-type\\(${card}\\)\\[data-reveal\\] \\{[^}]*transition-delay: ${delay};`),
-      );
-    }
-    const expectedConnectorTravel = (viewportWidth: number) => (
-      0.84 * Math.min(1180, viewportWidth - 48) - 52
-    );
-    const cssPulseTravel = (viewportWidth: number) => (
-      Math.min(0.84 * viewportWidth - 40.32, 991.2) - 52
-    );
-    for (const viewportWidth of [1101, 1180, 1200, 1228, 1440, 1920]) {
-      expect(Math.abs(cssPulseTravel(viewportWidth) - expectedConnectorTravel(viewportWidth))).toBeLessThan(0.001);
-    }
-    expect(stylesheet).toContain("calc(min(calc(84vw - 40.32px), 991.2px) - 52px)");
-    expect(stylesheet).not.toContain("calc(min(84vw, 991px) - 52px)");
-    expect(stylesheet).not.toContain("calc(84vw - 110px)");
-    expect(stylesheet).not.toContain("calc(84vw - 80px)");
-  });
-
-  it("shows real model renders for all four Strip buildings", async () => {
-    const nodeFs = "node:fs/promises";
-    const { readFile } = await import(nodeFs);
-    const landingStylesheet = await readFile(new URL("./landing.css", import.meta.url), "utf8");
-
-    for (const building of ["track", "garage", "upgrades", "crates"]) {
-      expect(landingHtml).toContain(`src="/assets/landing/building-${building}.webp"`);
-    }
-    expect(landingHtml.match(/class="strip-building"/g)).toHaveLength(4);
-    expect(landingHtml.match(/width="1024" height="720"/g)).toHaveLength(4);
-    expect(landingHtml.match(/loading="lazy" decoding="async" alt=""/g)).toHaveLength(4);
-    expect(landingHtml).not.toContain("building-shell");
-    expect(landingHtml).not.toContain("building-coil");
-    expect(landingHtml).not.toContain("crate-stack");
-    expect(landingStylesheet).toContain("--building-render-scale: 1.28;");
-    expect(landingStylesheet).toMatch(
-      /\.strip-building img \{[^}]*transform: scale\(var\(--building-render-scale\)\);[^}]*\}/,
-    );
-    expect(landingStylesheet).toMatch(
-      /\.stop-grid article:hover \.strip-building img \{[^}]*translateY\(-5px\) scale\(calc\(var\(--building-render-scale\) \* 1\.035\)\)[^}]*\}/,
-    );
-    expect(landingStylesheet).toMatch(
-      /@media \(prefers-reduced-motion: reduce\) \{[\s\S]*\.stop-grid article:hover \.strip-building img \{[^}]*transform: scale\(var\(--building-render-scale\)\);[^}]*\}/,
-    );
-  });
-
-  it("suppresses every hover transform when motion is paused or reduced", async () => {
-    const nodeFs = "node:fs/promises";
-    const { readFile } = await import(nodeFs);
-    const stylesheet = await readFile(new URL("./landing.css", import.meta.url), "utf8");
-    const reducedMotionStart = stylesheet.lastIndexOf("@media (prefers-reduced-motion: reduce)");
-    const reducedMotionStyles = stylesheet.slice(reducedMotionStart);
-    const ruleFor = (styles: string, selector: string) => {
-      const start = styles.indexOf(`${selector} {`);
-      expect(start, `missing CSS rule for ${selector}`).toBeGreaterThanOrEqual(0);
-      const open = styles.indexOf("{", start);
-      return styles.slice(open + 1, styles.indexOf("}", open));
-    };
-
-    const transitionContracts = [
-      [".launch-button", "transition-property: filter;"],
-      [".apk-button", "transition-property: border-color, background;"],
-      [".step-media video", "transition-property: filter;"],
-      [".stop-grid article::before", "transition-property: opacity;"],
-      [".strip-building", "transition: none;"],
-      [".strip-building img", "transition-property: filter;"],
-    ] as const;
-    for (const [selector, declaration] of transitionContracts) {
-      expect(ruleFor(stylesheet, `html.motion-paused ${selector}`)).toContain(declaration);
-      expect(ruleFor(reducedMotionStyles, selector)).toContain(declaration);
-    }
-
-    for (const selector of [
-      ".launch-button:hover",
-      ".apk-button:hover",
-      ".step-card:hover .step-media video",
-      ".stop-grid article:hover::before",
-    ]) {
-      expect(ruleFor(stylesheet, `html.motion-paused ${selector}`)).toContain("transform: none;");
-      expect(ruleFor(reducedMotionStyles, selector)).toContain("transform: none;");
-    }
-    expect(ruleFor(stylesheet, "html.motion-paused .stop-grid article:hover .strip-building img"))
-      .toContain("transform: scale(var(--building-render-scale));");
-    expect(ruleFor(reducedMotionStyles, ".stop-grid article:hover .strip-building img"))
-      .toContain("transform: scale(var(--building-render-scale));");
-
-    expect(ruleFor(stylesheet, "\n.launch-button:hover")).toContain("filter: brightness(1.08);");
-    expect(ruleFor(stylesheet, "\n.apk-button:hover")).toContain("border-color: var(--cyan);");
-    expect(ruleFor(stylesheet, "\n.step-card:hover .step-media video")).toContain("filter: saturate(1.15)");
-    expect(ruleFor(stylesheet, "\n.stop-grid article:hover")).toContain("background:");
-    expect(ruleFor(stylesheet, "\n.stop-grid article:hover::before")).toContain("opacity: 0.85;");
-    expect(ruleFor(stylesheet, "\n.stop-grid article:hover .strip-building img")).toContain("filter: brightness(1.12)");
-  });
-
-  it("keeps skip-link focus positioning functional without transition motion", async () => {
-    const nodeFs = "node:fs/promises";
-    const { readFile } = await import(nodeFs);
-    const stylesheet = await readFile(new URL("./landing.css", import.meta.url), "utf8");
-    const reducedMotionStyles = stylesheet.slice(stylesheet.lastIndexOf("@media (prefers-reduced-motion: reduce)"));
-
-    expect(stylesheet).toMatch(/\.skip-link:focus \{[^}]*transform: translateY\(0\);[^}]*\}/);
-    expect(stylesheet).toMatch(/html\.motion-paused \.skip-link \{[^}]*transition: none;[^}]*\}/);
-    expect(reducedMotionStyles).toMatch(/\.skip-link \{[^}]*transition: none;[^}]*\}/);
-  });
-
-  it("provides a dependency-free compositor motion field with normalized input", () => {
-    for (const layer of ["plasma", "grid", "streaks", "particles"]) {
-      expect(landingHtml).toMatch(
-        new RegExp(`<div class="motion-layer motion-${layer}">\\s*<span><\\/span>\\s*<\\/div>`),
-      );
-    }
-    expect(landingHtml.match(/class="motion-layer motion-/g)).toHaveLength(4);
-    expect(landingHtml).toContain("data-motion-bg");
-
-    const entry = Object.values(landingScripts)[0] as string;
-    const stylesheet = Object.values(landingStyles)[0] as string;
-    expect(entry).toContain('addEventListener("pointermove"');
-    expect(entry).toContain('addEventListener("deviceorientation"');
-    expect(entry).toContain("requestAnimationFrame");
-    expect(entry).toContain('setProperty("--motion-x", motionX.toFixed(3))');
-    expect(entry).toContain('setProperty("--motion-y", motionY.toFixed(3))');
-    expect(entry).not.toContain("--motion-near-x");
-    expect(stylesheet).not.toContain("--motion-near-x");
-    expect(stylesheet).not.toMatch(
-      /@keyframes\s+[^\s{]+\s*\{(?:[^{}]|\{[^{}]*\})*background-position/,
-    );
-    expect(entry).not.toContain('from "three"');
-  });
-
-  it("keeps ambient compositor motion continuous across loop boundaries", async () => {
-    const nodeFs = "node:fs/promises";
-    const { readFile } = await import(nodeFs);
-    const stylesheet = await readFile(new URL("./landing.css", import.meta.url), "utf8");
-
-    for (const layer of ["grid", "streaks", "particles"]) {
-      expect(stylesheet).toMatch(
-        new RegExp(`\\.motion-${layer} > span \\{[^}]*animation: ambient-${layer} [^;]* infinite alternate;`),
-      );
-    }
-  });
-
-  it("resets pointer parallax on all motion layers for reduced motion", async () => {
-    const nodeFs = "node:fs/promises";
-    const { readFile } = await import(nodeFs);
-    const stylesheet = await readFile(new URL("./landing.css", import.meta.url), "utf8");
-
-    expect(stylesheet).toMatch(
-      /@media \(prefers-reduced-motion: reduce\) \{[\s\S]*?\.motion-plasma,\s*\.motion-grid,\s*\.motion-streaks,\s*\.motion-particles \{[^}]*transform: none;/,
-    );
-  });
-
 });

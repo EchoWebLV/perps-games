@@ -81,7 +81,7 @@ export function initDemoCrate(): void {
           `<div class="demo-card">` +
             `<img class="demo-card-art" src="${car.card}" alt="${car.name} card" />` +
             `<b class="demo-card-name" style="--tc:${tier.color}">${car.name}</b>` +
-            `<a class="launch-button demo-keep" href="/play/"><span>Play to keep what you pull</span><b aria-hidden="true">GO!</b></a>` +
+            `<a class="cta demo-keep" href="/play/">Play to keep what you pull <span class="arw" aria-hidden="true">→</span></a>` +
           `</div>`;
       },
     }), PRE_REVEAL_MS);
