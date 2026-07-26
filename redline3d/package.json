@@ -24,6 +24,7 @@
   "devDependencies": {
     "@capacitor/cli": "^8.4.0",
     "@gltf-transform/core": "^4.4.0",
+    "@google/model-viewer": "^4.3.1",
     "@types/three": "^0.169.0",
     "buffer": "^6.0.3",
     "jsdom": "^29.1.1",
