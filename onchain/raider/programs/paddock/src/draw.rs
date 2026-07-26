@@ -32,6 +32,21 @@ fn next_u64(seed: &[u8; 32], counter: u64) -> u64 {
     )
 }
 
+/// Seed for race `seq`, bound to the authenticated Lazer price read at lock.
+///
+/// The market opens with `Race.seed` all zeroes; this value only exists once the
+/// crank locks the market, so the winner cannot be known while bets are open —
+/// the structural fix for the client-side pre-decided outcome at
+/// redline3d/src/render/race-mode.ts:363.
+pub fn race_seed(seq: u64, price_raw: i64, publish_time: i64) -> [u8; 32] {
+    hashv(&[
+        &seq.to_le_bytes(),
+        &price_raw.to_le_bytes(),
+        &publish_time.to_le_bytes(),
+    ])
+    .to_bytes()
+}
+
 /// Produce the finish order: `order[0]` is the winner, `order[7]` is last.
 pub fn draw_order(seed: &[u8; 32], strengths: &[u16; GRID]) -> [u8; GRID] {
     let mut remaining: [u8; GRID] = [0, 1, 2, 3, 4, 5, 6, 7];
@@ -146,5 +161,24 @@ mod tests {
         let mut sorted = order;
         sorted.sort();
         assert_eq!(sorted, [0, 1, 2, 3, 4, 5, 6, 7]);
+    }
+
+    #[test]
+    fn seed_binds_sequence_price_and_timestamp() {
+        let a = race_seed(1, 65_000_00000000, 1_770_000_000);
+        let b = race_seed(2, 65_000_00000000, 1_770_000_000);
+        let c = race_seed(1, 65_000_00000001, 1_770_000_000);
+        let d = race_seed(1, 65_000_00000000, 1_770_000_001);
+        assert_ne!(a, b, "seq must change the seed");
+        assert_ne!(a, c, "price must change the seed");
+        assert_ne!(a, d, "publish time must change the seed");
+    }
+
+    #[test]
+    fn seed_is_reproducible() {
+        assert_eq!(
+            race_seed(9, 123_456, 1_770_000_000),
+            race_seed(9, 123_456, 1_770_000_000)
+        );
     }
 }
