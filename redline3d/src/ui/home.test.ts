@@ -10,7 +10,7 @@ describe("home helpers", () => {
     expect(cardSlug("Cybertruck")).toBe("cybertruck");
   });
 
-  it("groups by rarity tier, 5★ first, owned-then-name within a tier", () => {
+  it("groups by rarity tier, common first, owned-then-name within a tier", () => {
     const defs = [
       { name: "A", rarity: 2 },
       { name: "B", rarity: 5 },
@@ -20,12 +20,12 @@ describe("home helpers", () => {
     ] as any[];
     const owns = (n: string) => n === "C";
     const groups = groupByTier(defs, owns);
-    // only tiers that actually have cars, highest rarity first
-    expect(groups.map((g) => g.rarity)).toEqual([5, 2, 1]);
+    // only tiers that actually have cars, lowest rarity first
+    expect(groups.map((g) => g.rarity)).toEqual([1, 2, 5]);
     // within 5★: the owned car (C) leads, then the rest alphabetically (B, E)
-    expect(groups[0].cars.map((c) => c.name)).toEqual(["C", "B", "E"]);
+    expect(groups[2].cars.map((c) => c.name)).toEqual(["C", "B", "E"]);
     expect(groups[1].cars.map((c) => c.name)).toEqual(["A"]);
-    expect(groups[2].cars.map((c) => c.name)).toEqual(["D"]);
+    expect(groups[0].cars.map((c) => c.name)).toEqual(["D"]);
   });
 
   it("treats a missing rarity as tier 1 (common)", () => {

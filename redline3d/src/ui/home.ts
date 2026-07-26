@@ -40,7 +40,7 @@ export function groupByTier(defs: CarOption[], owns: (n: string) => boolean): Ti
     (byRarity.get(r) ?? byRarity.set(r, []).get(r)!).push(c);
   }
   const groups: TierGroup[] = [];
-  for (let r = 5; r >= 1; r--) {
+  for (let r = 1; r <= 5; r++) {
     const cars = byRarity.get(r);
     if (!cars?.length) continue;
     cars.sort((a, b) => {

@@ -332,7 +332,7 @@ export function createCarPicker(
   // art-render queue, grant, reconcile) reads THIS array so selection/equip wiring stays aligned.
   const sorted = [...cars].sort((a, b) => {
     const ra = tierOf(a.rarity).id, rb = tierOf(b.rarity).id;
-    if (ra !== rb) return rb - ra;                       // rarity DESC (5★ first)
+    if (ra !== rb) return ra - rb;                       // rarity ASC (common first, legendary last)
     const la = a.locked ? 1 : 0, lb = b.locked ? 1 : 0;
     if (la !== lb) return la - lb;                        // owned/unlocked before locked
     return a.name.localeCompare(b.name);                 // then alphabetical

@@ -500,13 +500,13 @@ describe("garage grid rarity ordering", () => {
   const gridNames = (parent: HTMLElement) =>
     [...parent.querySelectorAll(".gcard .gtitle-name")].map((n) => n.textContent);
 
-  test("orders cards rarity DESC, then unlocked-before-locked, then A–Z", () => {
+  test("orders cards rarity ASC (common first), then unlocked-before-locked, then A–Z", () => {
     const parent = document.createElement("div");
     createCarPicker(parent, roster(), () => {});
     expect(gridNames(parent)).toEqual([
-      "Legend Alpha", "Legend Beta",   // 5★, both unlocked → alphabetical
-      "Epic Owned", "Epic Locked",     // 4★, unlocked before locked
       "Common Zebra",                  // 1★
+      "Epic Owned", "Epic Locked",     // 4★, unlocked before locked
+      "Legend Alpha", "Legend Beta",   // 5★, both unlocked → alphabetical
     ]);
   });
 
@@ -514,14 +514,14 @@ describe("garage grid rarity ordering", () => {
     const parent = document.createElement("div");
     createCarPicker(parent, roster(), () => {});
     const serials = [...parent.querySelectorAll(".gcard .gfoot-no")].map((n) => n.textContent);
-    expect(serials[0]).toBe("01 / 05"); // the highest-rarity card is #01
+    expect(serials[0]).toBe("01 / 05"); // the lowest-rarity card is #01
     expect(serials[4]).toBe("05 / 05");
   });
 
-  test("boot pick is the first drivable card in the SORTED order (highest rarity)", () => {
+  test("boot pick is the first drivable card in the SORTED order (lowest rarity)", () => {
     const picks: string[] = [];
     createCarPicker(document.createElement("div"), roster(), (c) => picks.push(c.name));
-    expect(picks).toEqual(["Legend Alpha"]);
+    expect(picks).toEqual(["Common Zebra"]);
   });
 
   test("does not mutate the caller's roster array", () => {
