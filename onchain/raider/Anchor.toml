@@ -7,8 +7,9 @@ resolution = true
 skip-lint = false
 
 [programs.devnet]
-raider = "FwUNcUaRbYGiWasHa6DA3xQaQJfZWCgH7UhDeBvoJcBv"
 crate_roll = "9MLzyBc2Nz4sqcnPnCsejMRGGnKMi9nepU3fSE1ZJUgG"
+paddock = "3wz2kwDSGZEfdwing4FucjveWunnpiwoYAnKUAbKRh2S"
+raider = "FwUNcUaRbYGiWasHa6DA3xQaQJfZWCgH7UhDeBvoJcBv"
 
 [registry]
 url = "https://api.apr.dev"
