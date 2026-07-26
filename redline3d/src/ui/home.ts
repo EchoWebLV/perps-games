@@ -12,6 +12,7 @@ export interface HomeDeps {
   owns: (name: string) => boolean;      // inventory.owns
   equippedName: () => string;           // current equipped car
   onDriveLobby: (carName: string) => void;
+  onDriveStrip: (carName: string) => void; // primary CTA: equip a sensible default + enter the lobby
   onEnterRace: (carName: string) => void;
   onWatchAndBet: () => void;
   onOpenStore: () => void;              // crateBox.open()
@@ -50,6 +51,29 @@ export function groupByTier(defs: CarOption[], owns: (n: string) => boolean): Ti
     groups.push({ rarity: r, cars });
   }
   return groups;
+}
+
+/** Resolve the default car for the "Drive the strip" CTA. Prefers the last-equipped car when it's
+ *  still owned (equip state is runtime-only, so `equippedName` IS the last-driven car); otherwise the
+ *  highest-rarity owned & drivable car, alphabetical tie-break (home's tier convention). Returns null
+ *  when the player owns no drivable car — the caller then routes to the crate store. comingSoon cars
+ *  are excluded: they can't be equipped, so main's equipByName would no-op and never reach the lobby. */
+export function pickDriveStripCar(
+  defs: CarOption[],
+  owns: (n: string) => boolean,
+  equippedName: string,
+): string | null {
+  if (equippedName && owns(equippedName)) {
+    const eq = defs.find((c) => c.name === equippedName);
+    if (eq && !eq.comingSoon) return equippedName; // last-equipped, still owned & drivable
+  }
+  const drivable = defs.filter((c) => owns(c.name) && !c.comingSoon);
+  if (!drivable.length) return null;
+  drivable.sort((a, b) => {
+    const r = tierOf(b.rarity).id - tierOf(a.rarity).id; // rarity DESC
+    return r !== 0 ? r : a.name.localeCompare(b.name);    // then alphabetical
+  });
+  return drivable[0].name;
 }
 
 // lock glyph (stroked, inherits currentColor) — no emoji, matches the carpicker/cratebox line-icon look
@@ -122,14 +146,21 @@ function injectStyles() {
     .sw-card.locked .sw-name{color:var(--mut)}
     .sw-stars{display:flex;gap:1px;font-size:11px;line-height:1;letter-spacing:.5px}
     .sw-star{text-shadow:0 0 6px currentColor}
-    /* sticky footer: WATCH & BET */
+    /* sticky footer: dual CTA — Drive the strip (primary, brand green) + Watch & bet (secondary) */
     .sw-foot{flex:none;padding:10px 0 max(12px,env(safe-area-inset-bottom));border-top:2px solid var(--edge);
       background:linear-gradient(0deg,#0a0c10,rgba(10,12,16,.2))}
-    .sw-watch{width:100%;border:2.5px solid var(--edge);border-radius:13px;padding:15px;cursor:pointer;
-      font:900 15px/1 'Chakra Petch',ui-monospace,monospace;letter-spacing:.14em;text-transform:uppercase;color:#0a0c10;
-      background:var(--acid);box-shadow:0 4px 0 var(--edge),0 8px 18px rgba(193,248,50,.28)}
-    .sw-watch:hover{filter:brightness(1.05)}
-    .sw-watch:active{transform:translateY(2px);box-shadow:0 2px 0 var(--edge)}
+    .sw-foot-row{display:flex;gap:10px;align-items:stretch}
+    .sw-cta{border:2.5px solid var(--edge);border-radius:13px;padding:15px 12px;cursor:pointer;white-space:nowrap;
+      font:900 14px/1 'Chakra Petch',ui-monospace,monospace;letter-spacing:.1em;text-transform:uppercase;
+      transition:filter .12s,transform .08s,box-shadow .12s}
+    .sw-cta:hover{filter:brightness(1.06)}
+    .sw-cta:active{transform:translateY(2px)}
+    /* primary: brand green, visually dominant (wider flex so it reads as the main action) */
+    .sw-cta-drive{flex:1.55;color:#0a0c10;background:var(--acid);box-shadow:0 4px 0 var(--edge),0 8px 18px rgba(193,248,50,.28)}
+    .sw-cta-drive:active{box-shadow:0 2px 0 var(--edge)}
+    /* secondary: dark surface, green text — present but subordinate to Drive */
+    .sw-cta-watch{flex:1;color:var(--acid);background:#12151c;box-shadow:0 4px 0 var(--edge),0 8px 18px rgba(0,0,0,.4)}
+    .sw-cta-watch:active{box-shadow:0 2px 0 var(--edge)}
     /* ── ONE action surface: the bottom sheet (kills the per-card button repetition) ── */
     .sw-backdrop{position:fixed;inset:0;z-index:6;display:none;background:rgba(4,5,9,.72);backdrop-filter:blur(2px)}
     .sw-backdrop.on{display:block}
@@ -207,13 +238,19 @@ export function createHome(parent: HTMLElement, deps: HomeDeps): Home {
   scroll.className = "sw-scroll";
   el.appendChild(scroll);
 
-  // ── sticky footer: Watch & bet ──
+  // ── sticky footer: dual CTA — Drive the strip (primary) + Watch & bet (secondary) ──
   const foot = document.createElement("div");
   foot.className = "sw-foot";
+  const footRow = document.createElement("div");
+  footRow.className = "sw-foot-row";
+  const driveBtn = document.createElement("button");
+  driveBtn.className = "sw-cta sw-cta-drive";
+  driveBtn.textContent = "Drive the strip";
   const watchBtn = document.createElement("button");
-  watchBtn.className = "sw-watch";
+  watchBtn.className = "sw-cta sw-cta-watch";
   watchBtn.textContent = "Watch & bet";
-  foot.appendChild(watchBtn);
+  footRow.append(driveBtn, watchBtn);
+  foot.appendChild(footRow);
   el.appendChild(foot);
 
   // ── the ONE action surface: a bottom sheet raised by tapping any card ──
@@ -231,6 +268,14 @@ export function createHome(parent: HTMLElement, deps: HomeDeps): Home {
 
   onTap(storeTab, openStore);
   onTap(watchBtn, () => deps.onWatchAndBet());
+  // primary CTA: equip a sensible default car and enter the lobby (same equip + exit path as the
+  // per-card "Drive lobby"). No drivable car owned → route to the crate store to get one (the store
+  // is the "you need a car" nudge; there's no home-level toast util to reuse).
+  onTap(driveBtn, () => {
+    const name = pickDriveStripCar(deps.cars(), deps.owns, deps.equippedName());
+    if (name) deps.onDriveStrip(name);
+    else openStore();
+  });
 
   // star row (★ × rarity) tinted in the tier color; `size` in px. ★ is a static glyph (no user data).
   const addStars = (host: HTMLElement, rarity: number, color: string) => {

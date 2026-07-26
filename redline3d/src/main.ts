@@ -822,6 +822,9 @@ const home = createHome(hudRoot, {
   owns: (n) => inventory.owns(n),
   equippedName: () => equippedCar.name,
   onDriveLobby: (carName) => { equipByName(carName); exitHomeToLobby(); },
+  // Primary footer CTA (Drive the strip): home picks the sensible default car, we equip + enter the
+  // lobby via the same path as the per-card Drive lobby.
+  onDriveStrip: (carName) => { equipByName(carName); exitHomeToLobby(); },
   // Enter the in-app race: with the tapped card's car, or null (spectate) for Watch & bet.
   onEnterRace: (carName) => enterGrandprix(carName),
   onWatchAndBet: () => enterGrandprix(null),

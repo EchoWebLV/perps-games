@@ -247,7 +247,9 @@ describe("live Garage ownership reconciliation", () => {
     const parent = document.createElement("div");
     const cars = roster();
     const garage = createCarPicker(parent, cars, () => {});
-    const card = parent.querySelectorAll(".gcard")[0] as HTMLElement;
+    // grid is rarity-sorted (unlocked-before-locked within a tier): the unlocked Solana Paper leads,
+    // so DeLorean — the card whose lock state actually cycles below — is grid index 1.
+    const card = parent.querySelectorAll(".gcard")[1] as HTMLElement;
     card.getBoundingClientRect = () => ({ left: 0, top: 0, width: 100, height: 100 }) as DOMRect;
 
     garage.reconcileOwnership(() => true);
@@ -483,5 +485,49 @@ describe("hamburger product menu", () => {
     historyPanel.close();
     expect(document.activeElement).toBe(hamburger);
     parent.remove();
+  });
+});
+
+describe("garage grid rarity ordering", () => {
+  const roster = (): CarOption[] => [
+    { name: "Common Zebra", url: "/models/a.glb", rarity: 1 },
+    { name: "Legend Alpha", url: "/models/b.glb", rarity: 5 },
+    { name: "Epic Owned", url: "/models/c.glb", rarity: 4 },
+    { name: "Epic Locked", url: "/models/d.glb", rarity: 4, locked: true },
+    { name: "Legend Beta", url: "/models/e.glb", rarity: 5 },
+  ];
+
+  const gridNames = (parent: HTMLElement) =>
+    [...parent.querySelectorAll(".gcard .gtitle-name")].map((n) => n.textContent);
+
+  test("orders cards rarity DESC, then unlocked-before-locked, then A–Z", () => {
+    const parent = document.createElement("div");
+    createCarPicker(parent, roster(), () => {});
+    expect(gridNames(parent)).toEqual([
+      "Legend Alpha", "Legend Beta",   // 5★, both unlocked → alphabetical
+      "Epic Owned", "Epic Locked",     // 4★, unlocked before locked
+      "Common Zebra",                  // 1★
+    ]);
+  });
+
+  test("serial numbers follow the sorted grid order", () => {
+    const parent = document.createElement("div");
+    createCarPicker(parent, roster(), () => {});
+    const serials = [...parent.querySelectorAll(".gcard .gfoot-no")].map((n) => n.textContent);
+    expect(serials[0]).toBe("01 / 05"); // the highest-rarity card is #01
+    expect(serials[4]).toBe("05 / 05");
+  });
+
+  test("boot pick is the first drivable card in the SORTED order (highest rarity)", () => {
+    const picks: string[] = [];
+    createCarPicker(document.createElement("div"), roster(), (c) => picks.push(c.name));
+    expect(picks).toEqual(["Legend Alpha"]);
+  });
+
+  test("does not mutate the caller's roster array", () => {
+    const cars = roster();
+    const before = cars.map((c) => c.name);
+    createCarPicker(document.createElement("div"), cars, () => {});
+    expect(cars.map((c) => c.name)).toEqual(before);
   });
 });

@@ -325,6 +325,19 @@ export function createCarPicker(
 ): Garage {
   injectStyles();
 
+  // Grid order mirrors home's groupByTier convention: rarity DESCENDING (Legendary → Common),
+  // and within a tier the owned/unlocked cars lead the locked ones, then A–Z by name. A shallow
+  // copy — the same CarOption refs — so grant()/reconcileOwnership() mutations to `.locked` still
+  // reflect back to the caller's array. Every grid index below (cards, serials, first-select, the
+  // art-render queue, grant, reconcile) reads THIS array so selection/equip wiring stays aligned.
+  const sorted = [...cars].sort((a, b) => {
+    const ra = tierOf(a.rarity).id, rb = tierOf(b.rarity).id;
+    if (ra !== rb) return rb - ra;                       // rarity DESC (5★ first)
+    const la = a.locked ? 1 : 0, lb = b.locked ? 1 : 0;
+    if (la !== lb) return la - lb;                        // owned/unlocked before locked
+    return a.name.localeCompare(b.name);                 // then alphabetical
+  });
+
   const wrap = document.createElement("div");
   wrap.className = "pe";
   wrap.id = "menuwrap";
@@ -546,7 +559,7 @@ export function createCarPicker(
     card.onpointermove = null;
     card.className = "gcard" + (c.locked ? " locked" : "") + (c.comingSoon ? " soon" : "");
     const displayName = carDisplayName(c);
-    const series = `${String(i + 1).padStart(2, "0")} / ${String(cars.length).padStart(2, "0")}`;
+    const series = `${String(i + 1).padStart(2, "0")} / ${String(sorted.length).padStart(2, "0")}`;
     const rarity = c.rarity ?? 1;
     if (c.locked) {
       card.innerHTML =
@@ -586,15 +599,15 @@ export function createCarPicker(
     card.onclick = () => { if (c.locked || c.comingSoon) return; openDetail(c, i, card); };
     return { art, spinner, locked: !!c.locked };
   };
-  cars.forEach((c, i) => {
+  sorted.forEach((c, i) => {
     const card = document.createElement("div");
     cards.push(fillCard(card, c, i));
     grid.appendChild(card);
   });
   // the boot car must be PICKED, not just painted — a class-only "sel" leaves the
   // default card's ability dead until the player re-clicks it in the garage
-  const firstOpen = cars.findIndex((c) => !c.locked && !c.comingSoon);
-  if (firstOpen >= 0) select(grid.children[firstOpen] as HTMLElement, cars[firstOpen]);
+  const firstOpen = sorted.findIndex((c) => !c.locked && !c.comingSoon);
+  if (firstOpen >= 0) select(grid.children[firstOpen] as HTMLElement, sorted[firstOpen]);
 
   // ---- render each car to a STATIC image once (no persistent canvas → light + no stuck frames) ----
   let rendered = false;
@@ -617,7 +630,7 @@ export function createCarPicker(
     // ONE model in flight at a time: 13 parallel GLB decodes into this second WebGL
     // context was the mobile memory peak (tab-killed Chrome/Safari on phones). The
     // queue drains sequentially and the renderer tears down even if a load errors.
-    const queue = cars.map((c, i) => ({ c, i })).filter(({ c }) => !c.locked);
+    const queue = sorted.map((c, i) => ({ c, i })).filter(({ c }) => !c.locked);
     let disposed = false;
     const disposeRender = () => {
       if (disposed) return;
@@ -885,15 +898,15 @@ export function createCarPicker(
     setBusy(b: boolean) { busy = b; updateBusyUI(); },
     openGarage() { wrap.style.display = "block"; open(); setView("garage"); },
     grant(name: string) {
-      const idx = cars.findIndex((c) => c.name === name);
-      if (idx < 0 || !cars[idx].locked) return; // unknown car or already owned
-      cars[idx].locked = false;
-      cards[idx] = fillCard(grid.children[idx] as HTMLElement, cars[idx], idx);
+      const idx = sorted.findIndex((c) => c.name === name);
+      if (idx < 0 || !sorted[idx].locked) return; // unknown car or already owned
+      sorted[idx].locked = false;
+      cards[idx] = fillCard(grid.children[idx] as HTMLElement, sorted[idx], idx);
       invalidateArt(); renderArt(); // re-render owned card art (the newly-unlocked one now included)
     },
     reconcileOwnership(owns) {
       let changed = false;
-      cars.forEach((c, i) => {
+      sorted.forEach((c, i) => {
         const locked = poolable(c) && !owns(c.name);
         if (!!c.locked === locked) return;
         c.locked = locked;
@@ -906,8 +919,8 @@ export function createCarPicker(
       if (selectedCar?.locked) {
         selectedEl = null;
         selectedCar = null;
-        const firstOpen = cars.findIndex((c) => !c.locked && !c.comingSoon);
-        if (firstOpen >= 0) select(grid.children[firstOpen] as HTMLElement, cars[firstOpen], true);
+        const firstOpen = sorted.findIndex((c) => !c.locked && !c.comingSoon);
+        if (firstOpen >= 0) select(grid.children[firstOpen] as HTMLElement, sorted[firstOpen], true);
       }
       if (view === "garage") renderArt();
     },
