@@ -100,7 +100,7 @@ describe("Slopwheels landing shell — Midnight Drop", () => {
 
   it("carries the verbatim story copy for every section", () => {
     expect(landingHtml).toContain("Crack crates.");
-    expect(landingHtml).toContain("Collect slop.");
+    expect(landingHtml).toContain("Collect wheels.");
     expect(landingHtml).toContain("Earn your $SLOP.");
     expect(landingHtml).toContain("Not all crates hit the same.");
     expect(landingHtml).toContain("Three moves, one loop");
@@ -109,6 +109,21 @@ describe("Slopwheels landing shell — Midnight Drop", () => {
     expect(landingHtml).toContain("Perps Rider");
     expect(landingHtml).toContain("There's a real perp");
     expect(landingHtml).toContain("five rarity tiers"); // rarity survives in "How the drop works"
+  });
+
+  it("reserves 'slop' for the $SLOP token — collectibles are 'wheels'", () => {
+    // hero green line + earn headline now say "wheels"
+    expect(landingHtml).toContain("<span>Collect wheels.</span>");
+    expect(landingHtml).toContain("Collect the wheels.");
+    // no collectible-sense "slop" survives
+    expect(landingHtml).not.toContain("Collect slop");
+    expect(landingHtml).not.toContain("Collect the slop");
+    expect(landingHtml).not.toContain("Built for the slop");
+    expect(landingHtml).not.toMatch(/alt="[^"]*slopface[^"]*"/); // alt text de-slopped (the /brands/slopface.png asset path stays)
+    // brand, event name, and the token keep their exact spellings
+    expect(landingHtml).toContain("Slopwheels");
+    expect(landingHtml).toContain("The Slop Drop");
+    expect(landingHtml).toContain("$SLOP");
   });
 
   it("explains the product in plain English — no unexplained jargon", () => {
