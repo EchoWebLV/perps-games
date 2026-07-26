@@ -1,14 +1,15 @@
 //! Pure pari-mutuel math. No Anchor types — runs under plain `cargo test`.
 //!
 //! All division floors, which is house-favorable: the sum of floored payouts can
-//! only ever be <= the payable pool, never more. `payouts_never_exceed_payable`
-//! locks that property.
+//! only ever be <= the payable pool, never more.
+//! `payouts_never_exceed_payable_under_rounding` locks that property.
 
 pub const SCALE: u64 = 1_000_000;
 /// 5% rake, matching RAKE in redline3d/src/core/race-payout.ts (locked by
 /// race-payout.test.ts).
 pub const RAKE_FP: u64 = 50_000;
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Settlement {
     pub mult_fp: u64,
     pub rake: u64,
