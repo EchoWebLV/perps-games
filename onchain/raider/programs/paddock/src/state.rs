@@ -113,6 +113,15 @@ impl Race {
 
     /// Slot-keyed ring lookup: O(1), and staleness is self-evident — if
     /// `history[seq % HISTORY_LEN].seq != seq` that race has been overwritten.
+    ///
+    /// HAZARD: the ring is zero-initialised, and an all-zero `RaceResult` is
+    /// bit-identical to `{seq: 0, winner: 0, mult_fp: 0}`. So `find_result(0)`
+    /// returns `Some(..)` from the moment the account exists — before race 0 has
+    /// ever settled — and that phantom is indistinguishable from a real race 0
+    /// won by lane 0 at a zero multiplier. The mitigation is caller-side, not
+    /// here: every caller MUST reject a sentinel ticket (`race_seq == u64::MAX`)
+    /// before trusting this, and must not consult it for the live race. The
+    /// phantom pays out zero either way, but do not rely on that alone.
     pub fn find_result(&self, seq: u64) -> Option<&RaceResult> {
         let slot = (seq as usize) % HISTORY_LEN;
         let r = &self.history[slot];
