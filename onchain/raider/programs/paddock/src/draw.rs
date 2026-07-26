@@ -1,5 +1,5 @@
-//! Weighted finish-order draw. Pure — no Anchor account types, no external
-//! hash crate — so it runs under plain `cargo test`.
+//! Weighted finish-order draw. Pure — no Anchor account types — so it runs
+//! under plain `cargo test`.
 //!
 //! Weighted sampling WITHOUT replacement: each rank draws from the remaining
 //! cars in proportion to strength. Upsets fall out of the weighting, so there
@@ -11,39 +11,25 @@
 //! compiling it (`error[E0432]: unresolved import
 //! anchor_lang::solana_program::keccak`; `no keccak in solana_program`). That
 //! anchor-lang version splits `solana-program` into per-syscall micro-crates
-//! and does not re-export the deprecated `keccak` module; the replacement
-//! crate, `solana-keccak-hasher`, is not a direct dependency here. `anchor-spl`,
-//! `ephemeral-rollups-sdk`, and `magicblock-magic-program-api` (already in the
-//! dependency graph) were also checked and none re-export a reachable hash.
-//! Adding a crate means editing Cargo.toml, out of scope for this file-only
-//! change. So `next_u64` mixes the seed with SplitMix64 (Steele/Lea/Flood
-//! 2014 finalizer; the same one behind Java's `SplittableRandom`) instead of
-//! Keccak — dependency-free, deterministic, good avalanche. It is NOT a
-//! cryptographic hash: fine for turning an already-committed seed into
-//! per-rank weights, since nothing here needs collision resistance, but
-//! revisit if the seed's own unpredictability ever comes to depend on this
-//! step being hard to invert.
+//! and does not re-export the deprecated `keccak` module. The replacement,
+//! `solana-keccak-hasher`, was already present in this workspace's dependency
+//! graph (transitively, via `ephemeral-rollups-sdk` /
+//! `magicblock-magic-program-api`, both at v2.2.1 and v3.1.0 — confirmed with
+//! `cargo tree`), so it costs no new compiled weight to declare directly in
+//! Cargo.toml and use here.
 
 use crate::state::GRID;
-
-/// SplitMix64 finalizer (public-domain construction; not a CSPRNG).
-fn splitmix64(x: u64) -> u64 {
-    let x = x.wrapping_add(0x9E37_79B9_7F4A_7C15);
-    let mut z = x;
-    z = (z ^ (z >> 30)).wrapping_mul(0xBF58_476D_1CE4_E5B9);
-    z = (z ^ (z >> 27)).wrapping_mul(0x94D0_49BB_1331_11EB);
-    z ^ (z >> 31)
-}
+use solana_keccak_hasher::hashv;
 
 /// Deterministic 64-bit draw value for draw `counter`, folding in the full
-/// 32-byte `seed` (all four 8-byte words, not just a prefix).
+/// 32-byte `seed`.
 fn next_u64(seed: &[u8; 32], counter: u64) -> u64 {
-    let mut state = counter;
-    for word in seed.chunks_exact(8) {
-        let w = u64::from_le_bytes(word.try_into().expect("chunk is 8 bytes"));
-        state = splitmix64(state ^ w);
-    }
-    splitmix64(state)
+    let h = hashv(&[seed, &counter.to_le_bytes()]);
+    u64::from_le_bytes(
+        h.to_bytes()[..8]
+            .try_into()
+            .expect("keccak output is 32 bytes"),
+    )
 }
 
 /// Produce the finish order: `order[0]` is the winner, `order[7]` is last.

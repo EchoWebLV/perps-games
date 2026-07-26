@@ -21,3 +21,4 @@ anchor-spl = "0.32.1"
 ephemeral-rollups-sdk = { version = "0.15.5", features = ["anchor-compat"] }
 magicblock-magic-program-api = "0.10.1"
 bincode = "1.3"
+solana-keccak-hasher = "3.1"
