@@ -225,6 +225,44 @@ pub mod paddock {
                 // cannot be known while bets are open. Seed and phase flip land in
                 // the SAME instruction — a bet can never follow the seed.
                 let snap = price::read_fresh(&ctx.accounts.price_update, now)?;
+
+                // ---- ANTI-GRINDING GATE ----------------------------------
+                // race_crank has NO signer (the MagicBlock scheduler executes it
+                // with every meta is_signer: false), so it is permissionless:
+                // anyone may fire it, not just the validator. Without this gate
+                // the submitter effectively CHOOSES the entropy, because
+                // race_seed/draw_order are pure public functions and read_fresh
+                // accepts any price within STALE_SECS (30s) — dozens of free
+                // rolls, enough to land a chosen winner near-certainly.
+                //
+                // Constrain the seed to a price published in a narrow band at the
+                // COMMITTED lock time. The scheduled crank runs every ~1s and
+                // takes the first in-band price, so an attacker is reduced from
+                // grinding the whole staleness window to racing the honest crank
+                // within a single slot.
+                //
+                // This narrows the exposure; it does not remove it. The real fix
+                // is VRF, where the output cannot be steered by submission
+                // timing at all. Tracked as a follow-up.
+                if snap.publish_time < race.phase_ends_ts {
+                    // Price predates the committed lock instant. Wait for a
+                    // fresher one rather than seeding from a stale sample.
+                    return Ok(());
+                }
+                let gap = snap.publish_time - race.phase_ends_ts;
+                if gap > state::LOCK_WINDOW_SECS {
+                    // No price landed in the band — a feed stall, or no crank got
+                    // through in time. Slide the target to the band that actually
+                    // contains the current price instead of WIDENING the band,
+                    // since a wider band is precisely the grinding surface being
+                    // closed here. Bands tile contiguously, so every price falls
+                    // in exactly one and liveness is preserved.
+                    race.phase_ends_ts += (gap / state::LOCK_WINDOW_SECS)
+                        * state::LOCK_WINDOW_SECS;
+                    return Ok(());
+                }
+                // ----------------------------------------------------------
+
                 race.seed = draw::race_seed(race.seq, snap.price, snap.publish_time);
                 race.order = draw::draw_order(&race.seed, &race.strengths);
                 race.phase = state::PHASE_RACING;

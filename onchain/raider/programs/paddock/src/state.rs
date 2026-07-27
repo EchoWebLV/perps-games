@@ -20,6 +20,21 @@ pub const FINISH_SECS: i64 = 6;
 // Reject prices older than this, matching raider's state.rs:71.
 pub const STALE_SECS: i64 = 30;
 
+/// Width of the band, starting at the committed `phase_ends_ts`, in which the
+/// price seeding a race must have been published.
+///
+/// `race_crank` is permissionless — the MagicBlock scheduler executes it with no
+/// signer, so anyone can fire it. Since `race_seed`/`draw_order` are pure public
+/// functions, whoever fires the lock would otherwise get to pick the entropy by
+/// picking the moment, anywhere inside `STALE_SECS`. Narrowing the acceptable
+/// publish time to this band leaves an attacker racing the ~1s scheduled crank
+/// inside one slot instead of grinding ~30s of prices.
+///
+/// Narrower is safer against grinding but leans harder on the feed's publish
+/// cadence; the crank slides the band forward rather than widening it when a
+/// price misses, so liveness does not depend on getting this exactly right.
+pub const LOCK_WINDOW_SECS: i64 = 2;
+
 // Phase codes.
 pub const PHASE_MARKET: u8 = 0;
 pub const PHASE_RACING: u8 = 1;
