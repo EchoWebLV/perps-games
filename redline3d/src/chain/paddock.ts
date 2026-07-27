@@ -1,13 +1,13 @@
 // paddock.ts — client for the pari-mutuel race book. Same shape as chain-round.ts:
 // PDA derivation, BN-free snapshots, HTTP-poll sends. Betting lives entirely in the ER
 // (Race is delegated permanently; Bettor/Ticket per player), so place_bet/claim target
-// CHAIN.ER_RPC, while the one-time onboarding (join / deposit / delegate_bettor) is L1.
-// The L1 exit side (exit_bettor / withdraw) is not wired yet.
+// CHAIN.ER_RPC, while the one-time onboarding (join / deposit / delegate_bettor) and the
+// exit (exit_bettor's undelegation lands there; withdraw / unwrap run there) are L1.
 import * as anchor from "@coral-xyz/anchor";
 import { Connection, PublicKey, Transaction, ComputeBudgetProgram, SystemProgram } from "@solana/web3.js";
-import { getAssociatedTokenAddressSync, TOKEN_PROGRAM_ID } from "@solana/spl-token";
+import { createAssociatedTokenAccountInstruction, getAssociatedTokenAddressSync, TOKEN_PROGRAM_ID } from "@solana/spl-token";
 import { CHAIN } from "./config";
-import { WSOL_MINT, wsolAta, buildWrapIxs } from "./wsol";
+import { WSOL_MINT, wsolAta, buildWrapIxs, buildUnwrapIxs } from "./wsol";
 import idlJson from "./idl/paddock.json";
 import type { Paddock } from "./idl/paddock";
 import type { AnchorWalletLike } from "./anchor-wallet";
@@ -153,6 +153,28 @@ export function settleTicket(history: RaceResultSnap[], ticket: TicketSnap): big
   return payoutOf(ticket.stakes[result.winner] ?? 0n, result.multFp);
 }
 
+/** What a cash-out has to do about the ticket before it may undelegate. Pure, so the whole
+ *  decision is testable without a chain — same reason classifyBettorDelegation is a free
+ *  function rather than a branch buried in ensureBettor.
+ *
+ *  - "blocked" — the stakes are riding the race running RIGHT NOW. exit_bettor has no phase
+ *    check and would commit and undelegate happily, but place_bet already moved that money
+ *    out of bettor.balance into race.pools, and the only instruction that can pay it back is
+ *    `claim` — which runs in the ER and needs the Ticket delegated. Exiting there does not
+ *    lose the bet outright, it STRANDS it: recovery means paying for another delegate_bettor
+ *    and claiming before the result falls out of the 32-race ring. Nothing can be claimed
+ *    first either, because this race has no result yet, so the only honest answer is to wait.
+ *  - "claim" — an unclaimed WINNING ticket from a past race. `withdraw` pays out
+ *    bettor.balance and nothing else, so exiting without claiming hands the player their
+ *    deposit back and silently leaves the winnings in the ring to expire.
+ *  - "exit" — a fresh, losing or aged-out ticket: it settles to 0, so it buys no transaction. */
+export type ExitAction = "exit" | "claim" | "blocked";
+
+export function classifyExit(race: RaceSnap, ticket: TicketSnap): ExitAction {
+  if (ticket.raceSeq !== null && ticket.raceSeq === race.seq && ticket.stakes.some((s) => s > 0n)) return "blocked";
+  return settleTicket(race.history, ticket) > 0n ? "claim" : "exit";
+}
+
 /** The program's error codes, in declaration order from PaddockError (lib.rs). */
 export const PADDOCK_ERROR_NAMES: Record<number, string> = {
   6000: "StalePrice", 6001: "UntrustedFeed", 6002: "BadMint", 6003: "NotOwner",
@@ -189,10 +211,24 @@ export class BettorTornError extends Error {
   constructor(message: string) { super(message); this.name = "BettorTornError"; }
 }
 
+/** Cash-out refused: this ticket's stakes are riding the race running RIGHT NOW, whose
+ *  result does not exist yet. See the comment on cashOut for why this refuses instead of
+ *  exiting anyway. */
+export class LiveStakesError extends Error {
+  readonly code = "live_stakes" as const;
+  constructor(message: string) { super(message); this.name = "LiveStakesError"; }
+}
+
 /** The one-time onboarding path, step by step. `delegate` → `confirm` is the ~25×1s owner
  *  poll the spec calls out: the first bet is slow and every bet after is instant, so that
  *  wait has to read as progress, never as a frozen button. */
 export type OnboardStep = "join" | "wrap" | "deposit" | "delegate" | "confirm" | "ready";
+
+/** The exit path, step by step — same contract as OnboardStep and for the same reason.
+ *  `exit` → `undelegate` is the round trip back: the ER transaction confirms at once, then
+ *  the delegation program hands the pair back on L1 seconds later. A cash-out that reports
+ *  nothing across that gap is the exact frozen-button failure OnboardStep exists to avoid. */
+export type CashOutStep = "claim" | "exit" | "undelegate" | "withdraw" | "unwrap" | "done";
 
 export interface PaddockBook {
   address: string;
@@ -209,6 +245,10 @@ export interface PaddockBook {
   ensureBettor(amount: number | bigint, onStep?: (step: OnboardStep) => void): Promise<void>;
   placeBet(carId: number, amount: number | bigint): Promise<void>;
   claim(): Promise<void>;
+  /** The whole way out: exit_bettor (ER → L1) → withdraw → unwrap, each step skipped if it
+   *  is already done, reporting through `onStep`. Returns the base-unit amount the vault
+   *  actually paid back. Throws LiveStakesError if the ticket is riding the live race. */
+  cashOut(onStep?: (step: CashOutStep) => void): Promise<bigint>;
 }
 
 export function createPaddockBook(deps: { wallet: AnchorWalletLike; mint: PublicKey }): PaddockBook {
@@ -243,15 +283,17 @@ export function createPaddockBook(deps: { wallet: AnchorWalletLike; mint: Public
     throw new Error(`tx ${sig} not confirmed within 60s`);
   }
 
-  // The delegation CPI lands asynchronously: the tx confirms, then the delegation program
-  // takes ownership. Poll the pair's L1 owners — same shape and cost as chain-round.ts:221.
-  async function pollBettorOwner(target: PublicKey, tries: number, gapMs: number) {
+  // Delegation and UNdelegation both land asynchronously: the tx confirms, then the
+  // delegation program hands ownership over. Poll the pair's L1 owners — same shape and
+  // cost as chain-round.ts:221, and the same function serves both directions (delegate
+  // targets DELEGATION_PROGRAM, exit targets the paddock program).
+  async function pollBettorOwner(target: PublicKey, label: string, tries: number, gapMs: number) {
     for (let i = 0; i < tries; i++) {
       const infos = await Promise.all([pdas.bettor, pdas.ticket].map((p) => baseConn.getAccountInfo(p)));
       if (infos.every((info) => info && info.owner.equals(target))) return;
       await sleep(gapMs);
     }
-    throw new Error(`delegate_bettor: Bettor/Ticket did not reach owner ${target.toBase58()} in time`);
+    throw new Error(`${label}: Bettor/Ticket did not reach owner ${target.toBase58()} in time`);
   }
 
   async function delegationState(): Promise<DelegateState> {
@@ -262,29 +304,38 @@ export function createPaddockBook(deps: { wallet: AnchorWalletLike; mint: Public
     return classifyBettorDelegation({ bettor: bi?.owner ?? null, ticket: ti?.owner ?? null });
   }
 
+  async function raceSnapshot(): Promise<RaceSnap | null> {
+    const r = await programER.account.race.fetchNullable(pdas.race);
+    return r ? raceToSnap(r) : null;
+  }
+
+  async function bettorSnapshot(): Promise<BettorSnap | null> {
+    const [b, t] = await Promise.all([
+      programER.account.bettor.fetchNullable(pdas.bettor),
+      programER.account.ticket.fetchNullable(pdas.ticket),
+    ]);
+    if (!b) return null;
+    // Bettor and Ticket are created together by `join` and delegated together, so a
+    // missing Ticket alongside a live Bettor is a torn account pair, not a real state —
+    // report it as the empty ticket it would be rather than inventing stakes.
+    const snap = t ? ticketToSnap(t) : { stakes: new Array<bigint>(GRID).fill(0n), raceSeq: null };
+    return { balance: big(b.balance), ...snap };
+  }
+
+  async function claim(): Promise<void> {
+    await send(erConn, programER.methods.claim().accountsPartial({
+      payer: owner, mint, race: pdas.race, bettor: pdas.bettor, ticket: pdas.ticket,
+    }));
+  }
+
   return {
     address: owner.toBase58(),
     pdas,
 
-    async raceSnapshot() {
-      const r = await programER.account.race.fetchNullable(pdas.race);
-      return r ? raceToSnap(r) : null;
-    },
-
-    async bettorSnapshot() {
-      const [b, t] = await Promise.all([
-        programER.account.bettor.fetchNullable(pdas.bettor),
-        programER.account.ticket.fetchNullable(pdas.ticket),
-      ]);
-      if (!b) return null;
-      // Bettor and Ticket are created together by `join` and delegated together, so a
-      // missing Ticket alongside a live Bettor is a torn account pair, not a real state —
-      // report it as the empty ticket it would be rather than inventing stakes.
-      const snap = t ? ticketToSnap(t) : { stakes: new Array<bigint>(GRID).fill(0n), raceSeq: null };
-      return { balance: big(b.balance), ...snap };
-    },
-
+    raceSnapshot,
+    bettorSnapshot,
     delegationState,
+    claim,
 
     async ensureBettor(amount, onStep) {
       const step = (s: OnboardStep) => onStep?.(s);
@@ -345,7 +396,7 @@ export function createPaddockBook(deps: { wallet: AnchorWalletLike; mint: Public
         payer: owner, mint, book: pdas.book, bettor: pdas.bettor, ticket: pdas.ticket,
       }).remainingAccounts([{ pubkey: new PublicKey(book.validator), isSigner: false, isWritable: false }]), 400_000);
       step("confirm");
-      await pollBettorOwner(CHAIN.DELEGATION_PROGRAM, 25, 1000);
+      await pollBettorOwner(CHAIN.DELEGATION_PROGRAM, "delegate_bettor", 25, 1000);
       step("ready");
     },
 
@@ -362,10 +413,72 @@ export function createPaddockBook(deps: { wallet: AnchorWalletLike; mint: Public
       }
     },
 
-    async claim() {
-      await send(erConn, programER.methods.claim().accountsPartial({
-        payer: owner, mint, race: pdas.race, bettor: pdas.bettor, ticket: pdas.ticket,
-      }));
+    // The exit is ensureBettor run backwards, ordering trap included. `deposit` writes the
+    // L1 Bettor so it must run BEFORE the delegation; `withdraw` writes that SAME L1 Bettor,
+    // so it must run AFTER the undelegation. While the delegation program owns the account
+    // anchor's owner check rejects every L1 write, so exit_bettor is not a tidy-up that
+    // happens to precede withdraw — it is the instruction that makes withdraw legal at all.
+    async cashOut(onStep) {
+      const step = (s: CashOutStep) => onStep?.(s);
+      const state = await delegationState();
+
+      // --- 1. exit_bettor — commit + undelegate the pair back to L1 (an ER instruction) ---
+      // "busy" comes down this path deliberately: exit is the ONLY instruction that can
+      // reunite a torn pair, and it is precisely what BettorTornError points the player at.
+      if (state !== "fresh") {
+        // classifyExit carries the whole rationale; this is the money-preserving half of the
+        // exit and it reads the ER, because the delegated pair's live state lives there.
+        const [race, mine] = await Promise.all([raceSnapshot(), bettorSnapshot()]);
+        const action = race && mine ? classifyExit(race, mine) : "exit";
+        if (action === "blocked") {
+          throw new LiveStakesError("This race is still running — your stakes stay in the pool until it settles.");
+        }
+        if (action === "claim") {
+          step("claim");
+          await claim();
+        }
+        step("exit");
+        await send(erConn, programER.methods.exitBettor().accountsPartial({
+          payer: owner, mint, bettor: pdas.bettor, ticket: pdas.ticket,
+        }));
+        // Undelegation is asynchronous exactly like the delegation on the way in, and the ER
+        // keeps serving a stale copy of an undelegated account (chain-round.ts:157) — so the
+        // L1 owner is the only sound signal that the accounts came home.
+        step("undelegate");
+        await pollBettorOwner(CHAIN.PADDOCK_PROGRAM_ID, "exit_bettor", 40, 2000);
+      }
+
+      // --- 2. withdraw — vault ATA → the player's ATA, against the restored L1 balance ---
+      const acct = await program.account.bettor.fetchNullable(pdas.bettor);
+      const balance = acct ? big(acct.balance) : 0n;
+      if (balance > 0n) {
+        // withdraw's `owner_token` must already exist. Onboarding creates it while wrapping,
+        // but a player who has cashed out before had it CLOSED by the unwrap below, so the
+        // second cash-out has to put it back.
+        const wd = program.methods.withdraw(new BN(balance.toString())).accountsPartial({
+          owner, mint, bettor: pdas.bettor, ownerToken: ownerAta,
+          vaultAuthority: pdas.vault, vaultToken: pdas.vaultToken, tokenProgram: TOKEN_PROGRAM_ID,
+        });
+        const ata = await baseConn.getAccountInfo(ownerAta);
+        step("withdraw");
+        await send(baseConn, ata ? wd : wd.preInstructions([
+          createAssociatedTokenAccountInstruction(owner, ownerAta, owner, mint),
+        ]));
+      }
+
+      // --- 3. unwrap — wSOL is native-wrap (core/stake-currency.ts), so the money is only
+      // really OUT once the ATA is closed and its lamports land in the player's own account.
+      // The close returns the withdrawn amount AND the ATA's rent in one move. Any other mint
+      // is spl-transfer: the tokens are already where they belong, sitting in the owner's ATA.
+      if (mint.equals(WSOL_MINT)) {
+        const ata = await baseConn.getAccountInfo(wsolAta(owner));
+        if (ata) {
+          step("unwrap");
+          await send(baseConn, { async transaction() { return new Transaction().add(...buildUnwrapIxs({ owner })); } });
+        }
+      }
+      step("done");
+      return balance;
     },
   };
 }

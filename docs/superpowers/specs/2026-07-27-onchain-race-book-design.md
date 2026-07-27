@@ -193,6 +193,17 @@ Chosen over ephemeral-vrf because:
   `BASE_RPC`). Whether ephemeral-vrf can be consumed in-ER is **unverified**. Making it
   load-bearing in a continuous 60-second cycle means either verifying that or leaving the
   rollup every single race.
+  > **REFUTED 2026-07-27.** In-ER VRF **is** available, and this was settled by observation
+  > rather than argument. `DEFAULT_EPHEMERAL_QUEUE` (`5hBR571xnXppuCPveTrctfTU7tJLSN94nq7kv7FRK5Tc`)
+  > is delegated on L1 and live + writable inside the rollup on **both** devnet and mainnet,
+  > owned in-ER by `Vrf1RNUjXmQGjmQrQLvJHs9SNkvDJEsRVFPkfSQUwGz`. It is **co-located with
+  > paddock**: `devnet.magicblock.app` identifies as `MAS1Dt9q…`, paddock's Race PDA has
+  > delegation-record `authority = MAS1Dt9q…`, the queue's is the any-validator sentinel, and
+  > both resolve in one `getMultipleAccounts` against that ER. Real in-rollup request→callback
+  > pairs were observed (`RequestRandomness` at slot 502946869 → `ConsumeRandomness` at
+  > 502946871); across ~1000 recent queue transactions, 119 pairs at a **median 2-slot / 0-second**
+  > delta. `SlotHashes` exists in the ER, and `fees.rs` exempts the ephemeral queue, so in-ER
+  > randomness is **free**.
 - Consistency: raider already settles leveraged positions on that exact price at a moment
   nobody controls. If it is trustworthy enough for that, it is trustworthy enough to pick
   a race winner.
@@ -203,6 +214,41 @@ unsteerable. Mitigation is in risk 3 below.
 
 **Swap path.** If VRF is wanted later, only the seed-production branch of `race_crank`
 changes — `order[8]` and everything downstream are untouched.
+
+> **ALSO REFUTED 2026-07-27.** `order[8]` and downstream really are untouched, but "only the
+> seed-production branch changes" badly understates it. The swap is a **phase-machine
+> change**, for two reasons found by reading source:
+>
+> 1. **The VRF request needs a signer; `race_crank` has none.** `RequestRandomness` demands
+>    `payer` as a writable signer and `program_identity` as a signer, while the scheduled
+>    task payload is documented as *"Unsigned instructions to execute when triggered"* and
+>    paddock's scheduled metas are both `is_signer: false`. The escape is `invoke_signed`
+>    with a paddock PDA passed as **both** `payer` and `program_identity` (duplicate metas
+>    union their privileges; the queue's fee exemption means the payer is never debited).
+>    **That is an inference, not a verified fact — it is the gate on this whole swap.** If it
+>    fails, the request moves to a separate signed permissionless instruction, which hands
+>    liveness to a keeper and gives back the property proved in `paddock-crank-liveness.ts`.
+> 2. **Randomness is asynchronous; the lock is synchronous.** Needs a new `PHASE_LOCKING`
+>    (value 3): the crank closes betting and requests, and a `callback_race_seed` signed by
+>    the VRF identity writes `seed`, computes `order`, and flips to `PHASE_RACING`. Costs
+>    1–3 ER slots — invisible in a 61s cycle.
+>
+> **The obvious design is fatally wrong and must be named:** *do not request a phase early.*
+> Randomness landing during `PHASE_MARKET` publishes `race.seed` while bets are still open,
+> and `draw_order` is a pure public function — strictly worse than the hole it replaces.
+>
+> No new `Race` field is needed, which matters: `Race::SIZE` is exactly 778 with no slack and
+> the account is already delegated, so a realloc would mean undelegate → realloc → redelegate.
+> Use `phase == PHASE_LOCKING && seed == [0;32]` as the request-outstanding marker, and bind
+> the callback to a race via `race.seq` in `callback_args`. `schedule_race_crank` hardcodes
+> the crank's metas, so it must be **re-armed** with the wider list.
+>
+> **Trust moves, it does not vanish.** The VRF proof means the oracle cannot *bias* the
+> number — but it can *withhold* it. That is a liveness dependency paddock does not have
+> today, so `PHASE_LOCKING` needs a timeout that **re-requests** rather than falling back to
+> the price. **Build hazard:** enable VRF by depending on `ephemeral-vrf-sdk` directly, as
+> `crate-roll` does — turning on `ephemeral-rollups-sdk/vrf` flips the proc-macro's path
+> emission for every co-built program and would break `crate-roll`.
 
 ## Client changes
 

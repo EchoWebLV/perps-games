@@ -17,9 +17,9 @@ import { portToAnchorWallet } from "./anchor-wallet";
 import {
   createPaddockBook, findResult, settlePool, settleTicket,
   GRID, PHASE_MARKET, PHASE_RACING, PHASE_SETTLED,
-  type OnboardStep, type PaddockBook, type RaceSnap,
+  type CashOutStep, type OnboardStep, type PaddockBook, type RaceSnap,
 } from "./paddock";
-import { buildUnwrapIxs } from "./wsol";
+import { buildUnwrapIxs, wsolAta } from "./wsol";
 import { CHAIN } from "./config";
 
 const RUN = process.env.PADDOCK_DEVNET === "1";
@@ -41,7 +41,23 @@ const STAKE = 10_000n;             // 0.00001 SOL per slot — proving mechanics
 const DEPOSIT = 120_000n;          // covers all 8 slots (80_000) with change left over
 const FUND_LAMPORTS = 0.07 * LAMPORTS_PER_SOL; // rent for Bettor + Ticket + the delegation CPI
 
+/** One signature at the default lamports-per-signature. Every send() below carries exactly
+ *  one signer, so an L1 transaction costs this and nothing else — the round-trip ledger is
+ *  reconciled against a count of transactions, never against an eyeballed balance. */
+const TX_FEE = 5_000;
+
 const sortedGrid = () => Array.from({ length: GRID }, (_, i) => i);
+
+/** Balance snapshots taken AT each step boundary. The callback is sync, so the read is fired
+ *  and its promise parked: `mark.get(s)` is the balance as the step `s` began, which is what
+ *  brackets one transaction between two adjacent steps. */
+function markBalances<S extends string>(conn: Connection, who: Keypair, into: S[]) {
+  const marks = new Map<S, Promise<number>>();
+  return {
+    marks,
+    on: (s: S) => { into.push(s); marks.set(s, conn.getBalance(who.publicKey)); log(`  ${s}`); },
+  };
+}
 
 /** A book bound to a throwaway keypair. Reads need no funds and never sign. */
 function bookFor(kp: Keypair): PaddockBook {
@@ -119,6 +135,18 @@ describe.skipIf(!RUN)("paddock client vs the live devnet book", () => {
     log(`crank moved it unattended -> seq ${moved.seq} phase ${moved.phase}`);
   }, 180_000);
 
+  it("cashes a never-onboarded wallet out for free — every step already done", async () => {
+    // The skip-or-run contract, proven where it is cheapest to prove: a wallet with no
+    // Bettor, no balance and no wSOL ATA has nothing to exit, nothing to withdraw and
+    // nothing to unwrap, so cashOut must send ZERO transactions. It is funded with zero
+    // lamports, so any transaction at all would fail rather than quietly succeed.
+    const book = bookFor(Keypair.generate());
+    expect(await book.delegationState()).toBe("fresh");
+    const steps: CashOutStep[] = [];
+    expect(await book.cashOut((s) => steps.push(s))).toBe(0n);
+    expect(steps).toEqual(["done"]);
+  }, 60_000);
+
   it("onboards a fresh wallet, bets into the shared pool, and claims the mirrored payout", async () => {
     const RPC = process.env.BASE_RPC || CHAIN.BASE_RPC;
     const conn = new Connection(RPC, { commitment: "confirmed" });
@@ -137,9 +165,15 @@ describe.skipIf(!RUN)("paddock client vs the live devnet book", () => {
       // --- 1. onboarding: join -> wrap -> deposit -> delegate_bettor, all on L1 ---
       expect(await book.delegationState()).toBe("fresh");
       const steps: OnboardStep[] = [];
-      await book.ensureBettor(DEPOSIT, (s) => { steps.push(s); log(`onboard: ${s}`); });
+      const onboard = markBalances<OnboardStep>(conn, player, steps);
+      log("onboard:");
+      await book.ensureBettor(DEPOSIT, onboard.on);
       expect(steps).toEqual(["join", "wrap", "deposit", "delegate", "confirm", "ready"]);
       expect(await book.delegationState()).toBe("reuse");
+      // What the delegation CPI itself cost, bracketed by the two steps around it: the
+      // `delegate` mark is taken before the transaction is built, `confirm` right after it
+      // confirmed. Whether ANY of this comes back at exit is measured in section 6.
+      const delegateSpend = (await onboard.marks.get("delegate")!) - (await onboard.marks.get("confirm")!);
 
       const joined = await book.bettorSnapshot();
       expect(joined).not.toBeNull();
@@ -230,9 +264,84 @@ describe.skipIf(!RUN)("paddock client vs the live devnet book", () => {
       expect(postClaim!.stakes).toEqual(new Array(GRID).fill(0n));
       log(`claimed ${owed} (mirror ${owed}); balance ${preClaim!.balance} -> ${postClaim!.balance}`);
       log(`net across the race: staked ${STAKE * BigInt(GRID)}, returned ${owed}`);
+
+      // --- 6. cash out: exit_bettor -> withdraw -> unwrap, money back as native SOL ---
+      // The mirror of section 1, and the half that was missing: until this ran, SOL went into
+      // the book and nothing came out.
+      const solPreCash = await conn.getBalance(player.publicKey);
+      // The wSOL ATA holds only its rent right now — the wrap put DEPOSIT in and the deposit
+      // moved all of it to the vault. Closing it at the end therefore returns this rent PLUS
+      // whatever withdraw pays in, which is why it has to be captured before the close.
+      const ataPreCash = (await conn.getAccountInfo(wsolAta(player.publicKey)))!.lamports;
+      expect(ataPreCash).toBe(await conn.getMinimumBalanceForRentExemption(165)); // SPL token account
+      const cashSteps: CashOutStep[] = [];
+      const cash = markBalances<CashOutStep>(conn, player, cashSteps);
+      log("cashout:");
+      const withdrawn = await book.cashOut(cash.on);
+
+      // No `claim` step: section 4 already claimed, so classifyExit sees the u64::MAX sentinel
+      // and spends no transaction on it.
+      expect(cashSteps).toEqual(["exit", "undelegate", "withdraw", "unwrap", "done"]);
+      expect(withdrawn).toBe(postClaim!.balance); // the WHOLE book balance came out
+      expect(await book.delegationState()).toBe("fresh");
+      // The pair really came home: program-owned on L1 again, and the L1 Bettor — the copy
+      // `withdraw` actually wrote — reads back at zero.
+      const [l1Bettor, l1Ticket] = await Promise.all(
+        [book.pdas.bettor, book.pdas.ticket].map((p) => conn.getAccountInfo(p)));
+      expect(l1Bettor!.owner.equals(CHAIN.PADDOCK_PROGRAM_ID)).toBe(true);
+      expect(l1Ticket!.owner.equals(CHAIN.PADDOCK_PROGRAM_ID)).toBe(true);
+      expect(l1Bettor!.data.readBigUInt64LE(8 + 32 + 32)).toBe(0n); // 8 disc, owner, mint, then balance
+      // The wSOL ATA is gone, so the money is native SOL in the player's own account, not a
+      // token balance they would need another transaction to reach.
+      expect(await conn.getAccountInfo(wsolAta(player.publicKey))).toBeNull();
+
+      // What the exit itself moved on L1. exit_bettor is an ER transaction; this is the only
+      // way to see whether the delegation program hands any of `delegateSpend` back.
+      const solPostUndelegate = await cash.marks.get("withdraw")!;
+      const exitRefund = solPostUndelegate - solPreCash;
+      const solPostCash = await conn.getBalance(player.publicKey);
+
+      // --- 7. the ledger, to the lamport. Two L1 transactions inside cashOut (withdraw and
+      // unwrap); the exit is an ER transaction and pays no L1 signature fee.
+      expect(solPostCash).toBe(solPreCash + exitRefund + ataPreCash + Number(withdrawn) - 2 * TX_FEE);
+      // The exit is not merely a permission change: the delegation program CLOSES the four
+      // buffer/record PDAs delegate_bettor paid rent for and refunds most of it. Verified on
+      // devnet 2026-07-27 by reading the ProcessUndelegation transaction: it closed 6_779_040
+      // of rent and split it 6_179_040 to the player / 540_000 to the validator's fee vault /
+      // 60_000 to the delegation program's. Assert the SHAPE — a real, partial refund — not
+      // MagicBlock's fee schedule, which is theirs to change.
+      expect(exitRefund).toBeGreaterThan(0);
+      expect(exitRefund).toBeLessThan(delegateSpend);
+      // The only money genuinely lost at the book is the stake the pool did not pay back.
+      // Covering all 8 slots makes that the rake and nothing else — 4_000 on 80_000 staked in
+      // the observed run — but it is asserted off the OBSERVED payout so a stranger betting
+      // into the same race shifts the number instead of failing the test.
+      const strandedRent = l1Bettor!.lamports + l1Ticket!.lamports;
+      const lostAtTheBook = Number(DEPOSIT) - Number(withdrawn);
+      expect(BigInt(lostAtTheBook)).toBe(STAKE * BigInt(GRID) - owed);
+      // And the whole run: six L1 transactions (join, wrap, deposit, delegate, withdraw,
+      // unwrap), the rent still locked in the two PDAs, the delegation overhead net of the
+      // refund, and the stake that genuinely went to the pool and the rake.
+      expect(FUND_LAMPORTS - solPostCash).toBe(
+        strandedRent + (delegateSpend - TX_FEE - exitRefund) + 6 * TX_FEE + lostAtTheBook);
+      // The rent is the program's own account sizes, not a magic number: Bettor::SIZE 81,
+      // Ticket::SIZE 113 (state.rs). Neither is reclaimed — paddock has no close instruction,
+      // so this is what every player permanently leaves behind to hold a seat at the book.
+      const [bettorRent, ticketRent] = await Promise.all(
+        [81, 113].map((n) => conn.getMinimumBalanceForRentExemption(n)));
+      expect(strandedRent).toBe(bettorRent + ticketRent);
+
+      log("");
+      log(`LEDGER (lamports), funded ${FUND_LAMPORTS}:`);
+      log(`  delegate_bettor cost ${delegateSpend}  ->  exit refunded ${exitRefund}`);
+      log(`  stranded PDA rent    ${strandedRent} (bettor ${bettorRent} + ticket ${ticketRent})`);
+      log(`  L1 fees              ${6 * TX_FEE} over 6 transactions`);
+      log(`  lost at the book     ${lostAtTheBook} (deposited ${DEPOSIT}, withdrew ${withdrawn})`);
+      log(`  SOL ${solPreCash} -> ${solPostCash}; net for the run ${solPostCash - FUND_LAMPORTS}`);
     } finally {
-      // Never strand wrapped SOL or faucet funds in a throwaway wallet. The Bettor's play
-      // balance stays in the vault: exit_bettor/withdraw are not wired into this client yet.
+      // Never strand wrapped SOL or faucet funds in a throwaway wallet. On the happy path
+      // cashOut has already closed the ATA and emptied the vault balance; this is the FAILURE
+      // path's sweep, for a run that threw before section 6.
       const ixs = buildUnwrapIxs({ owner: player.publicKey });
       await sendAndConfirmTransaction(conn, new Transaction().add(...ixs), [player], { commitment: "confirmed" })
         .catch(() => undefined); // no wSOL ATA (onboarding failed early) — nothing to close

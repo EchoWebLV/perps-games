@@ -2,10 +2,10 @@ import { describe, it, expect } from "vitest";
 import { PublicKey } from "@solana/web3.js";
 import { getAssociatedTokenAddressSync } from "@solana/spl-token";
 import {
-  derivePaddockPdas, classifyBettorDelegation, raceToSnap, ticketToSnap, findResult, settleTicket,
+  derivePaddockPdas, classifyBettorDelegation, classifyExit, raceToSnap, ticketToSnap, findResult, settleTicket,
   settlePool, payoutOf, paddockErrorName, PADDOCK_ERROR_NAMES,
   TICKET_NO_RACE, SCALE, RAKE_FP, GRID, HISTORY_LEN, PHASE_MARKET, PHASE_RACING, PHASE_SETTLED,
-  type RaceResultSnap,
+  type RaceResultSnap, type RaceSnap, type TicketSnap,
 } from "./paddock";
 import { CHAIN } from "./config";
 import idl from "./idl/paddock.json";
@@ -18,6 +18,15 @@ const MINT = new PublicKey("So11111111111111111111111111111111111111112");
  *  which is precisely the phantom the find_result HAZARD note warns about. */
 const zeroRing = (): RaceResultSnap[] =>
   Array.from({ length: HISTORY_LEN }, () => ({ seq: 0n, winner: 0, multFp: 0n }));
+
+type IdlAccount = { name: string; pda?: { seeds: { kind: string; path?: string }[] } };
+const idlAccounts = (ix: string): IdlAccount[] =>
+  (idl.instructions.find((i) => i.name === ix)?.accounts ?? []) as unknown as IdlAccount[];
+const accountNames = (ix: string) => idlAccounts(ix).map((a) => a.name);
+/** The seed sources anchor recorded for one account, in order — `const` for literal seeds,
+ *  otherwise the account the seed is read from. This is what proves who a PDA is derived FOR. */
+const seedPaths = (ix: string, account: string): string[] =>
+  (idlAccounts(ix).find((a) => a.name === account)?.pda?.seeds ?? []).map((s) => s.path ?? "const");
 
 describe("paddock IDL", () => {
   it("is the deployed program ABI with the book's instructions", () => {
@@ -37,6 +46,25 @@ describe("paddock IDL", () => {
 
   it("names every PaddockError at the code anchor assigns it", () => {
     for (const e of idl.errors) expect(PADDOCK_ERROR_NAMES[e.code]).toBe(e.name);
+  });
+
+  it("derives BOTH of exit_bettor's accounts from the SIGNER — the 2ae4b8d access-control fix", () => {
+    // The earlier shape seeded `ticket` from `ticket.owner`, which authorises nothing: every
+    // legitimate ticket satisfies its own self-referential seeds, so an attacker could pair
+    // their bettor with a VICTIM's ticket and undelegate it, splitting the co-delegated pair
+    // and blocking the victim's place_bet. If the program ever regresses to that, the IDL
+    // says so here — the client's accountsPartial({payer, bettor, ticket}) rides on this.
+    expect(seedPaths("exit_bettor", "bettor")).toEqual(["const", "payer", "mint"]);
+    expect(seedPaths("exit_bettor", "ticket")).toEqual(["const", "payer", "mint"]);
+  });
+
+  it("gives withdraw the same signer-derived Bettor deposit uses, plus the vault pair", () => {
+    // withdraw writes the L1 Bettor, which is exactly why it cannot run while the account is
+    // delegated — the ordering trap cashOut exists to get right.
+    expect(seedPaths("withdraw", "bettor")).toEqual(["const", "owner", "mint"]);
+    expect(seedPaths("deposit", "bettor")).toEqual(["const", "owner", "mint"]);
+    expect(accountNames("withdraw")).toEqual(accountNames("deposit"));
+    expect(accountNames("withdraw")).toContain("vault_token"); // the ATA that custodies stakes
   });
 });
 
@@ -215,6 +243,73 @@ describe("the u64::MAX ticket sentinel", () => {
     const stale = ticketToSnap({ raceSeq: 7, stakes: [0n, 0n, 0n, 300_000n, 0n, 0n, 0n, 0n] });
     expect(findResult(ring, stale.raceSeq)).toBeNull();
     expect(settleTicket(ring, stale)).toBe(0n);
+  });
+});
+
+describe("classifyExit — what a cash-out owes the ticket before it undelegates", () => {
+  /** A race carrying `history`, with everything cashOut does not read left at its zero. */
+  const raceAt = (seq: bigint, history: RaceResultSnap[], phase = PHASE_MARKET): RaceSnap => ({
+    mint: MINT.toBase58(), seq, phase, phaseEndsTs: 0,
+    entrants: [0, 1, 2, 3, 4, 5, 6, 7], strengths: new Array(GRID).fill(1000),
+    pools: new Array(GRID).fill(0n), total: 0n, order: new Array(GRID).fill(0),
+    seed: new Uint8Array(32), feed: CHAIN.BTC_FEED.toBase58(), rakeAccrued: 0n, history,
+  });
+  const ticketOn = (raceSeq: bigint | null, slot: number, stake: bigint): TicketSnap => {
+    const stakes = new Array<bigint>(GRID).fill(0n);
+    stakes[slot] = stake;
+    return { raceSeq, stakes };
+  };
+  const winRing = (seq: bigint, winner: number, multFp: bigint) => {
+    const ring = zeroRing();
+    ring[Number(seq % BigInt(HISTORY_LEN))] = { seq, winner, multFp };
+    return ring;
+  };
+
+  it("blocks while the ticket's stakes are riding the race that is running right now", () => {
+    // The stakes have already left bettor.balance for race.pools, and only `claim` (ER, needs
+    // the Ticket delegated) can bring them back — so exiting strands them.
+    expect(classifyExit(raceAt(41n, zeroRing()), ticketOn(41n, 3, 10_000n))).toBe("blocked");
+  });
+
+  it("still blocks in SETTLED, when the ring already holds THIS race's winning result", () => {
+    // The sharp edge: push_result writes the ring at RACING->SETTLED, so between the settle
+    // and the roll a live winning ticket looks claimable to settleTicket — but `claim` rejects
+    // it with WrongPhase (race_seq != race.seq). The live check therefore has to come FIRST,
+    // or a cash-out in that ~6s window sends a transaction that can only fail.
+    const ring = winRing(41n, 3, 3_166_666n);
+    expect(settleTicket(ring, ticketOn(41n, 3, 300_000n))).toBeGreaterThan(0n);
+    expect(classifyExit(raceAt(41n, ring, PHASE_SETTLED), ticketOn(41n, 3, 300_000n))).toBe("blocked");
+  });
+
+  it("claims first when a settled winning ticket is still unclaimed", () => {
+    // withdraw pays out bettor.balance and nothing else, so exiting without this hands the
+    // player their deposit back and leaves the winnings in the ring to expire.
+    const ring = winRing(40n, 3, 3_166_666n);
+    expect(classifyExit(raceAt(41n, ring), ticketOn(40n, 3, 300_000n))).toBe("claim");
+  });
+
+  it("exits straight away on a losing ticket — a claim that pays 0 buys nothing", () => {
+    const ring = winRing(40n, 3, 3_166_666n);
+    expect(classifyExit(raceAt(41n, ring), ticketOn(40n, 0, 300_000n))).toBe("exit");
+  });
+
+  it("exits straight away on a winning ticket whose race aged out of the 32-slot ring", () => {
+    // seq 8 and seq 40 share slot 8; once 40 lands, 8's result is gone and nothing can pay it.
+    const ring = winRing(40n, 3, 3_166_666n);
+    expect(findResult(ring, 8n)).toBeNull();
+    expect(classifyExit(raceAt(41n, ring), ticketOn(8n, 3, 300_000n))).toBe("exit");
+  });
+
+  it("exits straight away on the u64::MAX sentinel — fresh, or claimed already", () => {
+    expect(classifyExit(raceAt(41n, zeroRing()), ticketOn(null, 0, 0n))).toBe("exit");
+    // And the phantom race 0 cannot drag a sentinel ticket into a claim, even at seq 0.
+    expect(classifyExit(raceAt(0n, zeroRing()), ticketOn(null, 0, 9_999n))).toBe("exit");
+  });
+
+  it("does not block on the live race when every stake is zero", () => {
+    // Only a 0-amount bet can produce this, but the guard is about MONEY at risk, not about
+    // which seq the ticket happens to name.
+    expect(classifyExit(raceAt(41n, zeroRing()), ticketOn(41n, 0, 0n))).toBe("exit");
   });
 });
 
