@@ -1,8 +1,14 @@
 use anchor_lang::prelude::*;
+use anchor_lang::solana_program::instruction::{AccountMeta, Instruction};
+use anchor_lang::solana_program::program::invoke_signed;
 use anchor_spl::associated_token::AssociatedToken;
 use anchor_spl::token::{self, Mint, Token, TokenAccount, Transfer};
-use ephemeral_rollups_sdk::anchor::delegate;
+use ephemeral_rollups_sdk::anchor::{commit, delegate};
+use ephemeral_rollups_sdk::consts::MAGIC_PROGRAM_ID;
 use ephemeral_rollups_sdk::cpi::DelegateConfig;
+use ephemeral_rollups_sdk::ephem::{commit_accounts, commit_and_undelegate_accounts};
+use magicblock_magic_program_api::args::ScheduleTaskArgs;
+use magicblock_magic_program_api::instruction::MagicBlockInstruction;
 
 declare_id!("3wz2kwDSGZEfdwing4FucjveWunnpiwoYAnKUAbKRh2S");
 
@@ -320,6 +326,131 @@ pub mod paddock {
         }
         Ok(())
     }
+
+    /// Explicit payout for a player who does not bet again. The common path is
+    /// covered by the auto-settle inside `place_bet`.
+    pub fn claim(ctx: Context<Claim>) -> Result<()> {
+        let race = &ctx.accounts.race;
+        let ticket = &mut ctx.accounts.ticket;
+        let bettor = &mut ctx.accounts.bettor;
+
+        require!(ticket.race_seq != u64::MAX, PaddockError::NoSuchResult);
+        require!(ticket.race_seq != race.seq, PaddockError::WrongPhase);
+
+        let credit = settle_ticket(race, ticket);
+        ticket.stakes = [0; state::GRID];
+        ticket.race_seq = u64::MAX;
+        if credit > 0 {
+            bettor.balance = bettor
+                .balance
+                .checked_add(credit)
+                .ok_or(PaddockError::MathOverflow)?;
+        }
+        Ok(())
+    }
+
+    /// Land the Race's ER state on L1 WITHOUT undelegating. Permissionless.
+    ///
+    /// Race is permanently delegated, so raider's commit-once-at-session-end
+    /// model does not apply — without a bare commit, the history ring and the
+    /// rake counter would never reach the base layer at all.
+    ///
+    /// `rake_accrued` is deliberately NOT zeroed here. It is a CUMULATIVE
+    /// counter. The tokens never leave the vault, so zeroing it would erase the
+    /// house's claim with nothing credited anywhere, and L1 cannot write it back
+    /// down (Book is not delegated, Race is). The L1 sweep that credits
+    /// Book.balance against a high-water mark is a separate follow-up.
+    ///
+    /// Doubles as the audit trail: each commit publishes the history ring to L1.
+    pub fn commit_race(ctx: Context<CommitRace>) -> Result<()> {
+        commit_accounts(
+            &ctx.accounts.payer,
+            vec![&ctx.accounts.race.to_account_info()],
+            &ctx.accounts.magic_context,
+            &ctx.accounts.magic_program,
+            None,
+        )?;
+        Ok(())
+    }
+
+    /// Commit + undelegate ONE player's Bettor/Ticket so they can withdraw on L1.
+    pub fn exit_bettor(ctx: Context<ExitBettor>) -> Result<()> {
+        require_keys_eq!(
+            ctx.accounts.payer.key(),
+            ctx.accounts.bettor.owner,
+            PaddockError::NotOwner
+        );
+        commit_and_undelegate_accounts(
+            &ctx.accounts.payer,
+            vec![
+                &ctx.accounts.bettor.to_account_info(),
+                &ctx.accounts.ticket.to_account_info(),
+            ],
+            &ctx.accounts.magic_context,
+            &ctx.accounts.magic_program,
+            None,
+        )?;
+        Ok(())
+    }
+
+    /// Arm the native crank: the validator auto-invokes `race_crank` every
+    /// `execution_interval_millis` ms for `iterations` runs, with zero client tx.
+    /// Byte-identical in construction to raider's `schedule_tick`
+    /// (programs/raider/src/lib.rs:614) — only the scheduled inner ix differs.
+    pub fn schedule_race_crank(
+        ctx: Context<ScheduleRaceCrank>,
+        task_id: i64,
+        execution_interval_millis: i64,
+        iterations: i64,
+    ) -> Result<()> {
+        let feed = ctx.accounts.race.feed;
+
+        let crank_ix = Instruction {
+            program_id: crate::ID,
+            accounts: vec![
+                AccountMeta::new(ctx.accounts.race.key(), false),
+                AccountMeta::new_readonly(feed, false),
+            ],
+            data: anchor_lang::InstructionData::data(&crate::instruction::RaceCrank {}),
+        };
+
+        let ix_data = bincode::serialize(&MagicBlockInstruction::ScheduleTask(ScheduleTaskArgs {
+            task_id,
+            execution_interval_millis,
+            iterations,
+            instructions: vec![crank_ix],
+        }))
+        .map_err(|err| {
+            msg!("ERROR: failed to serialize ScheduleTask args {:?}", err);
+            ProgramError::InvalidArgument
+        })?;
+
+        let schedule_ix = Instruction::new_with_bytes(
+            MAGIC_PROGRAM_ID,
+            &ix_data,
+            vec![
+                AccountMeta::new(ctx.accounts.payer.key(), true),
+                AccountMeta::new(ctx.accounts.race.key(), false),
+                AccountMeta::new_readonly(feed, false),
+            ],
+        );
+
+        invoke_signed(
+            &schedule_ix,
+            &[
+                ctx.accounts.payer.to_account_info(),
+                ctx.accounts.race.to_account_info(),
+                ctx.accounts.price_update.to_account_info(),
+            ],
+            &[],
+        )?;
+
+        msg!(
+            "scheduled race_crank task {} interval {}ms x{}",
+            task_id, execution_interval_millis, iterations
+        );
+        Ok(())
+    }
 }
 
 #[derive(Accounts)]
@@ -475,6 +606,65 @@ pub struct RaceCrank<'info> {
     #[account(mut, seeds = [RACE_SEED, race.mint.as_ref()], bump = race.bump)]
     pub race: Account<'info, Race>,
     /// CHECK: must equal race.feed. Authenticated by price::read_fresh.
+    #[account(constraint = price_update.key() == race.feed @ PaddockError::UntrustedFeed)]
+    pub price_update: AccountInfo<'info>,
+}
+
+#[derive(Accounts)]
+pub struct Claim<'info> {
+    #[account(mut)]
+    pub payer: Signer<'info>,
+    pub mint: Account<'info, Mint>,
+    #[account(seeds = [RACE_SEED, mint.key().as_ref()], bump = race.bump)]
+    pub race: Account<'info, Race>,
+    #[account(mut,
+        constraint = bettor.owner == payer.key() @ PaddockError::NotOwner,
+        seeds = [BETTOR_SEED, payer.key().as_ref(), mint.key().as_ref()],
+        bump = bettor.bump)]
+    pub bettor: Account<'info, Bettor>,
+    #[account(mut,
+        constraint = ticket.owner == payer.key() @ PaddockError::NotOwner,
+        seeds = [TICKET_SEED, payer.key().as_ref(), mint.key().as_ref()],
+        bump = ticket.bump)]
+    pub ticket: Account<'info, Ticket>,
+}
+
+#[commit]
+#[derive(Accounts)]
+pub struct CommitRace<'info> {
+    #[account(mut)]
+    pub payer: Signer<'info>,
+    #[account(mut, seeds = [RACE_SEED, race.mint.as_ref()], bump = race.bump)]
+    pub race: Account<'info, Race>,
+}
+
+#[commit]
+#[derive(Accounts)]
+pub struct ExitBettor<'info> {
+    #[account(mut)]
+    pub payer: Signer<'info>,
+    pub mint: Account<'info, Mint>,
+    #[account(mut, seeds = [BETTOR_SEED, bettor.owner.as_ref(), mint.key().as_ref()],
+              bump = bettor.bump)]
+    pub bettor: Account<'info, Bettor>,
+    #[account(mut, seeds = [TICKET_SEED, ticket.owner.as_ref(), mint.key().as_ref()],
+              bump = ticket.bump)]
+    pub ticket: Account<'info, Ticket>,
+}
+
+// `race` is typed and `mut` for the same reason raider's ScheduleTick does it
+// (programs/raider/src/lib.rs:1436): the scheduled writable meta must inherit
+// write privilege or the scheduler rejects the task with PrivilegeEscalation.
+#[derive(Accounts)]
+pub struct ScheduleRaceCrank<'info> {
+    /// CHECK: the Magic program, used for the ScheduleTask CPI
+    #[account(address = MAGIC_PROGRAM_ID)]
+    pub magic_program: UncheckedAccount<'info>,
+    #[account(mut)]
+    pub payer: Signer<'info>,
+    #[account(mut, seeds = [RACE_SEED, race.mint.as_ref()], bump = race.bump)]
+    pub race: Account<'info, Race>,
+    /// CHECK: must equal race.feed; forwarded into the scheduled metas.
     #[account(constraint = price_update.key() == race.feed @ PaddockError::UntrustedFeed)]
     pub price_update: AccountInfo<'info>,
 }
