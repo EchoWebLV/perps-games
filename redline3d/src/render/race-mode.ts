@@ -711,6 +711,10 @@ export function createRaceGame(opts: RaceGameOptions): RaceGame {
       pendingCar: book.pendingBet(),
       settle: book.lastSettle(),
       credit: book.creditNote(),
+      // Optional on the interface, so a book without them (the local sim has no account to open and
+      // nothing to claim later) simply reports nothing and the panel paints nothing.
+      onboarding: book.onboarding?.() ?? null,
+      claim: book.claimWindow?.() ?? null,
     });
   }
 

@@ -10,8 +10,9 @@ import { describe, expect, it, vi } from "vitest";
 // files, including outside this package). node:fs is not available here — the main vitest config runs
 // through vite-plugin-node-polyfills, which stubs it.
 import paddockStateRs from "../../../onchain/raider/programs/paddock/src/state.rs?raw";
-import { chainBookSource, createChainBookSource, CHAIN_PHASE_SECS, type PaddockBookReader } from "./race-book-source";
-import { GRID, PHASE_MARKET, PHASE_RACING, PHASE_SETTLED, payoutOf, settlePool, TICKET_NO_RACE, type BettorSnap, type RaceSnap } from "../chain/paddock";
+import paddockLibRs from "../../../onchain/raider/programs/paddock/src/lib.rs?raw";
+import { chainBookSource, createChainBookSource, CHAIN_PHASE_SECS, ONBOARD_STEPS, type PaddockBookReader } from "./race-book-source";
+import { GRID, HISTORY_LEN, PHASE_MARKET, PHASE_RACING, PHASE_SETTLED, payoutOf, settlePool, TICKET_NO_RACE, type BettorSnap, type OnboardStep, type RaceResultSnap, type RaceSnap } from "../chain/paddock";
 
 // 1 display unit = 1e7 lamports (stake-currency: 9 decimals, 2 display decimals) — so 100 units is
 // 1 wSOL, and the panel's $1/$5/$20 chips are 0.01/0.05/0.20 SOL bets.
@@ -40,6 +41,25 @@ function raceSnap(over: Partial<RaceSnap> = {}): RaceSnap {
     ...over,
   };
 }
+
+/** A zero-initialised 32-slot ring with `entries` written into their seq-keyed slots — exactly what
+ *  `Race::push_result` does. Note slot 0 of an untouched ring reads as a real `{seq: 0}` result: that
+ *  is the phantom race 0 the HAZARD note warns about, so nothing below uses seq 0. */
+function ring(entries: RaceResultSnap[] = []): RaceResultSnap[] {
+  const h: RaceResultSnap[] = Array.from({ length: HISTORY_LEN }, () => ({ seq: 0n, winner: 0, multFp: 0n }));
+  for (const e of entries) h[Number(e.seq % BigInt(HISTORY_LEN))] = e;
+  return h;
+}
+
+/** Ticket stakes: `amount` on one SLOT, nothing anywhere else. */
+function stakesOn(slot: number, amount: bigint): bigint[] {
+  const s = new Array<bigint>(GRID).fill(0n);
+  s[slot] = amount;
+  return s;
+}
+
+/** Let a fire-and-forget bet path (onboarding → send → refresh) run to completion. */
+const settleAsync = async () => { for (let i = 0; i < 12; i++) await new Promise((r) => setTimeout(r, 0)); };
 
 function fakeClient(state: { race: RaceSnap | null; bettor: BettorSnap | null }) {
   const placed: Array<{ slot: number; amount: bigint }> = [];
@@ -281,6 +301,179 @@ describe("chainBookSource", () => {
     const live = fakeClient({ race: raceSnap(), bettor: null });
     const ok = await createChainBookSource(live.client);
     expect(ok.phase()).toBe("MARKET"); // primed: the host's very first frame already agrees with the chain
+  });
+
+  it("reports no onboarding at all without a wallet behind it — a read-only book cannot open one", async () => {
+    const state = { race: raceSnap(), bettor: null };
+    const book = chainBookSource(fakeClient(state).client);
+    await book.refresh();
+    expect(book.onboarding!()).toBeNull();
+  });
+
+  it("runs the one-time onboarding before the first bet, reporting each step's place in the sequence", async () => {
+    const state = { race: raceSnap(), bettor: null };
+    const { client, placed } = fakeClient(state);
+    const trace: string[] = [];
+    const amounts: bigint[] = [];
+    // The steps a FIRST-TIME wSOL wallet actually runs. `ensureBettor` emits only what it runs, which
+    // is the whole reason `index` is a position in the fixed sequence and not a count of steps taken.
+    const steps: OnboardStep[] = ["join", "wrap", "deposit", "delegate", "confirm", "ready"];
+    const book = chainBookSource(client, {
+      onboard: async (amount, onStep) => {
+        amounts.push(amount);
+        for (const s of steps) {
+          onStep(s);
+          const o = book.onboarding!()!;
+          trace.push(`${o.step}:${o.index}/${o.of}`);
+          await Promise.resolve();
+        }
+      },
+    });
+    await book.refresh();
+    expect(book.onboarding!()).toEqual({ step: null, index: 0, of: ONBOARD_STEPS.length, error: null });
+
+    book.placeBet(2, 5);                 // car 2 is standing in SLOT 1
+    expect(book.pendingBet()).toBe(2);   // the panel's amber "···" holds for the WHOLE sequence
+    await settleAsync();
+
+    expect(trace).toEqual(["join:1/5", "wrap:2/5", "deposit:3/5", "delegate:4/5", "confirm:5/5", "ready:5/5"]);
+    expect(amounts).toEqual([5n * UNIT]); // the bet's own amount, in base units — the book invents no deposit size
+    expect(placed).toEqual([{ slot: 1, amount: 5n * UNIT }]); // and only THEN does the bet go out
+    expect(book.pendingBet()).toBeNull();
+    expect(book.onboarding!()).toEqual({ step: null, index: 0, of: ONBOARD_STEPS.length, error: null });
+  });
+
+  it("a returning wallet skips to the end of the sequence rather than counting from one", async () => {
+    // `ensureBettor` returns `ready` immediately when the Bettor/Ticket pair is already delegated.
+    // The counter jumping to the end is the honest report of that: no step was needed.
+    const state = { race: raceSnap(), bettor: null };
+    const { client } = fakeClient(state);
+    const book = chainBookSource(client, { onboard: async (_a, onStep) => { onStep("ready"); } });
+    await book.refresh();
+    book.placeBet(2, 5);
+    await settleAsync();
+    expect(book.onboarding!()).toEqual({ step: null, index: 0, of: 5, error: null }); // cleared once the bet landed
+  });
+
+  it("keeps what stopped the first-bet path on screen, in the client's own words", async () => {
+    const state = { race: raceSnap(), bettor: null };
+    const { client, placed } = fakeClient(state);
+    const warned: string[] = [];
+    let onboardingWorks = false;
+    const book = chainBookSource(client, {
+      onError: (w) => warned.push(w),
+      onboard: async (_a, onStep) => {
+        onStep("delegate");
+        if (!onboardingWorks) throw new Error("delegate_bettor: Bettor/Ticket did not reach owner in time");
+        onStep("ready");
+      },
+    });
+    await book.refresh();
+    book.placeBet(2, 5);
+    await settleAsync();
+    expect(placed).toEqual([]);                       // the bet never went out
+    expect(book.pendingBet()).toBeNull();             // and the button is free again, not stuck
+    expect(warned).toEqual(["placeBet"]);
+    expect(book.onboarding!()!.error).toContain("did not reach owner");
+
+    // the SEND failing after a clean onboarding lands on the same line — the send is what it was for
+    onboardingWorks = true;
+    client.placeBet = async () => { throw new Error("Betting just closed for this race — the next one is seconds away."); };
+    book.placeBet(2, 5);
+    await settleAsync();
+    expect(book.onboarding!()!.error).toContain("Betting just closed");
+
+    // …and the next market clears it, since the chain opens one every MARKET_SECS
+    book.openMarket({ seed: 1, strengths: [], rng: () => 0 });
+    expect(book.onboarding!()!.error).toBeNull();
+  });
+
+  it("never blanks an onboarding that is still running when the chain rolls the market", async () => {
+    const state = { race: raceSnap(), bettor: null };
+    const { client } = fakeClient(state);
+    let held: (() => void) | null = null;
+    const book = chainBookSource(client, {
+      onboard: (_a, onStep) => new Promise<void>((res) => { onStep("confirm"); held = res; }),
+    });
+    await book.refresh();
+    book.placeBet(2, 5);
+    await settleAsync();
+    expect(book.onboarding!()!.step).toBe("confirm");
+    // the ~25×1s owner poll outlives a 15s market: the chain rolls into the next one mid-onboarding
+    book.openMarket({ seed: 1, strengths: [], rng: () => 0 });
+    expect(book.onboarding!()!.step).toBe("confirm"); // still running → still on screen
+    held!();
+    await settleAsync();
+  });
+
+  it("ONBOARD_STEPS names steps the program (or the wSOL path) actually has", () => {
+    // Cross-source guard, the CHAIN_PHASE_SECS idiom again: three of the five steps are instructions
+    // in the program and have to keep existing under those names. `wrap` and `confirm` are client-side
+    // (the native wSOL wrap, and the owner poll after the delegation CPI), so they are not asserted here.
+    for (const [step, fn] of [["join", "join"], ["deposit", "deposit"], ["delegate", "delegate_bettor"]] as const) {
+      expect(ONBOARD_STEPS).toContain(step);
+      expect(paddockLibRs).toContain(`pub fn ${fn}(`);
+    }
+    expect(ONBOARD_STEPS).not.toContain("ready"); // the end of the work, not a piece of it
+  });
+
+  it("says nothing about a claim when there is nothing to say", async () => {
+    const pools = [10n, 30n, 0n, 0n, 60n, 0n, 0n, 0n].map((n) => n * UNIT);
+    const state = {
+      race: raceSnap({ seq: 18n, pools, total: 100n * UNIT, history: ring([{ seq: 17n, winner: 0, multFp: 9_500_000n }]) }),
+      bettor: { balance: 10n * UNIT, stakes: stakesOn(0, 4n * UNIT), raceSeq: null } as BettorSnap,
+    };
+    const book = chainBookSource(fakeClient(state).client);
+    await book.refresh();
+    expect(book.claimWindow!()).toBeNull();                       // the u64::MAX sentinel: no ticket at all
+
+    state.bettor = { balance: 10n * UNIT, stakes: stakesOn(0, 4n * UNIT), raceSeq: 18n };
+    await book.refresh();
+    expect(book.claimWindow!()).toBeNull();                       // the race ON SCREEN — undecided, not unclaimed
+
+    // a settled ticket that backed a loser: the ring HAS the result, it is just worth nothing
+    state.race = raceSnap({ seq: 18n, history: ring([{ seq: 17n, winner: 3, multFp: 9_500_000n }]) });
+    state.bettor = { balance: 10n * UNIT, stakes: stakesOn(0, 4n * UNIT), raceSeq: 17n };
+    await book.refresh();
+    expect(book.claimWindow!()).toBeNull();
+  });
+
+  it("reports what an older ticket is owed and how much of the 32-race window is left", async () => {
+    const multFp = 9_500_000n;                                    // 9.5x, as settle_pool would price it
+    const stakes = stakesOn(0, 4n * UNIT);                        // 4 units on SLOT 0, which won race 17
+    const state = {
+      race: raceSnap({ seq: 20n, history: ring([{ seq: 17n, winner: 0, multFp }]) }),
+      bettor: { balance: 10n * UNIT, stakes, raceSeq: 17n } as BettorSnap,
+    };
+    const book = chainBookSource(fakeClient(state).client);
+    await book.refresh();
+    const c = book.claimWindow!()!;
+    expect(c.raceSeq).toBe(17);
+    expect(c.amount).toBeCloseTo(Number(payoutOf(4n * UNIT, multFp)) / 1e7, 9); // 38 units
+    expect(c.windowRaces).toBe(HISTORY_LEN);
+    expect(c.racesLeft).toBe(HISTORY_LEN - 3);                    // race 20 is live; the slot dies at 17+32
+    expect(c.expired).toBe(false);
+
+    // one race off the edge: the ring slot now carries seq 49, so 17's result is simply gone
+    state.race = raceSnap({ seq: 50n, history: ring([{ seq: 49n, winner: 0, multFp }]) });
+    await book.refresh();
+    expect(book.claimWindow!()).toEqual({ raceSeq: 17, amount: 0, racesLeft: 0, windowRaces: HISTORY_LEN, expired: true });
+  });
+
+  it("an aged-out ticket does not FAIL on-chain — it silently stops being worth anything", () => {
+    // The premise the claim-window copy rests on, read off the program rather than assumed. `claim`
+    // raises NoSuchResult (6008) only for the u64::MAX sentinel, and WrongPhase for the live race.
+    // Past the ring there is no error at all: settle_ticket finds no result, credits zero, and claim
+    // zeroes the stakes and resets the ticket anyway. place_bet's auto-settle does exactly the same.
+    // So this is not an error the UI can catch — the amount just stops existing, which is why the
+    // panel has to say it before it happens.
+    const claimBody = /pub fn claim\(([\s\S]*?)\n    \}/.exec(paddockLibRs)?.[1] ?? "";
+    expect(claimBody).toContain("require!(ticket.race_seq != u64::MAX, PaddockError::NoSuchResult)");
+    expect(claimBody).toContain("require!(ticket.race_seq != race.seq, PaddockError::WrongPhase)");
+    expect(claimBody).toContain("let credit = settle_ticket(race, ticket);");
+    expect(claimBody).not.toMatch(/NoSuchResult[\s\S]*settle_ticket[\s\S]*NoSuchResult/); // no second guard after the lookup
+    // and the lookup itself is the ring test, keyed by seq — nothing else decides staleness
+    expect(paddockLibRs).toContain("let Some(result) = race.find_result(ticket.race_seq) else {");
   });
 
   it("polls on the WALL clock, not on the host's sim dt", async () => {

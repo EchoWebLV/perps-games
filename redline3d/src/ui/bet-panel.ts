@@ -12,7 +12,7 @@
 // the chain's starting-slot permutation before anything reaches here — see the note at the top of
 // race-book-source.ts for why that matters.
 import { onTap } from "./tap";
-import type { BookSettle } from "../render/race-book-source";
+import type { BookClaim, BookOnboarding, BookSettle } from "../render/race-book-source";
 
 export interface BetCar { id: number; name: string; color: string }
 export type BetPhase = "LOADING" | "MARKET" | "COUNTDOWN" | "RACING" | "FINISH";
@@ -31,6 +31,10 @@ export interface BetRenderCtx {
   pendingCar: number | null;     // a bet in flight on this car (the ER is fast, not instant)
   settle: BookSettle | null;     // the settled result, painted in the FINISH card
   credit: string | null;         // non-bet winnings line (owner podium), painted alongside it
+  // The one-time account opening behind a first bet, or null when the book has none. Non-null is ALSO
+  // what says a bet can be funded past the balance on screen — see the BET-button gate in render().
+  onboarding: BookOnboarding | null;
+  claim: BookClaim | null;       // an older ticket still holding money, and what is left of its window
 }
 
 export interface BetPanel {
@@ -46,6 +50,60 @@ export interface BetPanel {
 }
 
 const STAKES = [1, 5, 20];
+
+/** How few races have to be left on a ticket's claim window before the notice reads as a warning
+ *  rather than as a fact. Emphasis only — nothing is capped, blocked or expired by this number; the
+ *  ring in the program is what decides that, and `claim.expired` is what reports it. */
+const CLAIM_WARN_RACES = 8;
+
+/** What each onboarding step is DOING, in the player's terms. `ensureBettor`'s vocabulary is the
+ *  program's (join / wrap / deposit / delegate / confirm / ready); this is the same sequence said out
+ *  loud. No step names a duration — the sequence is the progress, the clock is not ours to promise. */
+const ONBOARD_LABEL: Record<NonNullable<BookOnboarding["step"]>, string> = {
+  join: "Opening your account at the book",
+  wrap: "Wrapping SOL to stake",
+  deposit: "Funding your book balance",
+  delegate: "Delegating your seat to the rollup",
+  confirm: "Waiting for the rollup to take your seat",
+  ready: "Seat ready — sending your bet",
+};
+
+/** A one-block notice: an uppercase head and a line of plain text under it, or null for "say
+ *  nothing". Both notices the panel paints are this shape, so one renderer covers them. */
+interface Note { cls: string; head: string; body: string }
+
+/** The first-bet path, as a line the player can read. Idle and silent onboarding paint nothing —
+ *  a book that CAN onboard but is not is not news. */
+function onboardNote(o: BookOnboarding | null): Note | null {
+  if (!o) return null;
+  if (o.error) return { cls: "stopped", head: "Setup stopped", body: o.error };
+  if (!o.step) return null;
+  return {
+    cls: "",
+    head: `One-time setup · ${o.index} of ${o.of}`,
+    body: `${ONBOARD_LABEL[o.step]} — later bets skip all of this.`,
+  };
+}
+
+/** An older ticket, and whether its result is still on the chain to be paid from. */
+function claimNote(c: BookClaim | null): Note | null {
+  if (!c) return null;
+  if (c.expired) {
+    return {
+      cls: "gone",
+      head: `Race #${c.raceSeq} can no longer pay`,
+      body: `Past the ${c.windowRaces}-race claim window — that result is no longer on the chain.`,
+    };
+  }
+  const closing = c.racesLeft <= CLAIM_WARN_RACES;
+  return {
+    cls: closing ? "warn" : "",
+    head: `$${c.amount.toFixed(2)} to collect · race #${c.raceSeq}`,
+    body: closing
+      ? `Claim window closing — ${c.racesLeft} of ${c.windowRaces} races left. Your next bet collects it.`
+      : `Your next bet collects it — ${c.racesLeft} of ${c.windowRaces} races left.`,
+  };
+}
 
 const STYLE_ID = "bet-panel-style";
 // Two skins in one sheet. CLASSIC (base, unscoped) is the original dark-neon look. COMIC rules are
@@ -80,6 +138,21 @@ const CSS = `
 .bp-slipline{font-size:11px;color:#c9d6ff;display:flex;justify-content:space-between;}
 .bp-slipline em{color:#41d67f;font-style:normal;font-weight:700;}
 .bp-empty{font-size:11px;color:#6b74a6;}
+/* notices: the one-time setup running behind a first bet, and an older ticket's claim window. Same
+   block twice, recoloured by the modifier class — amber = working / closing, red = stopped / gone. */
+.bp-note{margin-top:10px;border-radius:8px;padding:7px 9px;border:1px solid rgba(255,255,255,.08);background:rgba(255,255,255,.03);}
+.bp-note b{display:block;font-size:10px;font-weight:700;letter-spacing:.07em;text-transform:uppercase;margin-bottom:2px;}
+.bp-note span{display:block;font-size:11px;line-height:1.42;color:#8b95c9;}
+.bp-onboard{border-color:rgba(255,209,102,.5);background:rgba(255,209,102,.1);}
+.bp-onboard b{color:#ffd166;}
+.bp-onboard.stopped{border-color:rgba(255,107,139,.55);background:rgba(255,107,139,.1);}
+.bp-onboard.stopped b{color:#ff6b8b;}
+.bp-claim{border-color:rgba(65,214,127,.45);background:rgba(65,214,127,.08);}
+.bp-claim b{color:#41d67f;}
+.bp-claim.warn{border-color:rgba(255,209,102,.55);background:rgba(255,209,102,.1);}
+.bp-claim.warn b{color:#ffd166;}
+.bp-claim.gone{border-color:rgba(255,107,139,.5);background:rgba(255,107,139,.08);}
+.bp-claim.gone b{color:#ff6b8b;}
 .bp-foot{display:flex;justify-content:space-between;align-items:center;margin-top:12px;}
 .bp-wallet{font-size:13px;font-weight:700;}
 .bp-wallet span{color:#41d67f;font-variant-numeric:tabular-nums;}
@@ -122,6 +195,19 @@ body.toon-ui .bp-slip{margin-top:8px;border-top:2px dashed #4a3670;}
 body.toon-ui .bp-slipline{color:#e6ddff;}
 body.toon-ui .bp-slipline em{color:#3ff08a;font-weight:800;}
 body.toon-ui .bp-empty{color:#8a7db3;}
+body.toon-ui .bp-note{border:2px solid #0a0812;border-radius:9px;box-shadow:2px 2px 0 rgba(8,5,16,.7);background:#31204d;}
+body.toon-ui .bp-note b{font-weight:800;}
+body.toon-ui .bp-note span{color:#e6ddff;}
+body.toon-ui .bp-onboard{background:#4a3a12;}
+body.toon-ui .bp-onboard b{color:#ffd166;}
+body.toon-ui .bp-onboard.stopped{background:#4a1a29;}
+body.toon-ui .bp-onboard.stopped b{color:#ff8fa3;}
+body.toon-ui .bp-claim{background:#16402a;}
+body.toon-ui .bp-claim b{color:#3ff08a;}
+body.toon-ui .bp-claim.warn{background:#4a3a12;}
+body.toon-ui .bp-claim.warn b{color:#ffd166;}
+body.toon-ui .bp-claim.gone{background:#4a1a29;}
+body.toon-ui .bp-claim.gone b{color:#ff8fa3;}
 body.toon-ui .bp-wallet{font-weight:800;}
 body.toon-ui .bp-wallet span{color:#3ff08a;}
 body.toon-ui .bp-skip{font-weight:800;letter-spacing:.08em;color:#e6ddff;background:#31204d;border:2px solid #0a0812;border-radius:9px;box-shadow:2px 2px 0 rgba(8,5,16,.8);}
@@ -157,6 +243,8 @@ export function createBetPanel(parent: HTMLElement = document.body): BetPanel {
       <div class="bp-rows"></div>
       <div class="bp-stakes"></div>
       <div class="bp-slip"></div>
+      <div class="bp-note bp-onboard" style="display:none"><b></b><span></span></div>
+      <div class="bp-note bp-claim" style="display:none"><b></b><span></span></div>
       <div class="bp-foot">
         <span class="bp-wallet">Wallet <span>$100.00</span></span>
         <span class="bp-skip">SKIP →</span>
@@ -180,6 +268,8 @@ export function createBetPanel(parent: HTMLElement = document.body): BetPanel {
   const rowsEl = root.querySelector(".bp-rows") as HTMLElement;
   const stakesEl = root.querySelector(".bp-stakes") as HTMLElement;
   const slipEl = root.querySelector(".bp-slip") as HTMLElement;
+  const onboardEl = root.querySelector(".bp-onboard") as HTMLElement;
+  const claimEl = root.querySelector(".bp-claim") as HTMLElement;
   const walletEl = root.querySelector(".bp-wallet span") as HTMLElement;
   const skipEl = root.querySelector(".bp-skip") as HTMLElement;
   const stripEl = root.querySelector(".bp-strip") as HTMLElement;
@@ -212,6 +302,16 @@ export function createBetPanel(parent: HTMLElement = document.body): BetPanel {
   }
   function refreshStakeSel() {
     stakesEl.querySelectorAll(".bp-chip").forEach((c, i) => c.classList.toggle("sel", STAKES[i] === selStake));
+  }
+
+  /** Paint one notice block, or hide it. `textContent` throughout: a note's body can be a chain
+   *  error's message, which is text from outside this file and never markup. */
+  function paintNote(el: HTMLElement, base: string, note: Note | null) {
+    el.style.display = note ? "block" : "none";
+    if (!note) return;
+    el.className = `bp-note ${base}${note.cls ? ` ${note.cls}` : ""}`;
+    (el.firstElementChild as HTMLElement).textContent = note.head;
+    (el.lastElementChild as HTMLElement).textContent = note.body;
   }
 
   return {
@@ -253,6 +353,10 @@ export function createBetPanel(parent: HTMLElement = document.body): BetPanel {
       // the whole point of a pari-mutuel market and why both are printed off one figure.
       const T = ctx.total || 1;
       const pending = ctx.pendingCar !== null;
+      // The balance on screen is the whole story ONLY when the book cannot fund past it. Where there
+      // is onboarding, the first bet is the thing that OPENS the account that balance comes from — so
+      // a zero balance must not be what stops the tap that would create it.
+      const canFund = ctx.wallet >= selStake || ctx.onboarding !== null;
 
       if (showPanel) {
         timerEl.textContent = `OPEN ${Math.max(0, Math.ceil(ctx.marketRemaining))}s`;
@@ -265,7 +369,7 @@ export function createBetPanel(parent: HTMLElement = document.body): BetPanel {
           // One bet in flight at a time — the book serialises them, so every button locks while any
           // send is outstanding and the one being sent says so instead of going grey and silent.
           const inFlight = ctx.pendingCar === i;
-          r.bet.disabled = pending || ctx.wallet < selStake;
+          r.bet.disabled = pending || !canFund;
           r.bet.classList.toggle("pending", inFlight);
           r.bet.textContent = inFlight ? "···" : "BET";
         });
@@ -288,6 +392,11 @@ export function createBetPanel(parent: HTMLElement = document.body): BetPanel {
             slipEl.appendChild(line);
           });
         }
+
+        // Below the slip: what the book is doing behind a first bet, and anything an older ticket is
+        // still owed. Either can be absent; both are the book's facts, never the panel's.
+        paintNote(onboardEl, "bp-onboard", onboardNote(ctx.onboarding));
+        paintNote(claimEl, "bp-claim", claimNote(ctx.claim));
       }
 
       if (stripEl.style.display === "flex") {

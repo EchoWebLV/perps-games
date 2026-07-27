@@ -27,6 +27,8 @@ function ctx(over: Partial<BetRenderCtx> = {}): BetRenderCtx {
     pendingCar: null,
     settle: null,
     credit: null,
+    onboarding: null,
+    claim: null,
     ...over,
     // `total`/`mults` follow `pools` unless the caller overrode them explicitly
     ...(over.total !== undefined ? { total: over.total } : {}),
@@ -134,6 +136,115 @@ describe("betPanel pending state", () => {
     expect(btns[1].textContent).toBe("BET");
     expect(btns[1].classList.contains("pending")).toBe(false);
     expect(btns[1].disabled).toBe(false);
+    panel.dispose();
+  });
+});
+
+describe("betPanel onboarding notice", () => {
+  const onboardEl = (el: HTMLElement) => el.querySelector(".bp-onboard") as HTMLElement;
+
+  it("says nothing at all when the book has no onboarding, or has one that is idle", () => {
+    const { el, panel } = mount();
+    panel.render(ctx());
+    expect(onboardEl(el).style.display).toBe("none");
+    // a book that CAN onboard but is not doing so is not news
+    panel.render(ctx({ onboarding: { step: null, index: 0, of: 5, error: null } }));
+    expect(onboardEl(el).style.display).toBe("none");
+    panel.dispose();
+  });
+
+  it("names the step and its place in the sequence, and says the wait is one-time", () => {
+    const { el, panel } = mount();
+    panel.render(ctx({ onboarding: { step: "delegate", index: 4, of: 5, error: null } }));
+    const text = onboardEl(el).textContent ?? "";
+    expect(onboardEl(el).style.display).toBe("block");
+    expect(text).toContain("4 of 5");
+    expect(text).toContain("Delegating your seat");
+    expect(text).toContain("later bets skip all of this");
+    // no wall-clock promise anywhere in the copy — the step is the progress, the duration is not ours
+    expect(text).not.toMatch(/second|minute|~|\d+s\b/i);
+
+    panel.render(ctx({ onboarding: { step: "confirm", index: 5, of: 5, error: null } }));
+    expect(onboardEl(el).textContent).toContain("5 of 5");
+    panel.dispose();
+  });
+
+  it("shows what stopped it, in the book's own words", () => {
+    const { el, panel } = mount();
+    panel.render(ctx({
+      onboarding: { step: null, index: 0, of: 5, error: "Betting just closed for this race — the next one is seconds away." },
+    }));
+    expect(onboardEl(el).className).toContain("stopped");
+    expect(onboardEl(el).textContent).toContain("Betting just closed for this race");
+    panel.dispose();
+  });
+
+  it("lets a wallet with no balance yet take its first bet — onboarding is what funds it", () => {
+    const { el, panel } = mount();
+    // no onboarding: the balance IS the whole story, exactly as before
+    panel.render(ctx({ wallet: 0 }));
+    expect(betButtons(el).every((b) => b.disabled)).toBe(true);
+    // with onboarding available, a zero balance must not be what stops the tap that opens the account
+    panel.render(ctx({ wallet: 0, onboarding: { step: null, index: 0, of: 5, error: null } }));
+    expect(betButtons(el).some((b) => b.disabled)).toBe(false);
+
+    const seen: Array<[number, number]> = [];
+    panel.onBet((carId, amount) => seen.push([carId, amount]));
+    betButtons(el)[1].click();
+    expect(seen).toEqual([[1, 5]]);
+    panel.dispose();
+  });
+
+  it("still greys every row while the bet the onboarding is for is in flight", () => {
+    const { el, panel } = mount();
+    panel.render(ctx({ wallet: 0, pendingCar: 2, onboarding: { step: "join", index: 1, of: 5, error: null } }));
+    const btns = betButtons(el);
+    expect(btns.every((b) => b.disabled)).toBe(true);
+    expect(btns[2].textContent).toBe("···");           // the same amber in-flight beat as any other bet
+    expect(btns[2].classList.contains("pending")).toBe(true);
+    panel.dispose();
+  });
+});
+
+describe("betPanel claim window", () => {
+  const claimEl = (el: HTMLElement) => el.querySelector(".bp-claim") as HTMLElement;
+
+  it("shows nothing when the book reports nothing to collect", () => {
+    const { el, panel } = mount();
+    panel.render(ctx());
+    expect(claimEl(el).style.display).toBe("none");
+    panel.dispose();
+  });
+
+  it("names the amount, the race and how much of the window is left", () => {
+    const { el, panel } = mount();
+    panel.render(ctx({ claim: { raceSeq: 40, amount: 3.2, racesLeft: 27, windowRaces: 32, expired: false } }));
+    const text = claimEl(el).textContent ?? "";
+    expect(claimEl(el).style.display).toBe("block");
+    expect(text).toContain("$3.20 to collect");
+    expect(text).toContain("race #40");
+    expect(text).toContain("27 of 32 races left");
+    expect(text).toContain("Your next bet collects it"); // place_bet auto-settles a stale ticket
+    expect(claimEl(el).className).not.toContain("warn");
+    panel.dispose();
+  });
+
+  it("reads as a warning once the window is nearly out", () => {
+    const { el, panel } = mount();
+    panel.render(ctx({ claim: { raceSeq: 40, amount: 3.2, racesLeft: 4, windowRaces: 32, expired: false } }));
+    expect(claimEl(el).className).toContain("warn");
+    expect(claimEl(el).textContent).toContain("Claim window closing — 4 of 32 races left");
+    panel.dispose();
+  });
+
+  it("says plainly that an aged-out ticket can no longer pay, and never quotes an amount for it", () => {
+    const { el, panel } = mount();
+    panel.render(ctx({ claim: { raceSeq: 7, amount: 0, racesLeft: 0, windowRaces: 32, expired: true } }));
+    const text = claimEl(el).textContent ?? "";
+    expect(claimEl(el).className).toContain("gone");
+    expect(text).toContain("Race #7 can no longer pay");
+    expect(text).toContain("Past the 32-race claim window");
+    expect(text).not.toContain("$"); // the result that priced the stakes is the thing that is gone
     panel.dispose();
   });
 });
