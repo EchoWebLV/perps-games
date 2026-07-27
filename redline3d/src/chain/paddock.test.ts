@@ -1,7 +1,8 @@
 import { describe, it, expect } from "vitest";
 import { PublicKey } from "@solana/web3.js";
+import { getAssociatedTokenAddressSync } from "@solana/spl-token";
 import {
-  derivePaddockPdas, raceToSnap, ticketToSnap, findResult, settleTicket,
+  derivePaddockPdas, classifyBettorDelegation, raceToSnap, ticketToSnap, findResult, settleTicket,
   settlePool, payoutOf, paddockErrorName, PADDOCK_ERROR_NAMES,
   TICKET_NO_RACE, SCALE, RAKE_FP, GRID, HISTORY_LEN, PHASE_MARKET, PHASE_RACING, PHASE_SETTLED,
   type RaceResultSnap,
@@ -54,6 +55,14 @@ describe("derivePaddockPdas", () => {
     expect(pdas.ticket.equals(ticket)).toBe(true);
   });
 
+  it("derives the vault's ATA off the vault AUTHORITY, off-curve", () => {
+    const pdas = derivePaddockPdas(PROGRAM, OWNER, MINT);
+    // The authority PDA holds nothing; `vaultToken` is the account deposit/withdraw move
+    // tokens through, so the split has to be explicit or a deposit aims at the wrong account.
+    expect(pdas.vaultToken.equals(getAssociatedTokenAddressSync(MINT, pdas.vault, true))).toBe(true);
+    expect(pdas.vaultToken.equals(pdas.vault)).toBe(false);
+  });
+
   it("keys book/race/vault by mint only, and bettor/ticket by owner too", () => {
     const a = derivePaddockPdas(PROGRAM, OWNER, MINT);
     const other = new PublicKey("2Xh6WT5oYqvLnRLGE7RtF9BQtqiVEV88pgvsCcaJoRXR");
@@ -65,6 +74,30 @@ describe("derivePaddockPdas", () => {
     // Different player, different money.
     expect(b.bettor.equals(a.bettor)).toBe(false);
     expect(b.ticket.equals(a.ticket)).toBe(false);
+  });
+});
+
+describe("classifyBettorDelegation", () => {
+  const DEL = CHAIN.DELEGATION_PROGRAM;
+  const PROG = CHAIN.PADDOCK_PROGRAM_ID;
+
+  it("reads a fully delegated pair as reusable", () => {
+    expect(classifyBettorDelegation({ bettor: DEL, ticket: DEL })).toBe("reuse");
+  });
+
+  it("reads absent PDAs and program-owned PDAs alike as fresh", () => {
+    expect(classifyBettorDelegation({ bettor: null, ticket: null })).toBe("fresh");
+    expect(classifyBettorDelegation({ bettor: PROG, ticket: PROG })).toBe("fresh");
+    // Joined but never delegated: the accounts exist, owned by the program.
+    expect(classifyBettorDelegation({ bettor: PROG, ticket: null })).toBe("fresh");
+  });
+
+  it("reads a half-delegated pair as busy — the state exit_bettor's access-control bug could force", () => {
+    // Bettor and Ticket are delegated by ONE instruction and must be written in ONE ER
+    // transaction, so a split pair is not a state to retry into — it needs an exit.
+    expect(classifyBettorDelegation({ bettor: DEL, ticket: PROG })).toBe("busy");
+    expect(classifyBettorDelegation({ bettor: PROG, ticket: DEL })).toBe("busy");
+    expect(classifyBettorDelegation({ bettor: null, ticket: DEL })).toBe("busy");
   });
 });
 

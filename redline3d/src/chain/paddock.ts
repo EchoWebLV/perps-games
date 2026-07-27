@@ -1,13 +1,17 @@
 // paddock.ts — client for the pari-mutuel race book. Same shape as chain-round.ts:
-// PDA derivation, BN-free snapshots, HTTP-poll sends. The book lives entirely in the ER
-// (Race is delegated permanently; Bettor/Ticket per player), so every call here targets
-// CHAIN.ER_RPC. The L1 side (join / deposit / delegate / withdraw) is not wired yet.
+// PDA derivation, BN-free snapshots, HTTP-poll sends. Betting lives entirely in the ER
+// (Race is delegated permanently; Bettor/Ticket per player), so place_bet/claim target
+// CHAIN.ER_RPC, while the one-time onboarding (join / deposit / delegate_bettor) is L1.
+// The L1 exit side (exit_bettor / withdraw) is not wired yet.
 import * as anchor from "@coral-xyz/anchor";
-import { Connection, PublicKey, Transaction, ComputeBudgetProgram } from "@solana/web3.js";
+import { Connection, PublicKey, Transaction, ComputeBudgetProgram, SystemProgram } from "@solana/web3.js";
+import { getAssociatedTokenAddressSync, TOKEN_PROGRAM_ID } from "@solana/spl-token";
 import { CHAIN } from "./config";
+import { WSOL_MINT, wsolAta, buildWrapIxs } from "./wsol";
 import idlJson from "./idl/paddock.json";
 import type { Paddock } from "./idl/paddock";
 import type { AnchorWalletLike } from "./anchor-wallet";
+import type { DelegateState } from "./chain-round";
 
 const { BN } = anchor;
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
@@ -35,18 +39,37 @@ type Scalar = number | { toString(): string };
 const big = (v: Scalar) => BigInt(v.toString());
 const num = (v: Scalar) => Number(v.toString());
 
-export interface PaddockPdas { book: PublicKey; race: PublicKey; vault: PublicKey; bettor: PublicKey; ticket: PublicKey; }
+export interface PaddockPdas { book: PublicKey; race: PublicKey; vault: PublicKey; vaultToken: PublicKey; bettor: PublicKey; ticket: PublicKey; }
 
-/** Derive the paddock PDAs for an owner+mint (matches state.rs seeds).
+/** Derive the paddock PDAs + the vault ATA for an owner+mint (matches state.rs seeds).
  *  `book`/`race`/`vault` are singletons per mint; `bettor`/`ticket` are per player.
- *  `vault` is the vault AUTHORITY PDA — the vault's token account is its ATA. */
+ *  `vault` is the vault AUTHORITY PDA — `vaultToken` is the ATA it owns, the account that
+ *  actually custodies stakes (same authority/token split as deriveRaiderPdas). */
 export function derivePaddockPdas(programId: PublicKey, owner: PublicKey, mint: PublicKey): PaddockPdas {
   const [book] = PublicKey.findProgramAddressSync([Buffer.from("book"), mint.toBuffer()], programId);
   const [race] = PublicKey.findProgramAddressSync([Buffer.from("race"), mint.toBuffer()], programId);
   const [vault] = PublicKey.findProgramAddressSync([Buffer.from("vault"), mint.toBuffer()], programId);
+  const vaultToken = getAssociatedTokenAddressSync(mint, vault, true);
   const [bettor] = PublicKey.findProgramAddressSync([Buffer.from("bettor"), owner.toBuffer(), mint.toBuffer()], programId);
   const [ticket] = PublicKey.findProgramAddressSync([Buffer.from("ticket"), owner.toBuffer(), mint.toBuffer()], programId);
-  return { book, race, vault, bettor, ticket };
+  return { book, race, vault, vaultToken, bettor, ticket };
+}
+
+/**
+ * Classify the co-delegated Bettor/Ticket pair from their L1 owners — the same three-state
+ * read chain-round.ts:72 does for a raider session, over the pair `delegate_bettor` moves
+ * together:
+ *  - both delegated → "reuse" (already onboarded; this wallet can bet right now)
+ *  - neither        → "fresh" (nulls = not-yet-created PDAs count as not-delegated)
+ *  - one of the two → "busy"  (torn mid-delegation — `delegate_bettor` would re-delegate the
+ *                              live half and fail, so it needs an exit, not a retry)
+ */
+export function classifyBettorDelegation(owners: { bettor: PublicKey | null; ticket: PublicKey | null }): DelegateState {
+  const del = (o: PublicKey | null) => !!o && o.equals(CHAIN.DELEGATION_PROGRAM);
+  const b = del(owners.bettor), t = del(owners.ticket);
+  if (b && t) return "reuse";
+  if (!b && !t) return "fresh";
+  return "busy";
 }
 
 export interface Settlement { multFp: bigint; rake: bigint; }
@@ -159,6 +182,18 @@ export class InsufficientBalanceError extends Error {
   constructor(message: string) { super(message); this.name = "InsufficientBalanceError"; }
 }
 
+/** Onboarding can't proceed: the Bettor/Ticket pair is half-delegated, so `delegate_bettor`
+ *  would try to re-delegate the live half. Only an `exit_bettor` can reunite them. */
+export class BettorTornError extends Error {
+  readonly code = "bettor_torn" as const;
+  constructor(message: string) { super(message); this.name = "BettorTornError"; }
+}
+
+/** The one-time onboarding path, step by step. `delegate` → `confirm` is the ~25×1s owner
+ *  poll the spec calls out: the first bet is slow and every bet after is instant, so that
+ *  wait has to read as progress, never as a frozen button. */
+export type OnboardStep = "join" | "wrap" | "deposit" | "delegate" | "confirm" | "ready";
+
 export interface PaddockBook {
   address: string;
   pdas: PaddockPdas;
@@ -166,6 +201,12 @@ export interface PaddockBook {
   raceSnapshot(): Promise<RaceSnap | null>;
   /** This player's ER balance + current ticket, or null if they haven't joined. */
   bettorSnapshot(): Promise<BettorSnap | null>;
+  /** L1 owners of the co-delegated Bettor/Ticket pair — the only sound "can this wallet bet?"
+   *  signal. The ER serves a copy of an undelegated account too, so an ER read proves nothing. */
+  delegationState(): Promise<DelegateState>;
+  /** One-time onboarding: join → deposit → delegate_bettor on L1, each step skipped if it is
+   *  already done, reporting every step it actually runs through `onStep`. */
+  ensureBettor(amount: number | bigint, onStep?: (step: OnboardStep) => void): Promise<void>;
   placeBet(carId: number, amount: number | bigint): Promise<void>;
   claim(): Promise<void>;
 }
@@ -173,22 +214,26 @@ export interface PaddockBook {
 export function createPaddockBook(deps: { wallet: AnchorWalletLike; mint: PublicKey }): PaddockBook {
   const { wallet, mint } = deps;
   const owner = wallet.publicKey;
+  const baseConn = new Connection(CHAIN.BASE_RPC, { commitment: "confirmed" });
   const erConn = new Connection(CHAIN.ER_RPC, { commitment: "confirmed" });
+  const baseProvider = new anchor.AnchorProvider(baseConn, wallet as anchor.Wallet, { commitment: "confirmed" });
   const erProvider = new anchor.AnchorProvider(new Connection(CHAIN.ER_RPC, { wsEndpoint: CHAIN.ER_WS, commitment: "confirmed" }), wallet as anchor.Wallet, { commitment: "confirmed" });
+  const program = new anchor.Program<Paddock>(idlJson as Paddock, baseProvider);
   const programER = new anchor.Program<Paddock>(idlJson as Paddock, erProvider);
   const pdas = derivePaddockPdas(CHAIN.PADDOCK_PROGRAM_ID, owner, mint);
+  const ownerAta = getAssociatedTokenAddressSync(mint, owner);
 
   // HTTP send + getSignatureStatuses poll — same reason as chain-round.ts:203: it dodges the
   // rpc-websockets v9 "Unknown action 'undefined'" bug on the ER signature stream.
-  async function send(builder: { transaction(): Promise<Transaction> }, cuLimit?: number): Promise<string> {
+  async function send(conn: Connection, builder: { transaction(): Promise<Transaction> }, cuLimit?: number): Promise<string> {
     const tx = await builder.transaction();
     if (cuLimit) tx.instructions.unshift(ComputeBudgetProgram.setComputeUnitLimit({ units: cuLimit }));
     tx.feePayer = owner;
-    tx.recentBlockhash = (await erConn.getLatestBlockhash("confirmed")).blockhash;
+    tx.recentBlockhash = (await conn.getLatestBlockhash("confirmed")).blockhash;
     const signed = await wallet.signTransaction(tx);
-    const sig = await erConn.sendRawTransaction(signed.serialize(), { skipPreflight: true });
+    const sig = await conn.sendRawTransaction(signed.serialize(), { skipPreflight: true });
     for (let i = 0; i < 60; i++) {
-      const st = (await erConn.getSignatureStatuses([sig])).value[0];
+      const st = (await conn.getSignatureStatuses([sig])).value[0];
       if (st && (st.confirmationStatus === "confirmed" || st.confirmationStatus === "finalized")) {
         if (st.err) throw new Error(`tx ${sig} failed: ${JSON.stringify(st.err)}`);
         return sig;
@@ -196,6 +241,25 @@ export function createPaddockBook(deps: { wallet: AnchorWalletLike; mint: Public
       await sleep(1000);
     }
     throw new Error(`tx ${sig} not confirmed within 60s`);
+  }
+
+  // The delegation CPI lands asynchronously: the tx confirms, then the delegation program
+  // takes ownership. Poll the pair's L1 owners — same shape and cost as chain-round.ts:221.
+  async function pollBettorOwner(target: PublicKey, tries: number, gapMs: number) {
+    for (let i = 0; i < tries; i++) {
+      const infos = await Promise.all([pdas.bettor, pdas.ticket].map((p) => baseConn.getAccountInfo(p)));
+      if (infos.every((info) => info && info.owner.equals(target))) return;
+      await sleep(gapMs);
+    }
+    throw new Error(`delegate_bettor: Bettor/Ticket did not reach owner ${target.toBase58()} in time`);
+  }
+
+  async function delegationState(): Promise<DelegateState> {
+    const [bi, ti] = await Promise.all([
+      baseConn.getAccountInfo(pdas.bettor),
+      baseConn.getAccountInfo(pdas.ticket),
+    ]);
+    return classifyBettorDelegation({ bettor: bi?.owner ?? null, ticket: ti?.owner ?? null });
   }
 
   return {
@@ -220,9 +284,74 @@ export function createPaddockBook(deps: { wallet: AnchorWalletLike; mint: Public
       return { balance: big(b.balance), ...snap };
     },
 
+    delegationState,
+
+    async ensureBettor(amount, onStep) {
+      const step = (s: OnboardStep) => onStep?.(s);
+      const state = await delegationState();
+      if (state === "busy") {
+        throw new BettorTornError("Your seat at the book is half-open — finish exiting, then try again.");
+      }
+      // Already delegated: `deposit` writes the L1 Bettor, and anchor's owner check rejects it
+      // the moment the delegation program holds the account, so there is nothing left to run.
+      // Topping a live bettor up is a different flow (exit → deposit → re-delegate), not this one.
+      if (state === "reuse") { step("ready"); return; }
+
+      // join — Bettor and Ticket are created by the same instruction, so either one missing
+      // means the pair does not exist yet.
+      const [bi, ti] = await Promise.all([
+        baseConn.getAccountInfo(pdas.bettor),
+        baseConn.getAccountInfo(pdas.ticket),
+      ]);
+      if (!bi || !ti) {
+        step("join");
+        await send(baseConn, program.methods.join().accountsPartial({
+          payer: owner, mint, bettor: pdas.bettor, ticket: pdas.ticket, systemProgram: SystemProgram.programId,
+        }));
+      }
+
+      // deposit — only the shortfall, so re-running after a half-finished onboarding tops up
+      // instead of double-funding. Strictly before delegation, for the reason above.
+      const want = BigInt(amount.toString());
+      const acct = await program.account.bettor.fetchNullable(pdas.bettor);
+      const have = acct ? big(acct.balance) : 0n;
+      if (have < want) {
+        const short = want - have;
+        // wSOL is native-wrap (core/stake-currency.ts): the deposit's source ATA is fed by
+        // wrapping native SOL, so the player only ever holds and spends SOL. Any other mint is
+        // spl-transfer — its tokens must already be sitting in the owner's ATA.
+        if (mint.equals(WSOL_MINT)) {
+          step("wrap");
+          const ata = wsolAta(owner);
+          const info = await baseConn.getAccountInfo(ata);
+          const ixs = buildWrapIxs({ owner, lamports: short, ataExists: !!info });
+          await send(baseConn, { async transaction() { return new Transaction().add(...ixs); } });
+        }
+        step("deposit");
+        await send(baseConn, program.methods.deposit(new BN(short.toString())).accountsPartial({
+          owner, mint, bettor: pdas.bettor, ownerToken: ownerAta,
+          vaultAuthority: pdas.vault, vaultToken: pdas.vaultToken, tokenProgram: TOKEN_PROGRAM_ID,
+        }));
+      }
+
+      // delegate_bettor — co-delegates Bettor AND Ticket, and MUST name the validator the book
+      // pinned at init_book. Read it off the Book rather than assuming CHAIN.VALIDATOR: naming
+      // a different one lands these accounts in another rollup from the Race, where they could
+      // never be co-written, and the program rejects the mismatch with ValidatorMismatch (6010).
+      const book = await program.account.book.fetchNullable(pdas.book);
+      if (!book) throw new Error(`no paddock book for mint ${mint.toBase58()}`);
+      step("delegate");
+      await send(baseConn, program.methods.delegateBettor().accountsPartial({
+        payer: owner, mint, book: pdas.book, bettor: pdas.bettor, ticket: pdas.ticket,
+      }).remainingAccounts([{ pubkey: new PublicKey(book.validator), isSigner: false, isWritable: false }]), 400_000);
+      step("confirm");
+      await pollBettorOwner(CHAIN.DELEGATION_PROGRAM, 25, 1000);
+      step("ready");
+    },
+
     async placeBet(carId, amount) {
       try {
-        await send(programER.methods.placeBet(carId, new BN(amount.toString())).accountsPartial({
+        await send(erConn, programER.methods.placeBet(carId, new BN(amount.toString())).accountsPartial({
           payer: owner, mint, race: pdas.race, bettor: pdas.bettor, ticket: pdas.ticket,
         }));
       } catch (e) {
@@ -234,7 +363,7 @@ export function createPaddockBook(deps: { wallet: AnchorWalletLike; mint: Public
     },
 
     async claim() {
-      await send(programER.methods.claim().accountsPartial({
+      await send(erConn, programER.methods.claim().accountsPartial({
         payer: owner, mint, race: pdas.race, bettor: pdas.bettor, ticket: pdas.ticket,
       }));
     },
