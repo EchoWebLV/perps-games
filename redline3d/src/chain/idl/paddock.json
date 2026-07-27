@@ -120,8 +120,8 @@
         "`rake_accrued` is deliberately NOT zeroed here. It is a CUMULATIVE",
         "counter. The tokens never leave the vault, so zeroing it would erase the",
         "house's claim with nothing credited anywhere, and L1 cannot write it back",
-        "down (Book is not delegated, Race is). The L1 sweep that credits",
-        "Book.balance against a high-water mark is a separate follow-up.",
+        "down (Book is not delegated, Race is). `sweep_rake` on L1 is what turns",
+        "that counter into house credit, by diffing it against a high-water mark.",
         "",
         "Doubles as the audit trail: each commit publishes the history ring to L1."
       ],
@@ -1667,6 +1667,133 @@
       ]
     },
     {
+      "name": "sweep_rake",
+      "docs": [
+        "Credit the house with the rake that has reached L1. L1 only.",
+        "",
+        "This is the other half of `commit_race`. The rollup accrues rake into the",
+        "CUMULATIVE `Race.rake_accrued`; a commit publishes that number to L1; this",
+        "reads it and turns the part it has not seen before into house credit. The",
+        "tokens themselves never move here — they have been sitting in the vault",
+        "ATA since the losing bets were placed, and `withdraw_rake` is what pulls",
+        "them out. See the comment on `WithdrawRake` for why the split.",
+        "",
+        "THE BOOK FIELDS. `Book.balance` and `Book.locked` were reserved and",
+        "zero-initialised at `init_book` and written nowhere else, so this needs no",
+        "resize and no migration — the live devnet book already has the space.",
+        "They are NOT renamed, because `redline3d/src/chain/idl/paddock.json` is a",
+        "checked-in copy of this IDL and a rename would desync it for no on-chain",
+        "benefit (borsh is positional; the bytes are identical either way).",
+        "",
+        "`balance` = rake credited to the house and not yet withdrawn. Exactly",
+        "parallel to `Bettor.balance`: a play-money ledger backed",
+        "1:1 by tokens already in the vault, drained by a withdraw.",
+        "`locked`  = the HIGH-WATER MARK. The largest `rake_accrued` this book",
+        "has ever credited against. \"Locked\" reads oddly for a",
+        "watermark, but it is the honest sense of the word here:",
+        "the portion of the cumulative counter already locked in.",
+        "",
+        "PERMISSIONLESS, deliberately, on the same reasoning as `race_crank`. The",
+        "grinding question that gate had to answer does not arise here, because",
+        "nothing about the outcome depends on WHEN the call lands:",
+        "",
+        "* the destination is not a parameter. Credit goes to `book.balance`,",
+        "and only `book.authority` can ever move it out. A hostile caller",
+        "cannot aim the money anywhere.",
+        "* the amount is not a choice. It is `committed - mark`, and the mark",
+        "advances to match, so calling early, late, or a thousand times in a",
+        "row all land on the same total (`book::sweep_rake`, proven by",
+        "`every_unit_of_race_rake_reaches_the_house_exactly_once`).",
+        "* calling it early only under-credits, and the shortfall is picked up",
+        "whole by the next sweep. There is no state an attacker can steer.",
+        "",
+        "So the worst a griefer can do is pay the fee to keep the house's books",
+        "current. What permissionless BUYS is that the house does not have to be",
+        "online for its revenue to be recorded — a keeper, a player, or anyone",
+        "clearing the vault's accounting can fire it.",
+        "",
+        "SOLVENCY. Crediting rake does not overdraw the vault. Tokens enter only",
+        "via `deposit` and leave only via `withdraw`/`withdraw_rake`, and every",
+        "settlement conserves value: a race's `total` was already in the vault",
+        "(it came out of bettor balances) and splits into `rake` plus payouts that",
+        "`payouts_never_exceed_payable_under_rounding` bounds below `total - rake`.",
+        "So `vault >= sum(bettor balances) + live pools + rake_accrued` holds",
+        "continuously, with floor-division dust and unclaimed winnings as extra",
+        "slack. `book.balance <= committed rake_accrued <= true rake_accrued`, so",
+        "the house can never withdraw a player's money."
+      ],
+      "discriminator": [
+        8,
+        64,
+        18,
+        95,
+        96,
+        177,
+        71,
+        195
+      ],
+      "accounts": [
+        {
+          "name": "payer",
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "mint"
+        },
+        {
+          "name": "book",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  98,
+                  111,
+                  111,
+                  107
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "mint"
+              }
+            ]
+          }
+        },
+        {
+          "name": "race",
+          "docs": [
+            "is owned by the DELEGATION program (it is permanently delegated), which a",
+            "typed `Account<'info, Race>` rejects outright. Authentication is the",
+            "`seeds` derivation below — that address can hold nothing else — plus the",
+            "discriminator check inside `Race::try_deserialize`. `bump` is re-derived",
+            "canonically rather than read off the account, since the account cannot be",
+            "deserialized until after the constraint has already run."
+          ],
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  114,
+                  97,
+                  99,
+                  101
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "mint"
+              }
+            ]
+          }
+        }
+      ],
+      "args": []
+    },
+    {
       "name": "withdraw",
       "docs": [
         "Pull tokens back out against the restored play balance. L1 only, and only",
@@ -1720,6 +1847,192 @@
         },
         {
           "name": "owner_token",
+          "writable": true
+        },
+        {
+          "name": "vault_authority",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  118,
+                  97,
+                  117,
+                  108,
+                  116
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "mint"
+              }
+            ]
+          }
+        },
+        {
+          "name": "vault_token",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "account",
+                "path": "vault_authority"
+              },
+              {
+                "kind": "const",
+                "value": [
+                  6,
+                  221,
+                  246,
+                  225,
+                  215,
+                  101,
+                  161,
+                  147,
+                  217,
+                  203,
+                  225,
+                  70,
+                  206,
+                  235,
+                  121,
+                  172,
+                  28,
+                  180,
+                  133,
+                  237,
+                  95,
+                  91,
+                  55,
+                  145,
+                  58,
+                  140,
+                  245,
+                  133,
+                  126,
+                  255,
+                  0,
+                  169
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "mint"
+              }
+            ],
+            "program": {
+              "kind": "const",
+              "value": [
+                140,
+                151,
+                37,
+                143,
+                78,
+                36,
+                137,
+                241,
+                187,
+                61,
+                16,
+                41,
+                20,
+                142,
+                13,
+                131,
+                11,
+                90,
+                19,
+                153,
+                218,
+                255,
+                16,
+                132,
+                4,
+                142,
+                123,
+                216,
+                219,
+                233,
+                248,
+                89
+              ]
+            }
+          }
+        },
+        {
+          "name": "token_program",
+          "address": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"
+        }
+      ],
+      "args": [
+        {
+          "name": "amount",
+          "type": "u64"
+        }
+      ]
+    },
+    {
+      "name": "withdraw_rake",
+      "docs": [
+        "Pull swept rake out of the vault to the house's own token account. L1 only.",
+        "",
+        "Split from `sweep_rake` on purpose. The sweep is permissionless so the",
+        "book's accounting stays current without the house being online; moving",
+        "real tokens is a different risk class, and the liveness argument for",
+        "permissionless does not apply to it — the house is by definition",
+        "available to collect its own revenue. Keeping the permissionless path to",
+        "pure bookkeeping means the set of callers who can trigger an SPL transfer",
+        "out of the vault stays exactly one: `book.authority`.",
+        "",
+        "Same shape as `withdraw`, with `book.balance` in place of",
+        "`bettor.balance` and the authority in place of the owner."
+      ],
+      "discriminator": [
+        58,
+        75,
+        176,
+        167,
+        100,
+        18,
+        13,
+        148
+      ],
+      "accounts": [
+        {
+          "name": "authority",
+          "writable": true,
+          "signer": true,
+          "relations": [
+            "book"
+          ]
+        },
+        {
+          "name": "mint"
+        },
+        {
+          "name": "book",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  98,
+                  111,
+                  111,
+                  107
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "mint"
+              }
+            ]
+          }
+        },
+        {
+          "name": "authority_token",
           "writable": true
         },
         {

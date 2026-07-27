@@ -358,8 +358,8 @@ pub mod paddock {
     /// `rake_accrued` is deliberately NOT zeroed here. It is a CUMULATIVE
     /// counter. The tokens never leave the vault, so zeroing it would erase the
     /// house's claim with nothing credited anywhere, and L1 cannot write it back
-    /// down (Book is not delegated, Race is). The L1 sweep that credits
-    /// Book.balance against a high-water mark is a separate follow-up.
+    /// down (Book is not delegated, Race is). `sweep_rake` on L1 is what turns
+    /// that counter into house credit, by diffing it against a high-water mark.
     ///
     /// Doubles as the audit trail: each commit publishes the history ring to L1.
     pub fn commit_race(ctx: Context<CommitRace>) -> Result<()> {
@@ -369,6 +369,135 @@ pub mod paddock {
             &ctx.accounts.magic_context,
             &ctx.accounts.magic_program,
             None,
+        )?;
+        Ok(())
+    }
+
+    /// Credit the house with the rake that has reached L1. L1 only.
+    ///
+    /// This is the other half of `commit_race`. The rollup accrues rake into the
+    /// CUMULATIVE `Race.rake_accrued`; a commit publishes that number to L1; this
+    /// reads it and turns the part it has not seen before into house credit. The
+    /// tokens themselves never move here — they have been sitting in the vault
+    /// ATA since the losing bets were placed, and `withdraw_rake` is what pulls
+    /// them out. See the comment on `WithdrawRake` for why the split.
+    ///
+    /// THE BOOK FIELDS. `Book.balance` and `Book.locked` were reserved and
+    /// zero-initialised at `init_book` and written nowhere else, so this needs no
+    /// resize and no migration — the live devnet book already has the space.
+    /// They are NOT renamed, because `redline3d/src/chain/idl/paddock.json` is a
+    /// checked-in copy of this IDL and a rename would desync it for no on-chain
+    /// benefit (borsh is positional; the bytes are identical either way).
+    ///
+    ///   `balance` = rake credited to the house and not yet withdrawn. Exactly
+    ///               parallel to `Bettor.balance`: a play-money ledger backed
+    ///               1:1 by tokens already in the vault, drained by a withdraw.
+    ///   `locked`  = the HIGH-WATER MARK. The largest `rake_accrued` this book
+    ///               has ever credited against. "Locked" reads oddly for a
+    ///               watermark, but it is the honest sense of the word here:
+    ///               the portion of the cumulative counter already locked in.
+    ///
+    /// PERMISSIONLESS, deliberately, on the same reasoning as `race_crank`. The
+    /// grinding question that gate had to answer does not arise here, because
+    /// nothing about the outcome depends on WHEN the call lands:
+    ///
+    ///   * the destination is not a parameter. Credit goes to `book.balance`,
+    ///     and only `book.authority` can ever move it out. A hostile caller
+    ///     cannot aim the money anywhere.
+    ///   * the amount is not a choice. It is `committed - mark`, and the mark
+    ///     advances to match, so calling early, late, or a thousand times in a
+    ///     row all land on the same total (`book::sweep_rake`, proven by
+    ///     `every_unit_of_race_rake_reaches_the_house_exactly_once`).
+    ///   * calling it early only under-credits, and the shortfall is picked up
+    ///     whole by the next sweep. There is no state an attacker can steer.
+    ///
+    /// So the worst a griefer can do is pay the fee to keep the house's books
+    /// current. What permissionless BUYS is that the house does not have to be
+    /// online for its revenue to be recorded — a keeper, a player, or anyone
+    /// clearing the vault's accounting can fire it.
+    ///
+    /// SOLVENCY. Crediting rake does not overdraw the vault. Tokens enter only
+    /// via `deposit` and leave only via `withdraw`/`withdraw_rake`, and every
+    /// settlement conserves value: a race's `total` was already in the vault
+    /// (it came out of bettor balances) and splits into `rake` plus payouts that
+    /// `payouts_never_exceed_payable_under_rounding` bounds below `total - rake`.
+    /// So `vault >= sum(bettor balances) + live pools + rake_accrued` holds
+    /// continuously, with floor-division dust and unclaimed winnings as extra
+    /// slack. `book.balance <= committed rake_accrued <= true rake_accrued`, so
+    /// the house can never withdraw a player's money.
+    pub fn sweep_rake(ctx: Context<SweepRake>) -> Result<()> {
+        // The Race is PERMANENTLY delegated, so on L1 it is owned by the
+        // delegation program, not by us — `Account<'info, Race>` would reject it
+        // with AccountOwnedByWrongProgram every time. Read it as raw bytes and
+        // deserialize by hand. The address is still unforgeable: the `seeds`
+        // constraint on `race` pins it to THIS book's Race PDA, and only this
+        // program (or the delegation program holding it on our behalf) can ever
+        // have written there. `try_deserialize` checks the discriminator, so a
+        // wrong or half-written account cannot be read as a Race.
+        //
+        // Scoped so the data borrow is released before `book` is taken mutably.
+        let committed = {
+            let data = ctx.accounts.race.try_borrow_data()?;
+            Race::try_deserialize(&mut &data[..])?
+        };
+
+        let book = &mut ctx.accounts.book;
+        // Belt-and-braces over the seeds: the Race's own record of which book it
+        // belongs to must agree. Both PDAs derive from `mint`, so this can only
+        // fail if an account was created outside the program's own paths.
+        require_keys_eq!(committed.mint, book.mint, PaddockError::BadMint);
+
+        let s = book::sweep_rake(committed.rake_accrued, book.locked);
+        book.locked = s.high_water;
+        book.balance = book
+            .balance
+            .checked_add(s.credit)
+            .ok_or(PaddockError::MathOverflow)?;
+
+        // Log the three numbers unconditionally, including on a zero-credit
+        // no-op. A sweep that credits nothing because the commit was stale and a
+        // sweep that credits nothing because it already ran are indistinguishable
+        // from the transaction status alone; they are not from the log.
+        msg!(
+            "sweep_rake: committed {} mark {} credit {} balance {}",
+            committed.rake_accrued,
+            s.high_water,
+            s.credit,
+            book.balance
+        );
+        Ok(())
+    }
+
+    /// Pull swept rake out of the vault to the house's own token account. L1 only.
+    ///
+    /// Split from `sweep_rake` on purpose. The sweep is permissionless so the
+    /// book's accounting stays current without the house being online; moving
+    /// real tokens is a different risk class, and the liveness argument for
+    /// permissionless does not apply to it — the house is by definition
+    /// available to collect its own revenue. Keeping the permissionless path to
+    /// pure bookkeeping means the set of callers who can trigger an SPL transfer
+    /// out of the vault stays exactly one: `book.authority`.
+    ///
+    /// Same shape as `withdraw`, with `book.balance` in place of
+    /// `bettor.balance` and the authority in place of the owner.
+    pub fn withdraw_rake(ctx: Context<WithdrawRake>, amount: u64) -> Result<()> {
+        let book = &mut ctx.accounts.book;
+        require!(book.balance >= amount, PaddockError::InsufficientBalance);
+        book.balance -= amount;
+
+        let mint_key = ctx.accounts.mint.key();
+        let seeds: &[&[u8]] = &[VAULT_SEED, mint_key.as_ref(), &[ctx.bumps.vault_authority]];
+        token::transfer(
+            CpiContext::new_with_signer(
+                ctx.accounts.token_program.to_account_info(),
+                Transfer {
+                    from: ctx.accounts.vault_token.to_account_info(),
+                    to: ctx.accounts.authority_token.to_account_info(),
+                    authority: ctx.accounts.vault_authority.to_account_info(),
+                },
+                &[seeds],
+            ),
+            amount,
         )?;
         Ok(())
     }
@@ -636,6 +765,54 @@ pub struct CommitRace<'info> {
     pub payer: Signer<'info>,
     #[account(mut, seeds = [RACE_SEED, race.mint.as_ref()], bump = race.bump)]
     pub race: Account<'info, Race>,
+}
+
+// L1 only, and no vault accounts at all: the sweep moves numbers, never tokens.
+// `payer` signs nothing but the fee — see the permissionless argument on
+// `sweep_rake`.
+#[derive(Accounts)]
+pub struct SweepRake<'info> {
+    #[account(mut)]
+    pub payer: Signer<'info>,
+    pub mint: Account<'info, Mint>,
+    #[account(mut, seeds = [BOOK_SEED, mint.key().as_ref()], bump = book.bump)]
+    pub book: Account<'info, Book>,
+    /// CHECK: the committed Race, read-only. Typed as Unchecked because on L1 it
+    /// is owned by the DELEGATION program (it is permanently delegated), which a
+    /// typed `Account<'info, Race>` rejects outright. Authentication is the
+    /// `seeds` derivation below — that address can hold nothing else — plus the
+    /// discriminator check inside `Race::try_deserialize`. `bump` is re-derived
+    /// canonically rather than read off the account, since the account cannot be
+    /// deserialized until after the constraint has already run.
+    #[account(seeds = [RACE_SEED, mint.key().as_ref()], bump)]
+    pub race: UncheckedAccount<'info>,
+}
+
+// Byte-for-byte the same account shape as `Withdraw`, one level up: the book's
+// authority instead of a bettor's owner, and the book ledger instead of the
+// bettor's. `has_one = authority` is the whole access control — `book.authority`
+// is written once at `init_book` and never mutated.
+#[derive(Accounts)]
+pub struct WithdrawRake<'info> {
+    #[account(mut)]
+    pub authority: Signer<'info>,
+    pub mint: Account<'info, Mint>,
+    #[account(mut,
+        seeds = [BOOK_SEED, mint.key().as_ref()],
+        bump = book.bump,
+        has_one = authority @ PaddockError::NotOwner)]
+    pub book: Account<'info, Book>,
+    #[account(mut,
+        constraint = authority_token.mint == mint.key() @ PaddockError::BadMint,
+        constraint = authority_token.owner == authority.key() @ PaddockError::NotOwner)]
+    pub authority_token: Account<'info, TokenAccount>,
+    /// CHECK: vault authority PDA
+    #[account(seeds = [VAULT_SEED, mint.key().as_ref()], bump)]
+    pub vault_authority: UncheckedAccount<'info>,
+    #[account(mut, associated_token::mint = mint,
+              associated_token::authority = vault_authority)]
+    pub vault_token: Account<'info, TokenAccount>,
+    pub token_program: Program<'info, Token>,
 }
 
 #[commit]

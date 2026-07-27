@@ -174,7 +174,10 @@ if (bookInfo) {
   console.log("[1/4] init_book      SKIP — book exists");
   console.log("        authority", b.authority.toBase58());
   console.log("        validator", b.validator.toBase58());
-  console.log("        balance  ", b.balance.toString(), " locked", b.locked.toString());
+  // `balance` = rake credited to the house and not yet withdrawn; `locked` = the
+  // sweep's high-water mark on Race.rake_accrued. Both are written only by
+  // sweep_rake / withdraw_rake — see scripts/paddock-rake-collect.mjs.
+  console.log("        rake credited", b.balance.toString(), " sweep mark", b.locked.toString());
   if (!b.validator.equals(VALIDATOR)) {
     console.error(
       `        FATAL: book pins validator ${b.validator.toBase58()}, expected ` +
