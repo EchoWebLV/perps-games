@@ -322,10 +322,35 @@ t=46s  seq=1 MARKET     t=56s  seq=1 RACING     t=96s  seq=1 SETTLED
 t=101s seq=2 MARKET     t=111s seq=2 RACING     t=146s seq=2 SETTLED
 ```
 
-Three complete race cycles, unattended. **Races self-run: no keeper process, and therefore
-no centralised liveness dependency.** The client is a pure reader-and-bettor. This also
+Three complete race cycles, unattended. The client is a pure reader-and-bettor. This also
 retires an assumption the anti-grinding mitigation below silently rested on — "the
 scheduled crank runs ~1s and takes the first in-band price" is now measured, not hoped for.
+
+**⚠️ QUALIFIED 2026-07-28 — "no keeper needed" was too strong.** The original conclusion
+here read *"Races self-run: no keeper process, and therefore no centralised liveness
+dependency."* The first half stands; the second does not.
+
+The live wSOL book was later found **dead: stalled at seq 136 in MARKET, 13,788 seconds
+past its phase deadline.** The scheduled task had simply stopped, despite being armed for
+1,000,000 iterations at 1000ms — it had not exhausted them. Not a `StalePrice` stall
+either: the BTC Lazer feed was fresh (age 0s) at the time. Re-arming step 4 of
+`paddock-house-setup.mjs` revived it, and it then cycled unattended from seq 136 to 179+.
+
+What is actually true, stated precisely:
+
+- **No per-race keeper.** No client transaction is needed for any phase transition. That
+  part was measured and re-confirmed across ~40 races.
+- **But the scheduled task is not durable**, and its lifetime is not something this repo
+  can predict. `iterations` being accepted says nothing about longevity.
+- **Nothing on chain records that a task exists.** `magicblock-magic-program-api` 0.10.1
+  exposes only `ScheduleTask`/`CancelTask` with a caller-chosen `i64 task_id` and no
+  readable task PDA. **The only way to detect a dead crank is behavioural** — watch the
+  race and notice it stopped moving.
+
+So the real requirement is a **watchdog, not a keeper**: something that periodically checks
+whether `phase_ends_ts` is overdue and re-arms if so. That is far weaker than signing every
+phase transition, but it is not nothing, and a book left unattended **will** silently stop
+taking bets. Unbuilt.
 
 ## Risks, in the order they should be tested
 
