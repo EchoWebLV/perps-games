@@ -228,6 +228,32 @@ changes — `order[8]` and everything downstream are untouched.
 >    **That is an inference, not a verified fact — it is the gate on this whole swap.** If it
 >    fails, the request moves to a separate signed permissionless instruction, which hands
 >    liveness to a keeper and gives back the property proved in `paddock-crank-liveness.ts`.
+>
+>    > **GATE PASSED 2026-07-27** — `spikes/vrf-signer-probe/`, program `DPRXzxfKbh4h…`,
+>    > `attempts=11 ok=11 failures=0 fulfilled=11`, of which 10 were scheduler-driven with
+>    > zero client transactions. Paddock keeps keeper-free liveness.
+>    >
+>    > **Both signer checks passed on the first try.** What failed was something else
+>    > entirely: the SDK builder's `AccountMeta::new(payer, true)` — the **writable** flag.
+>    > MagicBlock's ER refuses a writable account that is not delegated, and the rejection
+>    > is a transaction-level admission check that fires *after* execution succeeds:
+>    > ```
+>    > Program log: VRF REQUEST OK (variant 1)     <- the CPI itself SUCCEEDED
+>    > Program log: Account 2: 8q5tiW5g… was illegally used as writable
+>    > Program Magic1111… failed: InvalidWritableAccount
+>    > ```
+>    > **Fix, one line:** `ix.accounts[0].is_writable = false;` after the SDK builder. Legal
+>    > because `request_randomness.rs` only ever calls `signer_info.is_signer()`, never
+>    > `is_writable()`, and `fees.rs` skips the transfer for `DEFAULT_EPHEMERAL_QUEUE`.
+>    > Proven with the identity PDA **non-existent and zero-lamport on both layers** — direct
+>    > evidence that no debit occurs. (Fallback if paddock ever points at a non-exempt queue:
+>    > materialise the identity PDA and delegate it, then the stock metas work unmodified.
+>    > Also proven live.)
+>    >
+>    > Settled while there: `callback_args` layout is `discriminator || randomness[32] ||
+>    > callback_args`, so the handler is `fn callback(ctx, randomness: [u8;32], ...args)`.
+>    > And the scheduler propagates the wider six-account meta list with writable/readonly
+>    > preserved per meta — **no `PrivilegeEscalation` problem.**
 > 2. **Randomness is asynchronous; the lock is synchronous.** Needs a new `PHASE_LOCKING`
 >    (value 3): the crank closes betting and requests, and a `callback_race_seed` signed by
 >    the VRF identity writes `seed`, computes `order`, and flips to `PHASE_RACING`. Costs
