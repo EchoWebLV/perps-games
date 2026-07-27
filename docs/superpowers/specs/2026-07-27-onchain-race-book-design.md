@@ -246,10 +246,36 @@ coverage re-armed opportunistically from `place_bet`.
 2. **Write contention on `Race`.** N bettors mutating `pools` in the same slot.
    `onchain/raider/tests/raceguard.ts` covers this bug class for raider; throughput under
    real concurrency is unmeasured here.
-3. **Lock-timing influence.** The crank fires on a schedule armed in advance by the
-   validator, so nobody with a stake in the outcome chooses which price is read. Bind the
-   lock to the `phase_ends_ts` stamped at market open so this is provable rather than
-   merely true.
+3. **Lock-timing influence — the original claim here was WRONG.** This section used to
+   read: *"The crank fires on a schedule armed in advance by the validator, so nobody
+   with a stake in the outcome chooses which price is read."* That premise is false.
+   `race_crank` has **no signer at all** — the MagicBlock scheduler executes it with
+   every account meta marked `is_signer: false`, which is inherent to the scheduled-task
+   pattern and matches raider's `tick_crank`. The instruction is therefore
+   **permissionless**: the validator is merely one caller among many.
+
+   The resulting attack is practical, not theoretical. `race_seed` and `draw_order` are
+   pure public functions, and `read_fresh` accepts any price inside `STALE_SECS` (30s).
+   An attacker bets a slot, watches the Lazer feed, computes what the winner *would* be
+   for the currently-published price, and fires `race_crank` themselves the moment it
+   favours them. The lock is one-shot, so the first transaction to flip the phase fixes
+   the seed permanently. At Lazer's cadence that is dozens of free rolls per race —
+   enough to land a chosen winner near-certainly. The attacker need not even be the
+   bettor; the capability is sellable.
+
+   **Mitigation shipped** (`618fb42`): the seeding price must be published inside
+   `LOCK_WINDOW_SECS` (2s) of the committed `phase_ends_ts`, not anywhere in the 30s
+   staleness window. The scheduled crank runs ~1s and takes the first in-band price, so
+   an attacker is reduced from grinding ~30s of prices to racing the honest crank inside
+   a single slot. On a miss the band **slides** rather than widening — widening is
+   exactly the grinding surface — and bands tile contiguously so liveness is preserved.
+
+   **This narrows the exposure; it does not remove it.** The real fix is VRF, where the
+   output cannot be steered by submission timing at all. The repo already runs
+   MagicBlock `ephemeral-vrf` in `crate-roll`, though on **L1** rather than in-rollup, so
+   in-ER support must be verified before it can be load-bearing. Chosen deliberately as
+   the interim; **must be closed before mainnet or before this is shown as a fairness
+   claim.**
 4. **`commit_accounts` without undelegation is unproven here.** Raider only ever calls
    `commit_and_undelegate_accounts` (`lib.rs:864`); a bare periodic commit is a new code
    path in this repo. Rake extraction and the L1 audit trail both depend on it. Prove it
