@@ -148,6 +148,45 @@ pub mod paddock {
         )?;
         Ok(())
     }
+
+    /// Place a bet on `car_id` in the live race. ER only.
+    ///
+    /// If the ticket belongs to an older race, its winnings are auto-credited from
+    /// the history ring FIRST, then the stakes are zeroed and the ticket adopts the
+    /// current seq. That mirrors the round-corpse reconciliation in
+    /// redline3d/src/chain/game-session.ts:385 and means the common path never
+    /// needs an explicit `claim`.
+    pub fn place_bet(ctx: Context<PlaceBet>, car_id: u8, amount: u64) -> Result<()> {
+        let race = &mut ctx.accounts.race;
+        let ticket = &mut ctx.accounts.ticket;
+        let bettor = &mut ctx.accounts.bettor;
+
+        require!(race.phase == state::PHASE_MARKET, PaddockError::WrongPhase);
+        require!((car_id as usize) < state::GRID, PaddockError::BadCarIndex);
+        require!(bettor.balance >= amount, PaddockError::InsufficientBalance);
+
+        if ticket.race_seq != race.seq {
+            let credit = settle_ticket(race, ticket);
+            if credit > 0 {
+                bettor.balance = bettor
+                    .balance
+                    .checked_add(credit)
+                    .ok_or(PaddockError::MathOverflow)?;
+            }
+            ticket.stakes = [0; state::GRID];
+            ticket.race_seq = race.seq;
+        }
+
+        bettor.balance -= amount;
+        ticket.stakes[car_id as usize] = ticket.stakes[car_id as usize]
+            .checked_add(amount)
+            .ok_or(PaddockError::MathOverflow)?;
+        race.pools[car_id as usize] = race.pools[car_id as usize]
+            .checked_add(amount)
+            .ok_or(PaddockError::MathOverflow)?;
+        race.total = race.total.checked_add(amount).ok_or(PaddockError::MathOverflow)?;
+        Ok(())
+    }
 }
 
 #[derive(Accounts)]
@@ -266,6 +305,25 @@ pub struct DelegateBettor<'info> {
     pub ticket: AccountInfo<'info>,
 }
 
+#[derive(Accounts)]
+pub struct PlaceBet<'info> {
+    #[account(mut)]
+    pub payer: Signer<'info>,
+    pub mint: Account<'info, Mint>,
+    #[account(mut, seeds = [RACE_SEED, mint.key().as_ref()], bump = race.bump)]
+    pub race: Account<'info, Race>,
+    #[account(mut,
+        constraint = bettor.owner == payer.key() @ PaddockError::NotOwner,
+        seeds = [BETTOR_SEED, payer.key().as_ref(), mint.key().as_ref()],
+        bump = bettor.bump)]
+    pub bettor: Account<'info, Bettor>,
+    #[account(mut,
+        constraint = ticket.owner == payer.key() @ PaddockError::NotOwner,
+        seeds = [TICKET_SEED, payer.key().as_ref(), mint.key().as_ref()],
+        bump = ticket.bump)]
+    pub ticket: Account<'info, Ticket>,
+}
+
 #[error_code]
 pub enum PaddockError {
     StalePrice,
@@ -278,4 +336,20 @@ pub enum PaddockError {
     BadCarIndex,
     NoSuchResult,
     AlreadyClaimed,
+}
+
+/// Payout owed to `ticket` for the race it currently references, or 0 if that
+/// race has aged out of the ring, was never settled, or the ticket had no stake
+/// on the winner. Idempotent by construction: callers zero `stakes` afterwards.
+fn settle_ticket(race: &Race, ticket: &Ticket) -> u64 {
+    // Sentinel guard, mandated by the HAZARD note on Race::find_result in
+    // state.rs: the history ring is zero-initialised, so an unguarded lookup can
+    // match a phantom all-zero RaceResult. A fresh ticket carries u64::MAX.
+    if ticket.race_seq == u64::MAX {
+        return 0;
+    }
+    let Some(result) = race.find_result(ticket.race_seq) else {
+        return 0;
+    };
+    book::payout_of(ticket.stakes[result.winner as usize], result.mult_fp)
 }
