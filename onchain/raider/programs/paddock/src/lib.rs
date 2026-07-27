@@ -644,11 +644,25 @@ pub struct ExitBettor<'info> {
     #[account(mut)]
     pub payer: Signer<'info>,
     pub mint: Account<'info, Mint>,
-    #[account(mut, seeds = [BETTOR_SEED, bettor.owner.as_ref(), mint.key().as_ref()],
-              bump = bettor.bump)]
+    // Derive BOTH from `payer` — the SIGNER — not from each account's own stored
+    // `owner`. Self-referential seeds prove only that an account is the valid PDA
+    // for whatever owner it already records, which every legitimate account
+    // satisfies; they authorise nothing. The earlier shape derived `ticket` from
+    // `ticket.owner` and checked only `payer == bettor.owner`, so an attacker
+    // could pair their own bettor with a VICTIM's ticket and undelegate it,
+    // splitting the co-delegated pair and blocking the victim's place_bet (which
+    // needs both in the rollup) until they recovered. Same airtight pattern as
+    // Claim/PlaceBet/Withdraw: seeds built from the signer cannot be aimed at
+    // someone else's account.
+    #[account(mut,
+        constraint = bettor.owner == payer.key() @ PaddockError::NotOwner,
+        seeds = [BETTOR_SEED, payer.key().as_ref(), mint.key().as_ref()],
+        bump = bettor.bump)]
     pub bettor: Account<'info, Bettor>,
-    #[account(mut, seeds = [TICKET_SEED, ticket.owner.as_ref(), mint.key().as_ref()],
-              bump = ticket.bump)]
+    #[account(mut,
+        constraint = ticket.owner == payer.key() @ PaddockError::NotOwner,
+        seeds = [TICKET_SEED, payer.key().as_ref(), mint.key().as_ref()],
+        bump = ticket.bump)]
     pub ticket: Account<'info, Ticket>,
 }
 
