@@ -20,10 +20,11 @@ pub mod paddock {
     use super::*;
 
     /// Create the book ledger + the program-owned vault ATA that custodies stakes.
-    pub fn init_book(ctx: Context<InitBook>) -> Result<()> {
+    pub fn init_book(ctx: Context<InitBook>, validator: Pubkey) -> Result<()> {
         let b = &mut ctx.accounts.book;
         b.authority = ctx.accounts.authority.key();
         b.mint = ctx.accounts.mint.key();
+        b.validator = validator;
         b.balance = 0;
         b.locked = 0;
         b.bump = ctx.bumps.book;
@@ -120,7 +121,14 @@ pub mod paddock {
     /// programs/raider/src/lib.rs:231).
     pub fn delegate_race(ctx: Context<DelegateRace>) -> Result<()> {
         let mint = ctx.accounts.mint.key();
+        // The validator MUST match the one pinned at init_book, or this account
+        // lands in a different rollup from the rest of the book's state and can
+        // never be co-written. Enforced on-chain, not by client convention.
         let validator = ctx.remaining_accounts.first().map(|a| a.key());
+        require!(
+            validator == Some(ctx.accounts.book.validator),
+            PaddockError::ValidatorMismatch
+        );
         ctx.accounts.delegate_race(
             &ctx.accounts.payer,
             &[RACE_SEED, mint.as_ref()],
@@ -135,7 +143,14 @@ pub mod paddock {
     pub fn delegate_bettor(ctx: Context<DelegateBettor>) -> Result<()> {
         let owner = ctx.accounts.payer.key();
         let mint = ctx.accounts.mint.key();
+        // The validator MUST match the one pinned at init_book, or this account
+        // lands in a different rollup from the rest of the book's state and can
+        // never be co-written. Enforced on-chain, not by client convention.
         let validator = ctx.remaining_accounts.first().map(|a| a.key());
+        require!(
+            validator == Some(ctx.accounts.book.validator),
+            PaddockError::ValidatorMismatch
+        );
         ctx.accounts.delegate_bettor(
             &ctx.accounts.payer,
             &[BETTOR_SEED, owner.as_ref(), mint.as_ref()],
@@ -163,8 +178,10 @@ pub mod paddock {
 
         require!(race.phase == state::PHASE_MARKET, PaddockError::WrongPhase);
         require!((car_id as usize) < state::GRID, PaddockError::BadCarIndex);
-        require!(bettor.balance >= amount, PaddockError::InsufficientBalance);
 
+        // Reconcile a stale ticket BEFORE the affordability check, so winnings
+        // already owed are spendable in the same call. Checking first would
+        // reject bets the player can actually afford.
         if ticket.race_seq != race.seq {
             let credit = settle_ticket(race, ticket);
             if credit > 0 {
@@ -177,7 +194,9 @@ pub mod paddock {
             ticket.race_seq = race.seq;
         }
 
+        require!(bettor.balance >= amount, PaddockError::InsufficientBalance);
         bettor.balance -= amount;
+
         ticket.stakes[car_id as usize] = ticket.stakes[car_id as usize]
             .checked_add(amount)
             .ok_or(PaddockError::MathOverflow)?;
@@ -271,6 +290,12 @@ pub struct InitRace<'info> {
     #[account(mut)]
     pub authority: Signer<'info>,
     pub mint: Account<'info, Mint>,
+    #[account(
+        seeds = [BOOK_SEED, mint.key().as_ref()],
+        bump = book.bump,
+        has_one = authority @ PaddockError::NotOwner,
+    )]
+    pub book: Account<'info, Book>,
     #[account(init, payer = authority, space = Race::SIZE,
               seeds = [RACE_SEED, mint.key().as_ref()], bump)]
     pub race: Account<'info, Race>,
@@ -286,6 +311,8 @@ pub struct DelegateRace<'info> {
     #[account(mut)]
     pub payer: Signer<'info>,
     pub mint: Account<'info, Mint>,
+    #[account(seeds = [BOOK_SEED, mint.key().as_ref()], bump = book.bump)]
+    pub book: Account<'info, Book>,
     /// CHECK: Race PDA to delegate
     #[account(mut, del, seeds = [RACE_SEED, mint.key().as_ref()], bump)]
     pub race: AccountInfo<'info>,
@@ -297,6 +324,8 @@ pub struct DelegateBettor<'info> {
     #[account(mut)]
     pub payer: Signer<'info>,
     pub mint: Account<'info, Mint>,
+    #[account(seeds = [BOOK_SEED, mint.key().as_ref()], bump = book.bump)]
+    pub book: Account<'info, Book>,
     /// CHECK: Bettor PDA to delegate
     #[account(mut, del, seeds = [BETTOR_SEED, payer.key().as_ref(), mint.key().as_ref()], bump)]
     pub bettor: AccountInfo<'info>,
@@ -336,6 +365,7 @@ pub enum PaddockError {
     BadCarIndex,
     NoSuchResult,
     AlreadyClaimed,
+    ValidatorMismatch,
 }
 
 /// Payout owed to `ticket` for the race it currently references, or 0 if that

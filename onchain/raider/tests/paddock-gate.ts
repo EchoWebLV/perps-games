@@ -79,7 +79,7 @@ describe("paddock GATE: multi-payer co-delegation", function () {
     console.log("      mint    :", mint.toBase58());
 
     await prog.methods
-      .initBook()
+      .initBook(VALIDATOR)
       .accounts({
         authority: house.publicKey,
         mint,
@@ -97,6 +97,7 @@ describe("paddock GATE: multi-payer co-delegation", function () {
       .accounts({
         authority: house.publicKey,
         mint,
+        book: bookPda,
         race: racePda,
         priceUpdate: BTC_FEED,
         systemProgram: SystemProgram.programId,
@@ -114,7 +115,7 @@ describe("paddock GATE: multi-payer co-delegation", function () {
       baseConn,
       prog.methods
         .delegateRace()
-        .accounts({ payer: house.publicKey, mint, race: racePda })
+        .accounts({ payer: house.publicKey, mint, book: bookPda, race: racePda })
         .remainingAccounts([{ pubkey: VALIDATOR, isSigner: false, isWritable: false }]),
       house.payer
     );
@@ -175,7 +176,7 @@ describe("paddock GATE: multi-payer co-delegation", function () {
       baseConn,
       playerProg.methods
         .delegateBettor()
-        .accounts({ payer: player.publicKey, mint, bettor: bettorPda, ticket: ticketPda })
+        .accounts({ payer: player.publicKey, mint, book: bookPda, bettor: bettorPda, ticket: ticketPda })
         .remainingAccounts([{ pubkey: VALIDATOR, isSigner: false, isWritable: false }]),
       player
     );
