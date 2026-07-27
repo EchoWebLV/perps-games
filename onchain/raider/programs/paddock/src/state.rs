@@ -25,18 +25,27 @@ pub const PHASE_MARKET: u8 = 0;
 pub const PHASE_RACING: u8 = 1;
 pub const PHASE_SETTLED: u8 = 2;
 
-/// House bankroll + rake sink. Same layout as raider's HouseBalance so the
-/// vault/deposit/withdraw plumbing transfers unchanged.
+/// House bankroll + rake sink. Layout follows raider's HouseBalance so the
+/// vault/deposit/withdraw plumbing transfers unchanged, plus `validator`.
+///
+/// `validator` is the ER validator identity every delegation for this book MUST
+/// name. Without it, `delegate_race` and `delegate_bettor` are free to name
+/// different validators — the delegation program records the choice per-account
+/// in `DelegationRecord.authority` — and the shared Race would end up in a
+/// different rollup from a player's Bettor/Ticket. They could then never be
+/// written in one ER transaction, which is the assumption the whole pari-mutuel
+/// design rests on. Recorded once at `init_book`, asserted at every delegation.
 #[account]
 pub struct Book {
     pub authority: Pubkey,
     pub mint: Pubkey,
+    pub validator: Pubkey,
     pub balance: u64,
     pub locked: u64,
     pub bump: u8,
 }
 impl Book {
-    pub const SIZE: usize = 8 + 32 + 32 + 8 + 8 + 1;
+    pub const SIZE: usize = 8 + 32 + 32 + 32 + 8 + 8 + 1;
 }
 
 /// Per-player play balance. Same layout as raider's PlayerBalance.
@@ -145,7 +154,8 @@ mod tests {
 
     #[test]
     fn account_sizes_are_locked() {
-        assert_eq!(Book::SIZE, 89);
+        // 89 + 32 for the pinned ER validator identity.
+        assert_eq!(Book::SIZE, 121);
         assert_eq!(Bettor::SIZE, 81);
         assert_eq!(Ticket::SIZE, 113);
         assert_eq!(Race::SIZE, 778);
