@@ -23,6 +23,11 @@
 // mapping itself, not because callers need it to read the arrays, but so the permutation is a stated
 // fact of the contract and raw on-chain state can still be reconciled against what is on screen.
 import { RAKE } from "../core/race-payout";
+import {
+  GRID, PHASE_MARKET, PHASE_RACING, PHASE_SETTLED, SCALE, payoutOf, settlePool,
+  type BettorSnap, type PaddockBook, type RaceSnap,
+} from "../chain/paddock";
+import { baseToUnits, unitsToBase } from "../core/stake-currency";
 
 /** The market's own phase — deliberately the same three states the program's `Race.phase` uses
  *  (0 market / 1 racing / 2 finish), NOT the host's five-state render phase. A book has no opinion
@@ -221,4 +226,267 @@ export function localBookSource(): RaceBookSource {
     lastSettle: () => settled,
     creditNote: () => credited,
   };
+}
+
+// ── the on-chain book ────────────────────────────────────────────────────────────────────────────
+/** Phase-window lengths, in seconds, from the program's own constants
+ *  (`onchain/raider/programs/paddock/src/state.rs` — MARKET_SECS / RACE_SECS / FINISH_SECS).
+ *  They are re-declared here rather than imported because `chain/paddock.ts` does not export them,
+ *  and a silent divergence would desync every rendered clock — so `race-book-source.test.ts` reads
+ *  state.rs and asserts these three numbers still match it, the same cross-source guard `idl.test.ts`
+ *  uses for the program id. */
+export const CHAIN_PHASE_SECS: Record<BookPhase, number> = { MARKET: 15, RACING: 40, FINISH: 6 };
+
+/** How often `poll()` kicks a fresh ER read. The crank runs at ~1s, so a faster poll would only
+ *  re-read the same account: `secondsLeft()` is derived from the snapshot's `phaseEndsTs` and stays
+ *  continuous between polls, which is precisely why the rendered clock does not need a fast poll. */
+const POLL_SECS = 1.0;
+
+const ZERO_GRID = () => new Array<number>(GRID).fill(0);
+
+/** Exactly the slice of `PaddockBook` a book source touches: read the race, read my ticket, send a
+ *  bet. Onboarding (`ensureBettor`), delegation state and `claim` belong to the wallet flow, not to
+ *  the thing that paints a market — narrowing here says so in the type, and keeps this module from
+ *  quietly growing a dependency on the rest of the client. */
+export type PaddockBookReader = Pick<PaddockBook, "raceSnapshot" | "bettorSnapshot" | "placeBet">;
+
+export interface ChainBookOptions {
+  /** Seconds between ER reads. Default `POLL_SECS`. */
+  pollSecs?: number;
+  /** Anything that went wrong off the frame path (a failed bet, a dropped snapshot fetch). Default
+   *  `console.warn` — the book has no UI of its own and swallowing these silently is worse. */
+  onError?: (where: string, e: unknown) => void;
+}
+
+/** A `RaceBookSource` backed by the paddock program's shared Race in the ER.
+ *
+ *  SLOT → CAR happens HERE and only here. `Race.pools`, `Race.order` and `Ticket.stakes` are indexed
+ *  by starting SLOT; `Race.entrants[slot]` is the car (a roster index) standing in it, and the crank
+ *  permutes the grid on every roll. Everything this returns is already resolved through `entrants`,
+ *  so nothing downstream can forget to translate — see the note at the top of this file.
+ *
+ *  MONEY UNITS: on-chain amounts are base units (wSOL lamports); everything crossing this interface
+ *  is DISPLAY units, via the game's existing `stake-currency` convention (100 display units = 1 SOL).
+ *  That is the same "$" the panel has always printed, so the bet chips ($1/$5/$20) stay sane bets.
+ *
+ *  It never writes a number it did not read. There is no local wallet to debit and no optimistic pool
+ *  bump: a bet is `pendingBet()` until the ER confirms it and the next snapshot shows it landed. */
+export function chainBookSource(
+  client: PaddockBookReader,
+  opts: ChainBookOptions = {},
+): RaceBookSource & { refresh(): Promise<void> } {
+  const pollSecs = opts.pollSecs ?? POLL_SECS;
+  const report = opts.onError ?? ((where: string, e: unknown) => console.warn(`[chain-book] ${where}:`, e));
+
+  let race: RaceSnap | null = null;
+  let bettor: BettorSnap | null = null;
+  let lockedMult: number[] = [];   // CAR-indexed, frozen at lock()
+  let settled: BookSettle | null = null;
+  let pending: number | null = null; // CAR id of a bet in flight
+  let lastPoll = 0;                  // WALL-CLOCK ms of the last read (see poll)
+  let fetching = false;              // one ER read at a time — a slow RPC must not stack requests
+  let disposed = false;
+
+  /** `bySlot[slot]` → `byCar[entrants[slot]]`. The single translation point for the whole book. */
+  const toCar = (bySlot: bigint[]): number[] => {
+    const out = ZERO_GRID();
+    if (!race) return out;
+    race.entrants.forEach((car, slot) => { out[car] = baseToUnits(bySlot[slot] ?? 0n); });
+    return out;
+  };
+
+  /** What the program would pay a unit staked on `slot`, were it to win — `book::settle_pool` exactly,
+   *  in the same integer arithmetic, so the odds on screen and the payout in the vault agree to the
+   *  unit. A pool of zero yields a multiplier of zero, matching the program's "nobody backed the
+   *  winner, the house takes the pool" branch rather than a divide-by-zero infinity. */
+  const multOfSlot = (slot: number): number => {
+    if (!race) return 0;
+    return Number(settlePool(race.total, race.pools[slot] ?? 0n).multFp) / Number(SCALE);
+  };
+  const liveMults = (): number[] => {
+    const out = ZERO_GRID();
+    if (!race) return out;
+    race.entrants.forEach((car, slot) => { out[car] = multOfSlot(slot); });
+    return out;
+  };
+
+  /** The player's stakes, but ONLY when the ticket belongs to the race on screen. A ticket carries the
+   *  seq of the race its stakes were placed in; the program auto-settles and rewrites it on the next
+   *  bet. Reading a previous race's stakes through the CURRENT `entrants` map would be wrong twice
+   *  over — the wrong race's money, permuted by the wrong grid — so a stale ticket reads as no bet. */
+  const stakesBase = (): bigint[] => {
+    if (!race || !bettor || bettor.raceSeq === null || bettor.raceSeq !== race.seq) return [];
+    return bettor.stakes;
+  };
+
+  async function refresh(): Promise<void> {
+    if (fetching || disposed) return;
+    fetching = true;
+    try {
+      const [r, b] = await Promise.all([client.raceSnapshot(), client.bettorSnapshot()]);
+      if (disposed) return;
+      // A dropped read leaves the LAST snapshot in place rather than blanking the book: `phase()` and
+      // `secondsLeft()` keep reporting the last thing the chain actually said, and the host holds at
+      // that point instead of advancing the show past a chain it cannot currently see.
+      if (r) race = r;
+      bettor = b;
+    } catch (e) {
+      report("snapshot", e);
+    } finally {
+      fetching = false;
+    }
+  }
+
+  const source: RaceBookSource & { refresh(): Promise<void> } = {
+    refresh,
+
+    /** The chain opened this market long before the browser noticed. Nothing in `ctx` is used: the
+     *  seed, the strengths and the outcome all live on-chain, and the race's seeded stream is for a
+     *  book that draws its own result — this one only reports the one already drawn. What DOES happen
+     *  here is per-race view state clearing, so a new market never paints the last race's odds. */
+    openMarket() {
+      lockedMult = [];
+      settled = null;
+    },
+
+    /** Deliberately ignores `dt` and reads the WALL clock. `dt` is the host's sim step — clamped
+     *  (race-preview clamps to 0.1s so a stall cannot teleport the cars) and starved to a trickle
+     *  whenever the tab is throttled. The chain does not slow down with the frame rate, and neither
+     *  does `secondsLeft()`, which is derived from `Date.now()`; pacing the poll off `dt` too would
+     *  leave a throttled tab holding a snapshot minutes old while its own clock said the window had
+     *  closed. Observed exactly that in the preview pane at ~1.5fps, 2026-07-27. */
+    poll() {
+      const now = Date.now();
+      if (now - lastPoll < pollSecs * 1000) return;
+      lastPoll = now;
+      void refresh(); // fire-and-forget: the frame loop must never await an RPC
+    },
+
+    phase() {
+      if (!race) return null; // no snapshot yet — the host holds wherever it is
+      if (race.phase === PHASE_MARKET) return "MARKET";
+      if (race.phase === PHASE_RACING) return "RACING";
+      if (race.phase === PHASE_SETTLED) return "FINISH";
+      return null;
+    },
+
+    /** Counted down to the snapshot's `phaseEndsTs`, so the number on screen is the chain's clock and
+     *  not one this module started. Clamped into the phase's own window: a browser clock that is off
+     *  can then cost at most the current window (the render holds at a boundary, or starts one at its
+     *  beginning) instead of driving the show to a time the chain has never been at. */
+    secondsLeft() {
+      const p = source.phase();
+      if (!race || p === null) return null;
+      const left = race.phaseEndsTs - Date.now() / 1000;
+      return Math.max(0, Math.min(CHAIN_PHASE_SECS[p], left));
+    },
+
+    entrants: () => (race ? race.entrants.slice() : ZERO_GRID().map((_v, i) => i)),
+    pools: () => (race ? toCar(race.pools) : ZERO_GRID()),
+    total: () => (race ? baseToUnits(race.total) : 0),
+    multipliers: () => (lockedMult.length ? lockedMult : liveMults()),
+
+    myStakes() {
+      const base = stakesBase();
+      return base.length ? toCar(base) : ZERO_GRID();
+    },
+
+    wallet: () => (bettor ? baseToUnits(bettor.balance) : 0),
+
+    /** Null until the crank locks the market. `Race.order` is ZEROED on every roll into MARKET, so a
+     *  market-phase read would hand back a perfectly well-formed `[0,0,0,0,0,0,0,0]` — an "order" that
+     *  is really the absence of one. Returning it would pace the whole field onto car 0 and then swap
+     *  the result out from under the render at the lock. Phase is the only honest gate. */
+    finishOrder() {
+      const r = race; // bound so the null-narrowing survives into the mapping closure
+      if (!r || r.phase === PHASE_MARKET) return null;
+      return r.order.map((slot) => r.entrants[slot]);
+    },
+
+    /** `carId` is a roster index; the chain wants the SLOT that car is starting from. */
+    placeBet(carId, amount) {
+      if (!race || race.phase !== PHASE_MARKET) return; // the market is shut; the program would reject it
+      if (pending !== null) return;                     // one bet in flight at a time (the panel greys the rest)
+      const slot = race.entrants.indexOf(carId);
+      if (slot < 0) return;
+      pending = carId;
+      client
+        .placeBet(slot, BigInt(unitsToBase(amount)))
+        .then(() => refresh())          // pull the landed pools/stakes back before the button frees up
+        .catch((e) => report("placeBet", e))
+        .finally(() => { pending = null; });
+    },
+    pendingBet: () => pending,
+
+    /** Freeze the odds. The chain froze them at the lock; this only stops the panel re-deriving them
+     *  from pools that can no longer move, so the multiplier shown beside the winner is the one the
+     *  market closed at. */
+    lock() {
+      lockedMult = liveMults();
+    },
+
+    /** Report what the chain paid — it does not pay anything. The vault moved at the crank, or will
+     *  when the player claims; this mirrors `book::settle_pool` / `book::payout_of` on the frozen
+     *  pools so the FINISH card can be painted the instant the rendered race crosses the line, which
+     *  can be a second or two before the crank writes the result into `Race.history`.
+     *
+     *  `winnerId` is what the SIM produced. It is cross-checked, not trusted: the returned
+     *  `winnerId` is always the chain's, because the chain is what paid. */
+    settle(winnerId) {
+      if (!race || race.phase === PHASE_MARKET) {
+        settled = { winnerId, net: 0, winnerMult: 0, walletAfter: source.wallet() };
+        return settled;
+      }
+      const winnerSlot = race.order[0];
+      const winnerCar = race.entrants[winnerSlot];
+      if (winnerCar !== winnerId) {
+        // The rendered race finished on a different car than the one the chain paid. That is the
+        // single worst failure this whole seam exists to prevent, so it is shouted, and the chain's
+        // answer is the one that goes on the card.
+        console.error(`[chain-book] rendered winner ${winnerId} != chain winner ${winnerCar} (slot ${winnerSlot}) — showing the chain's`);
+      }
+      const s = settlePool(race.total, race.pools[winnerSlot] ?? 0n);
+      const base = stakesBase();
+      const gross = base.length ? payoutOf(base[winnerSlot] ?? 0n, s.multFp) : 0n;
+      const staked = base.reduce((a, b) => a + b, 0n);
+      settled = {
+        winnerId: winnerCar,
+        net: baseToUnits(gross) - baseToUnits(staked),
+        winnerMult: Number(s.multFp) / Number(SCALE),
+        // The LIVE on-chain balance, not balance+payout: the vault credits a win on `claim` (or on the
+        // next bet's auto-settle), so quoting a balance the chain has not written would be inventing
+        // money. `net` is what the race made; this is what is actually in the account right now.
+        walletAfter: source.wallet(),
+      };
+      return settled;
+    },
+
+    /** No-op, deliberately. The owner-podium slice of the rake is a demo-economy idea with no
+     *  counterpart in the program — there is no instruction that pays a car's owner. Painting a
+     *  "+$x" line for money the chain will never move would be a lie on the FINISH card. */
+    credit() {},
+    creditNote: () => null,
+
+    lastSettle: () => settled,
+
+    dispose() {
+      disposed = true; // a snapshot landing after teardown must not write into freed state
+    },
+  };
+
+  return source;
+}
+
+/** The factory a HOST should use: `chainBookSource` plus one awaited read, so race-mode is never
+ *  handed a book that has no phase yet. That matters — a book reporting `phase() === null` hands the
+ *  phase machine back to the host, which would open a local 15s market over a chain that may be
+ *  mid-race. Priming it makes the very first frame already agree with the chain. */
+export async function createChainBookSource(
+  client: PaddockBookReader,
+  opts: ChainBookOptions = {},
+): Promise<RaceBookSource & { refresh(): Promise<void> }> {
+  const src = chainBookSource(client, opts);
+  await src.refresh();
+  if (src.phase() === null) throw new Error("paddock: no Race account in the ER for this book mint");
+  return src;
 }

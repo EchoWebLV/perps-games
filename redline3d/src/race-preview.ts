@@ -16,7 +16,23 @@ import { installOutlineDevControls, isToonEnabled, onToonChanged, refreshToonSty
 import { EdgeOutlinePass, edgePassEnabled, setEdgePassEnabled } from "./render/edge-outline-pass";
 import { registerLightLab } from "./ui/light-lab";
 import { pNum, pColor } from "./config/visual-presets";
-import { createRaceGame, DEFAULT_GRID } from "./render/race-mode";
+import { createRaceGame, DEFAULT_GRID, type RaceGame } from "./render/race-mode";
+import { createChainBookSource, type RaceBookSource } from "./render/race-book-source";
+import { createPaddockBook } from "./chain/paddock";
+import { createDevKeypairPort } from "./chain/dev-keypair-port";
+import { portToAnchorWallet } from "./chain/anchor-wallet";
+import { CHAIN } from "./chain/config";
+
+// ── chain mode (?chain=1) ─────────────────────────────────────────────────────────────────────
+// Off by default: the harness is a rendering bench first, and it has to keep working with no RPC.
+// With the flag it points at the REAL devnet paddock book — the same singleton Race the scheduled
+// crank has been cycling unattended — so the market, the clock and the winner on screen are the
+// chain's. race-preview.html is not a vite build input (vite.config.ts:73-78), so none of this ships.
+//
+// The wallet is the persisted dev keypair (localStorage). Reading the book needs no SOL at all: an
+// AnchorProvider just needs SOME pubkey to build against. Betting is a different matter — that needs
+// a funded, joined and DELEGATED bettor, which is Task 6's onboarding path, not this harness's.
+const chainMode = new URLSearchParams(location.search).get("chain") === "1";
 
 const vw = () => innerWidth || 1280;
 const vh = () => innerHeight || 800;
@@ -122,19 +138,63 @@ registerLightLab("race-track", { controls: [
 installOutlineDevControls(); // DEV: [ / ] rescale every cel-shade outline live; window.__outline(x)
 
 // ── the race sim (all race logic + HUD/bet-panel/cam-controls DOM live here now) ──────────────
-const game = createRaceGame({
-  scene,
-  camera,
-  hudParent: document.body,
-  grid: DEFAULT_GRID,
-  seed: Date.now() % 100000,
-  lowTier: false,
-  devHooks: true, // installs window.__raceState / __warp for verification
+// `game` is created asynchronously in chain mode: the book must have a snapshot BEFORE race-mode sees
+// it, or race-mode falls back to its local 15s market for a frame over a chain that may be mid-race.
+let game: RaceGame | null = null;
+
+/** A one-line banner naming exactly which chain, which program and which book is on screen — so a
+ *  screenshot of this page is self-evidencing rather than something to be taken on trust. */
+function chainBanner(text: string, ok: boolean): HTMLElement {
+  const el = document.getElementById("chain-banner") ?? document.createElement("div");
+  el.id = "chain-banner";
+  el.style.cssText = `position:fixed;left:14px;bottom:14px;z-index:60;max-width:min(560px,60vw);padding:8px 12px;border-radius:10px;font:11px/1.5 'Chakra Petch',ui-monospace,monospace;color:${ok ? "#9ad7ff" : "#ff8fa3"};background:rgba(9,6,22,.86);border:1px solid ${ok ? "rgba(122,90,220,.5)" : "rgba(255,93,160,.6)"};white-space:pre-wrap;word-break:break-all;pointer-events:none;`;
+  el.textContent = text;
+  if (!el.parentElement) document.body.appendChild(el);
+  return el;
+}
+
+async function makeChainBook(): Promise<RaceBookSource> {
+  const wallet = portToAnchorWallet(createDevKeypairPort());
+  const client = createPaddockBook({ wallet, mint: CHAIN.PADDOCK_BOOK_MINT });
+  const book = await createChainBookSource(client, { onError: (where, e) => console.warn("[race-preview] chain book", where, e) });
+  chainBanner(
+    `CHAIN MODE · devnet\nprogram ${CHAIN.PADDOCK_PROGRAM_ID.toBase58()}\nmint    ${CHAIN.PADDOCK_BOOK_MINT.toBase58()}\nrace    ${client.pdas.race.toBase58()}\nER      ${CHAIN.ER_RPC}\nwallet  ${client.address} (read-only — no bettor joined)`,
+    true,
+  );
+  return book;
+}
+
+async function boot(): Promise<void> {
+  const book = chainMode ? await makeChainBook() : undefined;
+  game = createRaceGame({
+    scene,
+    camera,
+    hudParent: document.body,
+    grid: DEFAULT_GRID,
+    seed: Date.now() % 100000,
+    lowTier: false,
+    devHooks: true, // installs window.__raceState / __warp for verification
+    book,
+  });
+  // DEV: the game itself, so a frame can be driven by hand. This pane serves the page HIDDEN —
+  // `document.hidden` is true, requestAnimationFrame never fires, and the nextFrame() setTimeout
+  // fallback is throttled to roughly 1Hz — so verifying anything visual needs a pump that browser
+  // background-throttling does not reach. Chain mode makes this safe: the sim's position is a pure
+  // function of the book's remaining seconds, so pumping catches the show UP to the chain rather
+  // than running it ahead of one.
+  (window as unknown as { __raceGame: RaceGame }).__raceGame = game;
+  // sync the initial art style now the toon'd/variant-bearing roots (track + environment, built inside
+  // createRaceGame) exist: applies material/hull/geometry-variant state, sets the `toon-ui` body class,
+  // and fires applyStyleFog.
+  refreshToonStyle();
+  nextFrame(loop);
+}
+// A chain that will not load is a LOUD failure here, not a silent fall-back to the browser sim: the
+// entire point of ?chain=1 is that what you are looking at came off the chain.
+boot().catch((e) => {
+  console.error("[race-preview] boot failed", e);
+  chainBanner(`CHAIN MODE FAILED\n${e instanceof Error ? e.message : String(e)}`, false);
 });
-// sync the initial art style now the toon'd/variant-bearing roots (track + environment, built inside
-// createRaceGame) exist: applies material/hull/geometry-variant state, sets the `toon-ui` body class,
-// and fires applyStyleFog.
-refreshToonStyle();
 
 addEventListener("resize", () => {
   renderer.setSize(vw(), vh());
@@ -164,8 +224,8 @@ function loop() {
   const now = performance.now();
   const dt = Math.min(0.1, (now - last) / 1000); // clamp so a long stall never teleports cars
   last = now;
-  game.update(dt);    // step + poses + director + track/env + HUD push (all inside the sim module)
+  game?.update(dt);   // step + poses + director + track/env + HUD push (all inside the sim module)
   composer.render();  // bloom composite
   nextFrame(loop);
 }
-nextFrame(loop);
+// The ticker starts from boot() once the game exists (chain mode has to await its first snapshot).

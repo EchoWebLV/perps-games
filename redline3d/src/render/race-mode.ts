@@ -22,7 +22,7 @@ import { toonify, reclaimToonVariants } from "./toon";
 import { createRaceDirector, type DirectorCar, type DirectorMode } from "./race-director";
 import { createRaceHud, type RacePhase } from "../ui/race-hud";
 import { createBetPanel } from "../ui/bet-panel";
-import { localBookSource, mulberry32, type RaceBookSource } from "./race-book-source";
+import { localBookSource, mulberry32, type BookPhase, type RaceBookSource } from "./race-book-source";
 import { createCamControls } from "../ui/cam-controls";
 import { onTap } from "../ui/tap";
 import { STRENGTH, type GridEntrant } from "../core/race-grid";
@@ -93,6 +93,30 @@ const SUB_H = 1 / 240;      // fixed sim sub-step for framerate-independent, exa
 // whole race to completion instead of stalling — the loop also early-exits the instant every car has
 // finished, so this cap is only ever the pathological-input guard (any real race finishes < ~9k).
 const SUB_STEP_CAP = 60000;
+
+// ── reconciling the chain's 40s RACING window against this module's ~36s show ────────────────────
+// The program gives a locked race a FIXED 40s window (RACE_SECS, state.rs) before the crank settles
+// it. The show is shorter and not even a constant: last place finishes at BASE_T + 7·GAP + jitter,
+// i.e. somewhere in 35.6–36.0s. Those two numbers will never line up, so one of them has to give.
+//
+// The chain's does not — it owns the RESULT and the MONEY, and stretching or squeezing the pacing to
+// fill exactly 40s would mean re-tuning the one thing (`calibrateBase`) that guarantees the rendered
+// order. So the show is ANCHORED TO THE END of the chain's window instead: the sim clock is driven
+// from `secondsLeft()` such that the last car crosses the line with TAIL_HOLD seconds still on the
+// chain's clock, and whatever is left over at the FRONT of the window is spent on the countdown.
+// With the shipped constants that is 40 − 36 − 1 ≈ 3s of countdown, which is exactly CD_TIME — the
+// numbers were chosen to fit (see the RACE_SECS comment in state.rs), so nothing is being squeezed.
+//
+// Three things fall out of anchoring to the END rather than the start, and they are the reason for
+// the choice:
+//  • Discovery lag is free. The browser learns about a lock up to a poll-interval late; that time
+//    comes out of the countdown, never out of the race, so the chequered flag still lands where the
+//    chain says it does.
+//  • Joining mid-flight and a backgrounded tab are the SAME code path: the sim target is a pure
+//    function of the chain's remaining seconds, so "start the race" and "resync to 27s into it" are
+//    one line, not two features.
+//  • The render can never overrun the settle. It cannot finish LATE, only early-and-hold.
+const TAIL_HOLD = 1.0;      // seconds of chequered-flag hold left inside the chain's RACING window
 
 /** seeded PRNG — now lives in race-book-source.ts (the local book draws its finish order off the same
  *  stream, and bet-panel.ts used to keep a second copy of it). Re-exported here because the harness,
@@ -212,6 +236,21 @@ export function createRaceGame(opts: RaceGameOptions): RaceGame {
   let restoreSceneEnv: (() => void) | null = null;
   let ownLighting: RaceLighting | null = null; // this race's Light Lab binding (identity-checked on dispose)
   let lastResult: RaceResult = { finishOrder: [], playerRank: null, poolTotal: 0 };
+  // ── chain-driven state (all inert while the book has no phase of its own) ──
+  // Latches the first time the book reports a phase, and never unlatches: from then on the CHAIN owns
+  // every transition and the local MARKET_TIME/FINISH_HOLD timers are dead code for this instance.
+  // Latching (rather than re-testing each frame) is what stops a single dropped ER read from handing
+  // the phase machine back to a local clock mid-race.
+  let chainDriven = false;
+  // The finish order `setupRace` last paced the field to. The invariant this exists to enforce: while
+  // the book reports an order, the pacing was solved from THAT order. Checked every step; a violation
+  // re-solves before any car moves.
+  let pacedOrder: number[] = [];
+  let raceLen = BASE_T;       // last car's target finish time — the length of the show, exactly
+  // A market we have rendered has not been locked into a race yet. Without it, two consecutive races
+  // that happen to draw the identical finish order would be indistinguishable from one race still
+  // running, and the second one would never be set up.
+  let awaitingLock = false;
 
   // ── the book: pools, wallet, stakes and the RESULT. Host-supplied or the local sim (see opts.book).
   // `ownBook` is non-null only when we built it, and only that one gets disposed with the race.
@@ -358,6 +397,18 @@ export function createRaceGame(opts: RaceGameOptions): RaceGame {
     });
     for (const c of cars) c.base = calibrateBase(c);
     maxRefSpeed = Math.max(...cars.map((c) => c.base)) * 1.45; // reference top speed for the FOV kick
+    // The field was just put back on the grid, so the clock it is measured against goes back to zero
+    // with it. (enterMarket zeroed these right after this call anyway; a mid-race RE-solve — a chain
+    // order arriving late, or a resync after a backgrounded tab — has no such follow-up and needs it.)
+    raceElapsed = 0; simAccum = 0;
+    pacedOrder = order.slice();
+    raceLen = Math.max(...cars.map((c) => c.T)); // the show's own length, jitter included
+  }
+
+  /** Same finish order, element for element. Cheap enough to run every frame, which is the point:
+   *  it is the tripwire that catches the book's order changing under a race already being paced. */
+  function sameOrder(a: number[], b: number[]): boolean {
+    return a.length === b.length && a.every((v, i) => v === b[i]);
   }
 
   // ── phase machine ─────────────────────────────────────────────────────────────────────────────
@@ -375,11 +426,27 @@ export function createRaceGame(opts: RaceGameOptions): RaceGame {
     setupRace(rng, book.finishOrder() ?? cars.map((_c, i) => i));
     phase = "MARKET";
     marketTimer = MARKET_TIME;
-    simAccum = 0; raceElapsed = 0;
     director.reset();
   }
 
-  function lockAndCountdown() {
+  /** Close the market and roll the lights. `order` is the RESULT, when the book has one to give: a
+   *  chain market does not reveal `Race.order` until the crank locks it, so the pacing `enterMarket`
+   *  solved is a placeholder (the grid order) and has to be re-solved from the real thing HERE —
+   *  before the countdown, before any car has moved a metre. Getting this wrong is the one bug this
+   *  whole path is built to make impossible: the field would run to a stale order and the chequered
+   *  flag would fall on a car the chain did not pay.
+   *
+   *  A book that already had its order at `openMarket` (the local sim) passes the same array it
+   *  passed then, `sameOrder` sees no change, and nothing is re-solved — so the browser-only race is
+   *  byte-for-byte what it always was, down to the seeded jitter.
+   *
+   *  The re-solve draws off a FRESH `mulberry32(seed)` rather than the market's stream, because the
+   *  market's stream is long gone by the time a chain reveals its order. Consequence, stated rather
+   *  than discovered later: under a chain book `seed` never changes (nothing calls `restart()`), so
+   *  the jitter attached to each RANK repeats race after race. What varies is which car holds which
+   *  rank — the chain redraws that every time — which is the variation an audience actually sees. */
+  function lockAndCountdown(order?: number[]) {
+    if (order && !sameOrder(order, pacedOrder)) setupRace(mulberry32(seed), order);
     book.lock();
     phase = "COUNTDOWN";
     cdRemaining = CD_TIME;
@@ -390,7 +457,17 @@ export function createRaceGame(opts: RaceGameOptions): RaceGame {
     phase = "FINISH";
     finishTimer = FINISH_HOLD;
     // compute the exit payload BEFORE settling the market (podium credit wiring is a later task)
-    const finishOrder = order();
+    const simOrder = order();
+    // When a chain decided the result, the CHAIN's order is the result — the sim was paced to
+    // reproduce it, not to produce it. They agree because `calibrateBase` solves each car's speed for
+    // an exact finish time, but "they agree" is a claim about numerical integration, and this is the
+    // one place where being wrong pays the wrong car. So the authoritative array is used and the
+    // sim's is compared to it, loudly.
+    const bookOrder = chainDriven ? book.finishOrder() : null;
+    if (bookOrder && !sameOrder(bookOrder, simOrder)) {
+      console.error("[race-mode] rendered order != chain order — rendering the chain's", { simOrder, bookOrder });
+    }
+    const finishOrder = bookOrder ?? simOrder;
     const playerIdx = grid.findIndex((g) => g.isPlayer);
     lastResult = {
       finishOrder,
@@ -412,8 +489,11 @@ export function createRaceGame(opts: RaceGameOptions): RaceGame {
     seed = (Math.random() * 1e9) | 0;
     enterMarket();
   }
-  betPanel.onRaceAgain(restart);
-  betPanel.onSkip(lockAndCountdown);
+  // Both of these are the local sim's privileges: you cannot skip a market the chain is holding open,
+  // and you cannot re-run a race the chain already settled. They go quiet rather than desyncing the
+  // show from the book — the chain opens the next market on its own, seconds later.
+  betPanel.onRaceAgain(() => { if (!chainDriven) restart(); });
+  betPanel.onSkip(() => { if (!chainDriven) lockAndCountdown(); });
   // The panel emits intent; the book decides whether the bet lands. Nothing on screen moves until the
   // next pushUi() reads the book back — which is exactly what makes an ER round-trip renderable.
   betPanel.onBet((carId, amount) => book.placeBet(carId, amount));
@@ -441,11 +521,26 @@ export function createRaceGame(opts: RaceGameOptions): RaceGame {
     }
   }
 
+  /** Run the pacing sim forward by `seconds` of race time, in fixed sub-steps. Extracted so the local
+   *  clock and the chain clock feed the SAME integrator — the only difference between them is where
+   *  `seconds` comes from. */
+  function runSim(seconds: number) {
+    simAccum += seconds;
+    let guard = 0;
+    while (simAccum >= SUB_H && guard < SUB_STEP_CAP) {
+      advance(SUB_H); simAccum -= SUB_H; guard++;
+      if (allFinished()) break; // one giant dt must complete the race, not stall on the cap
+    }
+  }
+
   function step(dt: number) {
     // Every phase, not just MARKET: a chain book has to see the race lock and settle without this
     // module telling it when to look. The local book no-ops the moment its odds freeze, so polling it
     // outside MARKET costs nothing and changes nothing.
     book.poll(dt);
+    const bp = book.phase();
+    if (bp !== null) chainDriven = true;
+    if (chainDriven) { stepChain(dt, bp); return; }
     if (phase === "MARKET") {
       marketTimer -= dt;
       if (marketTimer <= 0) lockAndCountdown();
@@ -454,15 +549,72 @@ export function createRaceGame(opts: RaceGameOptions): RaceGame {
       if (cdRemaining <= 0) { phase = "RACING"; goFlash = GO_HOLD; }
     } else if (phase === "RACING") {
       if (goFlash > 0) goFlash -= dt;
-      simAccum += dt;
-      let guard = 0;
-      while (simAccum >= SUB_H && guard < SUB_STEP_CAP) {
-        advance(SUB_H); simAccum -= SUB_H; guard++;
-        if (allFinished()) break; // one giant dt must complete the race, not stall on the cap
-      }
+      runSim(dt);
       if (allFinished()) enterFinish();
     } else if (phase === "FINISH") {
       if (!exited) { finishTimer -= dt; if (finishTimer <= 0) restart(); } // stay frozen once the player left
+    }
+  }
+
+  /** The phase machine when a BOOK owns the phases — i.e. when the market, the lock and the
+   *  settlement are all facts on a chain and this module's job is to be at the right point of the
+   *  show when each of them happens.
+   *
+   *  Nothing here counts down a local timer. Every transition is read off the book, and the sim's
+   *  position inside the race is a pure function of the book's remaining seconds (see TAIL_HOLD), so
+   *  a stalled tab, a slow RPC or a race joined halfway through all converge to the same state as a
+   *  client that watched the whole thing. */
+  function stepChain(dt: number, bp: BookPhase | null) {
+    // No snapshot to act on: a book that has lost its read reports null, and the show HOLDS. Running
+    // on a local clock past a chain we cannot currently see is how the render ends up contradicting
+    // the payout — the crank is ~1s away, so holding costs a beat and risks nothing.
+    if (bp === null) return;
+
+    if (bp === "MARKET") {
+      // A market is open on-chain. Anything other than MARKET on screen means this is a race we have
+      // not opened yet — the first one, or the next one after a settle we are still showing.
+      if (phase !== "MARKET") enterMarket();
+      marketTimer = book.secondsLeft() ?? MARKET_TIME; // the chain's clock; it cannot drift from ours
+      awaitingLock = true;
+      return;
+    }
+
+    // RACING or FINISH: the market is shut, so `Race.order` exists and the winner is already decided.
+    const ord = book.finishOrder();
+    if (ord && (awaitingLock || !sameOrder(ord, pacedOrder))) {
+      // Re-solve the pacing onto the real order. Arriving here from anything but MARKET means this
+      // race's market never reached the screen — a mid-flight join, or a `seq` that jumped several
+      // races while the tab was backgrounded — so the race context (pools, roster, camera) is rebuilt
+      // for the race we are about to run rather than continuing the stale one.
+      if (phase !== "MARKET") enterMarket();
+      lockAndCountdown(ord);
+      awaitingLock = false;
+    }
+
+    if (bp === "RACING") {
+      // Where the show has to be, measured from the END of the chain's window (see TAIL_HOLD).
+      // Negative → the race has not started yet and the remainder is the countdown.
+      const target = raceLen - ((book.secondsLeft() ?? 0) - TAIL_HOLD);
+      if (target < 0) {
+        if (phase !== "FINISH") { phase = "COUNTDOWN"; cdRemaining = Math.min(CD_TIME, -target); }
+        return;
+      }
+      if (phase === "COUNTDOWN") { phase = "RACING"; goFlash = GO_HOLD; }
+      if (phase !== "RACING") return; // already at FINISH: the show ran out ahead of the chain, as designed
+      if (goFlash > 0) goFlash -= dt;
+      // Never backwards — `target` only grows within a race, and a fresh race resets raceElapsed with
+      // the re-solve above, so this is a guard against a snapshot arriving out of order, not a clamp.
+      if (target > raceElapsed) runSim(target - raceElapsed);
+      if (allFinished()) enterFinish();
+      return;
+    }
+
+    // bp === "FINISH": the chain has settled. The render must not still be mid-race — force the
+    // remaining laps through the same integrator (one giant step, exactly as a throttled tab does)
+    // so the flag falls before the result card, never after it.
+    if (phase !== "FINISH") {
+      runSim(raceLen - raceElapsed + 1);
+      enterFinish();
     }
   }
 
@@ -629,11 +781,30 @@ export function createRaceGame(opts: RaceGameOptions): RaceGame {
       wallet: +book.wallet().toFixed(2),
       pool: +book.total().toFixed(2),
       mode: camControls.mode(),
+      // ── the book's side of the same instant, so a browser check can compare the show against the
+      // chain WITHOUT reaching into the ER a second time and racing the poll it is trying to verify.
+      chainDriven,
+      bookPhase: book.phase(),
+      bookSecondsLeft: book.secondsLeft(),
+      // entrants[slot] = roster index, i.e. the crank's grid permutation, named
+      entrants: book.entrants().map((i) => cars[i]?.entrant.name ?? `?${i}`),
+      // winner-first CAR names straight off the book — this is the array the render must match
+      bookOrder: book.finishOrder()?.map((i) => cars[i]?.entrant.name ?? `?${i}`) ?? null,
+      pacedOrder: pacedOrder.map((i) => cars[i]?.entrant.name ?? `?${i}`),
+      pools: book.pools().map((p) => +p.toFixed(2)),
+      mults: book.multipliers().map((m) => +m.toFixed(3)),
+      stakes: book.myStakes().map((s) => +s.toFixed(2)),
+      raceElapsed: +raceElapsed.toFixed(2),
+      raceLen: +raceLen.toFixed(2),
+      settle: book.lastSettle(),
     });
     // fast-forward through the SAME per-frame path (fixed dt) so laps / order / finish / settlement
     // fire exactly as in real time. No-op during MARKET (can't skip betting); stops the instant it
-    // reaches FINISH so the settlement state is observable.
+    // reaches FINISH so the settlement state is observable. Also a no-op under a chain book: the sim
+    // clock is derived from the chain's remaining seconds there, so "warping" would advance the show
+    // and then be pulled straight back to wherever the chain actually is.
     w.__warp = (sec: number) => {
+      if (chainDriven) return { skipped: "chain" };
       if (phase === "MARKET" || phase === "LOADING") return { skipped: phase };
       const steps = Math.max(1, Math.round(sec * 60));
       for (let i = 0; i < steps; i++) { step(1 / 60); if (phase === "FINISH") break; }
@@ -690,7 +861,10 @@ export function createRaceGame(opts: RaceGameOptions): RaceGame {
   return {
     update(dt: number) {
       if (disposed) return; // a trailing rAF frame after dispose() must not touch freed geometry / DOM
-      if (phase === "LOADING") enterMarket(); // open the market on the first frame; models stream in
+      // Open the market on the first frame; models stream in. UNLESS the book already has a phase of
+      // its own — then it decides when a market opens, and flashing a local one over a chain that is
+      // mid-race would show a market nobody can bet into. `phase()` is a pure read on both books.
+      if (phase === "LOADING" && book.phase() === null) enterMarket();
       step(dt);
       placeCars(dt);      // update world poses first so the director frames current positions
       runDirector(dt);

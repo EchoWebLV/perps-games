@@ -211,6 +211,7 @@ Per the spec, `delegate_bettor` costs a one-time ~25×1s owner poll. So the shap
 | **L1 rake sweep** | Designed, unbuilt. `rake_accrued` is cumulative and must never be zeroed in the ER. | House revenue, not play. |
 | **`settle_pool`/`payout_of` truncation** | Ratio-bounded, unreachable at realistic supplies. No cap added, per the standing no-risk-scaffolding rule. | Nothing. |
 | **`init_book` first-come** | Same posture as raider's `init_house`. Task 1 has the house win the race. | Nothing, once Task 1 runs. |
+| **No top-up for a delegated bettor** | Found proving Task 6 on devnet. `deposit` writes `Bettor` on **L1**, but a delegated `Bettor` rejects L1 writes — so a player who spends their balance down cannot add more without `exit_bettor` → `deposit` → `delegate_bettor`, paying the one-time ~25×1s owner poll **again**. `ensureBettor` returns `"ready"` and the next `placeBet` fails `InsufficientBalanceError`. This is a **program-shape** problem, not a client bug: a fix means either wiring exit/withdraw into the client and accepting the re-delegation cost, or adding an L1 pending-deposit account the crank sweeps into `Bettor.balance` in-rollup. Not fixed here — surfacing it once, per the standing no-unrequested-scaffolding rule. | **A returning player's second session.** The single most likely real-world failure. |
 
 ---
 
