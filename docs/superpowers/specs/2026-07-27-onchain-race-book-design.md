@@ -236,6 +236,25 @@ Cycle: 15s market → 40s race window (client fills ~36s of it) → 6s finish �
 (`HIGHWAY_CRANK_ITERATIONS = 24*60*60`, `redline3d/src/chain/chain-round.ts:91`) with
 coverage re-armed opportunistically from `place_bet`.
 
+**VERIFIED 2026-07-27 — the scheduled task actually executes.** `paddock-e2e.ts` drives
+`race_crank` manually and asserts only that `schedule_race_crank` is *accepted* (that the
+CPI does not error). Acceptance is not execution, so whether MagicBlock's scheduler ever
+invokes the crank was an open question. `tests/paddock-crank-liveness.ts` settles it: arm
+the crank, then poll only — the file never calls `race_crank`. Result over 150s with zero
+client transactions:
+
+```
+t=0    seq=0 MARKET  (armed here)
+t=6s   seq=0 RACING     t=41s  seq=0 SETTLED
+t=46s  seq=1 MARKET     t=56s  seq=1 RACING     t=96s  seq=1 SETTLED
+t=101s seq=2 MARKET     t=111s seq=2 RACING     t=146s seq=2 SETTLED
+```
+
+Three complete race cycles, unattended. **Races self-run: no keeper process, and therefore
+no centralised liveness dependency.** The client is a pure reader-and-bettor. This also
+retires an assumption the anti-grinding mitigation below silently rested on — "the
+scheduled crank runs ~1s and takes the first in-band price" is now measured, not hoped for.
+
 ## Risks, in the order they should be tested
 
 1. **Multi-payer delegation to one validator.** `Race` is delegated by the house;
