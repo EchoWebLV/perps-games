@@ -206,6 +206,82 @@ pub mod paddock {
         race.total = race.total.checked_add(amount).ok_or(PaddockError::MathOverflow)?;
         Ok(())
     }
+
+    /// The whole race state machine. NO SIGNER — this is the instruction the
+    /// MagicBlock validator auto-executes, the no-signer twin of raider's
+    /// `tick_crank` (programs/raider/src/lib.rs:593). No-ops when the current
+    /// phase has not expired, so leftover scheduled iterations are harmless.
+    pub fn race_crank(ctx: Context<RaceCrank>) -> Result<()> {
+        let now = Clock::get()?.unix_timestamp;
+        let race = &mut ctx.accounts.race;
+
+        if now < race.phase_ends_ts {
+            return Ok(());
+        }
+
+        match race.phase {
+            state::PHASE_MARKET => {
+                // LOCK. The seed does not exist until this instant, so the winner
+                // cannot be known while bets are open. Seed and phase flip land in
+                // the SAME instruction — a bet can never follow the seed.
+                let snap = price::read_fresh(&ctx.accounts.price_update, now)?;
+                race.seed = draw::race_seed(race.seq, snap.price, snap.publish_time);
+                race.order = draw::draw_order(&race.seed, &race.strengths);
+                race.phase = state::PHASE_RACING;
+                race.phase_ends_ts = now + state::RACE_SECS;
+            }
+            state::PHASE_RACING => {
+                let winner = race.order[0];
+                let s = book::settle_pool(race.total, race.pools[winner as usize]);
+                race.rake_accrued = race
+                    .rake_accrued
+                    .checked_add(s.rake)
+                    .ok_or(PaddockError::MathOverflow)?;
+                // Hoisted out of the call: `push_result` takes `&mut self` through
+                // Account's DerefMut, and that reservation isn't two-phase across
+                // the coercion, so reading `race.seq` inline in the struct literal
+                // argument conflicts with it (E0502). Pre-read the Copy field instead.
+                let seq = race.seq;
+                race.push_result(state::RaceResult {
+                    seq,
+                    winner,
+                    mult_fp: s.mult_fp,
+                });
+                race.phase = state::PHASE_SETTLED;
+                race.phase_ends_ts = now + state::FINISH_SECS;
+            }
+            state::PHASE_SETTLED => {
+                // Roll to the next race. Shuffle the grid so slot assignment is not
+                // static, then zero the betting state.
+                let next = race.seq + 1;
+                let grid_seed = draw::race_seed(next, 0, 0);
+                let p = draw::draw_order(&grid_seed, &race.strengths);
+
+                // CORRECTION to the original plan: `entrants` and `strengths` MUST
+                // be permuted TOGETHER. `strengths[i]` is the strength of whichever
+                // car sits in slot i, and `pools[i]`/`ticket.stakes[i]` are indexed
+                // by that same slot. Permuting entrants alone would leave slot i
+                // showing a different car while keeping the previous car's strength,
+                // silently detaching the odds from the cars they describe.
+                let old_entrants = race.entrants;
+                let old_strengths = race.strengths;
+                for i in 0..state::GRID {
+                    race.entrants[i] = old_entrants[p[i] as usize];
+                    race.strengths[i] = old_strengths[p[i] as usize];
+                }
+
+                race.seq = next;
+                race.pools = [0; state::GRID];
+                race.total = 0;
+                race.order = [0; state::GRID];
+                race.seed = [0; 32];
+                race.phase = state::PHASE_MARKET;
+                race.phase_ends_ts = now + state::MARKET_SECS;
+            }
+            _ => {}
+        }
+        Ok(())
+    }
 }
 
 #[derive(Accounts)]
@@ -351,6 +427,18 @@ pub struct PlaceBet<'info> {
         seeds = [TICKET_SEED, payer.key().as_ref(), mint.key().as_ref()],
         bump = ticket.bump)]
     pub ticket: Account<'info, Ticket>,
+}
+
+// No Signer slot: the validator executes this. The Race PDA is re-derived from
+// its stored mint, and the feed is pinned to race.feed, so the crank can only
+// ever advance THIS book against THIS feed.
+#[derive(Accounts)]
+pub struct RaceCrank<'info> {
+    #[account(mut, seeds = [RACE_SEED, race.mint.as_ref()], bump = race.bump)]
+    pub race: Account<'info, Race>,
+    /// CHECK: must equal race.feed. Authenticated by price::read_fresh.
+    #[account(constraint = price_update.key() == race.feed @ PaddockError::UntrustedFeed)]
+    pub price_update: AccountInfo<'info>,
 }
 
 #[error_code]
