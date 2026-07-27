@@ -1,0 +1,2184 @@
+/**
+ * Program IDL in camelCase format in order to be used in JS/TS.
+ *
+ * Note that this is only a type helper and is not the actual IDL. The original
+ * IDL can be found at `target/idl/paddock.json`.
+ */
+export type Paddock = {
+  "address": "3wz2kwDSGZEfdwing4FucjveWunnpiwoYAnKUAbKRh2S",
+  "metadata": {
+    "name": "paddock",
+    "version": "0.1.0",
+    "spec": "0.1.0"
+  },
+  "instructions": [
+    {
+      "name": "claim",
+      "docs": [
+        "Explicit payout for a player who does not bet again. The common path is",
+        "covered by the auto-settle inside `place_bet`."
+      ],
+      "discriminator": [
+        62,
+        198,
+        214,
+        193,
+        213,
+        159,
+        108,
+        210
+      ],
+      "accounts": [
+        {
+          "name": "payer",
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "mint"
+        },
+        {
+          "name": "race",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  114,
+                  97,
+                  99,
+                  101
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "mint"
+              }
+            ]
+          }
+        },
+        {
+          "name": "bettor",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  98,
+                  101,
+                  116,
+                  116,
+                  111,
+                  114
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "payer"
+              },
+              {
+                "kind": "account",
+                "path": "mint"
+              }
+            ]
+          }
+        },
+        {
+          "name": "ticket",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  116,
+                  105,
+                  99,
+                  107,
+                  101,
+                  116
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "payer"
+              },
+              {
+                "kind": "account",
+                "path": "mint"
+              }
+            ]
+          }
+        }
+      ],
+      "args": []
+    },
+    {
+      "name": "commitRace",
+      "docs": [
+        "Land the Race's ER state on L1 WITHOUT undelegating. Permissionless.",
+        "",
+        "Race is permanently delegated, so raider's commit-once-at-session-end",
+        "model does not apply — without a bare commit, the history ring and the",
+        "rake counter would never reach the base layer at all.",
+        "",
+        "`rake_accrued` is deliberately NOT zeroed here. It is a CUMULATIVE",
+        "counter. The tokens never leave the vault, so zeroing it would erase the",
+        "house's claim with nothing credited anywhere, and L1 cannot write it back",
+        "down (Book is not delegated, Race is). The L1 sweep that credits",
+        "Book.balance against a high-water mark is a separate follow-up.",
+        "",
+        "Doubles as the audit trail: each commit publishes the history ring to L1."
+      ],
+      "discriminator": [
+        29,
+        149,
+        185,
+        228,
+        148,
+        229,
+        218,
+        178
+      ],
+      "accounts": [
+        {
+          "name": "payer",
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "race",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  114,
+                  97,
+                  99,
+                  101
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "race.mint",
+                "account": "race"
+              }
+            ]
+          }
+        },
+        {
+          "name": "magicProgram",
+          "address": "Magic11111111111111111111111111111111111111"
+        },
+        {
+          "name": "magicContext",
+          "writable": true,
+          "address": "MagicContext1111111111111111111111111111111"
+        }
+      ],
+      "args": []
+    },
+    {
+      "name": "delegateBettor",
+      "docs": [
+        "Co-delegate ONE player's Bettor + Ticket. Runs once per player, ever.",
+        "MUST name the same validator as `delegate_race` or the two cannot be",
+        "written in the same ER transaction."
+      ],
+      "discriminator": [
+        60,
+        83,
+        214,
+        78,
+        243,
+        10,
+        66,
+        197
+      ],
+      "accounts": [
+        {
+          "name": "payer",
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "mint"
+        },
+        {
+          "name": "book",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  98,
+                  111,
+                  111,
+                  107
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "mint"
+              }
+            ]
+          }
+        },
+        {
+          "name": "bufferBettor",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  98,
+                  117,
+                  102,
+                  102,
+                  101,
+                  114
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "bettor"
+              }
+            ],
+            "program": {
+              "kind": "const",
+              "value": [
+                43,
+                205,
+                56,
+                207,
+                30,
+                206,
+                196,
+                84,
+                121,
+                66,
+                229,
+                199,
+                87,
+                98,
+                222,
+                136,
+                236,
+                14,
+                89,
+                62,
+                69,
+                233,
+                149,
+                135,
+                53,
+                115,
+                150,
+                22,
+                67,
+                220,
+                223,
+                211
+              ]
+            }
+          }
+        },
+        {
+          "name": "delegationRecordBettor",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  100,
+                  101,
+                  108,
+                  101,
+                  103,
+                  97,
+                  116,
+                  105,
+                  111,
+                  110
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "bettor"
+              }
+            ],
+            "program": {
+              "kind": "account",
+              "path": "delegationProgram"
+            }
+          }
+        },
+        {
+          "name": "delegationMetadataBettor",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  100,
+                  101,
+                  108,
+                  101,
+                  103,
+                  97,
+                  116,
+                  105,
+                  111,
+                  110,
+                  45,
+                  109,
+                  101,
+                  116,
+                  97,
+                  100,
+                  97,
+                  116,
+                  97
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "bettor"
+              }
+            ],
+            "program": {
+              "kind": "account",
+              "path": "delegationProgram"
+            }
+          }
+        },
+        {
+          "name": "bettor",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  98,
+                  101,
+                  116,
+                  116,
+                  111,
+                  114
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "payer"
+              },
+              {
+                "kind": "account",
+                "path": "mint"
+              }
+            ]
+          }
+        },
+        {
+          "name": "bufferTicket",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  98,
+                  117,
+                  102,
+                  102,
+                  101,
+                  114
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "ticket"
+              }
+            ],
+            "program": {
+              "kind": "const",
+              "value": [
+                43,
+                205,
+                56,
+                207,
+                30,
+                206,
+                196,
+                84,
+                121,
+                66,
+                229,
+                199,
+                87,
+                98,
+                222,
+                136,
+                236,
+                14,
+                89,
+                62,
+                69,
+                233,
+                149,
+                135,
+                53,
+                115,
+                150,
+                22,
+                67,
+                220,
+                223,
+                211
+              ]
+            }
+          }
+        },
+        {
+          "name": "delegationRecordTicket",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  100,
+                  101,
+                  108,
+                  101,
+                  103,
+                  97,
+                  116,
+                  105,
+                  111,
+                  110
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "ticket"
+              }
+            ],
+            "program": {
+              "kind": "account",
+              "path": "delegationProgram"
+            }
+          }
+        },
+        {
+          "name": "delegationMetadataTicket",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  100,
+                  101,
+                  108,
+                  101,
+                  103,
+                  97,
+                  116,
+                  105,
+                  111,
+                  110,
+                  45,
+                  109,
+                  101,
+                  116,
+                  97,
+                  100,
+                  97,
+                  116,
+                  97
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "ticket"
+              }
+            ],
+            "program": {
+              "kind": "account",
+              "path": "delegationProgram"
+            }
+          }
+        },
+        {
+          "name": "ticket",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  116,
+                  105,
+                  99,
+                  107,
+                  101,
+                  116
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "payer"
+              },
+              {
+                "kind": "account",
+                "path": "mint"
+              }
+            ]
+          }
+        },
+        {
+          "name": "ownerProgram",
+          "address": "3wz2kwDSGZEfdwing4FucjveWunnpiwoYAnKUAbKRh2S"
+        },
+        {
+          "name": "delegationProgram",
+          "address": "DELeGGvXpWV2fqJUhqcF5ZSYMS4JTLjteaAMARRSaeSh"
+        },
+        {
+          "name": "systemProgram",
+          "address": "11111111111111111111111111111111"
+        }
+      ],
+      "args": []
+    },
+    {
+      "name": "delegateRace",
+      "docs": [
+        "Delegate the singleton Race. Permissionless, runs ONCE for the lifetime of",
+        "the book. Validator is the single remaining account (raider's proven shape,",
+        "programs/raider/src/lib.rs:231)."
+      ],
+      "discriminator": [
+        143,
+        209,
+        21,
+        239,
+        142,
+        60,
+        93,
+        209
+      ],
+      "accounts": [
+        {
+          "name": "payer",
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "mint"
+        },
+        {
+          "name": "book",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  98,
+                  111,
+                  111,
+                  107
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "mint"
+              }
+            ]
+          }
+        },
+        {
+          "name": "bufferRace",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  98,
+                  117,
+                  102,
+                  102,
+                  101,
+                  114
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "race"
+              }
+            ],
+            "program": {
+              "kind": "const",
+              "value": [
+                43,
+                205,
+                56,
+                207,
+                30,
+                206,
+                196,
+                84,
+                121,
+                66,
+                229,
+                199,
+                87,
+                98,
+                222,
+                136,
+                236,
+                14,
+                89,
+                62,
+                69,
+                233,
+                149,
+                135,
+                53,
+                115,
+                150,
+                22,
+                67,
+                220,
+                223,
+                211
+              ]
+            }
+          }
+        },
+        {
+          "name": "delegationRecordRace",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  100,
+                  101,
+                  108,
+                  101,
+                  103,
+                  97,
+                  116,
+                  105,
+                  111,
+                  110
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "race"
+              }
+            ],
+            "program": {
+              "kind": "account",
+              "path": "delegationProgram"
+            }
+          }
+        },
+        {
+          "name": "delegationMetadataRace",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  100,
+                  101,
+                  108,
+                  101,
+                  103,
+                  97,
+                  116,
+                  105,
+                  111,
+                  110,
+                  45,
+                  109,
+                  101,
+                  116,
+                  97,
+                  100,
+                  97,
+                  116,
+                  97
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "race"
+              }
+            ],
+            "program": {
+              "kind": "account",
+              "path": "delegationProgram"
+            }
+          }
+        },
+        {
+          "name": "race",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  114,
+                  97,
+                  99,
+                  101
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "mint"
+              }
+            ]
+          }
+        },
+        {
+          "name": "ownerProgram",
+          "address": "3wz2kwDSGZEfdwing4FucjveWunnpiwoYAnKUAbKRh2S"
+        },
+        {
+          "name": "delegationProgram",
+          "address": "DELeGGvXpWV2fqJUhqcF5ZSYMS4JTLjteaAMARRSaeSh"
+        },
+        {
+          "name": "systemProgram",
+          "address": "11111111111111111111111111111111"
+        }
+      ],
+      "args": []
+    },
+    {
+      "name": "deposit",
+      "docs": [
+        "Move real tokens into the vault and credit play balance. L1 only."
+      ],
+      "discriminator": [
+        242,
+        35,
+        198,
+        137,
+        82,
+        225,
+        242,
+        182
+      ],
+      "accounts": [
+        {
+          "name": "owner",
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "mint"
+        },
+        {
+          "name": "bettor",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  98,
+                  101,
+                  116,
+                  116,
+                  111,
+                  114
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "owner"
+              },
+              {
+                "kind": "account",
+                "path": "mint"
+              }
+            ]
+          }
+        },
+        {
+          "name": "ownerToken",
+          "writable": true
+        },
+        {
+          "name": "vaultAuthority",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  118,
+                  97,
+                  117,
+                  108,
+                  116
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "mint"
+              }
+            ]
+          }
+        },
+        {
+          "name": "vaultToken",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "account",
+                "path": "vaultAuthority"
+              },
+              {
+                "kind": "const",
+                "value": [
+                  6,
+                  221,
+                  246,
+                  225,
+                  215,
+                  101,
+                  161,
+                  147,
+                  217,
+                  203,
+                  225,
+                  70,
+                  206,
+                  235,
+                  121,
+                  172,
+                  28,
+                  180,
+                  133,
+                  237,
+                  95,
+                  91,
+                  55,
+                  145,
+                  58,
+                  140,
+                  245,
+                  133,
+                  126,
+                  255,
+                  0,
+                  169
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "mint"
+              }
+            ],
+            "program": {
+              "kind": "const",
+              "value": [
+                140,
+                151,
+                37,
+                143,
+                78,
+                36,
+                137,
+                241,
+                187,
+                61,
+                16,
+                41,
+                20,
+                142,
+                13,
+                131,
+                11,
+                90,
+                19,
+                153,
+                218,
+                255,
+                16,
+                132,
+                4,
+                142,
+                123,
+                216,
+                219,
+                233,
+                248,
+                89
+              ]
+            }
+          }
+        },
+        {
+          "name": "tokenProgram",
+          "address": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"
+        }
+      ],
+      "args": [
+        {
+          "name": "amount",
+          "type": "u64"
+        }
+      ]
+    },
+    {
+      "name": "exitBettor",
+      "docs": [
+        "Commit + undelegate ONE player's Bettor/Ticket so they can withdraw on L1."
+      ],
+      "discriminator": [
+        110,
+        17,
+        151,
+        25,
+        68,
+        150,
+        133,
+        218
+      ],
+      "accounts": [
+        {
+          "name": "payer",
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "mint"
+        },
+        {
+          "name": "bettor",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  98,
+                  101,
+                  116,
+                  116,
+                  111,
+                  114
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "payer"
+              },
+              {
+                "kind": "account",
+                "path": "mint"
+              }
+            ]
+          }
+        },
+        {
+          "name": "ticket",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  116,
+                  105,
+                  99,
+                  107,
+                  101,
+                  116
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "payer"
+              },
+              {
+                "kind": "account",
+                "path": "mint"
+              }
+            ]
+          }
+        },
+        {
+          "name": "magicProgram",
+          "address": "Magic11111111111111111111111111111111111111"
+        },
+        {
+          "name": "magicContext",
+          "writable": true,
+          "address": "MagicContext1111111111111111111111111111111"
+        }
+      ],
+      "args": []
+    },
+    {
+      "name": "initBook",
+      "docs": [
+        "Create the book ledger + the program-owned vault ATA that custodies stakes."
+      ],
+      "discriminator": [
+        96,
+        122,
+        49,
+        43,
+        63,
+        61,
+        118,
+        152
+      ],
+      "accounts": [
+        {
+          "name": "authority",
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "mint"
+        },
+        {
+          "name": "book",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  98,
+                  111,
+                  111,
+                  107
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "mint"
+              }
+            ]
+          }
+        },
+        {
+          "name": "vaultAuthority",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  118,
+                  97,
+                  117,
+                  108,
+                  116
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "mint"
+              }
+            ]
+          }
+        },
+        {
+          "name": "vaultToken",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "account",
+                "path": "vaultAuthority"
+              },
+              {
+                "kind": "const",
+                "value": [
+                  6,
+                  221,
+                  246,
+                  225,
+                  215,
+                  101,
+                  161,
+                  147,
+                  217,
+                  203,
+                  225,
+                  70,
+                  206,
+                  235,
+                  121,
+                  172,
+                  28,
+                  180,
+                  133,
+                  237,
+                  95,
+                  91,
+                  55,
+                  145,
+                  58,
+                  140,
+                  245,
+                  133,
+                  126,
+                  255,
+                  0,
+                  169
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "mint"
+              }
+            ],
+            "program": {
+              "kind": "const",
+              "value": [
+                140,
+                151,
+                37,
+                143,
+                78,
+                36,
+                137,
+                241,
+                187,
+                61,
+                16,
+                41,
+                20,
+                142,
+                13,
+                131,
+                11,
+                90,
+                19,
+                153,
+                218,
+                255,
+                16,
+                132,
+                4,
+                142,
+                123,
+                216,
+                219,
+                233,
+                248,
+                89
+              ]
+            }
+          }
+        },
+        {
+          "name": "tokenProgram",
+          "address": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"
+        },
+        {
+          "name": "associatedTokenProgram",
+          "address": "ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL"
+        },
+        {
+          "name": "systemProgram",
+          "address": "11111111111111111111111111111111"
+        }
+      ],
+      "args": [
+        {
+          "name": "validator",
+          "type": "pubkey"
+        }
+      ]
+    },
+    {
+      "name": "initRace",
+      "docs": [
+        "Create the singleton Race, idle and un-delegated, so it can be delegated.",
+        "`entrants` and `strengths` seed the first grid; the crank re-rolls them",
+        "each cycle."
+      ],
+      "discriminator": [
+        16,
+        77,
+        152,
+        224,
+        167,
+        145,
+        202,
+        7
+      ],
+      "accounts": [
+        {
+          "name": "authority",
+          "writable": true,
+          "signer": true,
+          "relations": [
+            "book"
+          ]
+        },
+        {
+          "name": "mint"
+        },
+        {
+          "name": "book",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  98,
+                  111,
+                  111,
+                  107
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "mint"
+              }
+            ]
+          }
+        },
+        {
+          "name": "race",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  114,
+                  97,
+                  99,
+                  101
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "mint"
+              }
+            ]
+          }
+        },
+        {
+          "name": "priceUpdate",
+          "docs": [
+            "by price::read_fresh; pinned into race.feed here."
+          ]
+        },
+        {
+          "name": "systemProgram",
+          "address": "11111111111111111111111111111111"
+        }
+      ],
+      "args": [
+        {
+          "name": "entrants",
+          "type": {
+            "array": [
+              "u8",
+              8
+            ]
+          }
+        },
+        {
+          "name": "strengths",
+          "type": {
+            "array": [
+              "u16",
+              8
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "join",
+      "docs": [
+        "Create the per-player ledger + ticket. Both are delegated together later."
+      ],
+      "discriminator": [
+        206,
+        55,
+        2,
+        106,
+        113,
+        220,
+        17,
+        163
+      ],
+      "accounts": [
+        {
+          "name": "payer",
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "mint"
+        },
+        {
+          "name": "bettor",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  98,
+                  101,
+                  116,
+                  116,
+                  111,
+                  114
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "payer"
+              },
+              {
+                "kind": "account",
+                "path": "mint"
+              }
+            ]
+          }
+        },
+        {
+          "name": "ticket",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  116,
+                  105,
+                  99,
+                  107,
+                  101,
+                  116
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "payer"
+              },
+              {
+                "kind": "account",
+                "path": "mint"
+              }
+            ]
+          }
+        },
+        {
+          "name": "systemProgram",
+          "address": "11111111111111111111111111111111"
+        }
+      ],
+      "args": []
+    },
+    {
+      "name": "placeBet",
+      "docs": [
+        "Place a bet on `car_id` in the live race. ER only.",
+        "",
+        "If the ticket belongs to an older race, its winnings are auto-credited from",
+        "the history ring FIRST, then the stakes are zeroed and the ticket adopts the",
+        "current seq. That mirrors the round-corpse reconciliation in",
+        "redline3d/src/chain/game-session.ts:385 and means the common path never",
+        "needs an explicit `claim`."
+      ],
+      "discriminator": [
+        222,
+        62,
+        67,
+        220,
+        63,
+        166,
+        126,
+        33
+      ],
+      "accounts": [
+        {
+          "name": "payer",
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "mint"
+        },
+        {
+          "name": "race",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  114,
+                  97,
+                  99,
+                  101
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "mint"
+              }
+            ]
+          }
+        },
+        {
+          "name": "bettor",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  98,
+                  101,
+                  116,
+                  116,
+                  111,
+                  114
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "payer"
+              },
+              {
+                "kind": "account",
+                "path": "mint"
+              }
+            ]
+          }
+        },
+        {
+          "name": "ticket",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  116,
+                  105,
+                  99,
+                  107,
+                  101,
+                  116
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "payer"
+              },
+              {
+                "kind": "account",
+                "path": "mint"
+              }
+            ]
+          }
+        }
+      ],
+      "args": [
+        {
+          "name": "carId",
+          "type": "u8"
+        },
+        {
+          "name": "amount",
+          "type": "u64"
+        }
+      ]
+    },
+    {
+      "name": "processUndelegation",
+      "discriminator": [
+        196,
+        28,
+        41,
+        206,
+        48,
+        37,
+        51,
+        167
+      ],
+      "accounts": [
+        {
+          "name": "baseAccount",
+          "writable": true
+        },
+        {
+          "name": "buffer"
+        },
+        {
+          "name": "payer",
+          "writable": true
+        },
+        {
+          "name": "systemProgram"
+        }
+      ],
+      "args": [
+        {
+          "name": "accountSeeds",
+          "type": {
+            "vec": "bytes"
+          }
+        }
+      ]
+    },
+    {
+      "name": "raceCrank",
+      "docs": [
+        "The whole race state machine. NO SIGNER — this is the instruction the",
+        "MagicBlock validator auto-executes, the no-signer twin of raider's",
+        "`tick_crank` (programs/raider/src/lib.rs:593). No-ops when the current",
+        "phase has not expired, so leftover scheduled iterations are harmless."
+      ],
+      "discriminator": [
+        185,
+        188,
+        186,
+        39,
+        239,
+        133,
+        251,
+        159
+      ],
+      "accounts": [
+        {
+          "name": "race",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  114,
+                  97,
+                  99,
+                  101
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "race.mint",
+                "account": "race"
+              }
+            ]
+          }
+        },
+        {
+          "name": "priceUpdate"
+        }
+      ],
+      "args": []
+    },
+    {
+      "name": "scheduleRaceCrank",
+      "docs": [
+        "Arm the native crank: the validator auto-invokes `race_crank` every",
+        "`execution_interval_millis` ms for `iterations` runs, with zero client tx.",
+        "Byte-identical in construction to raider's `schedule_tick`",
+        "(programs/raider/src/lib.rs:614) — only the scheduled inner ix differs."
+      ],
+      "discriminator": [
+        28,
+        124,
+        124,
+        92,
+        22,
+        150,
+        55,
+        20
+      ],
+      "accounts": [
+        {
+          "name": "magicProgram",
+          "address": "Magic11111111111111111111111111111111111111"
+        },
+        {
+          "name": "payer",
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "race",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  114,
+                  97,
+                  99,
+                  101
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "race.mint",
+                "account": "race"
+              }
+            ]
+          }
+        },
+        {
+          "name": "priceUpdate"
+        }
+      ],
+      "args": [
+        {
+          "name": "taskId",
+          "type": "i64"
+        },
+        {
+          "name": "executionIntervalMillis",
+          "type": "i64"
+        },
+        {
+          "name": "iterations",
+          "type": "i64"
+        }
+      ]
+    },
+    {
+      "name": "withdraw",
+      "docs": [
+        "Pull tokens back out against the restored play balance. L1 only, and only",
+        "after the Bettor PDA has been committed + undelegated."
+      ],
+      "discriminator": [
+        183,
+        18,
+        70,
+        156,
+        148,
+        109,
+        161,
+        34
+      ],
+      "accounts": [
+        {
+          "name": "owner",
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "mint"
+        },
+        {
+          "name": "bettor",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  98,
+                  101,
+                  116,
+                  116,
+                  111,
+                  114
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "owner"
+              },
+              {
+                "kind": "account",
+                "path": "mint"
+              }
+            ]
+          }
+        },
+        {
+          "name": "ownerToken",
+          "writable": true
+        },
+        {
+          "name": "vaultAuthority",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  118,
+                  97,
+                  117,
+                  108,
+                  116
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "mint"
+              }
+            ]
+          }
+        },
+        {
+          "name": "vaultToken",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "account",
+                "path": "vaultAuthority"
+              },
+              {
+                "kind": "const",
+                "value": [
+                  6,
+                  221,
+                  246,
+                  225,
+                  215,
+                  101,
+                  161,
+                  147,
+                  217,
+                  203,
+                  225,
+                  70,
+                  206,
+                  235,
+                  121,
+                  172,
+                  28,
+                  180,
+                  133,
+                  237,
+                  95,
+                  91,
+                  55,
+                  145,
+                  58,
+                  140,
+                  245,
+                  133,
+                  126,
+                  255,
+                  0,
+                  169
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "mint"
+              }
+            ],
+            "program": {
+              "kind": "const",
+              "value": [
+                140,
+                151,
+                37,
+                143,
+                78,
+                36,
+                137,
+                241,
+                187,
+                61,
+                16,
+                41,
+                20,
+                142,
+                13,
+                131,
+                11,
+                90,
+                19,
+                153,
+                218,
+                255,
+                16,
+                132,
+                4,
+                142,
+                123,
+                216,
+                219,
+                233,
+                248,
+                89
+              ]
+            }
+          }
+        },
+        {
+          "name": "tokenProgram",
+          "address": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"
+        }
+      ],
+      "args": [
+        {
+          "name": "amount",
+          "type": "u64"
+        }
+      ]
+    }
+  ],
+  "accounts": [
+    {
+      "name": "bettor",
+      "discriminator": [
+        126,
+        54,
+        2,
+        128,
+        133,
+        184,
+        253,
+        108
+      ]
+    },
+    {
+      "name": "book",
+      "discriminator": [
+        121,
+        34,
+        121,
+        35,
+        91,
+        62,
+        85,
+        222
+      ]
+    },
+    {
+      "name": "race",
+      "discriminator": [
+        114,
+        93,
+        186,
+        119,
+        99,
+        123,
+        162,
+        192
+      ]
+    },
+    {
+      "name": "ticket",
+      "discriminator": [
+        41,
+        228,
+        24,
+        165,
+        78,
+        90,
+        235,
+        200
+      ]
+    }
+  ],
+  "errors": [
+    {
+      "code": 6000,
+      "name": "stalePrice"
+    },
+    {
+      "code": 6001,
+      "name": "untrustedFeed"
+    },
+    {
+      "code": 6002,
+      "name": "badMint"
+    },
+    {
+      "code": 6003,
+      "name": "notOwner"
+    },
+    {
+      "code": 6004,
+      "name": "insufficientBalance"
+    },
+    {
+      "code": 6005,
+      "name": "mathOverflow"
+    },
+    {
+      "code": 6006,
+      "name": "wrongPhase"
+    },
+    {
+      "code": 6007,
+      "name": "badCarIndex"
+    },
+    {
+      "code": 6008,
+      "name": "noSuchResult"
+    },
+    {
+      "code": 6009,
+      "name": "alreadyClaimed"
+    },
+    {
+      "code": 6010,
+      "name": "validatorMismatch"
+    }
+  ],
+  "types": [
+    {
+      "name": "bettor",
+      "docs": [
+        "Per-player play balance. Same layout as raider's PlayerBalance."
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "owner",
+            "type": "pubkey"
+          },
+          {
+            "name": "mint",
+            "type": "pubkey"
+          },
+          {
+            "name": "balance",
+            "type": "u64"
+          },
+          {
+            "name": "bump",
+            "type": "u8"
+          }
+        ]
+      }
+    },
+    {
+      "name": "book",
+      "docs": [
+        "House bankroll + rake sink. Layout follows raider's HouseBalance so the",
+        "vault/deposit/withdraw plumbing transfers unchanged, plus `validator`.",
+        "",
+        "`validator` is the ER validator identity every delegation for this book MUST",
+        "name. Without it, `delegate_race` and `delegate_bettor` are free to name",
+        "different validators — the delegation program records the choice per-account",
+        "in `DelegationRecord.authority` — and the shared Race would end up in a",
+        "different rollup from a player's Bettor/Ticket. They could then never be",
+        "written in one ER transaction, which is the assumption the whole pari-mutuel",
+        "design rests on. Recorded once at `init_book`, asserted at every delegation."
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "authority",
+            "type": "pubkey"
+          },
+          {
+            "name": "mint",
+            "type": "pubkey"
+          },
+          {
+            "name": "validator",
+            "type": "pubkey"
+          },
+          {
+            "name": "balance",
+            "type": "u64"
+          },
+          {
+            "name": "locked",
+            "type": "u64"
+          },
+          {
+            "name": "bump",
+            "type": "u8"
+          }
+        ]
+      }
+    },
+    {
+      "name": "race",
+      "docs": [
+        "The singleton live race. Delegated once, permanently; never undelegated."
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "mint",
+            "type": "pubkey"
+          },
+          {
+            "name": "seq",
+            "type": "u64"
+          },
+          {
+            "name": "phase",
+            "type": "u8"
+          },
+          {
+            "name": "phaseEndsTs",
+            "type": "i64"
+          },
+          {
+            "name": "entrants",
+            "type": {
+              "array": [
+                "u8",
+                8
+              ]
+            }
+          },
+          {
+            "name": "strengths",
+            "type": {
+              "array": [
+                "u16",
+                8
+              ]
+            }
+          },
+          {
+            "name": "pools",
+            "type": {
+              "array": [
+                "u64",
+                8
+              ]
+            }
+          },
+          {
+            "name": "total",
+            "type": "u64"
+          },
+          {
+            "name": "order",
+            "type": {
+              "array": [
+                "u8",
+                8
+              ]
+            }
+          },
+          {
+            "name": "seed",
+            "type": {
+              "array": [
+                "u8",
+                32
+              ]
+            }
+          },
+          {
+            "name": "feed",
+            "type": "pubkey"
+          },
+          {
+            "name": "rakeAccrued",
+            "type": "u64"
+          },
+          {
+            "name": "history",
+            "type": {
+              "array": [
+                {
+                  "defined": {
+                    "name": "raceResult"
+                  }
+                },
+                32
+              ]
+            }
+          },
+          {
+            "name": "bump",
+            "type": "u8"
+          }
+        ]
+      }
+    },
+    {
+      "name": "raceResult",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "seq",
+            "type": "u64"
+          },
+          {
+            "name": "winner",
+            "type": "u8"
+          },
+          {
+            "name": "multFp",
+            "type": "u64"
+          }
+        ]
+      }
+    },
+    {
+      "name": "ticket",
+      "docs": [
+        "One player's stakes in the CURRENT race. Seeds deliberately carry no race id:",
+        "the player delegates once and reuses this every race. Staleness is detected by",
+        "comparing `race_seq` against the live Race, mirroring the round-corpse",
+        "reconciliation in redline3d/src/chain/game-session.ts:385."
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "owner",
+            "type": "pubkey"
+          },
+          {
+            "name": "raceSeq",
+            "type": "u64"
+          },
+          {
+            "name": "stakes",
+            "type": {
+              "array": [
+                "u64",
+                8
+              ]
+            }
+          },
+          {
+            "name": "bump",
+            "type": "u8"
+          }
+        ]
+      }
+    }
+  ]
+};

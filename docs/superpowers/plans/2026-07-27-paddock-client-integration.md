@@ -138,6 +138,29 @@ The panel currently owns money: it mutates a module-level wallet, invents bettor
 
 ---
 
+## ⚠️ SLOT ≠ CAR — the trap that will silently pay the wrong car
+
+Discovered and verified live on the wSOL book, 2026-07-27. The crank **permutes the grid on
+every roll**, so a slot index is not a car id after race 0:
+
+```
+entrants  [2,4,0,6,3,1,5,7]
+strengths [1800,1350,3200,1000,1800,2400,1800,1000]
+slot 0 -> entrant 2 = Cybertruck (1800)     slot 2 -> entrant 0 = Bedrock (3200)
+```
+
+- `pools[i]`, `stakes[i]`, `order[]` and `place_bet(car_id)` are all **slot**-indexed.
+- `entrants[i]` is the **car** occupying slot `i` — an index into `DEFAULT_GRID`.
+- The entrant↔strength pairing is preserved under the permutation (verified above), so
+  odds stay attached to the right car. Reading `strengths[i]` as "car i's strength" is
+  still wrong.
+
+Every roster render, every bet, and every finish-order mapping **must** go through
+`entrants[]`. Getting this wrong shows the right odds on the wrong name and pays the
+wrong car — and it will look perfectly plausible on screen.
+
+---
+
 ## Task 5: Chain-driven phases and finish order
 
 **Files:**

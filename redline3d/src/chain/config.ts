@@ -10,6 +10,8 @@ export const CHAIN = {
   PROGRAM_ID: new PublicKey("FwUNcUaRbYGiWasHa6DA3xQaQJfZWCgH7UhDeBvoJcBv"),
   // MagicBlock-VRF crate-pull consumer program (standalone; see docs/superpowers/specs/2026-07-10-vrf-crates-design.md)
   CRATE_ROLL_PROGRAM_ID: new PublicKey("9MLzyBc2Nz4sqcnPnCsejMRGGnKMi9nepU3fSE1ZJUgG"),
+  // Pari-mutuel race book (standalone program; see onchain/raider/programs/paddock).
+  PADDOCK_PROGRAM_ID: new PublicKey("3wz2kwDSGZEfdwing4FucjveWunnpiwoYAnKUAbKRh2S"),
   BASE_RPC: (import.meta.env.VITE_BASE_RPC as string | undefined) || "https://api.devnet.solana.com",
   BASE_WS: "wss://api.devnet.solana.com",
   ER_RPC: "https://devnet.magicblock.app",
@@ -33,6 +35,10 @@ export const CHAIN = {
   // (The legacy stuck-delegated [b"house", wSOL] pot was abandoned by the house2 seed bump.)
   STAKE_MINT: ACTIVE_STAKE_CURRENCY.mint,
   STAKE_DECIMALS: ACTIVE_STAKE_CURRENCY.decimals,
+  // The mint keying the paddock book: `book`/`race`/`vault` are singletons per mint and
+  // `bettor`/`ticket` are per player+mint, so this one value picks the whole book. Same
+  // currency the raider stakes (wSOL) — kept as the PublicKey the PDA seeds actually need.
+  PADDOCK_BOOK_MINT: new PublicKey(ACTIVE_STAKE_CURRENCY.mint),
 } as const;
 
 /** The singleton on-chain feed registry PDA (`[b"feeds"]`) — read by `open` to bind a round to its asset feed. */
