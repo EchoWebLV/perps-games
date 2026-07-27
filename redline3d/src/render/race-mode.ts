@@ -22,6 +22,7 @@ import { toonify, reclaimToonVariants } from "./toon";
 import { createRaceDirector, type DirectorCar, type DirectorMode } from "./race-director";
 import { createRaceHud, type RacePhase } from "../ui/race-hud";
 import { createBetPanel } from "../ui/bet-panel";
+import { localBookSource, mulberry32, type RaceBookSource } from "./race-book-source";
 import { createCamControls } from "../ui/cam-controls";
 import { onTap } from "../ui/tap";
 import { STRENGTH, type GridEntrant } from "../core/race-grid";
@@ -50,6 +51,12 @@ export interface RaceGameOptions {
   // so the host applies/restores the ACES operator itself (beside its light mute); this thin get/set just
   // lets the "race-track" Light Lab expose an `exposure` knob that tunes the live value end-to-end in-game.
   exposure?: { get(): number; set(v: number): void };
+  // Where the pools, the wallet and the WINNER come from. Absent → the browser-local sim that has
+  // always shipped (`localBookSource()`), byte-for-byte: same seeded pools, same fake bettors, same
+  // seeded finish draw. Present → an outside book (the on-chain paddock client) owns all of it and
+  // this module is reduced to what it is good at, which is putting on the show. A host that passes
+  // its own book also owns that book's lifetime; dispose() here only frees the one created inside.
+  book?: RaceBookSource;
   onExit?: (result: RaceResult) => void; // fired when the player leaves after FINISH
 }
 export interface RaceResult {
@@ -87,18 +94,10 @@ const SUB_H = 1 / 240;      // fixed sim sub-step for framerate-independent, exa
 // finished, so this cap is only ever the pathological-input guard (any real race finishes < ~9k).
 const SUB_STEP_CAP = 60000;
 
-const OUTCOME_NOISE = 2.8;  // additive seeded spread — big enough that a common can upset a legendary
-
-/** seeded PRNG (moved from race-preview.ts; now exported so the harness + tests can reuse it). */
-export function mulberry32(seed: number): () => number {
-  let a = seed >>> 0;
-  return () => {
-    a |= 0; a = (a + 0x6d2b79f5) | 0;
-    let t = Math.imul(a ^ (a >>> 15), 1 | a);
-    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
-    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
-  };
-}
+/** seeded PRNG — now lives in race-book-source.ts (the local book draws its finish order off the same
+ *  stream, and bet-panel.ts used to keep a second copy of it). Re-exported here because the harness,
+ *  main.ts and the tests import it from this module. */
+export { mulberry32 };
 
 // The 8-car roster the prototype hard-coded (was `SPECS`), re-expressed as a GridEntrant[] so the
 // harness has a self-contained grid. Fields are verbatim; strength maps through the shared table,
@@ -213,6 +212,11 @@ export function createRaceGame(opts: RaceGameOptions): RaceGame {
   let restoreSceneEnv: (() => void) | null = null;
   let ownLighting: RaceLighting | null = null; // this race's Light Lab binding (identity-checked on dispose)
   let lastResult: RaceResult = { finishOrder: [], playerRank: null, poolTotal: 0 };
+
+  // ── the book: pools, wallet, stakes and the RESULT. Host-supplied or the local sim (see opts.book).
+  // `ownBook` is non-null only when we built it, and only that one gets disposed with the race.
+  const ownBook = opts.book ? null : localBookSource();
+  const book: RaceBookSource = opts.book ?? ownBook!;
 
   // THREE resources this module owns and must free in dispose()
   const disposables: Array<{ dispose(): void }> = [];
@@ -339,15 +343,14 @@ export function createRaceGame(opts: RaceGameOptions): RaceGame {
     }
   }
 
-  function setupRace(): number[] {
-    const rng = mulberry32(seed);
-    // scoring strength now comes from the grid entrant (rarity + perk-adjusted upstream), not a
-    // rarity lookup: hidden seeded score = strength + noise → sort desc for the finish order.
-    const strengths = cars.map((c) => c.entrant.strength);
-    const scored = cars.map((_c, i) => ({ i, score: strengths[i] + rng() * OUTCOME_NOISE }));
-    scored.sort((a, b) => b.score - a.score);
-    scored.forEach((sc, rank) => {
-      const c = cars[sc.i];
+  // Pace the field to a finish order that is ALREADY DECIDED (the book decided it — locally from a
+  // seeded strength draw, on-chain from `Race.order`). `calibrateBase` then back-solves each car's
+  // constant base speed so it crosses the line at exactly T_i, which is why an outside result costs
+  // this module nothing: the order was always an input here, only its author changed. `rng` is the
+  // race's stream, already advanced past the book's draw, so the T/surge jitter is unchanged.
+  function setupRace(rng: () => number, order: number[]): void {
+    order.forEach((carIdx, rank) => {
+      const c = cars[carIdx];
       c.T = BASE_T + rank * GAP + rng() * 0.4;
       // each surge's amplitude gains the entrant's perk bonus for that car (keeps the surge shape)
       c.surges = surgesForRank(rank, rng).map((s) => ({ ...s, amp: s.amp + c.entrant.surgeAmpBonus }));
@@ -355,13 +358,21 @@ export function createRaceGame(opts: RaceGameOptions): RaceGame {
     });
     for (const c of cars) c.base = calibrateBase(c);
     maxRefSpeed = Math.max(...cars.map((c) => c.base)) * 1.45; // reference top speed for the FOV kick
-    return strengths;
   }
 
   // ── phase machine ─────────────────────────────────────────────────────────────────────────────
   function enterMarket() {
-    const strengths = setupRace();
-    betPanel.openMarket(seed, strengths);
+    // ONE seeded stream drives the whole race. The book draws the finish order off it FIRST (one draw
+    // per car — exactly where the old inline `strengths[i] + rng() * OUTCOME_NOISE` scoring sat), then
+    // setupRace consumes the T-jitter and surge-jitter draws that follow. Handing the book this stream
+    // instead of letting it seed a private one is what keeps every later draw on the same sequence
+    // position it always had: the same seed still produces the same race, down to the surge shapes.
+    const rng = mulberry32(seed);
+    const strengths = cars.map((c) => c.entrant.strength);
+    book.openMarket({ seed, strengths, rng });
+    // A book with no order yet (a chain market that has not locked) gets the grid order as a stand-in
+    // so nothing paces off undefined; racing against a not-yet-decided result is Task 5's job.
+    setupRace(rng, book.finishOrder() ?? cars.map((_c, i) => i));
     phase = "MARKET";
     marketTimer = MARKET_TIME;
     simAccum = 0; raceElapsed = 0;
@@ -369,7 +380,7 @@ export function createRaceGame(opts: RaceGameOptions): RaceGame {
   }
 
   function lockAndCountdown() {
-    betPanel.lock();
+    book.lock();
     phase = "COUNTDOWN";
     cdRemaining = CD_TIME;
     goFlash = 0;
@@ -384,15 +395,15 @@ export function createRaceGame(opts: RaceGameOptions): RaceGame {
     lastResult = {
       finishOrder,
       playerRank: playerIdx >= 0 ? finishOrder.indexOf(playerIdx) : null,
-      poolTotal: betPanel.poolTotal(),
+      poolTotal: book.total(),
     };
-    betPanel.settle(finishOrder[0]);
+    book.settle(finishOrder[0]);
     // Owner podium credit: the player SEES their payout on the FINISH card. Must come AFTER settle so
     // the credit line never paints without a settled result behind it (ownerPodiumPayout returns 0
     // beyond rank 2, so no extra rank check is needed — off-podium finishes credit nothing).
     if (lastResult.playerRank !== null) {
       const pay = ownerPodiumPayout(lastResult.poolTotal, lastResult.playerRank);
-      if (pay > 0) betPanel.credit(pay, `Podium — P${lastResult.playerRank + 1}`);
+      if (pay > 0) book.credit(pay, `Podium — P${lastResult.playerRank + 1}`);
     }
     fireExitIfReady();
   }
@@ -403,6 +414,19 @@ export function createRaceGame(opts: RaceGameOptions): RaceGame {
   }
   betPanel.onRaceAgain(restart);
   betPanel.onSkip(lockAndCountdown);
+  // The panel emits intent; the book decides whether the bet lands. Nothing on screen moves until the
+  // next pushUi() reads the book back — which is exactly what makes an ER round-trip renderable.
+  betPanel.onBet((carId, amount) => book.placeBet(carId, amount));
+
+  /** Roster index of the car the player has the most money on, or -1. Drives the camera's MY BET
+   *  focus and the director's battle cuts — the panel used to answer this from its own stakes; the
+   *  book owns them now. */
+  function myBet(): number {
+    const stakes = book.myStakes();
+    let bi = -1, bv = 0;
+    stakes.forEach((s, i) => { if (s > bv) { bv = s; bi = i; } });
+    return bi;
+  }
 
   const allFinished = () => cars.every((c) => c.finished);
 
@@ -418,9 +442,12 @@ export function createRaceGame(opts: RaceGameOptions): RaceGame {
   }
 
   function step(dt: number) {
+    // Every phase, not just MARKET: a chain book has to see the race lock and settle without this
+    // module telling it when to look. The local book no-ops the moment its odds freeze, so polling it
+    // outside MARKET costs nothing and changes nothing.
+    book.poll(dt);
     if (phase === "MARKET") {
       marketTimer -= dt;
-      betPanel.tick(dt);
       if (marketTimer <= 0) lockAndCountdown();
     } else if (phase === "COUNTDOWN") {
       cdRemaining -= dt;
@@ -483,13 +510,13 @@ export function createRaceGame(opts: RaceGameOptions): RaceGame {
     const sel = camControls.focusSel();
     const ord = order();
     if (sel === "leader") return ord[0];
-    if (sel === "mybet") { const mb = betPanel.myBet(); return mb >= 0 ? mb : ord[0]; }
+    if (sel === "mybet") { const mb = myBet(); return mb >= 0 ? mb : ord[0]; }
     return sel;
   }
   function focusLabel(): string {
     const sel = camControls.focusSel();
     if (sel === "leader") return "Leader";
-    if (sel === "mybet") { const mb = betPanel.myBet(); return mb >= 0 ? `My Bet · ${cars[mb].entrant.name}` : "My Bet"; }
+    if (sel === "mybet") { const mb = myBet(); return mb >= 0 ? `My Bet · ${cars[mb].entrant.name}` : "My Bet"; }
     return cars[sel].entrant.name;
   }
   function runDirector(dt: number) {
@@ -502,7 +529,7 @@ export function createRaceGame(opts: RaceGameOptions): RaceGame {
     }));
     director.aim(dt, {
       phase, cars: dirCars, order: order(), raceDist, maxSpeed: maxRefSpeed,
-      mode: mode as DirectorMode, focus: resolveFocus(), myBet: betPanel.myBet(),
+      mode: mode as DirectorMode, focus: resolveFocus(), myBet: myBet(),
     });
   }
 
@@ -518,10 +545,20 @@ export function createRaceGame(opts: RaceGameOptions): RaceGame {
       totalLaps: TOTAL_LAPS,
       countdown: countdownLabel(),
     });
+    // The panel holds no money of its own — every figure below is read off the book each frame, so a
+    // pool that moved in the ER between two frames shows up here without anything having to be told.
     betPanel.render({
       phase,
       marketRemaining: marketTimer,
       raceLeaderName: phase === "RACING" ? cars[ord[0]].entrant.name : null,
+      pools: book.pools(),
+      total: book.total(),
+      mults: book.multipliers(),
+      stakes: book.myStakes(),
+      wallet: book.wallet(),
+      pendingCar: book.pendingBet(),
+      settle: book.lastSettle(),
+      credit: book.creditNote(),
     });
   }
 
@@ -589,8 +626,8 @@ export function createRaceGame(opts: RaceGameOptions): RaceGame {
       lap: phase === "RACING" || phase === "FINISH" ? currentLap() : 0,
       order: order().map((i) => cars[i].entrant.name),
       speeds: cars.map((c) => +c.speed.toFixed(2)),
-      wallet: +betPanel.wallet().toFixed(2),
-      pool: +betPanel.poolTotal().toFixed(2),
+      wallet: +book.wallet().toFixed(2),
+      pool: +book.total().toFixed(2),
       mode: camControls.mode(),
     });
     // fast-forward through the SAME per-frame path (fixed dt) so laps / order / finish / settlement
@@ -605,7 +642,7 @@ export function createRaceGame(opts: RaceGameOptions): RaceGame {
       track.update(1 / 60);
       environment.update(1 / 60);
       pushUi();
-      return { phase, order: order().map((i) => cars[i].entrant.name), wallet: +betPanel.wallet().toFixed(2) };
+      return { phase, order: order().map((i) => cars[i].entrant.name), wallet: +book.wallet().toFixed(2) };
     };
   }
 
@@ -677,6 +714,7 @@ export function createRaceGame(opts: RaceGameOptions): RaceGame {
       if (restoreSceneEnv) { restoreSceneEnv(); restoreSceneEnv = null; }
       if (ownLighting && activeLighting === ownLighting) activeLighting = null;
       scene.remove(raceGroup);
+      ownBook?.dispose?.(); // only the book WE built — a host-supplied one outlives this race
       hud.dispose();
       betPanel.dispose();
       camControls.dispose();

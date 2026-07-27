@@ -1,58 +1,51 @@
-// Fake prediction-market betting UI for the spectator-race preview (DEV-ONLY, used by
-// src/race-preview.ts). Polymarket-style "WINNER" market in the game's neon-dark styling. Pure
-// client sim: pari-mutuel pools seeded by rarity, fake bettors flowing in during MARKET OPEN,
-// user stakes that move the odds, a bet slip, a collapsed strip while racing, and a settlement
-// card on finish. Wallet is module-level: survives RACE AGAIN, resets on page reload. No chain,
-// no server — this is a demo of the betting vision only.
+// Polymarket-style "WINNER" market for the race, in the game's neon-dark styling: pari-mutuel odds
+// per car, a bet slip, a collapsed strip while racing, and a settlement card on finish.
+//
+// It owns NO MONEY. It used to: a module-level wallet it debited, bettors it invented, a settle()
+// that paid itself. All of that moved behind `RaceBookSource` (render/race-book-source.ts), because
+// the same pixels now have to render a browser sim OR an on-chain pari-mutuel pool in the ER, and a
+// view that quietly mutates a wallet cannot render a wallet it does not own. What is left is the
+// honest shape: render(ctx) paints what it is handed, onBet(fn) emits intent, and every number on
+// screen came from the book.
+//
+// SLOT ≠ CAR: every id and array crossing this file is CAR-indexed (roster order). The book resolves
+// the chain's starting-slot permutation before anything reaches here — see the note at the top of
+// race-book-source.ts for why that matters.
 import { onTap } from "./tap";
-import { RAKE } from "../core/race-payout";
+import type { BookSettle } from "../render/race-book-source";
 
 export interface BetCar { id: number; name: string; color: string }
 export type BetPhase = "LOADING" | "MARKET" | "COUNTDOWN" | "RACING" | "FINISH";
 
+/** Everything painted, per frame. No field here is remembered between renders — the book is the
+ *  single source of truth for all of it, so the panel can never drift out of sync with the money. */
 export interface BetRenderCtx {
   phase: BetPhase;
-  marketRemaining: number;   // seconds left in MARKET OPEN
+  marketRemaining: number;       // seconds left in MARKET OPEN
   raceLeaderName: string | null; // current on-track leader (RACING)
+  pools: number[];               // per-car pool
+  total: number;                 // sum of pools
+  mults: number[];               // per-car payout multiplier — live while open, frozen after the lock
+  stakes: number[];              // the player's own stake per car
+  wallet: number;                // the player's spendable balance
+  pendingCar: number | null;     // a bet in flight on this car (the ER is fast, not instant)
+  settle: BookSettle | null;     // the settled result, painted in the FINISH card
+  credit: string | null;         // non-bet winnings line (owner podium), painted alongside it
 }
-
-export interface SettleResult { net: number; walletAfter: number; winnerMult: number }
 
 export interface BetPanel {
   el: HTMLElement;
   setRoster(cars: BetCar[]): void;
-  openMarket(seed: number, strengths: number[]): void;
-  tick(dt: number): void;               // advance fake bettors (call during MARKET only)
-  lock(): void;                         // freeze odds at market close
-  settle(winnerId: number): SettleResult; // call once on entering FINISH; mutates wallet
-  /** Add non-bet winnings (owner podium) to the wallet; label shows in the results strip. */
-  credit(amount: number, label: string): void;
   render(ctx: BetRenderCtx): void;
+  /** Fires on a BET tap with the tapped car and the selected chip stake. INTENT only — nothing on
+   *  screen moves until the book comes back with new pools through render(). */
+  onBet(fn: (carId: number, amount: number) => void): void;
   onSkip(fn: () => void): void;
   onRaceAgain(fn: () => void): void;
-  // verification-hook accessors
-  wallet(): number;
-  poolTotal(): number;
-  probs(): number[];
-  myBet(): number; // index of the car with the largest user stake, or -1
   dispose(): void;
 }
 
-const FLOW_INTERVAL = 0.8;  // seconds between fake-bettor pool inflows
 const STAKES = [1, 5, 20];
-
-// module-level wallet — persists across RACE AGAIN, resets only on page reload
-let wallet = 100.0;
-
-function mulberry32(seed: number): () => number {
-  let a = seed >>> 0;
-  return () => {
-    a |= 0; a = (a + 0x6d2b79f5) | 0;
-    let x = Math.imul(a ^ (a >>> 15), 1 | a);
-    x = (x + Math.imul(x ^ (x >>> 7), 61 | x)) ^ x;
-    return ((x ^ (x >>> 14)) >>> 0) / 4294967296;
-  };
-}
 
 const STYLE_ID = "bet-panel-style";
 // Two skins in one sheet. CLASSIC (base, unscoped) is the original dark-neon look. COMIC rules are
@@ -77,6 +70,9 @@ const CSS = `
 .bp-bet{cursor:pointer;font-family:inherit;font-size:11px;font-weight:700;letter-spacing:.04em;color:#04121a;background:linear-gradient(180deg,#4ff0ff,#27b7e7);border:none;border-radius:6px;padding:6px 9px;box-shadow:0 0 14px rgba(39,231,255,.4);-webkit-tap-highlight-color:transparent;user-select:none;}
 .bp-bet:active{transform:translateY(1px);}
 .bp-bet[disabled]{opacity:.35;filter:grayscale(.6);cursor:default;box-shadow:none;}
+/* in-flight bet: reads as WORKING, not unavailable — it sits on top of [disabled] (same specificity,
+   declared later) so the greyed-out look never swallows the one row that is actually doing something */
+.bp-bet.pending{opacity:1;filter:none;background:linear-gradient(180deg,#ffe08a,#f0b429);box-shadow:0 0 14px rgba(255,209,102,.5);}
 .bp-stakes{display:flex;gap:7px;margin:12px 0 8px;}
 .bp-chip{flex:1;text-align:center;cursor:pointer;font-size:13px;font-weight:700;padding:8px 0;border-radius:8px;border:1px solid rgba(122,90,220,.45);background:rgba(255,255,255,.03);color:#c9d6ff;-webkit-tap-highlight-color:transparent;user-select:none;}
 .bp-chip.sel{background:rgba(39,231,255,.16);border-color:#27e7ff;color:#eaf7ff;box-shadow:0 0 12px rgba(39,231,255,.35);}
@@ -119,6 +115,7 @@ body.toon-ui .bp-prob small{font-weight:700;}
 body.toon-ui .bp-bet{font-weight:800;background:#2de2e6;border:2px solid #0a0812;border-radius:8px;padding:6px 10px;box-shadow:2px 2px 0 rgba(8,5,16,.8);}
 body.toon-ui .bp-bet:active{transform:translate(2px,2px);box-shadow:none;}
 body.toon-ui .bp-bet[disabled]{opacity:.4;}
+body.toon-ui .bp-bet.pending{opacity:1;background:#ffd166;box-shadow:2px 2px 0 rgba(8,5,16,.8);}
 body.toon-ui .bp-chip{font-weight:800;border:2px solid #0a0812;border-radius:9px;background:#31204d;color:#e6ddff;box-shadow:2px 2px 0 rgba(8,5,16,.7);}
 body.toon-ui .bp-chip.sel{background:#2de2e6;border-color:#0a0812;color:#04121a;box-shadow:2px 2px 0 rgba(8,5,16,.7);}
 body.toon-ui .bp-slip{margin-top:8px;border-top:2px dashed #4a3670;}
@@ -194,24 +191,14 @@ export function createBetPanel(parent: HTMLElement = document.body): BetPanel {
   const walletBigEl = settleEl.querySelector(".bp-walletbig") as HTMLElement;
   const againBtn = settleEl.querySelector(".bp-again") as HTMLElement;
 
-  // ---- market state ----
+  // ---- view state ONLY: the roster, which chip is selected, and where to send a bet. Everything
+  // else on screen arrives per-frame in the render ctx and is never cached here. ----
   let cars: BetCar[] = [];
-  let pools: number[] = [];
-  let userStake: number[] = [];
-  let lockedMult: number[] = [];
-  let locked = false;
-  let rng = mulberry32(1);
-  let flowAcc = 0;
   let selStake = 5;
-  let lastSettle: { winnerId: number; net: number; winnerMult: number } | null = null;
-  let creditLine: string | null = null; // non-bet winnings (owner podium) shown in the FINISH card
+  let betFn: ((carId: number, amount: number) => void) | null = null;
 
   // per-car row element refs
   const rows: Array<{ row: HTMLElement; prob: HTMLElement; mult: HTMLElement; pool: HTMLElement; bet: HTMLButtonElement }> = [];
-
-  const total = () => pools.reduce((a, b) => a + b, 0);
-  const liveProbs = () => { const T = total() || 1; return pools.map((p) => p / T); };
-  const liveMults = () => { const T = total(); return pools.map((p) => (p > 0 ? (T * (1 - RAKE)) / p : 0)); };
 
   function buildStakeChips() {
     stakesEl.innerHTML = "";
@@ -225,13 +212,6 @@ export function createBetPanel(parent: HTMLElement = document.body): BetPanel {
   }
   function refreshStakeSel() {
     stakesEl.querySelectorAll(".bp-chip").forEach((c, i) => c.classList.toggle("sel", STAKES[i] === selStake));
-  }
-
-  function placeBet(carId: number) {
-    if (locked || wallet < selStake) return;
-    wallet -= selStake;
-    pools[carId] += selStake;
-    userStake[carId] += selStake;
   }
 
   return {
@@ -250,7 +230,10 @@ export function createBetPanel(parent: HTMLElement = document.body): BetPanel {
           <button class="bp-bet" type="button">BET</button>`;
         rowsEl.appendChild(row);
         const bet = row.querySelector(".bp-bet") as HTMLButtonElement;
-        onTap(bet, () => placeBet(c.id));
+        // `disabled` is the only gate: render() sets it from the wallet, the phase and any in-flight
+        // bet, so the affordance and the guard are the same fact. jsdom + keyboard Enter still reach
+        // this handler on a disabled button, hence the explicit check rather than trusting the browser.
+        onTap(bet, () => { if (!bet.disabled) betFn?.(c.id, selStake); });
         rows.push({
           row,
           prob: row.querySelector(".bp-prob") as HTMLElement,
@@ -261,78 +244,44 @@ export function createBetPanel(parent: HTMLElement = document.body): BetPanel {
       }
       buildStakeChips();
     },
-    openMarket(seed, strengths) {
-      rng = mulberry32(seed);
-      // seed pools by rarity strength^1.6 (favourite ~28-32%, longest shot ~4-6% across 8 outcomes)
-      pools = strengths.map((s) => Math.pow(s, 1.6) * 18 + rng() * 8);
-      userStake = cars.map(() => 0);
-      lockedMult = [];
-      locked = false;
-      flowAcc = 0;
-      lastSettle = null;
-      creditLine = null;
-    },
-    tick(dt) {
-      if (locked) return;
-      flowAcc += dt;
-      while (flowAcc >= FLOW_INTERVAL) {
-        flowAcc -= FLOW_INTERVAL;
-        // fake bettor: pick a car weighted toward current favorites, add a stake
-        const probs = liveProbs();
-        let r = rng();
-        let pick = 0;
-        for (let i = 0; i < probs.length; i++) { r -= probs[i]; if (r <= 0) { pick = i; break; } }
-        pools[pick] += 5 + rng() * 32;
-      }
-    },
-    lock() {
-      locked = true;
-      lockedMult = liveMults();
-    },
-    settle(winnerId) {
-      const mult = (lockedMult.length ? lockedMult : liveMults())[winnerId] || 0;
-      const staked = userStake.reduce((a, b) => a + b, 0);
-      const gross = userStake[winnerId] * mult;
-      wallet += gross;
-      const net = gross - staked;
-      lastSettle = { winnerId, net, winnerMult: mult };
-      return { net, walletAfter: wallet, winnerMult: mult };
-    },
-    credit(amount, label) {
-      if (!(amount > 0)) return;
-      wallet += amount;
-      creditLine = `${label}: +$${amount.toFixed(2)}`; // painted alongside the settle result in FINISH
-    },
     render(ctx) {
       const showPanel = ctx.phase === "MARKET";
       panelEl.style.display = showPanel ? "block" : "none";
       stripEl.style.display = (ctx.phase === "COUNTDOWN" || ctx.phase === "RACING") ? "flex" : "none";
       settleEl.style.display = ctx.phase === "FINISH" ? "block" : "none";
+      // implied probability = this car's share of the pool; the ¢ price is the same number, which is
+      // the whole point of a pari-mutuel market and why both are printed off one figure.
+      const T = ctx.total || 1;
+      const pending = ctx.pendingCar !== null;
 
       if (showPanel) {
         timerEl.textContent = `OPEN ${Math.max(0, Math.ceil(ctx.marketRemaining))}s`;
-        poolEl.textContent = `$${total().toFixed(0)}`;
-        const probs = liveProbs();
-        const mults = liveMults();
+        poolEl.textContent = `$${ctx.total.toFixed(0)}`;
         rows.forEach((r, i) => {
-          r.prob.firstChild!.textContent = `${Math.round(probs[i] * 100)}% · ${Math.round(probs[i] * 100)}¢`;
-          r.mult.textContent = `x${mults[i].toFixed(2)}`;
-          r.pool.textContent = `$${pools[i].toFixed(0)} pool`;
-          r.bet.disabled = wallet < selStake;
+          const prob = ctx.pools[i] / T;
+          r.prob.firstChild!.textContent = `${Math.round(prob * 100)}% · ${Math.round(prob * 100)}¢`;
+          r.mult.textContent = `x${ctx.mults[i].toFixed(2)}`;
+          r.pool.textContent = `$${ctx.pools[i].toFixed(0)} pool`;
+          // One bet in flight at a time — the book serialises them, so every button locks while any
+          // send is outstanding and the one being sent says so instead of going grey and silent.
+          const inFlight = ctx.pendingCar === i;
+          r.bet.disabled = pending || ctx.wallet < selStake;
+          r.bet.classList.toggle("pending", inFlight);
+          r.bet.textContent = inFlight ? "···" : "BET";
         });
-        walletEl.textContent = `$${wallet.toFixed(2)}`;
+        walletEl.textContent = `$${ctx.wallet.toFixed(2)}`;
 
         // bet slip
         slipEl.innerHTML = "";
-        const any = userStake.some((s) => s > 0);
+        const any = ctx.stakes.some((s) => s > 0);
         if (!any) {
           const e = document.createElement("div");
           e.className = "bp-empty"; e.textContent = "No positions yet — pick a car.";
           slipEl.appendChild(e);
         } else {
-          userStake.forEach((s, i) => {
+          ctx.stakes.forEach((s, i) => {
             if (s <= 0) return;
-            const pays = s * mults[i];
+            const pays = s * ctx.mults[i];
             const line = document.createElement("div");
             line.className = "bp-slipline";
             line.innerHTML = `<span>$${s.toFixed(0)} on ${cars[i].name}</span><em>→ $${pays.toFixed(2)}</em>`;
@@ -342,39 +291,34 @@ export function createBetPanel(parent: HTMLElement = document.body): BetPanel {
       }
 
       if (stripEl.style.display === "flex") {
-        const mults = lockedMult.length ? lockedMult : liveMults();
-        const myBets = userStake.map((s, i) => ({ s, i })).filter((b) => b.s > 0);
+        const myBets = ctx.stakes.map((s, i) => ({ s, i })).filter((b) => b.s > 0);
         const posTxt = myBets.length
-          ? myBets.map((b) => `<b>$${b.s.toFixed(0)} ${cars[b.i].name}</b> → $${(b.s * mults[b.i]).toFixed(2)}`).join(" · ")
+          ? myBets.map((b) => `<b>$${b.s.toFixed(0)} ${cars[b.i].name}</b> → $${(b.s * ctx.mults[b.i]).toFixed(2)}`).join(" · ")
           : "<span style='color:#6b74a6'>no bet placed</span>";
         const lead = ctx.raceLeaderName ? `<span class="lead">LEADING ${ctx.raceLeaderName}</span>` : "";
         stripEl.innerHTML = `${posTxt} ${lead}`;
       }
 
-      if (ctx.phase === "FINISH" && lastSettle) {
-        const w = cars[lastSettle.winnerId];
-        winEl.textContent = `${w.name} WINS`;
-        winEl.style.color = w.color;
-        paidEl.textContent = `market paid x${lastSettle.winnerMult.toFixed(2)}`;
-        const up = lastSettle.net >= 0;
-        netEl.textContent = `${up ? "+" : "−"}$${Math.abs(lastSettle.net).toFixed(2)}`;
-        netEl.className = "bp-net " + (up ? "up" : "down");
-        walletBigEl.textContent = `Wallet: $${wallet.toFixed(2)}`;
-      }
-
       if (ctx.phase === "FINISH") {
-        creditEl.textContent = creditLine ?? "";
-        creditEl.style.display = creditLine ? "block" : "none";
-        // keep the settle-card wallet figure honest even when a credit lands without a bet settle
-        if (creditLine && !lastSettle) walletBigEl.textContent = `Wallet: $${wallet.toFixed(2)}`;
+        if (ctx.settle) {
+          const w = cars[ctx.settle.winnerId];
+          winEl.textContent = `${w.name} WINS`;
+          winEl.style.color = w.color;
+          paidEl.textContent = `market paid x${ctx.settle.winnerMult.toFixed(2)}`;
+          const up = ctx.settle.net >= 0;
+          netEl.textContent = `${up ? "+" : "−"}$${Math.abs(ctx.settle.net).toFixed(2)}`;
+          netEl.className = "bp-net " + (up ? "up" : "down");
+        }
+        creditEl.textContent = ctx.credit ?? "";
+        creditEl.style.display = ctx.credit ? "block" : "none";
+        // the live balance, not a figure captured at settle time — a credit landing after the payout
+        // (owner podium) has to show up here too, and reading it off the ctx makes that automatic
+        walletBigEl.textContent = `Wallet: $${ctx.wallet.toFixed(2)}`;
       }
     },
+    onBet(fn) { betFn = fn; },
     onSkip(fn) { onTap(skipEl, () => fn()); },
     onRaceAgain(fn) { onTap(againBtn, () => fn()); },
-    wallet: () => wallet,
-    poolTotal: () => total(),
-    probs: () => liveProbs(),
-    myBet: () => { let bi = -1, bv = 0; userStake.forEach((s, i) => { if (s > bv) { bv = s; bi = i; } }); return bi; },
     dispose() { root.remove(); },
   };
 }
