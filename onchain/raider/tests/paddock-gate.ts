@@ -226,11 +226,66 @@ describe("paddock GATE: multi-payer co-delegation", function () {
     assert.ok(race.feed.equals(BTC_FEED), "ER race feed wrong");
     assert.equal(ticket.raceSeq.toString(), "18446744073709551615", "ticket sentinel wrong");
 
+    console.log("      co-residency confirmed");
+  });
+
+  it("THE CO-WRITE: place_bet mutates Race + Bettor + Ticket in ONE ER tx", async () => {
+    const CAR = 7;
+    const STAKE = 300_000;
+
+    const pre = await erProg.account.race.fetch(racePda);
+    const preBettor = await erProg.account.bettor.fetch(bettorPda);
+
+    await sendIxHttp(
+      erConn,
+      erProg.methods
+        .placeBet(CAR, new BN(STAKE))
+        .accounts({
+          payer: player.publicKey,
+          mint,
+          race: racePda,
+          bettor: bettorPda,
+          ticket: ticketPda,
+        }),
+      player
+    );
+
+    const race = await erProg.account.race.fetch(racePda);
+    const bettor = await erProg.account.bettor.fetch(bettorPda);
+    const ticket = await erProg.account.ticket.fetch(ticketPda);
+
+    // Shared account written by a player who did not delegate it.
+    assert.equal(
+      race.pools[CAR].toNumber(),
+      pre.pools[CAR].toNumber() + STAKE,
+      "shared Race pool not credited"
+    );
+    assert.equal(
+      race.total.toNumber(),
+      pre.total.toNumber() + STAKE,
+      "shared Race total not credited"
+    );
+    // Player-owned accounts written in the same instruction.
+    assert.equal(
+      bettor.balance.toNumber(),
+      preBettor.balance.toNumber() - STAKE,
+      "bettor not debited"
+    );
+    assert.equal(ticket.stakes[CAR].toNumber(), STAKE, "ticket stake not recorded");
+    assert.equal(
+      ticket.raceSeq.toString(),
+      race.seq.toString(),
+      "ticket did not adopt the live race seq"
+    );
+    // The seed must not exist while the market is open.
+    assert.deepEqual([...race.seed], new Array(32).fill(0), "seed leaked during betting");
+
     console.log("");
     console.log("      ==============================================");
-    console.log("      GATE PASSED — shared Race + separately-delegated");
-    console.log("      Bettor/Ticket are co-resident in one rollup.");
-    console.log("      Shared pari-mutuel pool is viable.");
+    console.log("      GATE FULLY PASSED");
+    console.log("      A player wrote the house-delegated shared Race and");
+    console.log("      their own Bettor/Ticket in ONE ER transaction.");
+    console.log("      Shared pari-mutuel pool is PROVEN viable.");
     console.log("      ==============================================");
   });
 });
