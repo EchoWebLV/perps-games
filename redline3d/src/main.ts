@@ -1367,7 +1367,11 @@ function enterGrandprix(playerCarName: string | null): void {
     // and picks the player by name (an unowned/unknown name → all-house spectate).
     raceGame = createRaceGame({
       scene: ctx.scene, camera: ctx.camera, hudParent: hudRoot,
-      grid: buildGrid(CAR_DEFS.filter((c) => !c.locked || inventory.owns(c.name)), playerCarName, mulberry32(seed)),
+      // The chain race is ALWAYS a full field: `Race.entrants` permutes GRID_SIZE slots, and
+      // `setupRace` paces `cars[entrants[slot]]` — a grid short of that crashes on the first
+      // market (fresh accounts own almost nothing). House opponents aren't the player's to own,
+      // so the chain show fills from the FULL roster; guests keep the unlock-filtered field.
+      grid: buildGrid(book ? CAR_DEFS : CAR_DEFS.filter((c) => !c.locked || inventory.owns(c.name)), playerCarName, mulberry32(seed)),
       seed, lowTier: quality.tier === "low",
       book, // undefined for a guest / an unreachable book → race-mode falls back to its local sim
       // race-mode lights the race like the dev harness (own hemi/key/rim + dusk fog + full IBL) and
