@@ -175,6 +175,19 @@ describe("betPanel BET gate", () => {
     panel.dispose();
   });
 
+  it("takes no bet in the stepless gaps either — `working` is the controller's own word", () => {
+    const { el, panel } = mount();
+    // Between two steps the controller is still mid-run: the seat can be undelegated at this
+    // instant and `betable` can be a stale clone's number. `step` alone goes null in those gaps,
+    // so keying the gate on it opened a window where a doomed send looked fundable.
+    panel.render(ctx({ wallet: 100, betable: 100, onboarding: { kind: "refill", working: true, step: null, index: 0, of: 9, error: null, betError: null } }));
+    expect(betButtons(el).every((b) => b.disabled)).toBe(true);
+    // the same shape with the controller at rest is a bettable seat
+    panel.render(ctx({ wallet: 100, betable: 100, onboarding: { kind: "refill", working: false, step: null, index: 0, of: 9, error: null, betError: null } }));
+    expect(betButtons(el).some((b) => b.disabled)).toBe(false);
+    panel.dispose();
+  });
+
   it("hands the gate back to the balance once staging has stopped", () => {
     const { el, panel } = mount();
     // errored, so nothing is in flight: the note explains the seat, the balance decides the bet
@@ -213,7 +226,9 @@ describe("betPanel selected stake", () => {
     const { el, panel } = mount();
     // the host stages the seat for the bet the player is ABOUT to make, so it has to be able to ask
     expect(panel.selectedStake()).toBe(DEFAULT_STAKE);
-    expect(DEFAULT_STAKE).toBe(5);
+    // the invariant that actually matters: the constant and the chip painted as selected agree
+    const selected = el.querySelector(".bp-chip.sel") as HTMLElement;
+    expect(selected.textContent).toBe(`$${DEFAULT_STAKE}`);
     (el.querySelectorAll(".bp-chip")[0] as HTMLElement).click(); // $1
     expect(panel.selectedStake()).toBe(1);
     (el.querySelectorAll(".bp-chip")[2] as HTMLElement).click(); // $20
@@ -272,8 +287,10 @@ describe("betPanel onboarding notice", () => {
     expect(text).toMatch(/Topping up · 3 of 9/);
     expect(text).not.toContain("One-time setup"); // a ten-minute player is not a first-timer
     expect(text).toContain("hand it back");       // the refill's own words for `undelegate`
-    expect(text).toContain("you can bet again next market");
-    // same rule as setup: the sequence is the progress, the clock is not ours to promise
+    expect(text).toContain("betting reopens when your seat is back");
+    // same rule as setup, and a market count is a clock too — the refill runs about two race
+    // cycles, so "next market" was a deadline the panel had no standing to promise
+    expect(text).not.toContain("next market");
     expect(text).not.toMatch(/second|minute|~|\d+s\b/i);
     panel.dispose();
   });
@@ -301,7 +318,6 @@ describe("betPanel onboarding notice", () => {
     expect(onboardEl(el).style.display).toBe("block");
     expect(onboardEl(el).textContent).toContain("Topping up · 7 of 9");
     expect(betErrEl(el).style.display).toBe("block");
-    expect(betErrEl(el).className).toContain("stopped");
     expect(betErrEl(el).textContent).toContain("Bet not placed");
     expect(betErrEl(el).textContent).toContain("Betting just closed for this race");
     panel.dispose();
@@ -320,7 +336,7 @@ describe("betPanel onboarding notice", () => {
     const { el, panel } = mount();
     // fundable, and the seat is standing still (staged, between steps): the gate is open, so the
     // in-flight send is the only thing greying these rows and the amber row is the one being sent
-    panel.render(ctx({ wallet: 100, betable: 20, pendingCar: 2, onboarding: { kind: "setup", working: false, step: null, index: 0, of: 5, error: null, betError: "Not enough balance for that stake." } }));
+    panel.render(ctx({ wallet: 100, betable: 20, pendingCar: 2, onboarding: { kind: "setup", working: false, step: null, index: 0, of: 5, error: null, betError: null } }));
     const btns = betButtons(el);
     expect(btns.every((b) => b.disabled)).toBe(true);
     expect(btns[2].textContent).toBe("···");           // the same amber in-flight beat as any other bet
@@ -342,13 +358,27 @@ describe("betPanel short-balance line", () => {
     panel.render(ctx({ wallet: 100, betable: 1, onboarding: null }));
     expect(betButtons(el).every((b) => b.disabled)).toBe(true); // the button this line exists to explain
     expect(onboardEl(el).style.display).toBe("block");
-    expect(onboardEl(el).textContent).toContain("Topping up");
-    expect(onboardEl(el).textContent).toContain("Balance short for a $5 bet — staging more before the next market.");
+    expect(onboardEl(el).textContent).toContain("Balance short");
+    expect(onboardEl(el).textContent).toContain("Not enough staged for a $5 bet — the seat is topping up in the background.");
     expect(onboardEl(el).className).not.toContain("stopped"); // normal play, not a fault
+    // no deadline here either: this line cannot know which market the seat comes back for
+    expect(onboardEl(el).textContent).not.toContain("next market");
+    expect(onboardEl(el).textContent).not.toMatch(/second|minute|~|\d+s\b/i);
     // and it quotes the chip the player is actually on
     (el.querySelectorAll(".bp-chip")[2] as HTMLElement).click(); // $20
     panel.render(ctx({ wallet: 100, betable: 1, onboarding: null }));
-    expect(onboardEl(el).textContent).toContain("Balance short for a $20 bet");
+    expect(onboardEl(el).textContent).toContain("Not enough staged for a $20 bet");
+    panel.dispose();
+  });
+
+  it("stands aside in the stepless gap — the seat is being worked, just not named", () => {
+    const { el, panel } = mount();
+    // `working` with no step yet: the controller IS moving the seat, so the short line would be
+    // wrong about the present. Nothing to name and nothing to correct → one quiet beat, and the
+    // gate is still shut. This documents that silence as accepted, not as an oversight.
+    panel.render(ctx({ wallet: 100, betable: 1, onboarding: { kind: "refill", working: true, step: null, index: 0, of: 9, error: null, betError: null } }));
+    expect(onboardEl(el).style.display).toBe("none");
+    expect(betButtons(el).every((b) => b.disabled)).toBe(true);
     panel.dispose();
   });
 
@@ -397,7 +427,7 @@ describe("betPanel short-balance line", () => {
     expect(betErrEl(el).style.display).toBe("block");
     expect(betErrEl(el).textContent).toContain("Bet not placed");
     expect(onboardEl(el).style.display).toBe("block");
-    expect(onboardEl(el).textContent).toContain("Balance short for a $5 bet");
+    expect(onboardEl(el).textContent).toContain("Not enough staged for a $5 bet");
     panel.dispose();
   });
 });

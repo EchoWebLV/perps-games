@@ -95,9 +95,17 @@ const STEP_LABEL: Record<NonNullable<BookOnboarding["step"]>, string> = {
  *  nothing". Every notice the panel paints is this shape, so one renderer covers them all. */
 interface Note { cls: string; head: string; body: string }
 
+/** Whether staging has anything of its own to say: the states `onboardNote` can render (a step to
+ *  name, or an error), PLUS the stepless gaps where the controller is working but has not named a
+ *  step yet. `shortNote` stands down on all of them — the two share one element, and the short line
+ *  must never talk over real progress nor imply a seat is sitting still while it is being moved.
+ *  One predicate so that set cannot drift apart from the `??` that pairs the two builders. */
+const stagingSpeaks = (o: BookOnboarding | null): boolean => !!o && (o.working || o.step !== null || !!o.error);
+
 /** The seat work behind the scenes, as a line the player can read: a one-time build the first time,
  *  a top-up when the balance ran short. Idle and silent staging paints nothing — a book that COULD
- *  be staging but is not is not news. */
+ *  be staging but is not is not news. Nor is a working controller that has not named a step: there
+ *  is nothing true to say yet, so the gap is a beat of silence and the line lands when a step does. */
 function onboardNote(o: BookOnboarding | null): Note | null {
   if (!o) return null;
   if (o.error) {
@@ -106,8 +114,11 @@ function onboardNote(o: BookOnboarding | null): Note | null {
   }
   if (!o.step) return null;
   const head = o.kind === "refill" ? `Topping up · ${o.index} of ${o.of}` : `One-time setup · ${o.index} of ${o.of}`;
+  // `?? o.step` is runtime belt-and-braces; the exhaustive Record type is what actually breaks the
+  // build. No deadline in either suffix — the refill takes about two race cycles, so naming a
+  // market would be a clock in disguise and a promise the panel has no standing to make.
   const body = o.kind === "refill"
-    ? `${STEP_LABEL[o.step] ?? o.step} — you can bet again next market.`
+    ? `${STEP_LABEL[o.step] ?? o.step} — betting reopens when your seat is back.`
     : `${STEP_LABEL[o.step] ?? o.step} — later bets skip all of this.`;
   return { cls: "", head, body };
 }
@@ -117,7 +128,9 @@ function onboardNote(o: BookOnboarding | null): Note | null {
  *  be what erases the top-up explaining it. */
 function betNote(o: BookOnboarding | null): Note | null {
   if (!o?.betError) return null;
-  return { cls: "stopped", head: "Bet not placed", body: o.betError };
+  // no modifier: `.bp-beterr` is unconditionally the red "refused" block, so a `stopped` class here
+  // would be inert — a modifier with no rule behind it reads as styling that exists and does not
+  return { cls: "", head: "Bet not placed", body: o.betError };
 }
 
 /** BET disabled by a short balance while the refill sits between attempts — the quiet windows
@@ -127,14 +140,17 @@ function betNote(o: BookOnboarding | null): Note | null {
  *
  *  `betable === null` is how the panel knows it is looking at the local sim, which has no seat, no
  *  staging and nothing to promise — there the plain disabled button is the honest answer and this
- *  line would be an invention. It also stands down whenever staging has something real to say, so
- *  it can never talk over progress or an error. */
+ *  line would be an invention. It also stands down the moment staging has anything of its own to
+ *  say, so it can never talk over progress, an error, or a run that is between steps.
+ *
+ *  The body says what is true and stops: the balance is short and a top-up is running. WHEN it
+ *  lands is the chain's business — it takes roughly two race cycles, which is exactly why naming
+ *  a market here would be a deadline dressed up as reassurance. */
 function shortNote(ctx: BetRenderCtx, stake: number): Note | null {
   if (ctx.betable === null) return null;
   if (ctx.betable >= stake) return null;
-  const o = ctx.onboarding;
-  if (o && (o.step !== null || o.error)) return null;
-  return { cls: "", head: "Topping up", body: `Balance short for a $${stake} bet — staging more before the next market.` };
+  if (stagingSpeaks(ctx.onboarding)) return null;
+  return { cls: "", head: "Balance short", body: `Not enough staged for a $${stake} bet — the seat is topping up in the background.` };
 }
 
 /** An older ticket, and whether its result is still on the chain to be paid from. */
@@ -417,11 +433,12 @@ export function createBetPanel(parent: HTMLElement = document.body): BetPanel {
       // built, so a tap that cannot be funded has to be a disabled button with an honest line under
       // it (the note says what is crossing), not a promise the book would go on to refuse.
       const betable = ctx.betable ?? ctx.wallet;
-      // A seat mid-move cannot take a bet: while any staging step is in flight the delegated pair
-      // may be undelegated at this instant, and `betable` can have come off a stale ER clone that
-      // still reads high — a balance saying yes to a send the chain is certain to refuse. The
-      // honest gate is OFF, with the progress note right there saying why.
-      const stagingInFlight = ctx.onboarding !== null && ctx.onboarding.step !== null;
+      // A seat mid-move cannot take a bet: while the controller is working — even between steps —
+      // the delegated pair may be undelegated at this instant, and `betable` can have come off a
+      // stale ER clone that still reads high, a balance saying yes to a send the chain is certain
+      // to refuse. `working` is the controller's own word for it; `step` alone has stepless gaps,
+      // and gating on that proxy left a window where a doomed tap looked funded.
+      const stagingInFlight = ctx.onboarding?.working ?? false;
       const canFund = betable >= selStake && !stagingInFlight;
 
       if (showPanel) {
