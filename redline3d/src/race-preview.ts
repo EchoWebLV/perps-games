@@ -43,14 +43,16 @@ const params = new URLSearchParams(location.search);
 const chainMode = params.get("chain") === "1";
 const betMode = chainMode && params.get("bet") === "1";
 
-/** The STAKE the harness stages against on entry, in base units (8e7 lamports = 0.08 SOL, which the
- *  game's stake-currency convention prints as $8.00). It is `ensure()`'s argument, not a deposit
- *  size: the controller targets `STAKE_BUFFER_BETS` × this, capped by what the wallet can actually
- *  reach, so the seat holds several bets' worth and the heavy refill round trip stays rare.
- *  `?deposit=<SOL>` overrides it for a cheaper/richer run. */
+/** The STAKE the harness stages against on entry, in base units. It is `ensure()`'s argument, not a
+ *  deposit size: the controller targets `STAKE_BUFFER_BETS` (5) × this, capped by what the wallet can
+ *  actually reach, so the seat holds several bets' worth and the heavy refill round trip stays rare.
+ *
+ *  1.6e7 lamports = 0.016 SOL, which stages toward the same effective 0.08 SOL the harness has always
+ *  deposited. The old 0.08 default meant 0.4 SOL — very nearly the whole dev wallet — and this harness
+ *  has no cash-out control to get it back out. `?deposit=<SOL>` overrides it for a richer run. */
 const DEV_DEPOSIT_LAMPORTS = (() => {
   const sol = Number(params.get("deposit"));
-  return Number.isFinite(sol) && sol > 0 ? BigInt(Math.round(sol * 1e9)) : 80_000_000n;
+  return Number.isFinite(sol) && sol > 0 ? BigInt(Math.round(sol * 1e9)) : 16_000_000n;
 })();
 
 const vw = () => innerWidth || 1280;

@@ -68,11 +68,13 @@ const settleAsync = async () => { for (let i = 0; i < 12; i++) await new Promise
  *  module owes the controller is a trigger carrying the freshly-observed balance. */
 const fakeStaging = (over: Partial<StageStatus> = {}) => {
   const status: StageStatus = { state: "idle", step: null, error: null, ...over };
+  const funds = { sol: 0n };
   return {
     status: () => status,
     set: (next: Partial<StageStatus>) => { Object.assign(status, next); },
+    setSol: (sol: bigint) => { funds.sol = sol; },
     betableBase: () => 0n,
-    walletSolBase: () => 0n,
+    walletSolBase: () => funds.sol,
     ensure: vi.fn(),
     ensureNow: vi.fn(async () => {}),
     dispose: () => {},
@@ -313,6 +315,38 @@ describe("chainBookSource", () => {
     expect(book.total()).toBe(1);
   });
 
+  it("keeps the last BETTOR too — a null read is a failed read, not a vanished account", async () => {
+    // There is no instruction that closes a Bettor/Ticket pair, so once joined it exists forever; a
+    // null snapshot is always the ER read failing. Three player-facing numbers now hang off it
+    // (wallet, betable, the claim line), and blanking all three on one bad response would flash the
+    // balance to $0 mid-market and grey every BET button with it.
+    const state: { race: RaceSnap | null; bettor: BettorSnap | null } = {
+      race: raceSnap({ seq: 18n }),
+      bettor: { balance: 25n * UNIT, stakes: new Array<bigint>(GRID).fill(0n), raceSeq: null },
+    };
+    const book = chainBookSource(fakeClient(state).client);
+    await book.refresh();
+    expect(book.wallet()).toBe(25);
+
+    state.bettor = null;                                       // the ER read drops
+    await book.refresh();
+    expect(book.wallet()).toBe(25);                            // the last thing the chain actually said
+    expect(book.betable!()).toBe(25);
+
+    state.bettor = { balance: 9n * UNIT, stakes: new Array<bigint>(GRID).fill(0n), raceSeq: null };
+    await book.refresh();
+    expect(book.wallet()).toBe(9);                             // and a real read still moves it
+  });
+
+  it("a wallet that never joined stays at nothing — sticky is not an invented balance", async () => {
+    const state = { race: raceSnap(), bettor: null };
+    const book = chainBookSource(fakeClient(state).client);
+    await book.refresh();
+    expect(book.wallet()).toBe(0);                             // null from the start is the honest value
+    expect(book.betable!()).toBe(0);
+    expect(book.myStakes()).toEqual(new Array(GRID).fill(0));
+  });
+
   it("createChainBookSource refuses to hand back a book with no phase", async () => {
     const { client } = fakeClient({ race: null, bettor: null });
     await expect(createChainBookSource(client)).rejects.toThrow(/no Race account/);
@@ -400,27 +434,72 @@ describe("chainBookSource", () => {
     expect(book.onboarding!()).toBeNull();                     // idle and quiet: nothing to explain
 
     staging.set({ state: "staging", step: "deposit" });
-    expect(book.onboarding!()).toEqual({ kind: "setup", step: "deposit", index: 3, of: 5, error: null });
+    expect(book.onboarding!()).toEqual({ kind: "setup", step: "deposit", index: 3, of: 5, error: null, betError: null });
 
     staging.set({ state: "refilling", step: "exit" });
-    expect(book.onboarding!()).toEqual({ kind: "refill", step: "exit", index: 2, of: 9, error: null });
+    expect(book.onboarding!()).toEqual({ kind: "refill", step: "exit", index: 2, of: 9, error: null, betError: null });
 
     // `done` / `ready` are transitions, not work: collapsed to a stepless beat rather than letting
     // indexOf(-1) yank the bar back to the start of the sequence.
     staging.set({ state: "refilling", step: "done" });
-    expect(book.onboarding!()).toEqual({ kind: "refill", step: null, index: 0, of: 9, error: null });
+    expect(book.onboarding!()).toEqual({ kind: "refill", step: null, index: 0, of: 9, error: null, betError: null });
     staging.set({ state: "staging", step: "ready" });
-    expect(book.onboarding!()).toEqual({ kind: "setup", step: null, index: 0, of: 5, error: null });
+    expect(book.onboarding!()).toEqual({ kind: "setup", step: null, index: 0, of: 5, error: null, betError: null });
 
     staging.set({ state: "ready", step: null });
     expect(book.onboarding!()).toBeNull();                     // a built seat says nothing at all
 
     // the one state the player has to act on survives idle, because it is not progress — it is news
     staging.set({ state: "error", step: null, error: "Your wallet needs SOL first — open the wallet panel and send SOL to your address." });
-    expect(book.onboarding!()).toEqual({ kind: "setup", step: null, index: 0, of: 5, error: expect.stringContaining("needs SOL") });
+    expect(book.onboarding!()).toEqual({ kind: "setup", step: null, index: 0, of: 5, error: expect.stringContaining("needs SOL"), betError: null });
   });
 
-  it("keeps what stopped a bet on screen, in the client's own words, until the next market", async () => {
+  it("a step the sequence does not name degrades to the stepless beat instead of claiming position 1", async () => {
+    // `indexOf` returns -1 for a step that belongs to the OTHER sequence (`join` only ever runs on a
+    // first build, never in a refill). Reporting "1 of 9" for it would be a confident lie about how
+    // far along the bar is; 0 is the honest "working, position unknown" the mapper already uses for
+    // the done/ready transitions. The step itself is still passed through — it is what is happening.
+    const state = { race: raceSnap(), bettor: null };
+    const staging = fakeStaging();
+    const book = chainBookSource(fakeClient(state).client, { staging });
+    await book.refresh();
+
+    staging.set({ state: "refilling", step: "join" });
+    expect(book.onboarding!()).toEqual({ kind: "refill", step: "join", index: 0, of: 9, error: null, betError: null });
+  });
+
+  it("an errored REFILL still reads as a refill — a returning player is never relabelled first-time", async () => {
+    // The controller reports `state: "error"` with no memory of which path was running, so the kind
+    // has to be latched while the state machine is still saying it. Without the latch a failed
+    // mid-session top-up would paint "One-time setup" at a player who has been betting for an hour.
+    const state = { race: raceSnap(), bettor: null };
+    const { client } = fakeClient(state);
+    const staging = fakeStaging();
+    const book = chainBookSource(client, { onError: () => {}, staging });
+    await book.refresh();
+
+    staging.set({ state: "refilling", step: "undelegate" });
+    expect(book.onboarding!()!.kind).toBe("refill");            // the frame that latches it
+
+    client.placeBet = async () => { throw new Error("Not enough in your balance for that bet."); };
+    book.placeBet(2, 5);
+    await settleAsync();
+    staging.set({ state: "error", step: null, error: "Your wallet needs SOL first — open the wallet panel and send SOL to your address." });
+
+    // BOTH errors are present and separate: the staging one is actionable and belongs to the refill
+    // bar; the bet one is transient and belongs to the bet slip. Folding them into one field would
+    // let a failed tap mask the refill that is the reason the tap failed.
+    expect(book.onboarding!()).toEqual({
+      kind: "refill",                                           // latched, not re-derived from "error"
+      step: null,
+      index: 0,
+      of: 9,
+      error: expect.stringContaining("needs SOL"),
+      betError: expect.stringContaining("Not enough in your balance"),
+    });
+  });
+
+  it("keeps what stopped a bet on screen, in the client's own words, for one whole market", async () => {
     const state = { race: raceSnap(), bettor: null };
     const { client, placed } = fakeClient(state);
     const warned: string[] = [];
@@ -435,7 +514,8 @@ describe("chainBookSource", () => {
     expect(placed).toEqual([]);                                // the send threw; nothing landed
     expect(book.pendingBet()).toBeNull();                      // the button is free again, not stuck
     expect(warned).toEqual(["placeBet"]);
-    expect(book.onboarding!()!.error).toContain("Betting just closed");
+    expect(book.onboarding!()!.betError).toContain("Betting just closed");
+    expect(book.onboarding!()!.error).toBeNull();              // the staging pipeline is fine — this is the bet's
 
     // a retry supersedes it: the line on screen is about the LAST attempt, never a stale one
     client.placeBet = async (slot, amount) => { placed.push({ slot, amount: BigInt(amount.toString()) }); };
@@ -449,15 +529,53 @@ describe("chainBookSource", () => {
     book.placeBet(2, 5);
     await settleAsync();
 
-    // a refill running underneath keeps its OWN progress — the bet's message rides alongside it
+    // a refill running underneath keeps its OWN progress, in its OWN field — a failed tap must never
+    // mask the rebuild that is very often the reason the tap failed
     staging.set({ state: "refilling", step: "withdraw" });
-    expect(book.onboarding!()).toEqual({ kind: "refill", step: "withdraw", index: 4, of: 9, error: expect.stringContaining("Betting just closed") });
+    expect(book.onboarding!()).toEqual({ kind: "refill", step: "withdraw", index: 4, of: 9, error: null, betError: expect.stringContaining("Betting just closed") });
 
-    // …and the next market clears the bet's message, since the chain opens one every MARKET_SECS.
-    // The staging behind it is untouched: it is read live every frame, never latched by this book,
-    // so a rebuild that outlives a 15s market can never be blanked by the roll.
+    // ONE market of visibility, not zero: MarketClosedError arrives within a second of the roll that
+    // would otherwise clear it, so the player would never get to read the sentence explaining why
+    // their tap did nothing. It survives the first roll…
     book.openMarket({ seed: 1, strengths: [], rng: () => 0 });
-    expect(book.onboarding!()).toEqual({ kind: "refill", step: "withdraw", index: 4, of: 9, error: null });
+    expect(book.onboarding!()!.betError).toContain("Betting just closed");
+    // …and goes on the second, so it can never become furniture.
+    book.openMarket({ seed: 2, strengths: [], rng: () => 0 });
+    expect(book.onboarding!()).toEqual({ kind: "refill", step: "withdraw", index: 4, of: 9, error: null, betError: null });
+  });
+
+  it("folds the wallet's own SOL into the one number, on top of what a bet can spend", async () => {
+    // The panel shows wallet+play as ONE figure, the way the perps chip does. `betable()` is the
+    // narrower number a single bet can reach; the difference is money that needs a background refill
+    // crossing first — real, spendable, just not in this tap.
+    const state = {
+      race: raceSnap({ seq: 18n }),
+      bettor: { balance: 12n * UNIT, stakes: new Array<bigint>(GRID).fill(0n), raceSeq: null } as BettorSnap,
+    };
+    const staging = fakeStaging();
+    const book = chainBookSource(fakeClient(state).client, { staging });
+    await book.refresh();
+    expect(book.wallet()).toBe(12);                            // nothing in the wallet yet
+    expect(book.betable!()).toBe(12);
+
+    staging.setSol(50_000_000n);                               // 0.05 SOL sitting on L1 = 5 display units
+    expect(book.betable!()).toBe(12);                          // unchanged: a bet cannot reach it
+    expect(book.wallet()).toBe(17);                            // but the player's money is 17
+  });
+
+  it("a read-only book reports betable and wallet as the same number, and ensureFunded is a no-op", async () => {
+    // No staging wired → nothing to stage into and no wallet balance to fold in, so the two numbers
+    // are the same and the panel gates on the balance exactly as it did before any of this existed.
+    const state = {
+      race: raceSnap({ seq: 18n }),
+      bettor: { balance: 7n * UNIT, stakes: new Array<bigint>(GRID).fill(0n), raceSeq: null } as BettorSnap,
+    };
+    const book = chainBookSource(fakeClient(state).client);
+    await book.refresh();
+    expect(book.betable!()).toBe(7);
+    expect(book.wallet()).toBe(book.betable!());
+    expect(() => book.ensureFunded!(5)).not.toThrow();         // asked to stage with nowhere to stage
+    expect(book.onboarding!()).toBeNull();
   });
 
   it("REFILL_STEPS is the whole way out and then back in, in cashOut + ensureBettor's own order", () => {

@@ -60,9 +60,14 @@ export interface BookOnboarding {
   index: number;
   /** `ONBOARD_STEPS.length` or `REFILL_STEPS.length`, whichever kind this is. */
   of: number;
-  /** What the player has to act on: an unfunded wallet the staging cannot get past, or the bet send
-   *  that just failed. Null otherwise. */
+  /** The STAGING pipeline's own error — actionable, and about the seat: "your wallet needs SOL".
+   *  Never a bet failure. */
   error: string | null;
+  /** A failed BET send (market closed, not enough balance) — transient, its own note in the panel,
+   *  never allowed to mask refill progress. Kept apart from `error` because the two have different
+   *  causes, different lifetimes and different things to do about them; folding them into one field
+   *  means a tap that failed BECAUSE a refill was mid-flight hides the refill explaining it. */
+  betError: string | null;
 }
 
 /** The onboarding sequence, in the order `ensureBettor` runs it. `ready` is deliberately absent: it
@@ -175,7 +180,9 @@ export interface RaceBookSource {
    *  units. Absent → `wallet()` is the gate, exactly the pre-chain behavior. */
   betable?(): number;
   /** Optional: tell the book what stake the player has selected so it can stage/refill AHEAD of the
-   *  tap. Cheap to call every frame; the staging controller throttles itself. */
+   *  tap. The call is cheap every frame; the staging controller throttles itself. The consequence —
+   *  at most once per retry gap — can be a multi-race-cycle refill round trip, which is exactly the
+   *  point: it happens in the background, ahead of the tap that would otherwise wait for it. */
   ensureFunded?(stakeUnits: number): void;
   /** Optional: an older ticket still holding money, and how much of the claim window is left on it.
    *  Null when there is nothing to say; omitted by a book with no claim window (the local sim settles
@@ -337,7 +344,7 @@ export interface ChainBookOptions {
    *  `console.warn` — the book has no UI of its own and swallowing these silently is worse. */
   onError?: (where: string, e: unknown) => void;
   /** The staging controller, when the host holds a wallet that can fund a seat. Absent → a
-   *  READ-ONLY book: `onboarding()` is null, `betable()` mirrors the balance, and `placeBet`
+   *  READ-ONLY book: `onboarding()` is null, `betable()` mirrors balance + claimable, and `placeBet`
    *  sends straight to the ER — the dev harness's shape. Present → the book reports staging
    *  progress and `ensureFunded` keeps the seat ahead of the selected stake. The tap itself
    *  NEVER stages: the 15s market does not wait, so a tap that cannot be funded is a
@@ -371,7 +378,9 @@ export function chainBookSource(
   let lockedMult: number[] = [];   // CAR-indexed, frozen at lock()
   let settled: BookSettle | null = null;
   let pending: number | null = null; // CAR id of a bet in flight
-  let betError: string | null = null; // what the last send said, until the next market opens
+  let betError: string | null = null; // what the last send said (see openMarket for how long it lives)
+  let betErrorFresh = false;          // set by the send that raised it; spent by the next market roll
+  let lastKind: BookOnboarding["kind"] = "setup"; // which path the staging was last KNOWN to be on
   let lastPoll = 0;                  // WALL-CLOCK ms of the last read (see poll)
   let fetching = false;              // one ER read at a time — a slow RPC must not stack requests
   let disposed = false;
@@ -418,7 +427,10 @@ export function chainBookSource(
       // `secondsLeft()` keep reporting the last thing the chain actually said, and the host holds at
       // that point instead of advancing the show past a chain it cannot currently see.
       if (r) race = r;
-      bettor = b;
+      // Sticky like `race`: once joined, the pair is never closed (no close instruction exists), so a
+      // null read is a failed read, not a vanished account — and three player-facing numbers now hang
+      // off it. A never-joined wallet stays null from the start, which is the honest value.
+      if (b) bettor = b;
     } catch (e) {
       report("snapshot", e);
     } finally {
@@ -436,11 +448,15 @@ export function chainBookSource(
     openMarket() {
       lockedMult = [];
       settled = null;
-      // A failed send's message is this book's ONLY latched state, and the next market is what clears
-      // it — the chain opens one every MARKET_SECS, so it never sits there forever. Staging progress
-      // is deliberately not touched: it is read live off the controller every frame, so a rebuild that
-      // outlives a 15s market cannot be blanked by the roll.
-      betError = null;
+      // A failed send's message gets ONE full market of visibility, not zero. The commonest failure
+      // is MarketClosedError, which arrives within a second of the very roll that would otherwise
+      // clear it — so clearing on the first roll means the player never reads the sentence explaining
+      // why their tap did nothing. The second roll takes it, so it can never become furniture.
+      // (A fresh tap clears it immediately; see placeBet.) Staging progress is deliberately not
+      // touched here: it is read live off the controller every frame, so a rebuild that outlives a
+      // 15s market cannot be blanked by the roll.
+      if (betErrorFresh) betErrorFresh = false;
+      else betError = null;
     },
 
     /** Deliberately ignores `dt` and reads the WALL clock. `dt` is the host's sim step — clamped
@@ -514,6 +530,7 @@ export function chainBookSource(
       if (slot < 0) return;
       pending = carId;
       betError = null;                                  // a fresh attempt supersedes the last one's message
+      betErrorFresh = false;
       const base = BigInt(unitsToBase(amount));
       void (async () => {
         try {
@@ -525,6 +542,7 @@ export function chainBookSource(
           // InsufficientBalanceError, BettorTornError in chain/paddock.ts), so the message goes
           // through as it stands rather than being re-worded here.
           betError = messageOf(e);
+          betErrorFresh = true;                         // survives the roll that is probably about to happen
         } finally {
           pending = null;
         }
@@ -537,15 +555,21 @@ export function chainBookSource(
     onboarding() {
       if (!staging) return null;
       const s = staging.status();
-      const kind: BookOnboarding["kind"] = s.state === "refilling" ? "refill" : "setup";
+      // A refill that ERRORS must still read as a refill — latch the kind while the state
+      // machine is still telling us, so "error" doesn't relabel a ten-minute player as first-time.
+      if (s.state === "refilling") lastKind = "refill";
+      else if (s.state === "staging") lastKind = "setup";
+      const kind = s.state === "error" ? lastKind : s.state === "refilling" ? "refill" : "setup";
       const seq = kind === "refill" ? REFILL_STEPS : ONBOARD_STEPS;
-      const error = betError ?? s.error;
       if (s.state === "idle" || s.state === "ready") {
-        return error ? { kind, step: null, index: 0, of: seq.length, error } : null;
+        return s.error || betError ? { kind, step: null, index: 0, of: seq.length, error: s.error, betError } : null;
       }
       const step = s.step === "done" || s.step === "ready" ? null : s.step;
-      const index = step ? Math.max(0, seq.indexOf(step)) + 1 : 0;
-      return { kind, step, index, of: seq.length, error };
+      // A step belonging to the OTHER sequence indexes to -1. Reporting it as position 1 would be a
+      // confident lie about how far along the bar is; 0 is the same honest "working, position
+      // unknown" beat the done/ready transitions get.
+      const i = step ? seq.indexOf(step) : -1;
+      return { kind, step, index: i < 0 ? 0 : i + 1, of: seq.length, error: s.error, betError };
     },
 
     /** balance + a past ticket's claimable win — what ONE bet can spend right now, because
@@ -629,9 +653,12 @@ export function chainBookSource(
         winnerId: winnerCar,
         net: baseToUnits(gross) - baseToUnits(staked),
         winnerMult: Number(s.multFp) / Number(SCALE),
-        // The LIVE on-chain balance, not balance+payout: the vault credits a win on `claim` (or on the
-        // next bet's auto-settle), so quoting a balance the chain has not written would be inventing
-        // money. `net` is what the race made; this is what is actually in the account right now.
+        // The same ONE number the header shows (balance + claimable + the L1 SOL in the wallet), not
+        // that plus this race's payout: the vault credits a win on `claim` (or on the next bet's
+        // auto-settle), so quoting money the chain has not written would be inventing it. The ticket
+        // being settled here is still the race on screen, so its own win is not in this figure yet —
+        // it appears the moment the chain rolls and the claimable term picks it up. `net` is what the
+        // race made; this is what the player actually holds right now.
         walletAfter: source.wallet(),
       };
       return settled;
