@@ -94,6 +94,8 @@ import { modeSwitchBlocked } from "./core/mode-guard";
 import { createOval } from "./render/oval";
 import { createGarageRoom } from "./render/garage-room";
 import { createRaceGame, mulberry32, type RaceGame } from "./render/race-mode";
+import { createChainBookSource } from "./render/race-book-source";
+import { DEFAULT_STAKE } from "./ui/bet-panel";
 import { buildGrid } from "./core/race-grid";
 import { elevationAt } from "./core/track";
 import { HIGHWAY_MAX_LEV, highwayPose, seedHighwayMotion, speedForLeverage, stepHighwayMotion, synchronizedHighwayMotion, type HighwayMotion } from "./core/highway-auto";
@@ -104,6 +106,8 @@ import { HIGHWAY_DURATION_SENTINEL, isHighwayRound, roundKey, type RoundSnap } f
 import { selectChainWalletPort } from "./chain/wallet-select";
 import { createCrateRollDraws, makeCrateRollIo } from "./chain/crate-roll";
 import { payDevnetSol } from "./chain/sol-payment";
+import { createPaddockBook, LiveStakesError, type PaddockBook } from "./chain/paddock";
+import { createPaddockStaging, type PaddockStaging } from "./chain/paddock-staging";
 import {
   createHighwayRoundReader,
   deriveHighwayRoundPda,
@@ -214,6 +218,21 @@ const session = createGameSession({
   onSettled: (info) => finalizeSettled(info), // terminal-first background lever
   port: selectChainWalletPort(), // Privy by default (app id set); ?wallet=dev forces the dev keypair
 });
+// The paddock book rides the SAME signer as everything else on chain — session.anchorWallet()
+// is the documented seam for that (crate-roll VRF already uses it). Lazy and keyed by address:
+// loginFresh can change the wallet, and the old account's staging must not leak into the new one.
+let paddockPair: { client: PaddockBook; staging: PaddockStaging; address: string } | null = null;
+function paddockFor(): { client: PaddockBook; staging: PaddockStaging } | null {
+  const w = session.anchorWallet();
+  if (!w) return null;
+  const address = w.publicKey.toBase58();
+  if (paddockPair?.address !== address) {
+    paddockPair?.staging.dispose();
+    const client = createPaddockBook({ wallet: w, mint: CHAIN.PADDOCK_BOOK_MINT });
+    paddockPair = { client, staging: createPaddockStaging({ client }), address };
+  }
+  return paddockPair;
+}
 // The cash chip + wallet hero show the player's TOTAL money — wallet SOL + play balance —
 // one number, the way the player thinks about it ("I sent 5 SOL, I have 5 SOL"). Moving
 // money between wallet and play (buy-in / cash-out) barely moves it; wins and losses do.
@@ -550,6 +569,19 @@ const walletUI = createWallet(hudRoot, {
       if (session.delegated()) await session.endSession(); // undelegate under the hood
       await session.withdraw();
       syncOnchainBalance();
+      // The race book comes home through the same door — one Cash Out returns ALL the money
+      // (the player never sees the seat lifecycle). A seat riding the LIVE race cannot exit
+      // yet: that is normal play, and the bet panel is already saying so; skip quietly.
+      // Ahead of the success line, so "Cashed out to your wallet." is only claimed once both
+      // legs are actually home; the perps balance is already re-read either way.
+      const pad = paddockFor();
+      if (pad) {
+        try { await pad.client.cashOut(); }
+        catch (e) {
+          if (e instanceof LiveStakesError) console.warn("race book cash-out deferred — stakes riding the live race");
+          else throw e;
+        }
+      }
       hud.setStatus("Cashed out to your wallet.");
     },
   },
@@ -1221,55 +1253,83 @@ function exitHomeToLobby(): void { home.hide(); ensureWorlds(); enterLobby(); }
 function enterGrandprix(playerCarName: string | null): void {
   if (mode === "grandprix" || raceGame) return;                          // re-entry guard: a double-tapped race button (Android retargets the trailing click) would orphan + leak a whole race
   if (modeSwitchBlocked({ opening, phase: engine.getPhase() })) return;  // no mode switch mid-GO
-  const seed = (Math.random() * 1e9) >>> 0;
-  // Build the race FIRST: if construction throws (bad GLB path, track build) we bail here, BEFORE any
-  // irreversible mode/visibility/chrome mutation — the app stays on home instead of a half-torn state.
-  // House field: unowned-but-unlocked defs stay eligible; buildGrid itself drops pool:false/comingSoon
-  // and picks the player by name (an unowned/unknown name → all-house spectate).
-  raceGame = createRaceGame({
-    scene: ctx.scene, camera: ctx.camera, hudParent: hudRoot,
-    grid: buildGrid(CAR_DEFS.filter((c) => !c.locked || inventory.owns(c.name)), playerCarName, mulberry32(seed)),
-    seed, lowTier: quality.tier === "low",
-    // race-mode lights the race like the dev harness (own hemi/key/rim + dusk fog + full IBL) and
-    // registers the DEV "race-track" Light Lab folder — the perps main-scene lights are too dark for it.
-    provideSceneLighting: true,
-    // thin accessor so the race-track Light Lab can expose an "exposure" knob over the host renderer
-    exposure: { get: () => ctx.renderer.toneMappingExposure, set: (v) => { ctx.renderer.toneMappingExposure = v; } },
-    onExit: () => exitGrandprixToHome(),
-  });
-  mode = "grandprix";
-  // The race owns the whole screen (race-hud board + bet panel). Hide the perps 3D world — world +
-  // pickups + fire-trail AND the drivable car (it can poke into some race cam angles) — the same
-  // groups enterHighway hides, plus the car. Then MUTE the two perps main-scene lights (ambient + key,
-  // the scene-root pair from createScene): they're the only lights that reach the race group (every
-  // other group is hidden here), and their moody purple/pink wash is exactly what made the race look
-  // wrong. With them off the race renders under ONLY its harness-matched rig. exitGrandprix restores.
-  if (world) world.group.visible = false; // may be null: grandprix is enterable straight from home before any lobby/3D visit ever built the world (nothing to hide then)
-  pickups.group.visible = false; fireTrail.group.visible = false; car.group.visible = false; // eager groups — always exist
-  ctx.ambient.visible = false; ctx.key.visible = false;
-  // Share the harness's tonal operator: the perps world runs NoToneMapping (tone-mapping deferred to the
-  // composer's OutputPass, which reads renderer.toneMapping live), so ACES here rolls off the neon like the
-  // harness — its original "flat neon fix". Save + restore on exit; exposure comes from the race-track preset.
-  prevRaceToneMapping = ctx.renderer.toneMapping;
-  prevRaceExposure = ctx.renderer.toneMappingExposure;
-  ctx.renderer.toneMapping = THREE.ACESFilmicToneMapping;
-  ctx.renderer.toneMappingExposure = pNum("race-track", "exposure", 1.05);
-  // Kill the cold-entry compile freeze (the "dark spot at race start"): the race track + environment
-  // programs were never in precompileModes() (the race group doesn't exist at boot), so their first
-  // render used to glCompileShader ~30 programs mid-frame. Warm them NOW — while home still covers the
-  // canvas and under the final light config set just above — so the first VISIBLE race frame is already
-  // compiled. (Diagnosed in-browser: cold entry spiked one 124ms frame as programs jumped 116→145; a
-  // warm re-entry has no such spike.)
-  ctx.renderer.compile(ctx.scene, ctx.camera);
-  syncPresenceLifecycle(); // grandprix carries no presence (allowlist predicates keep it dark); this
-                           // still DISCONNECTS the lobby ghost when arriving from a presence mode
-  home.hide(); lobbyHud.hide(); // hide home LAST — it masked the compile stall a beat ago
-  mapBtn.setVisible(false); // the race exits via its own Done button, not the map pin
-  // Hide the perps driving chrome (GO dock, tach, market tabs, price/timer/× via setMinimal; coin/scrap
-  // counters). enterLobby/exitLobby + setChrome re-establish every one of these downstream, so leaving
-  // grandprix restores it for free.
-  hud.setMinimal(true);
-  coins.setVisible(false); scrap.setVisible(false);
+  // Bound to a const and called on the next line rather than written as an inline IIFE ON PURPOSE:
+  // TypeScript carries the guards' narrowing INTO an IIFE, so `mode` would still read as "not
+  // grandprix" below — a narrowing that cannot survive the await between the two. Breaking the IIFE
+  // shape hands the re-check the declared union again, which is the whole point of re-checking.
+  const openRace = async (): Promise<void> => {
+    // A connected wallet plays the REAL book — the same singleton Race the crank cycles on
+    // devnet; a guest keeps the local sim byte-for-byte (book absent ⇒ pre-chain behavior).
+    // Build it BEFORE the mode flips: one primed ER read, and on any failure the race still
+    // opens on the local sim rather than half-opening on a dead chain.
+    let book: Awaited<ReturnType<typeof createChainBookSource>> | undefined;
+    const pad = paddockFor();
+    if (pad) {
+      try {
+        book = await createChainBookSource(pad.client, { staging: pad.staging });
+        // The moment we know a bet will be needed is NOW — stage the default stake's buffer
+        // while the player is still watching the market fill in.
+        pad.staging.ensure(BigInt(unitsToBase(DEFAULT_STAKE)));
+      } catch (e) {
+        console.warn("[grandprix] chain book unavailable — local sim:", e);
+      }
+    }
+    // Re-assert both guards across the await: a double-tap or a mode change while the ER read
+    // was in flight must not build a second race over the first (or over a mode that moved on).
+    if (mode === "grandprix" || raceGame) return;
+    if (modeSwitchBlocked({ opening, phase: engine.getPhase() })) return;
+    const seed = (Math.random() * 1e9) >>> 0;
+    // Build the race FIRST: if construction throws (bad GLB path, track build) we bail here, BEFORE any
+    // irreversible mode/visibility/chrome mutation — the app stays on home instead of a half-torn state.
+    // House field: unowned-but-unlocked defs stay eligible; buildGrid itself drops pool:false/comingSoon
+    // and picks the player by name (an unowned/unknown name → all-house spectate).
+    raceGame = createRaceGame({
+      scene: ctx.scene, camera: ctx.camera, hudParent: hudRoot,
+      grid: buildGrid(CAR_DEFS.filter((c) => !c.locked || inventory.owns(c.name)), playerCarName, mulberry32(seed)),
+      seed, lowTier: quality.tier === "low",
+      book, // undefined for a guest / an unreachable book → race-mode falls back to its local sim
+      // race-mode lights the race like the dev harness (own hemi/key/rim + dusk fog + full IBL) and
+      // registers the DEV "race-track" Light Lab folder — the perps main-scene lights are too dark for it.
+      provideSceneLighting: true,
+      // thin accessor so the race-track Light Lab can expose an "exposure" knob over the host renderer
+      exposure: { get: () => ctx.renderer.toneMappingExposure, set: (v) => { ctx.renderer.toneMappingExposure = v; } },
+      onExit: () => exitGrandprixToHome(),
+    });
+    mode = "grandprix";
+    // The race owns the whole screen (race-hud board + bet panel). Hide the perps 3D world — world +
+    // pickups + fire-trail AND the drivable car (it can poke into some race cam angles) — the same
+    // groups enterHighway hides, plus the car. Then MUTE the two perps main-scene lights (ambient + key,
+    // the scene-root pair from createScene): they're the only lights that reach the race group (every
+    // other group is hidden here), and their moody purple/pink wash is exactly what made the race look
+    // wrong. With them off the race renders under ONLY its harness-matched rig. exitGrandprix restores.
+    if (world) world.group.visible = false; // may be null: grandprix is enterable straight from home before any lobby/3D visit ever built the world (nothing to hide then)
+    pickups.group.visible = false; fireTrail.group.visible = false; car.group.visible = false; // eager groups — always exist
+    ctx.ambient.visible = false; ctx.key.visible = false;
+    // Share the harness's tonal operator: the perps world runs NoToneMapping (tone-mapping deferred to the
+    // composer's OutputPass, which reads renderer.toneMapping live), so ACES here rolls off the neon like the
+    // harness — its original "flat neon fix". Save + restore on exit; exposure comes from the race-track preset.
+    prevRaceToneMapping = ctx.renderer.toneMapping;
+    prevRaceExposure = ctx.renderer.toneMappingExposure;
+    ctx.renderer.toneMapping = THREE.ACESFilmicToneMapping;
+    ctx.renderer.toneMappingExposure = pNum("race-track", "exposure", 1.05);
+    // Kill the cold-entry compile freeze (the "dark spot at race start"): the race track + environment
+    // programs were never in precompileModes() (the race group doesn't exist at boot), so their first
+    // render used to glCompileShader ~30 programs mid-frame. Warm them NOW — while home still covers the
+    // canvas and under the final light config set just above — so the first VISIBLE race frame is already
+    // compiled. (Diagnosed in-browser: cold entry spiked one 124ms frame as programs jumped 116→145; a
+    // warm re-entry has no such spike.)
+    ctx.renderer.compile(ctx.scene, ctx.camera);
+    syncPresenceLifecycle(); // grandprix carries no presence (allowlist predicates keep it dark); this
+                             // still DISCONNECTS the lobby ghost when arriving from a presence mode
+    home.hide(); lobbyHud.hide(); // hide home LAST — it masked the compile stall a beat ago
+    mapBtn.setVisible(false); // the race exits via its own Done button, not the map pin
+    // Hide the perps driving chrome (GO dock, tach, market tabs, price/timer/× via setMinimal; coin/scrap
+    // counters). enterLobby/exitLobby + setChrome re-establish every one of these downstream, so leaving
+    // grandprix restores it for free.
+    hud.setMinimal(true);
+    coins.setVisible(false); scrap.setVisible(false);
+  };
+  void openRace();
 }
 // Tear a live in-app race down and hand every host resource it borrowed back to the perps world:
 // dispose() (which restores the scene fog/background/env-intensity) + null the ref, un-mute the two

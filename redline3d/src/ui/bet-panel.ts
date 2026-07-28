@@ -130,6 +130,7 @@ function betNote(o: BookOnboarding | null): Note | null {
   if (!o?.betError) return null;
   // no modifier: `.bp-beterr` is unconditionally the red "refused" block, so a `stopped` class here
   // would be inert — a modifier with no rule behind it reads as styling that exists and does not
+  // apply. One red block, one rule.
   return { cls: "", head: "Bet not placed", body: o.betError };
 }
 
