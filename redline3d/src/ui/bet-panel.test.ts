@@ -144,15 +144,46 @@ describe("betPanel pending state", () => {
 describe("betPanel BET gate", () => {
   it("gates BET on betable, not on the presence of onboarding", () => {
     const { el, panel } = mount();
-    // A seat mid-top-up: there is money on screen (wallet counts the SOL still in the wallet and
-    // whatever is crossing back) and $1 a bet can actually spend. The clause this replaces let the
-    // mere existence of onboarding un-gate the button, which promised a bet the book would bounce.
-    const refilling = { kind: "refill" as const, step: "withdraw" as const, index: 4, of: 9, error: null, betError: null };
-    panel.render(ctx({ wallet: 100, betable: 1, onboarding: refilling }));
+    // A stopped top-up: onboarding is non-null and nothing is in flight, so the seat is sitting
+    // still and the balance is the whole question. The clause this replaces let the mere existence
+    // of onboarding un-gate the button, which promised a bet the book would go on to bounce.
+    const stalled = {
+      kind: "refill" as const, step: null, index: 0, of: 9,
+      error: "Your wallet needs about 0.01 SOL for fees.", betError: null,
+    };
+    panel.render(ctx({ wallet: 100, betable: 1, onboarding: stalled }));
     expect(betButtons(el).every((b) => b.disabled)).toBe(true);
-    // and it is the number that un-gates it, with the very same top-up still running
-    panel.render(ctx({ wallet: 100, betable: 5, onboarding: refilling }));
+    // and it is the number that un-gates it, with the very same stopped top-up on screen
+    panel.render(ctx({ wallet: 100, betable: 5, onboarding: stalled }));
     expect(betButtons(el).some((b) => b.disabled)).toBe(false);
+    panel.dispose();
+  });
+
+  it("takes no bet while the seat is mid-move", () => {
+    const { el, panel } = mount();
+    // A step in flight means the delegated pair may be undelegated at this instant and `betable`
+    // may have come off a stale ER clone reading high — a balance that says yes to a send the
+    // chain is certain to refuse. The honest gate is OFF; the progress note beside it says why.
+    panel.render(ctx({ wallet: 100, betable: 100, onboarding: { kind: "refill", step: "deposit", index: 7, of: 9, error: null, betError: null } }));
+    expect(betButtons(el).every((b) => b.disabled)).toBe(true);
+    // a first-seat build is the same story — the seat is moving either way
+    panel.render(ctx({ wallet: 100, betable: 100, onboarding: { kind: "setup", step: "delegate", index: 4, of: 5, error: null, betError: null } }));
+    expect(betButtons(el).every((b) => b.disabled)).toBe(true);
+    // nothing moving, money there → open
+    panel.render(ctx({ wallet: 100, betable: 100, onboarding: null }));
+    expect(betButtons(el).some((b) => b.disabled)).toBe(false);
+    panel.dispose();
+  });
+
+  it("hands the gate back to the balance once staging has stopped", () => {
+    const { el, panel } = mount();
+    // errored, so nothing is in flight: the note explains the seat, the balance decides the bet
+    panel.render(ctx({
+      wallet: 100, betable: 100,
+      onboarding: { kind: "setup", step: null, index: 0, of: 5, error: "Your wallet needs about 0.02 SOL to open a seat.", betError: null },
+    }));
+    expect(betButtons(el).some((b) => b.disabled)).toBe(false);
+    expect((el.querySelector(".bp-onboard") as HTMLElement).textContent).toContain("Setup stopped");
     panel.dispose();
   });
 
@@ -287,8 +318,9 @@ describe("betPanel onboarding notice", () => {
 
   it("still greys every row while the bet the onboarding is for is in flight", () => {
     const { el, panel } = mount();
-    // fundable on purpose: the gate is open, so the in-flight send is the only thing greying these
-    panel.render(ctx({ wallet: 100, betable: 20, pendingCar: 2, onboarding: { kind: "setup", step: "join", index: 1, of: 5, error: null, betError: null } }));
+    // fundable, and the seat is standing still (staged, between steps): the gate is open, so the
+    // in-flight send is the only thing greying these rows and the amber row is the one being sent
+    panel.render(ctx({ wallet: 100, betable: 20, pendingCar: 2, onboarding: { kind: "setup", step: null, index: 0, of: 5, error: null, betError: "Not enough balance for that stake." } }));
     const btns = betButtons(el);
     expect(btns.every((b) => b.disabled)).toBe(true);
     expect(btns[2].textContent).toBe("···");           // the same amber in-flight beat as any other bet

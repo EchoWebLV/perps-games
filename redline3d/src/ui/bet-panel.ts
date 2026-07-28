@@ -73,8 +73,10 @@ const CLAIM_WARN_RACES = 8;
  *  withdraw / unwrap on the way back out); this is the same sequence said out loud. One map covers
  *  both kinds — a step means the same thing whether it is running for a first seat or a top-up. No
  *  step names a duration — the sequence is the progress, the clock is not ours to promise. `ready`
- *  and `done` are transitions the book collapses to a stepless beat, so they are never rendered. */
-const STEP_LABEL: Record<string, string> = {
+ *  and `done` are transitions the book collapses to a stepless beat, so they are never rendered;
+ *  they are here because the type is TOTAL over the step union on purpose — a thirteenth step added
+ *  to `StageStep` has to break this build rather than quietly show the player a raw identifier. */
+const STEP_LABEL: Record<NonNullable<BookOnboarding["step"]>, string> = {
   join: "Opening your account at the book",
   wrap: "Wrapping SOL to stake",
   deposit: "Staking your seat",
@@ -398,7 +400,12 @@ export function createBetPanel(parent: HTMLElement = document.body): BetPanel {
       // built, so a tap that cannot be funded has to be a disabled button with an honest line under
       // it (the note says what is crossing), not a promise the book would go on to refuse.
       const betable = ctx.betable ?? ctx.wallet;
-      const canFund = betable >= selStake;
+      // A seat mid-move cannot take a bet: while any staging step is in flight the delegated pair
+      // may be undelegated at this instant, and `betable` can have come off a stale ER clone that
+      // still reads high — a balance saying yes to a send the chain is certain to refuse. The
+      // honest gate is OFF, with the progress note right there saying why.
+      const stagingInFlight = ctx.onboarding !== null && ctx.onboarding.step !== null;
+      const canFund = betable >= selStake && !stagingInFlight;
 
       if (showPanel) {
         timerEl.textContent = `OPEN ${Math.max(0, Math.ceil(ctx.marketRemaining))}s`;
