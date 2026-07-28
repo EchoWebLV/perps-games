@@ -860,9 +860,10 @@ const garage = createCarPicker(hudRoot, CAR_DEFS, (c) => equipCar(c), () => upgr
 garageForHydration = garage;
 (window as Window & { setSplashProgress?: (pct: number) => void }).setSplashProgress?.(75); // boot milestone: inventory + garage up
 
-// Crate Shop (lobby Crates building): buy a crate → roll a car by rarity odds → reveal. A NEW car
-// unlocks in the garage; a DUPLICATE melts to Scrap. Account crates use MagicBlock VRF; only guests
-// use client RNG for local practice.
+// The Crate Shop — ONE surface, two entrances: the lobby CRATES building and home's STORE tab both
+// open THIS. Buy a crate → roll a car by rarity odds → reveal. A NEW car unlocks in the garage; a
+// DUPLICATE melts to Scrap. Account crates use MagicBlock VRF; only guests use client RNG for local
+// practice. It paints above home (z 34 vs 30), so neither entrance has to blank what it opened from.
 const crateBox = createCrateBox(hudRoot, {
   cars: () => CAR_DEFS,
   grantCar: (name) => inventory.grant(name),
@@ -909,6 +910,8 @@ const crateBox = createCrateBox(hudRoot, {
   holdCoins: (n) => upgrades.holdCoins(n),
   settleHold: (n, commit) => upgrades.settleHold(n, commit),
   onVrfFail: (msg) => lobbyHud.toast(msg),
+  // Back to whichever entrance opened the shop. home.show() is a re-render, not a re-entry (home never
+  // left the screen): it surfaces a just-pulled car as owned and drops the STORE tab back to Collection.
   onClose: () => { if (mode === "lobby") lobbyHud.show(); else if (mode === "home") home.show(); },
 });
 

@@ -15,7 +15,7 @@ export interface HomeDeps {
   onDriveStrip: (carName: string) => void; // primary CTA: equip a sensible default + enter the lobby
   onEnterRace: (carName: string) => void;
   onWatchAndBet: () => void;
-  onOpenStore: () => void;              // crateBox.open()
+  onOpenStore: () => void;              // crateBox.open() — the ONE crate shop, hosted over home
 }
 export interface Home {
   el: HTMLElement;
@@ -86,9 +86,10 @@ function injectStyles() {
   stylesInjected = true;
   const s = document.createElement("style");
   s.textContent = `
-    /* z-index 30 sits below the access wall (40) and splash (50). The identity gate ALSO uses 30,
-       so it wins over home purely by DOM append order (main.ts creates the gate after home) — keep
-       that ordering if either is reworked, or bump one of the two to an explicit different layer. */
+    /* z-index 30 sits below the crate shop (34), the access wall (40) and splash (50). The identity
+       gate ALSO uses 30, so it wins over home purely by DOM append order (main.ts creates the gate
+       after home) — keep that ordering if either is reworked, or bump one of the two to an explicit
+       different layer. The crate shop is deliberately ABOVE: it hosts over home, never under it. */
     .sw-home{--acid:#c1f832;--ink:#e8edf3;--mut:#79838f;--edge:#05070b;
       position:fixed;inset:0;z-index:30;display:none;flex-direction:column;pointer-events:auto;
       background:radial-gradient(130% 80% at 50% -10%,rgba(193,248,50,.08),transparent 55%),#0a0c10;
@@ -220,8 +221,9 @@ export function createHome(parent: HTMLElement, deps: HomeDeps): Home {
   head.appendChild(wordmark);
   el.appendChild(head);
 
-  // ── tab strip: [Collection] [Store] segmented control. Store is a passthrough to the crate overlay;
-  //    Collection is the only rendered content, so tapping Store never swaps the grid out from under it. ──
+  // ── tab strip: [Collection] [Store] segmented control. Store is the SECOND entrance to the one crate
+  //    shop (the lobby CRATES building is the first) — it hosts the canonical overlay above home rather
+  //    than rendering a shop of its own, so Collection stays the only content this module builds. ──
   const tabs = document.createElement("div");
   tabs.className = "sw-tabs";
   const collectionTab = document.createElement("button");
@@ -262,9 +264,14 @@ export function createHome(parent: HTMLElement, deps: HomeDeps): Home {
 
   parent.appendChild(el);
 
-  // Opening the store hides home (the crate overlay sits BELOW home's z-index); crateBox.onClose
-  // brings home back via show(), which also picks up any car just pulled from the crate.
-  const openStore = () => { closeSheet(); hide(); deps.onOpenStore(); };
+  // The crate overlay now paints ABOVE home, so the store opens IN PLACE: home stays mounted behind the
+  // shop's scrim and the tab reads as selected while it's up. crateBox.onClose calls show(), which
+  // re-renders (a car just pulled from the crate shows up owned) and re-selects Collection.
+  const openStore = () => {
+    closeSheet();
+    collectionTab.classList.remove("on"); storeTab.classList.add("on");
+    deps.onOpenStore();
+  };
 
   onTap(storeTab, openStore);
   onTap(watchBtn, () => deps.onWatchAndBet());

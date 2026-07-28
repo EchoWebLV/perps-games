@@ -36,7 +36,9 @@ describe("main trade history wiring", () => {
   });
 
   it("passes History and local economy visibility into the product menu", () => {
-    const picker = between("const garage = createCarPicker", "// Crate Shop");
+    // end-marker: the crate shop comment that follows the carpicker block (renamed when the shop
+    // became one surface with two entrances — lobby CRATES building + home's STORE tab)
+    const picker = between("const garage = createCarPicker", "// The Crate Shop");
 
     expect(picker).toContain("showGarageAndUpgrades,");
     expect(picker).toContain("onHistory: () => { void tradeHistory.open(); },");

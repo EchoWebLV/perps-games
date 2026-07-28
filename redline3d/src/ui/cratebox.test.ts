@@ -67,6 +67,21 @@ describe("crate shop odds disclosure", () => {
   });
 });
 
+describe("one shop, two entrances", () => {
+  // Both the lobby CRATES building and home's STORE tab open THIS overlay, so it has to host above
+  // home (30) and the identity gate (30) — under them, an entrance would have to blank its own screen
+  // and a welcome crate fired from home would be revealed invisibly. The access wall (40) and the
+  // driver-name / trade-history modals (42) are hard gates and must stay ABOVE the shop.
+  test("the shop paints above home and the identity gate, below the access wall", () => {
+    const parent = document.createElement("div");
+    createCrateBox(parent, stubDeps());
+    const overlay = parent.firstElementChild as HTMLElement;
+    const layer = Number(overlay.style.zIndex);
+    expect(layer).toBeGreaterThan(30); // home + identity gate
+    expect(layer).toBeLessThan(40);    // access wall (and the 42 modals above it)
+  });
+});
+
 describe("SOL crate purchases", () => {
   const paidDeps = (overrides: Partial<CrateBoxDeps> = {}): CrateBoxDeps => ({
     ...stubDeps(),

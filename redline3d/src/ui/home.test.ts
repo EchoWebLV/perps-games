@@ -122,6 +122,36 @@ describe("home footer dual CTA", () => {
     home.dispose();
   });
 
+  it("STORE hosts the one crate shop OVER home — home stays up, the tab reads selected", () => {
+    const deps = makeDeps(["Solana Paper"]);
+    const home = createHome(document.createElement("div"), deps);
+    home.show();
+    const [collectionTab, storeTab] = [...home.el.querySelectorAll<HTMLElement>(".sw-tab")];
+    storeTab.click();
+    expect(deps.onOpenStore).toHaveBeenCalledTimes(1);
+    // the crate overlay paints ABOVE home, so home must NOT blank itself to reveal it
+    expect(home.isOpen()).toBe(true);
+    expect(storeTab.classList.contains("on")).toBe(true);
+    expect(collectionTab.classList.contains("on")).toBe(false);
+    // closing the shop → main calls show() → back on Collection, grid re-rendered
+    home.show();
+    expect(collectionTab.classList.contains("on")).toBe(true);
+    expect(storeTab.classList.contains("on")).toBe(false);
+    home.dispose();
+  });
+
+  it("an unowned card's Get crates opens that same one shop, home still up", () => {
+    const deps = makeDeps([]); // owns nothing → every card is locked
+    const home = createHome(document.createElement("div"), deps);
+    home.show();
+    (home.el.querySelector(".sw-card") as HTMLElement).click(); // raise the action sheet
+    (home.el.querySelector(".sw-act.crates") as HTMLElement).click();
+    expect(deps.onOpenStore).toHaveBeenCalledTimes(1);
+    expect(home.isOpen()).toBe(true);
+    expect(home.el.querySelector(".sw-sheet")?.classList.contains("on")).toBe(false); // sheet stands down
+    home.dispose();
+  });
+
   it("Watch & bet stays wired to onWatchAndBet", () => {
     const deps = makeDeps(["Solana Paper"]);
     const home = createHome(document.createElement("div"), deps);

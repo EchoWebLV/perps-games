@@ -204,8 +204,13 @@ export function createCrateBox(parent: HTMLElement, deps: CrateBoxDeps): CrateBo
   const rng = deps.rng ?? clientRandom;
 
   const overlay = document.createElement("div");
+  // ONE shop, TWO entrances (the lobby CRATES building and home's STORE tab), so this surface has to
+  // paint above home (30) and the identity gate (30). At z-11 it sat UNDER home: the store entrance had
+  // to blank home to be seen (baring the perps driving chrome behind the scrim), and any open fired
+  // while home was up — the welcome crate — was drawn invisibly behind it. Stays below the access wall
+  // (40) and driver-name / trade-history (42): those are hard gates and must keep covering the shop.
   overlay.style.cssText = [
-    "position:fixed", "inset:0", "z-index:11", "display:none", "align-items:center", "justify-content:center",
+    "position:fixed", "inset:0", "z-index:34", "display:none", "align-items:center", "justify-content:center",
     "padding:max(22px,env(safe-area-inset-top)) 18px", "background:rgba(0,0,0,.82)", "backdrop-filter:blur(2px)", "pointer-events:auto",
   ].join(";");
 
