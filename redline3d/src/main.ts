@@ -84,7 +84,6 @@ import { createAccessWall } from "./ui/access-wall";
 import { anyAccountRedeemed, anyRedeemed, redeem, redeemForAccount, type RedeemPorts } from "./core/access-code";
 import { offerPendingAccountWelcome, shouldGrantWelcome, welcomeClaimed, markWelcome } from "./core/welcome";
 import { GUEST_SAVE_NAMESPACE, readSaveSnapshot, restoreSave, stashSave, wipeSave } from "./core/save-vault";
-import { createMapButton } from "./ui/mapbutton";
 import { createLobbyHud } from "./ui/lobbyhud";
 import { step as driveStep, DRIVE, type DriveState, type DriveTune } from "./core/freedrive";
 import { stepBody, type BodyState } from "./core/body-language";
@@ -849,6 +848,7 @@ const garage = createCarPicker(hudRoot, CAR_DEFS, (c) => equipCar(c), () => upgr
   set: (key: string) => { setWorldTheme(key); },
 }, {
   showGarageAndUpgrades,
+  onHome: backOutToHome,
   onHistory: () => { void tradeHistory.open(); },
   onAccessCode: () => openAccessCodeDialog(),
   driverName: {
@@ -1121,7 +1121,6 @@ function enterLobby() {
   lobby!.show();
   // cruise chrome: the world is the UI — balance + hamburger, nothing else
   setChrome("cruise");
-  mapBtn.setVisible(true); // the map pin backs the strip out to the Slopwheels collection (home)
   lobbyHud.show();
   syncPresenceLifecycle();
   audio.resume(); radio.resume();
@@ -1138,7 +1137,6 @@ function exitLobby() {
   world!.group.visible = true;
   pickups.group.visible = true;
   fireTrail.group.visible = true;
-  mapBtn.setVisible(true);
   // restore the road car pose; the chase cam takes back over next frame.
   // market (BTC/ETH/SOL) stays whatever it was — it's chosen from the in-race HUD tabs, not the lobby.
   lane = { x: 0, vx: 0, yaw: 0, steer: 0 };
@@ -1169,7 +1167,6 @@ function enterHighway(restoring = false) {
   fireTrail.group.visible = false;
   oval!.show();
   setChrome("race"); // the highway uses the full driving chrome
-  mapBtn.setVisible(true); // "map" = back to the strip
   tach.rebuild(HIGHWAY_MAX_LEV);
   // Racer-only ability buttons are disabled here. The Highway position owns leverage.
   nitro.setEnabled(false); flux.setEnabled(false); magnet.setEnabled(false); autoExit.setEnabled(false); barrelRoll.setEnabled(false);
@@ -1213,7 +1210,6 @@ function enterGarage() {
   garageRoom?.show();
   garageRoom?.setCar(equippedCar); // whatever's equipped rides the turntable
   setChrome("cruise");             // no racing HUD — hamburger + balance chip only
-  mapBtn.setVisible(true);         // back-to-strip pin
   garageEnterT = 0;
   garageMenuShown = false;
   audio.resume(); radio.resume();
@@ -1408,7 +1404,6 @@ function enterGrandprix(playerCarName: string | null): void {
     syncPresenceLifecycle(); // grandprix carries no presence (allowlist predicates keep it dark); this
                              // still DISCONNECTS the lobby ghost when arriving from a presence mode
     home.hide(); lobbyHud.hide(); // hide home LAST — it masked the compile stall a beat ago
-    mapBtn.setVisible(false); // the race exits via its own Done button, not the map pin
     // Hide the perps driving chrome (GO dock, tach, market tabs, price/timer/× via setMinimal; coin/scrap
     // counters). enterLobby/exitLobby + setChrome re-establish every one of these downstream, so leaving
     // grandprix restores it for free.
@@ -1465,12 +1460,15 @@ function triggerBuilding(kind: BuildingKind) {
   }
 }
 
-const mapBtn = createMapButton(hudRoot, () => {
+// The floating home button moved under the ☰ menu (user call 2026-07-28) — same contextual
+// back-out it always performed: race/highway/garage step back to the strip, the strip backs
+// out to the collection (home). Hoisted so the carpicker's menuFeatures can reference it.
+function backOutToHome(): void {
   if (mode === "race") enterLobby();
   else if (mode === "highway") exitHighwayToLobby();
   else if (mode === "garage") exitGarageToLobby();
   else if (mode === "lobby") enterHome(); // the strip is no longer root — back it out to the collection
-});
+}
 const lobbyHud = createLobbyHud(hudRoot);
 let presence: PresenceClient | null = null;
 const presenceHud = createPresenceHud(hudRoot, (kind) => presence?.emote(kind));
@@ -1724,7 +1722,6 @@ function restoreHighwayPosition(): boolean {
   autoExit.setLive(true);
   controls.setLive(true, "CASH OUT");
   garage.setBusy(true);
-  mapBtn.setVisible(false);
   upgrades.setBusy(true);
   walletUI.setBusy(true);
   highwayControls.show();
@@ -1755,7 +1752,7 @@ function finalizeSettled(info: { outcome: number; outcomeName: string; payout: b
   // reset UI
   dropDrive();
   throttle = 34; game.equity = 1; chase.setDriving(false);
-  garage.setBusy(false); mapBtn.setVisible(true); upgrades.setBusy(false); walletUI.setBusy(false);
+  garage.setBusy(false); upgrades.setBusy(false); walletUI.setBusy(false);
   highwayControls.setDisabled(false);
   hud.setOpenPosition(false);
   hud.setTimer(effMaxSec(), false);
@@ -1817,7 +1814,7 @@ function launchPractice() {
   }
   else chase.setDriving(true);
   controls.setLive(true, "CASH OUT");
-  garage.setBusy(true); mapBtn.setVisible(false); upgrades.setBusy(true);
+  garage.setBusy(true); upgrades.setBusy(true);
   hud.setStatus("Practice run — nothing at stake. Sign in to play for real SOL.");
 }
 
@@ -1832,7 +1829,7 @@ function finalizePractice(snap: Snapshot) {
   autoExit.setLive(false);
   dropDrive();
   throttle = 34; game.equity = 1; chase.setDriving(false);
-  garage.setBusy(false); mapBtn.setVisible(true); upgrades.setBusy(false);
+  garage.setBusy(false); upgrades.setBusy(false);
   highwayControls.setDisabled(false);
   hud.setOpenPosition(false);
   hud.setTimer(effMaxSec(), false);
@@ -2070,7 +2067,7 @@ controls.onLaunch(async () => {
       chase.setDriving(true);
     }
     controls.setLive(true, "CASH OUT");
-    garage.setBusy(true); mapBtn.setVisible(false); upgrades.setBusy(true); walletUI.setBusy(true);
+    garage.setBusy(true); upgrades.setBusy(true); walletUI.setBusy(true);
     hud.setStatus(session.crankArmed() ? "" : mode === "highway"
       ? "⚠ Auto protection is off. Keep the app open or tap CASH OUT."
       : "⚠ Auto cash-out is off this round. Tap CASH OUT before the timer ends.");

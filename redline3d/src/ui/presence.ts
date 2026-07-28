@@ -3,6 +3,11 @@ import { onTap } from "./tap";
 
 export type PresenceState = "offline" | "connecting" | "live";
 
+// Emote SEND rail parked for now (user call 2026-07-28): the emoji buttons stay hidden on every
+// surface (lobby + track) while the LIVE status readout keeps working. Flip to bring them back —
+// the wiring (send, pulse, remote floaters) is untouched underneath.
+const SHOW_EMOTE_RAIL = false;
+
 export interface PresenceHud {
   setVisible(visible: boolean): void;
   setState(state: PresenceState, count: number): void;
@@ -114,7 +119,7 @@ export function createPresenceHud(
   return {
     setVisible(visible) {
       status.style.display = visible ? "block" : "none";
-      rail.style.display = visible ? "flex" : "none";
+      rail.style.display = visible && SHOW_EMOTE_RAIL ? "flex" : "none";
     },
     setState(state, liveCount) {
       if (state === "live") {

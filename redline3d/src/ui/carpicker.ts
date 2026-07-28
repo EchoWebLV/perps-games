@@ -55,6 +55,7 @@ const ICONS: Record<string, string> = {
   key: '<circle cx="8" cy="12" r="3.5"/><path d="M11.5 12H21M17 12v3M20 12v2"/>',
   car: '<path d="M4 13l1.6-4.2A2.5 2.5 0 0 1 8 7h8a2.5 2.5 0 0 1 2.4 1.8L20 13v5h-2.4v-1.6h-11.2V18H4z"/><circle cx="7.6" cy="14.8" r="1.4"/><circle cx="16.4" cy="14.8" r="1.4"/>',
   help: '<circle cx="12" cy="12" r="9"/><path d="M9.6 9.2a2.4 2.4 0 1 1 3.4 2.2c-.8.4-1.1.9-1.1 1.7"/><path d="M12 16.4h.01"/>',
+  home: '<path d="M3 11.5 12 4l9 7.5"/><path d="M5.5 9.6V20h13V9.6"/><path d="M10 20v-5.5h4V20"/>',
   chevron: '<path d="M9 6l6 6-6 6"/>',
   level: '<path d="M6 13l6-6 6 6"/><path d="M6 18l6-6 6 6"/>',
   logout: '<path d="M9 4H6a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h3"/><path d="M16 12H9"/><path d="M13 8l4 4-4 4"/>',
@@ -297,6 +298,8 @@ export interface WorldPicker {
 
 export interface MenuFeatures {
   showGarageAndUpgrades?: boolean;
+  /** "Home" row — the contextual back-out that replaced the floating home button (menu closes, then navigates). */
+  onHome?: () => void;
   onHistory?: () => void;
   onAccessCode?: () => void;
   driverName?: {
@@ -370,9 +373,12 @@ export function createCarPicker(
       <button class="gmenu-item" data-act="history"><span class="gmenu-ic">${icon("clock", 20)}</span><span class="gmenu-tx"><b>History</b><small>your settled trades</small></span><span class="gmenu-arr">${icon("chevron", 16)}</span></button>`;
   const accessCodeRow = `
       <button class="gmenu-item" data-act="access-code"><span class="gmenu-ic">${icon("key", 20)}</span><span class="gmenu-tx"><b>Redeem access code</b><small>unlock entry and rewards</small></span><span class="gmenu-arr">${icon("chevron", 16)}</span></button>`;
+  // Home leads the list — the floating home button now lives here (user call 2026-07-28).
+  const homeRow = menuFeatures.onHome ? `
+      <button class="gmenu-item" data-act="home"><span class="gmenu-ic">${icon("home", 20)}</span><span class="gmenu-tx"><b>Home</b><small>back out of the strip</small></span><span class="gmenu-arr">${icon("chevron", 16)}</span></button>` : "";
   menuPanel.innerHTML =
     `<div class="ghead"><span class="lbl">menu</span><button class="gicon-btn" data-act="close" aria-label="Close">✕</button></div>` +
-    `<div class="gmenu">${localRows}${historyRow}${accessCodeRow}
+    `<div class="gmenu">${homeRow}${localRows}${historyRow}${accessCodeRow}
       <button class="gmenu-item" data-act="howto"><span class="gmenu-ic">${icon("help", 20)}</span><span class="gmenu-tx"><b>How to play</b><small>controls &amp; the bet</small></span><span class="gmenu-arr">${icon("chevron", 16)}</span></button>
     </div>`;
 
@@ -874,6 +880,9 @@ export function createCarPicker(
     if (!t) return;
     if (t.dataset.world !== undefined) { if (t.classList.contains("locked")) return; worlds?.set(t.dataset.world); renderWorlds(); return; } // switch level skin (sealed skins ignore the tap), stay open
     if (t.dataset.act === "style") { menuFeatures.style?.toggle(); return; } // toggle art style, stay open (label re-syncs via subscribe)
+    // "chain" close: the navigation below owns the transition — a "dismiss" here would fire the
+    // showroom/lobby restore side-effects an instant before the mode moves anyway.
+    if (t.dataset.act === "home") { close("chain"); menuFeatures.onHome?.(); return; }
     if (t.dataset.act === "history") { close("chain"); menuButton.focus(); menuFeatures.onHistory?.(); return; }
     if (t.dataset.act === "access-code") { close("chain"); menuButton.focus(); menuFeatures.onAccessCode?.(); return; }
     if (t.dataset.act === "driver-name") { close("chain"); menuButton.focus(); menuFeatures.driverName?.edit(); return; }

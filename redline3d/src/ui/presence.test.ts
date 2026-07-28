@@ -95,7 +95,8 @@ describe("createPresenceHud", () => {
     expect(rail.style.display).toBe("none");
     hud.setVisible(true);
     expect(status.style.display).toBe("block");
-    expect(rail.style.display).toBe("flex");
+    // the emote rail is parked (SHOW_EMOTE_RAIL=false): it stays hidden even while the HUD shows
+    expect(rail.style.display).toBe("none");
     hud.setVisible(false);
     expect(status.style.display).toBe("none");
     expect(rail.style.display).toBe("none");
