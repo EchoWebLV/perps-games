@@ -121,6 +121,39 @@ describe("createPaddockStaging", () => {
     expect(client.ensureBettor).toHaveBeenCalledTimes(1);
   });
 
+  it("a returning delegated player still gets a wallet SOL read (one-number display)", async () => {
+    const client = fakeClient({
+      delegationState: vi.fn(async () => "reuse" as const),
+      bettorSnapshot: vi.fn(async () => bettorSnap(STAKE)),
+    });
+    const s = createPaddockStaging({ client });
+    await s.ensureNow(STAKE);
+    expect(s.walletSolBase()).toBe(1_000_000_000n);
+  });
+
+  it("a failed bettor read on a live seat retries quietly — never a rebuild", async () => {
+    const client = fakeClient({
+      delegationState: vi.fn(async () => "reuse" as const),
+      bettorSnapshot: vi.fn(async () => { throw new Error("502 from ER"); }),
+    });
+    const s = createPaddockStaging({ client });
+    await s.ensureNow(STAKE);
+    expect(client.cashOut).not.toHaveBeenCalled();
+    expect(s.status().state).toBe("idle");
+    expect(s.status().error).toBeNull();
+  });
+
+  it("a torn pair blocked by live stakes also retries quietly", async () => {
+    const client = fakeClient({
+      delegationState: vi.fn(async () => "busy" as const),
+      cashOut: vi.fn(async () => { throw new LiveStakesError("riding"); }),
+    });
+    const s = createPaddockStaging({ client });
+    await s.ensureNow(STAKE);
+    expect(s.status().state).toBe("idle");
+    expect(s.status().error).toBeNull();
+  });
+
   it("throttles repeat attempts (min interval) so a frame-loop trigger cannot hammer RPC", async () => {
     const client = fakeClient({ walletFunds: vi.fn(async () => ({ sol: 0n, stake: 0n })) });
     const s = createPaddockStaging({ client });

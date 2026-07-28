@@ -85,12 +85,30 @@ export function createPaddockStaging(deps: { client: StagingClient; onChange?: (
   async function run(stakeBase: bigint): Promise<void> {
     const state = await client.delegationState();
 
-    if (state === "reuse") {
-      if (await readBetable() >= stakeBase) { set({ state: "ready", step: null, error: null }); return; }
-      // Short, and nothing claimable covers it → the silent rebuild: the full way out, then a
-      // fresh buffer back in. cashOut claims any past win on the way (classifyExit "claim"),
-      // exits, polls the undelegation home, withdraws + unwraps — so ensureBettor below sees a
-      // fresh wallet-funded state. Blocked while stakes ride the LIVE race: quietly retry later.
+    if (state !== "fresh") {
+      if (state === "reuse") {
+        const [race, bettor] = await Promise.all([
+          client.raceSnapshot().catch(() => null),
+          client.bettorSnapshot().catch(() => null),
+        ]);
+        // On "reuse" the pair provably exists on L1, so a null bettor snapshot is always a
+        // failed ER read, never a broke player — rebuilding on it would spend the ~2-cycle
+        // money round trip over one bad RPC response. Quietly retry instead.
+        if (!bettor) { set({ state: "idle", step: null, error: null }); return; }
+        betable = betableOf(race, bettor);
+        if (betable >= stakeBase) {
+          // The seat covers the bet — but the "one number" the panel shows still needs the
+          // wallet half, and a returning player never walks the fresh path that reads it.
+          walletSol = (await client.walletFunds().catch(() => ({ sol: walletSol, stake: 0n }))).sol;
+          set({ state: "ready", step: null, error: null });
+          return;
+        }
+      }
+      // Short (reuse) or torn (busy): the silent rebuild — cashOut claims any past win,
+      // exits, polls the undelegation home, withdraws + unwraps, so the fresh path below
+      // re-stages from the wallet. Busy comes down the same path because exit is the only
+      // instruction that reunites a torn pair (cashOut routes "busy" down it deliberately).
+      // Blocked while stakes ride the LIVE race — that is normal play, not news: quiet retry.
       set({ state: "refilling", error: null });
       try {
         await client.cashOut((s) => set({ step: s }));
@@ -98,10 +116,6 @@ export function createPaddockStaging(deps: { client: StagingClient; onChange?: (
         if (e instanceof LiveStakesError) { set({ state: "idle", step: null, error: null }); return; }
         throw e;
       }
-    } else if (state === "busy") {
-      // Torn pair: exit is the only reuniting instruction, and cashOut routes "busy" down it.
-      set({ state: "refilling", error: null });
-      await client.cashOut((s) => set({ step: s }));
     }
 
     // Fresh (or just-rebuilt): fail fast BEFORE spending — sends go out skipPreflight, so a
