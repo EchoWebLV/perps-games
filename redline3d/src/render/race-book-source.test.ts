@@ -77,6 +77,8 @@ const fakeStaging = (over: Partial<StageStatus> = {}) => {
     walletSolBase: () => funds.sol,
     ensure: vi.fn(),
     ensureNow: vi.fn(async () => {}),
+    cashOutNow: vi.fn(async () => 0n),
+    resume: vi.fn(),
     dispose: () => {},
   };
 };

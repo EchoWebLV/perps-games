@@ -46,6 +46,18 @@ export interface PaddockStaging {
   ensure(stakeBase: bigint, observedBetableBase?: bigint): void;
   /** Awaitable variant — main.ts entry kick and tests. Never rejects; failures land in status(). */
   ensureNow(stakeBase: bigint, observedBetableBase?: bigint): Promise<void>;
+  /** The wallet panel's cash-out, through the SAME single-flight slot the refill uses — two
+   *  sequences must never drive the same PDAs. Waits out any in-flight run, then runs the
+   *  full way out (claim → exit → undelegate → withdraw → unwrap), reporting steps through
+   *  status. Returns the base units withdrawn. Rethrows LiveStakesError (the caller owns
+   *  that message) and any hard failure — both after landing in status. On success the
+   *  controller is left SUSPENDED: ensure()/ensureNow() no-op until resume(), because the
+   *  frame loop's staging trigger would otherwise re-deposit the money the player just
+   *  asked for back (the boomerang). A fresh race entry resumes. */
+  cashOutNow(): Promise<bigint>;
+  /** Lift the post-cash-out suspension — the host calls this when the player re-enters the
+   *  race, which is them opting back in to a staged seat. */
+  resume(): void;
   dispose(): void;
 }
 
@@ -73,6 +85,10 @@ export function createPaddockStaging(deps: { client: StagingClient; onChange?: (
   /** When a run first saw the seat short of the stake, or 0 when the last read covered it.
    *  Gates the heavy rebuild behind a second confirming read — see the comment at its use. */
   let shortSeenAt = 0;
+  /** Set by a successful cashOutNow (and by a hard failure, which leaves the seat
+   *  indeterminate): the staging trigger no-ops until resume(), so the frame loop cannot
+   *  re-deposit money the player just withdrew. */
+  let suspended = false;
   let disposed = false;
 
   const set = (next: Partial<StageStatus>) => {
@@ -172,6 +188,7 @@ export function createPaddockStaging(deps: { client: StagingClient; onChange?: (
 
   async function ensureNow(stakeBase: bigint, observedBetableBase?: bigint): Promise<void> {
     if (disposed) return;
+    if (suspended) return;
     if (observedBetableBase !== undefined) betable = observedBetableBase;
     if (inflight) return inflight;
     if (stat.state === "ready" && betable >= stakeBase) return;
@@ -191,6 +208,38 @@ export function createPaddockStaging(deps: { client: StagingClient; onChange?: (
     walletSolBase: () => walletSol,
     ensure: (stakeBase, observedBetableBase) => { void ensureNow(stakeBase, observedBetableBase); },
     ensureNow,
+
+    async cashOutNow() {
+      if (disposed) return 0n;
+      while (inflight) await inflight.catch(() => {});   // drain the slot; its errors are its own
+      suspended = true;                                   // stop the frame loop re-staging what we withdraw
+      let out = 0n;
+      const runOut = (async () => {
+        set({ state: "refilling", step: null, error: null });
+        try {
+          out = await client.cashOut((s) => set({ step: s }));
+          betable = 0n;
+          walletSol = (await client.walletFunds().catch(() => ({ sol: walletSol, stake: 0n }))).sol;
+          set({ state: "idle", step: null, error: null });
+        } catch (e) {
+          // Blocked by a live race: nothing was withdrawn and the seat still plays, so lift the
+          // suspension and let the frame loop keep it staged. A hard failure stays suspended —
+          // the seat is indeterminate, so don't auto-restage over it; the player retries Cash
+          // Out or re-enters the race.
+          if (e instanceof LiveStakesError) { suspended = false; set({ state: "idle", step: null, error: null }); }
+          else set({ state: "error", step: null, error: messageOf(e) });
+          throw e;
+        }
+      })();
+      inflight = runOut.catch(() => {}).finally(() => { inflight = null; });
+      await runOut;
+      return out;
+    },
+
+    resume() {
+      suspended = false;
+      shortSeenAt = 0; // a shortfall seen before the cash-out must not insta-rebuild on re-entry
+    },
     dispose() { disposed = true; },
   };
 }

@@ -348,6 +348,82 @@ describe("createPaddockStaging", () => {
     } finally { now.mockRestore(); }
   });
 
+  it("cashOutNow returns the amount, walks refilling → idle, refreshes wallet SOL, empties betable", async () => {
+    const states: string[] = [];
+    const sol = { v: 1_000_000n };
+    const client = fakeClient({
+      walletFunds: vi.fn(async () => ({ sol: sol.v, stake: 0n })),
+      cashOut: vi.fn(async () => { sol.v = 900_000_000n; return 250_000_000n; }),
+    });
+    const s = createPaddockStaging({ client, onChange: () => states.push(s.status().state) });
+    const out = await s.cashOutNow();
+    expect(out).toBe(250_000_000n);
+    expect(states).toContain("refilling");
+    expect(s.status().state).toBe("idle");
+    expect(s.status().error).toBeNull();
+    expect(s.walletSolBase()).toBe(900_000_000n);
+    expect(s.betableBase()).toBe(0n);
+  });
+
+  it("after a cash-out the staging trigger is parked until resume (no boomerang re-deposit)", async () => {
+    const client = fakeClient();
+    const s = createPaddockStaging({ client });
+    await s.cashOutNow();
+    await s.ensureNow(STAKE);
+    s.ensure(STAKE);
+    expect(client.delegationState).not.toHaveBeenCalled(); // the money stays withdrawn
+    s.resume();                                            // player re-enters the race
+    await s.ensureNow(STAKE);
+    expect(client.delegationState).toHaveBeenCalledTimes(1);
+  });
+
+  it("cashOutNow waits out an in-flight staging run — the two never interleave", async () => {
+    let release!: () => void;
+    const gate = new Promise<void>((r) => { release = r; });
+    const client = fakeClient({ ensureBettor: vi.fn(async () => gate) });
+    const s = createPaddockStaging({ client });
+    const staging = s.ensureNow(STAKE);
+    const out = s.cashOutNow();
+    expect(client.cashOut).not.toHaveBeenCalled(); // blocked behind the staging run's slot
+    release();
+    await Promise.all([staging, out]);
+    expect(client.ensureBettor).toHaveBeenCalledTimes(1);
+    expect(client.cashOut).toHaveBeenCalledTimes(1);
+  });
+
+  it("a cash-out blocked by live stakes rethrows and leaves the seat playable", async () => {
+    const client = fakeClient({
+      cashOut: vi.fn(async () => { throw new LiveStakesError("riding"); }),
+    });
+    const s = createPaddockStaging({ client });
+    await expect(s.cashOutNow()).rejects.toThrow(LiveStakesError);
+    expect(s.status().state).toBe("idle");
+    expect(s.status().error).toBeNull();
+    await s.ensureNow(STAKE);                              // NOT suspended — nothing was withdrawn
+    expect(client.delegationState).toHaveBeenCalledTimes(1);
+  });
+
+  it("a hard cash-out failure rethrows, surfaces an error, and stays parked", async () => {
+    const client = fakeClient({
+      cashOut: vi.fn(async () => { throw new Error("withdraw reverted"); }),
+    });
+    const s = createPaddockStaging({ client });
+    await expect(s.cashOutNow()).rejects.toThrow(/withdraw reverted/);
+    expect(s.status().state).toBe("error");
+    expect(s.status().error).toMatch(/withdraw reverted/);
+    await s.ensureNow(STAKE);                              // indeterminate seat — no auto re-stage
+    expect(client.delegationState).not.toHaveBeenCalled();
+  });
+
+  it("dispose makes cashOutNow a no-op", async () => {
+    const client = fakeClient();
+    const s = createPaddockStaging({ client });
+    s.dispose();
+    expect(await s.cashOutNow()).toBe(0n);
+    expect(client.cashOut).not.toHaveBeenCalled();
+    expect(client.walletFunds).not.toHaveBeenCalled();
+  });
+
   it("throttles repeat attempts (min interval) so a frame-loop trigger cannot hammer RPC", async () => {
     const client = fakeClient({ walletFunds: vi.fn(async () => ({ sol: 0n, stake: 0n })) });
     const s = createPaddockStaging({ client });
