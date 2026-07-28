@@ -177,8 +177,9 @@ function chainBanner(text: string, ok: boolean): HTMLElement {
 async function makeChainBook(): Promise<RaceBookSource> {
   const wallet = portToAnchorWallet(createDevKeypairPort());
   const client = createPaddockBook({ wallet, mint: CHAIN.PADDOCK_BOOK_MINT });
-  // Absent in read-only mode, which is what makes `onboarding()` null and the BET button gate purely
-  // on the balance on screen.
+  // Absent in read-only mode, which is what gives the book its read-only SHAPE: `onboarding()` is
+  // null and `betable`/`ensureFunded` are not offered at all, so the panel gates the BET button on
+  // the balance on screen and never paints top-up copy for a top-up this harness cannot run.
   const staging = betMode ? createPaddockStaging({ client }) : undefined;
   const book = await createChainBookSource(client, {
     onError: (where, e) => console.warn("[race-preview] chain book", where, e),

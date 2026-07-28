@@ -51,6 +51,10 @@ export interface BookSettle {
  *  that explains why BET is briefly unavailable, never a flow they drive. */
 export interface BookOnboarding {
   kind: "setup" | "refill";
+  /** True while the controller is actively moving the seat (state staging/refilling) — even
+   *  between steps. The BET gate keys on THIS, not on `step`: the stepless instants inside a
+   *  run are exactly when a send would hit a torn pair. */
+  working: boolean;
   /** The step running right now, or null when nothing is in flight (idle, finished, or on one of the
    *  `done`/`ready` transitions the mapper collapses). */
   step: StageStep | null;
@@ -561,32 +565,39 @@ export function chainBookSource(
       else if (s.state === "staging") lastKind = "setup";
       const kind = s.state === "error" ? lastKind : s.state === "refilling" ? "refill" : "setup";
       const seq = kind === "refill" ? REFILL_STEPS : ONBOARD_STEPS;
+      // The seat is MOVING — which is not the same question as "is a step named right now". The
+      // controller enters a state before its first onStep and passes through stepless instants
+      // mid-run (walletFunds, delegationState); a send landing in one of those hits a half-moved
+      // pair. So this reports the controller's own state, and the BET gate keys on it.
+      const working = s.state === "staging" || s.state === "refilling";
       if (s.state === "idle" || s.state === "ready") {
-        return s.error || betError ? { kind, step: null, index: 0, of: seq.length, error: s.error, betError } : null;
+        return s.error || betError ? { kind, working, step: null, index: 0, of: seq.length, error: s.error, betError } : null;
       }
       const step = s.step === "done" || s.step === "ready" ? null : s.step;
       // A step belonging to the OTHER sequence indexes to -1. Reporting it as position 1 would be a
       // confident lie about how far along the bar is; 0 is the same honest "working, position
       // unknown" beat the done/ready transitions get.
       const i = step ? seq.indexOf(step) : -1;
-      return { kind, step, index: i < 0 ? 0 : i + 1, of: seq.length, error: s.error, betError };
+      return { kind, working, step, index: i < 0 ? 0 : i + 1, of: seq.length, error: s.error, betError };
     },
 
     /** balance + a past ticket's claimable win — what ONE bet can spend right now, because
      *  `place_bet` auto-settles the old ticket before its balance check (proven live). The
-     *  math lives in paddock-staging's exported `betableOf`; imported, never re-derived. */
-    betable() {
-      return baseToUnits(betableOf(race, bettor));
-    },
+     *  math lives in paddock-staging's exported `betableOf`; imported, never re-derived.
+     *
+     *  EXPOSED ONLY WHEN STAGING IS WIRED: on a read-only book, `betable !== null` would tell the
+     *  panel a seat exists behind the number and it would paint top-up copy for a top-up that can
+     *  never happen. Absent → the panel gates on `wallet()`, the read-only book's honest whole
+     *  story. Same for `ensureFunded`. */
+    betable: staging ? () => baseToUnits(betableOf(race, bettor)) : undefined,
 
-    ensureFunded(stakeUnits) {
-      if (!staging) return;
+    ensureFunded: staging ? (stakeUnits: number) => {
       // Feed the controller what THIS module just read off the chain — its own cache only
       // updates when a staging run executes, so without the observation a drained balance
       // would short-circuit "ready" forever and the silent refill would never fire.
       const observed = race && bettor ? betableOf(race, bettor) : undefined;
       staging.ensure(BigInt(unitsToBase(stakeUnits)), observed);
-    },
+    } : undefined,
 
     /** An older ticket still holding money, and what is left of its claim window.
      *

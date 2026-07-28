@@ -148,7 +148,7 @@ describe("betPanel BET gate", () => {
     // still and the balance is the whole question. The clause this replaces let the mere existence
     // of onboarding un-gate the button, which promised a bet the book would go on to bounce.
     const stalled = {
-      kind: "refill" as const, step: null, index: 0, of: 9,
+      kind: "refill" as const, working: false, step: null, index: 0, of: 9,
       error: "Your wallet needs about 0.01 SOL for fees.", betError: null,
     };
     panel.render(ctx({ wallet: 100, betable: 1, onboarding: stalled }));
@@ -164,10 +164,10 @@ describe("betPanel BET gate", () => {
     // A step in flight means the delegated pair may be undelegated at this instant and `betable`
     // may have come off a stale ER clone reading high — a balance that says yes to a send the
     // chain is certain to refuse. The honest gate is OFF; the progress note beside it says why.
-    panel.render(ctx({ wallet: 100, betable: 100, onboarding: { kind: "refill", step: "deposit", index: 7, of: 9, error: null, betError: null } }));
+    panel.render(ctx({ wallet: 100, betable: 100, onboarding: { kind: "refill", working: true, step: "deposit", index: 7, of: 9, error: null, betError: null } }));
     expect(betButtons(el).every((b) => b.disabled)).toBe(true);
     // a first-seat build is the same story — the seat is moving either way
-    panel.render(ctx({ wallet: 100, betable: 100, onboarding: { kind: "setup", step: "delegate", index: 4, of: 5, error: null, betError: null } }));
+    panel.render(ctx({ wallet: 100, betable: 100, onboarding: { kind: "setup", working: true, step: "delegate", index: 4, of: 5, error: null, betError: null } }));
     expect(betButtons(el).every((b) => b.disabled)).toBe(true);
     // nothing moving, money there → open
     panel.render(ctx({ wallet: 100, betable: 100, onboarding: null }));
@@ -180,7 +180,7 @@ describe("betPanel BET gate", () => {
     // errored, so nothing is in flight: the note explains the seat, the balance decides the bet
     panel.render(ctx({
       wallet: 100, betable: 100,
-      onboarding: { kind: "setup", step: null, index: 0, of: 5, error: "Your wallet needs about 0.02 SOL to open a seat.", betError: null },
+      onboarding: { kind: "setup", working: false, step: null, index: 0, of: 5, error: "Your wallet needs about 0.02 SOL to open a seat.", betError: null },
     }));
     expect(betButtons(el).some((b) => b.disabled)).toBe(false);
     expect((el.querySelector(".bp-onboard") as HTMLElement).textContent).toContain("Setup stopped");
@@ -231,14 +231,14 @@ describe("betPanel onboarding notice", () => {
     panel.render(ctx());
     expect(onboardEl(el).style.display).toBe("none");
     // a book that CAN onboard but is not doing so is not news
-    panel.render(ctx({ onboarding: { kind: "setup", step: null, index: 0, of: 5, error: null, betError: null } }));
+    panel.render(ctx({ onboarding: { kind: "setup", working: false, step: null, index: 0, of: 5, error: null, betError: null } }));
     expect(onboardEl(el).style.display).toBe("none");
     panel.dispose();
   });
 
   it("names the step and its place in the sequence, and says the wait is one-time", () => {
     const { el, panel } = mount();
-    panel.render(ctx({ onboarding: { kind: "setup", step: "delegate", index: 4, of: 5, error: null, betError: null } }));
+    panel.render(ctx({ onboarding: { kind: "setup", working: true, step: "delegate", index: 4, of: 5, error: null, betError: null } }));
     const text = onboardEl(el).textContent ?? "";
     expect(onboardEl(el).style.display).toBe("block");
     expect(text).toContain("4 of 5");
@@ -247,7 +247,7 @@ describe("betPanel onboarding notice", () => {
     // no wall-clock promise anywhere in the copy — the step is the progress, the duration is not ours
     expect(text).not.toMatch(/second|minute|~|\d+s\b/i);
 
-    panel.render(ctx({ onboarding: { kind: "setup", step: "confirm", index: 5, of: 5, error: null, betError: null } }));
+    panel.render(ctx({ onboarding: { kind: "setup", working: true, step: "confirm", index: 5, of: 5, error: null, betError: null } }));
     expect(onboardEl(el).textContent).toContain("5 of 5");
     panel.dispose();
   });
@@ -255,7 +255,7 @@ describe("betPanel onboarding notice", () => {
   it("shows what stopped the seat, in the book's own words", () => {
     const { el, panel } = mount();
     panel.render(ctx({
-      onboarding: { kind: "setup", step: null, index: 0, of: 5, error: "Your wallet needs about 0.02 SOL to open a seat.", betError: null },
+      onboarding: { kind: "setup", working: false, step: null, index: 0, of: 5, error: "Your wallet needs about 0.02 SOL to open a seat.", betError: null },
     }));
     expect(onboardEl(el).className).toContain("stopped");
     expect(onboardEl(el).textContent).toContain("Setup stopped");
@@ -266,7 +266,7 @@ describe("betPanel onboarding notice", () => {
 
   it("paints a top-up note for kind refill", () => {
     const { el, panel } = mount();
-    panel.render(ctx({ onboarding: { kind: "refill", step: "undelegate", index: 3, of: 9, error: null, betError: null } }));
+    panel.render(ctx({ onboarding: { kind: "refill", working: true, step: "undelegate", index: 3, of: 9, error: null, betError: null } }));
     const text = onboardEl(el).textContent ?? "";
     expect(onboardEl(el).style.display).toBe("block");
     expect(text).toMatch(/Topping up · 3 of 9/);
@@ -281,7 +281,7 @@ describe("betPanel onboarding notice", () => {
   it("says a stopped top-up is a top-up, not a setup", () => {
     const { el, panel } = mount();
     panel.render(ctx({
-      onboarding: { kind: "refill", step: null, index: 0, of: 9, error: "Your wallet needs about 0.01 SOL for fees.", betError: null },
+      onboarding: { kind: "refill", working: false, step: null, index: 0, of: 9, error: "Your wallet needs about 0.01 SOL for fees.", betError: null },
     }));
     expect(onboardEl(el).className).toContain("stopped");
     expect(onboardEl(el).textContent).toContain("Top-up stopped");
@@ -293,7 +293,7 @@ describe("betPanel onboarding notice", () => {
     const { el, panel } = mount();
     panel.render(ctx({
       onboarding: {
-        kind: "refill", step: "deposit", index: 7, of: 9, error: null,
+        kind: "refill", working: true, step: "deposit", index: 7, of: 9, error: null,
         betError: "Betting just closed for this race — the next market opens in about 46 seconds.",
       },
     }));
@@ -311,7 +311,7 @@ describe("betPanel onboarding notice", () => {
     const { el, panel } = mount();
     panel.render(ctx());
     expect(betErrEl(el).style.display).toBe("none");
-    panel.render(ctx({ onboarding: { kind: "refill", step: "wrap", index: 6, of: 9, error: null, betError: null } }));
+    panel.render(ctx({ onboarding: { kind: "refill", working: true, step: "wrap", index: 6, of: 9, error: null, betError: null } }));
     expect(betErrEl(el).style.display).toBe("none");
     panel.dispose();
   });
@@ -320,7 +320,7 @@ describe("betPanel onboarding notice", () => {
     const { el, panel } = mount();
     // fundable, and the seat is standing still (staged, between steps): the gate is open, so the
     // in-flight send is the only thing greying these rows and the amber row is the one being sent
-    panel.render(ctx({ wallet: 100, betable: 20, pendingCar: 2, onboarding: { kind: "setup", step: null, index: 0, of: 5, error: null, betError: "Not enough balance for that stake." } }));
+    panel.render(ctx({ wallet: 100, betable: 20, pendingCar: 2, onboarding: { kind: "setup", working: false, step: null, index: 0, of: 5, error: null, betError: "Not enough balance for that stake." } }));
     const btns = betButtons(el);
     expect(btns.every((b) => b.disabled)).toBe(true);
     expect(btns[2].textContent).toBe("···");           // the same amber in-flight beat as any other bet
@@ -361,7 +361,7 @@ describe("betPanel short-balance line", () => {
 
   it("stands aside while staging has progress of its own to report", () => {
     const { el, panel } = mount();
-    panel.render(ctx({ wallet: 100, betable: 1, onboarding: { kind: "refill", step: "deposit", index: 7, of: 9, error: null, betError: null } }));
+    panel.render(ctx({ wallet: 100, betable: 1, onboarding: { kind: "refill", working: true, step: "deposit", index: 7, of: 9, error: null, betError: null } }));
     expect(onboardEl(el).textContent).toContain("Topping up · 7 of 9"); // the real progress owns the area
     expect(onboardEl(el).textContent).not.toContain("Balance short");
     panel.dispose();
@@ -371,7 +371,7 @@ describe("betPanel short-balance line", () => {
     const { el, panel } = mount();
     panel.render(ctx({
       wallet: 100, betable: 1,
-      onboarding: { kind: "setup", step: null, index: 0, of: 5, error: "Your wallet needs about 0.02 SOL to open a seat.", betError: null },
+      onboarding: { kind: "setup", working: false, step: null, index: 0, of: 5, error: "Your wallet needs about 0.02 SOL to open a seat.", betError: null },
     }));
     expect(onboardEl(el).textContent).toContain("Setup stopped");
     expect(onboardEl(el).textContent).not.toContain("Balance short");
@@ -392,7 +392,7 @@ describe("betPanel short-balance line", () => {
     const { el, panel } = mount();
     panel.render(ctx({
       wallet: 100, betable: 1,
-      onboarding: { kind: "refill", step: null, index: 0, of: 9, error: null, betError: "Not enough balance for that stake." },
+      onboarding: { kind: "refill", working: false, step: null, index: 0, of: 9, error: null, betError: "Not enough balance for that stake." },
     }));
     expect(betErrEl(el).style.display).toBe("block");
     expect(betErrEl(el).textContent).toContain("Bet not placed");
