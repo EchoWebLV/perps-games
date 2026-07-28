@@ -92,27 +92,42 @@ describe("createPaddockStaging", () => {
   });
 
   it("delegated and short with nothing to claim: silent rebuild (cashOut then re-stage)", async () => {
-    const client = fakeClient({
-      delegationState: vi.fn(async () => "reuse" as const),
-      bettorSnapshot: vi.fn(async () => bettorSnap(1_000_000n)),
-    });
-    const s = createPaddockStaging({ client });
-    await s.ensureNow(STAKE);
-    expect(client.cashOut).toHaveBeenCalledTimes(1);
-    expect(client.ensureBettor).toHaveBeenCalledTimes(1);
-    expect(s.status().state).toBe("ready");
+    const now = vi.spyOn(Date, "now");
+    try {
+      now.mockReturnValue(1_000_000);
+      const client = fakeClient({
+        delegationState: vi.fn(async () => "reuse" as const),
+        bettorSnapshot: vi.fn(async () => bettorSnap(1_000_000n)),
+      });
+      const s = createPaddockStaging({ client });
+      await s.ensureNow(STAKE);               // first shortfall only arms the double-confirm
+      now.mockReturnValue(1_000_000 + 6_000);
+      await s.ensureNow(STAKE);
+      expect(client.cashOut).toHaveBeenCalledTimes(1);
+      expect(client.ensureBettor).toHaveBeenCalledTimes(1);
+      expect(s.status().state).toBe("ready");
+    } finally { now.mockRestore(); }
   });
 
   it("a refill blocked by live stakes retries quietly — no error state", async () => {
-    const client = fakeClient({
-      delegationState: vi.fn(async () => "reuse" as const),
-      bettorSnapshot: vi.fn(async () => bettorSnap(0n)),
-      cashOut: vi.fn(async () => { throw new LiveStakesError("riding"); }),
-    });
-    const s = createPaddockStaging({ client });
-    await s.ensureNow(STAKE);
-    expect(s.status().state).toBe("idle");
-    expect(s.status().error).toBeNull();
+    const now = vi.spyOn(Date, "now");
+    try {
+      now.mockReturnValue(1_000_000);
+      const client = fakeClient({
+        delegationState: vi.fn(async () => "reuse" as const),
+        bettorSnapshot: vi.fn(async () => bettorSnap(0n)),
+        cashOut: vi.fn(async () => { throw new LiveStakesError("riding"); }),
+      });
+      const s = createPaddockStaging({ client });
+      await s.ensureNow(STAKE);               // first shortfall only arms the double-confirm
+      now.mockReturnValue(1_000_000 + 6_000);
+      await s.ensureNow(STAKE);
+      // Assert the blocked call actually happened: without this the double-confirm gate alone
+      // would produce the same idle/no-error status and the LiveStakes path would go untested.
+      expect(client.cashOut).toHaveBeenCalledTimes(1);
+      expect(s.status().state).toBe("idle");
+      expect(s.status().error).toBeNull();
+    } finally { now.mockRestore(); }
   });
 
   it("is single-flight: concurrent ensure() runs once", async () => {
@@ -177,7 +192,9 @@ describe("createPaddockStaging", () => {
     // truth (trusting it would rebuild a healthy seat on one stale observation).
     onChain = 0n;
     now.mockReturnValue(1_000_000 + 6_000);   // past RETRY_GAP_MS
-    await s.ensureNow(STAKE, 0n);
+    await s.ensureNow(STAKE, 0n);             // hint re-arms the check; first shortfall read
+    now.mockReturnValue(1_000_000 + 12_000);
+    await s.ensureNow(STAKE, 0n);             // second consecutive shortfall confirms the drain
     expect(client.cashOut).toHaveBeenCalledTimes(1); // the silent rebuild actually fired
     now.mockRestore();
   });
@@ -233,15 +250,21 @@ describe("createPaddockStaging", () => {
   });
 
   it("a generic cashOut failure surfaces as an error state", async () => {
-    const client = fakeClient({
-      delegationState: vi.fn(async () => "reuse" as const),
-      bettorSnapshot: vi.fn(async () => bettorSnap(0n)),
-      cashOut: vi.fn(async () => { throw new Error("tx failed hard"); }),
-    });
-    const s = createPaddockStaging({ client });
-    await s.ensureNow(STAKE);
-    expect(s.status().state).toBe("error");
-    expect(s.status().error).toMatch(/tx failed hard/);
+    const now = vi.spyOn(Date, "now");
+    try {
+      now.mockReturnValue(1_000_000);
+      const client = fakeClient({
+        delegationState: vi.fn(async () => "reuse" as const),
+        bettorSnapshot: vi.fn(async () => bettorSnap(0n)),
+        cashOut: vi.fn(async () => { throw new Error("tx failed hard"); }),
+      });
+      const s = createPaddockStaging({ client });
+      await s.ensureNow(STAKE);               // first shortfall only arms the double-confirm
+      now.mockReturnValue(1_000_000 + 6_000);
+      await s.ensureNow(STAKE);
+      expect(s.status().state).toBe("error");
+      expect(s.status().error).toMatch(/tx failed hard/);
+    } finally { now.mockRestore(); }
   });
 
   it("an ensureBettor failure surfaces as an error state", async () => {
@@ -260,6 +283,69 @@ describe("createPaddockStaging", () => {
     await s.ensureNow(STAKE);
     expect(client.delegationState).not.toHaveBeenCalled();
     expect(changes.length).toBe(0);
+  });
+
+  it("one low read does not rebuild — two consecutive shortfalls do", async () => {
+    const now = vi.spyOn(Date, "now");
+    try {
+      now.mockReturnValue(1_000_000);
+      const client = fakeClient({
+        delegationState: vi.fn(async () => "reuse" as const),
+        bettorSnapshot: vi.fn(async () => bettorSnap(0n)),
+      });
+      const s = createPaddockStaging({ client });
+      await s.ensureNow(STAKE);                    // first shortfall: quiet
+      expect(client.cashOut).not.toHaveBeenCalled();
+      expect(s.status().state).toBe("idle");
+      now.mockReturnValue(1_000_000 + 6_000);
+      await s.ensureNow(STAKE);                    // second shortfall: rebuild
+      expect(client.cashOut).toHaveBeenCalledTimes(1);
+    } finally { now.mockRestore(); }
+  });
+
+  it("a shortfall that heals between attempts never rebuilds", async () => {
+    const now = vi.spyOn(Date, "now");
+    try {
+      now.mockReturnValue(1_000_000);
+      const onChain = { balance: 0n };
+      const client = fakeClient({
+        delegationState: vi.fn(async () => "reuse" as const),
+        bettorSnapshot: vi.fn(async () => bettorSnap(onChain.balance)),
+      });
+      const s = createPaddockStaging({ client });
+      await s.ensureNow(STAKE);                    // lag: reads 0
+      onChain.balance = STAKE * 5n;                // the clone lands
+      now.mockReturnValue(1_000_000 + 6_000);
+      await s.ensureNow(STAKE, 0n);                // stale caller hint too — fresh read must win
+      expect(client.cashOut).not.toHaveBeenCalled();
+      expect(s.status().state).toBe("ready");
+    } finally { now.mockRestore(); }
+  });
+
+  it("wallet SOL refreshes as soon as a refill's cash-out lands", async () => {
+    const now = vi.spyOn(Date, "now");
+    try {
+      now.mockReturnValue(1_000_000);
+      const sol = { v: 5_000_000n };
+      let midRefill = -1n;
+      const client = fakeClient({
+        delegationState: vi.fn(async () => "reuse" as const),
+        bettorSnapshot: vi.fn(async () => bettorSnap(0n)),
+        walletFunds: vi.fn(async () => ({ sol: sol.v, stake: 0n })),
+        cashOut: vi.fn(async () => { sol.v = 1_000_000_000n; return 250_000_000n; }),
+        // Sampled in the gap between the cash-out landing and the re-stage's own wallet read —
+        // the only window the post-cashOut refresh covers. A poller reading walletSolBase()
+        // here saw the pre-refill number before the fix. Without this probe the test passes
+        // either way, because the fresh path re-reads walletFunds before the final assert.
+        bettorL1Balance: vi.fn(async () => { midRefill = s.walletSolBase(); return 0n; }),
+      });
+      const s = createPaddockStaging({ client });
+      await s.ensureNow(STAKE);
+      now.mockReturnValue(1_000_000 + 6_000);
+      await s.ensureNow(STAKE);                    // second shortfall → rebuild runs
+      expect(midRefill).toBe(1_000_000_000n);
+      expect(s.walletSolBase()).toBe(1_000_000_000n);
+    } finally { now.mockRestore(); }
   });
 
   it("throttles repeat attempts (min interval) so a frame-loop trigger cannot hammer RPC", async () => {

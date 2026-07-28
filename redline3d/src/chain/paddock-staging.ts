@@ -70,6 +70,9 @@ export function createPaddockStaging(deps: { client: StagingClient; onChange?: (
   let walletSol = 0n;
   let inflight: Promise<void> | null = null;
   let lastAttempt = 0;
+  /** When a run first saw the seat short of the stake, or 0 when the last read covered it.
+   *  Gates the heavy rebuild behind a second confirming read — see the comment at its use. */
+  let shortSeenAt = 0;
   let disposed = false;
 
   const set = (next: Partial<StageStatus>) => {
@@ -104,12 +107,18 @@ export function createPaddockStaging(deps: { client: StagingClient; onChange?: (
         if (!bettor || !race) { set({ state: "idle", step: null, error: null }); return; }
         betable = betableOf(race, bettor);
         if (betable >= stakeBase) {
+          shortSeenAt = 0;
           // The seat covers the bet — but the "one number" the panel shows still needs the
           // wallet half, and a returning player never walks the fresh path that reads it.
           walletSol = (await client.walletFunds().catch(() => ({ sol: walletSol, stake: 0n }))).sol;
           set({ state: "ready", step: null, error: null });
           return;
         }
+        // One low read is evidence of lag as often as of a drain (the ER serves stale clones
+        // around (un)delegation — game-session live-hit); two reads ≥RETRY_GAP apart are a
+        // drain. ensureNow's throttle guarantees that spacing by construction, so the first
+        // shortfall only arms the flag and the SECOND one buys the ~2-cycle round trip.
+        if (!shortSeenAt) { shortSeenAt = Date.now(); set({ state: "idle", step: null, error: null }); return; }
       }
       // Short (reuse) or torn (busy): the silent rebuild — cashOut claims any past win,
       // exits, polls the undelegation home, withdraws + unwraps, so the fresh path below
@@ -119,6 +128,10 @@ export function createPaddockStaging(deps: { client: StagingClient; onChange?: (
       set({ state: "refilling", error: null });
       try {
         await client.cashOut((s) => set({ step: s }));
+        // The money has physically landed back in the wallet here. Refresh the one-number
+        // display NOW rather than only at the end of the run, so it tracks the round trip
+        // instead of reading stale for the whole (multi-cycle) refill.
+        walletSol = (await client.walletFunds().catch(() => ({ sol: walletSol, stake: 0n }))).sol;
       } catch (e) {
         if (e instanceof LiveStakesError) { set({ state: "idle", step: null, error: null }); return; }
         throw e;
@@ -153,6 +166,7 @@ export function createPaddockStaging(deps: { client: StagingClient; onChange?: (
     await readBetable();
     if (betable < target) betable = target; // the ER clone can lag right after delegation (game-session live-hit)
     walletSol = (await client.walletFunds().catch(() => ({ sol: walletSol, stake: 0n }))).sol;
+    shortSeenAt = 0;
     set({ state: "ready", step: null, error: null });
   }
 
