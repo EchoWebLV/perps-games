@@ -96,7 +96,7 @@ describe("createLobbyHud", () => {
     expect(el.querySelector("[data-pdesc]")!.textContent).toContain("real SOL");
   });
 
-  test("stays dark for a parked kind that has no storefront", () => {
+  test("stays dark for every parked kind that has no storefront", () => {
     installFakeDocument();
     const parent = new FakeElement();
 
@@ -104,8 +104,14 @@ describe("createLobbyHud", () => {
     const el = hud.el as unknown as FakeElement;
     const prompt = el.querySelector("[data-prompt]")!;
 
-    hud.setPrompt("highway"); // no plaza building → no door → no card
-    expect(prompt.style.opacity).toBe("0");
+    // no plaza building → no door → no card. Upgrades joined highway here: it opens from the
+    // garage's collection view now, so no doorway can raise it.
+    for (const parked of ["highway", "upgrades"] as const) {
+      hud.setPrompt("garage");           // raise a real card first so the clear is observable
+      expect(prompt.style.opacity).toBe("1");
+      hud.setPrompt(parked);
+      expect(prompt.style.opacity).toBe("0");
+    }
   });
 
   test("toast shows a transient message", () => {

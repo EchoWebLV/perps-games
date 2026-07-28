@@ -1,8 +1,9 @@
 import { describe, it, expect } from "vitest";
 import { BUILDINGS, DOORS, LOT_BOUNDS, LOBBY_SPAWN, PLAZA, doorExitPose, entranceHit, type BuildingKind } from "./lobby-layout";
 
-// "highway" is deliberately absent: the mode lives on for boot-restore, the storefront does not
-const KINDS: BuildingKind[] = ["garage", "upgrades", "crates", "track", "race", "scrapyard"];
+// "highway" and "upgrades" are deliberately absent: both live on as parked kinds (highway for
+// boot-restore, upgrades as a panel opened from the garage), neither owns a plaza storefront
+const KINDS: BuildingKind[] = ["garage", "crates", "track", "race", "scrapyard"];
 const find = (k: BuildingKind) => BUILDINGS.find((b) => b.kind === k)!;
 
 describe("lobby-layout", () => {
@@ -43,7 +44,6 @@ describe("lobby-layout", () => {
 
   it("rings the plaza with mirrored pairs across the x=0 centreline", () => {
     const pairs: Array<[BuildingKind, BuildingKind]> = [
-      ["garage", "upgrades"],
       ["crates", "scrapyard"],
       ["track", "race"],
     ];
@@ -54,6 +54,16 @@ describe("lobby-layout", () => {
       expect(e.x).toBeCloseTo(-w.x, 5);
       expect(e.z).toBeCloseTo(w.z, 5);
     }
+  });
+
+  // UPGRADES used to mirror the Garage on the west side; tuning moved in with the cars, so the
+  // Garage now stands alone on its ring slot and nothing faces it across the centreline.
+  it("stands the Garage alone on the east side — no UPGRADES across from it", () => {
+    const g = find("garage");
+    expect(g.x).toBeGreaterThan(0);
+    expect(BUILDINGS.some((b) => b.kind === "upgrades")).toBe(false);
+    const mirrored = BUILDINGS.filter((b) => Math.abs(b.x + g.x) < 1 && Math.abs(b.z - g.z) < 1);
+    expect(mirrored).toEqual([]);
   });
 
   it("turns every building to face the plaza centre (readable from inside)", () => {

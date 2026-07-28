@@ -1,6 +1,8 @@
 /** which functional building you drive into — the lobby is the economy town, not a market picker.
- *  "highway" no longer has a storefront (the plaza gave its slot to RACE) but stays in the union:
- *  the mode itself lives on for the boot-restore of an open perpetual position. */
+ *  Two kinds are parked here with no storefront left in the plaza: "highway" (the mode lives on for
+ *  the boot-restore of an open perpetual position) and "upgrades" (tuning moved in with the cars —
+ *  it opens from the garage's collection view). Both keep their art builders and their place in the
+ *  union so nothing downstream has to special-case them. */
 export type BuildingKind = "garage" | "upgrades" | "crates" | "track" | "race" | "highway" | "scrapyard";
 
 export interface Building { kind: BuildingKind; x: number; z: number; w: number; d: number; rot: number; color: number; name: string; comingSoon?: boolean }
@@ -35,9 +37,8 @@ const RING_SPEC: Array<{ kind: BuildingKind; deg: number; w: number; d: number; 
   // the chain-book grandprix you bet on, and it's the anchor — widest of the pair, hottest colour.
   { kind: "track",    deg:  35, w: 28, d: 12, color: 0x14f195, name: "TRACK" },
   { kind: "race",     deg: -35, w: 30, d: 12, color: 0xff2d55, name: "RACE" },
-  // shops — east / west sides
+  // shops — east side (the west slot opposite is empty: UPGRADES left the plaza for the garage)
   { kind: "garage",   deg:  80, w: 24, d: 16, color: 0x27e7ff, name: "GARAGE" },
-  { kind: "upgrades", deg: -80, w: 24, d: 16, color: 0xffd166, name: "UPGRADES" },
   // shops — nearer the entrance corners
   { kind: "crates",   deg: 125, w: 24, d: 16, color: 0xff39c0, name: "CRATES" },
   { kind: "scrapyard",deg:-125, w: 24, d: 16, color: 0xd94a2b, name: "SCRAPYARD", comingSoon: true },

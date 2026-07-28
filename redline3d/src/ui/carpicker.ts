@@ -56,6 +56,7 @@ const ICONS: Record<string, string> = {
   car: '<path d="M4 13l1.6-4.2A2.5 2.5 0 0 1 8 7h8a2.5 2.5 0 0 1 2.4 1.8L20 13v5h-2.4v-1.6h-11.2V18H4z"/><circle cx="7.6" cy="14.8" r="1.4"/><circle cx="16.4" cy="14.8" r="1.4"/>',
   help: '<circle cx="12" cy="12" r="9"/><path d="M9.6 9.2a2.4 2.4 0 1 1 3.4 2.2c-.8.4-1.1.9-1.1 1.7"/><path d="M12 16.4h.01"/>',
   home: '<path d="M3 11.5 12 4l9 7.5"/><path d="M5.5 9.6V20h13V9.6"/><path d="M10 20v-5.5h4V20"/>',
+  gear: '<circle cx="12" cy="12" r="3.4"/><circle cx="12" cy="12" r="7.4"/><path d="M12 2.2v2.4M12 19.4v2.4M21.8 12h-2.4M4.6 12H2.2M18.9 5.1l-1.7 1.7M6.8 17.2l-1.7 1.7M18.9 18.9l-1.7-1.7M6.8 6.8L5.1 5.1"/>',
   chevron: '<path d="M9 6l6 6-6 6"/>',
   level: '<path d="M6 13l6-6 6 6"/><path d="M6 18l6-6 6 6"/>',
   logout: '<path d="M9 4H6a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h3"/><path d="M16 12H9"/><path d="M13 8l4 4-4 4"/>',
@@ -120,6 +121,12 @@ function injectStyles() {
     .ghead .lbl{flex:1}
     .gicon-btn{display:grid;place-items:center;width:30px;height:30px;border:0;background:transparent;cursor:pointer;color:var(--mut);border-radius:8px}
     .gicon-btn:hover{color:var(--ink);background:rgba(255,255,255,.06)}
+    /* header shortcut pill (garage → Upgrades): the menu card's dark fill, shrunk to a header control */
+    .gpill-btn{display:flex;align-items:center;gap:6px;padding:7px 10px;border-radius:9px;cursor:pointer;flex:none;
+      color:var(--cyan);background:rgba(18,14,40,.72);border:1px solid rgba(132,150,224,.24);
+      font:700 10px/1 'Chakra Petch',ui-monospace,monospace;letter-spacing:.1em;
+      transition:border-color .15s,background .15s}
+    .gpill-btn:hover{border-color:var(--cyan);background:rgba(30,24,62,.82)}
     .gmenu{display:flex;flex-direction:column;gap:10px}
     .gmenu-item{display:flex;align-items:center;gap:13px;padding:14px;border-radius:12px;cursor:pointer;text-align:left;
       color:var(--ink);background:rgba(18,14,40,.72);border:1px solid rgba(132,150,224,.24);
@@ -361,8 +368,11 @@ export function createCarPicker(
   let showroom = false;
   const applyShowroom = () => { overlay.classList.toggle("gover-showroom", showroom); };
 
-  type View = "menu" | "garage" | "worlds";
+  type View = "menu" | "garage" | "worlds" | "settings";
   let view: View = "menu";
+  // where "back" (and Escape) lands from each sub-view. World is reached THROUGH Settings, so it
+  // steps back into Settings rather than dropping the player all the way out to the top level.
+  const BACK_VIEW: Record<View, View> = { menu: "menu", garage: "menu", worlds: "settings", settings: "menu" };
 
   const menuPanel = document.createElement("div");
   menuPanel.className = "panel gpanel";
@@ -382,22 +392,22 @@ export function createCarPicker(
       <button class="gmenu-item" data-act="howto"><span class="gmenu-ic">${icon("help", 20)}</span><span class="gmenu-tx"><b>How to play</b><small>controls &amp; the bet</small></span><span class="gmenu-arr">${icon("chevron", 16)}</span></button>
     </div>`;
 
-  // audio on/off toggles (Music / SFX) appended at the bottom of the menu list
   const gmenu = menuPanel.querySelector(".gmenu") as HTMLElement | null;
-  // World (race-level skin) picker — opens a sub-view listing every skin
-  if (worlds && gmenu) {
-    const b = document.createElement("button");
-    b.className = "gmenu-item";
-    b.dataset.go = "worlds";
-    b.innerHTML =
-      `<span class="gmenu-ic">${icon("sparkle", 20)}</span>` +
-      `<span class="gmenu-tx"><b>World</b><small>race level skin</small></span>` +
-      `<span class="gmenu-arr">${icon("chevron", 16)}</span>`;
-    gmenu.appendChild(b);
-  }
-  // Style (art style) toggle — TOON / CLASSIC. Tapping toggles in place (menu stays open); the value
-  // on the right reflects the current mode and re-syncs whenever the style flips anywhere (subscribe).
-  if (menuFeatures.style && gmenu) {
+
+  // ---- settings sub-view ----
+  // Every knob lives behind ONE menu row, so the top level reads as destinations only. Holds the
+  // Style toggle, the audio faders, and the doorway to the World (level skin) picker.
+  const settingsPanel = document.createElement("div");
+  settingsPanel.className = "panel gpanel";
+  settingsPanel.style.display = "none";
+  settingsPanel.innerHTML =
+    `<div class="ghead"><button class="gicon-btn" data-act="back" aria-label="Back">${backIcon(18)}</button><span class="lbl">settings</span><button class="gicon-btn" data-act="close" aria-label="Close">✕</button></div>` +
+    `<div class="gmenu" data-settings-list></div>`;
+  const gsettings = settingsPanel.querySelector("[data-settings-list]") as HTMLElement;
+
+  // Style (art style) toggle — TOON / CLASSIC. Tapping toggles in place (the panel stays open); the
+  // value on the right reflects the current mode and re-syncs whenever the style flips anywhere.
+  if (menuFeatures.style) {
     const b = document.createElement("button");
     b.className = "gmenu-item";
     b.dataset.act = "style";
@@ -405,7 +415,7 @@ export function createCarPicker(
       `<span class="gmenu-ic">${icon("swap", 20)}</span>` +
       `<span class="gmenu-tx"><b>Style</b><small>cartoon look</small></span>` +
       `<span class="gmenu-arr" data-style-mode style="color:var(--cyan);font:700 13px/1 'Chakra Petch',ui-monospace,monospace"></span>`;
-    gmenu.appendChild(b);
+    gsettings.appendChild(b);
     const modeEl = b.querySelector("[data-style-mode]") as HTMLElement;
     const paintStyle = (toon: boolean) => { modeEl.textContent = toon ? "TOON" : "CLASSIC"; };
     paintStyle(menuFeatures.style.get());
@@ -418,11 +428,11 @@ export function createCarPicker(
     val.textContent = v === 0 ? "off" : v + "%";
     input.style.background = `linear-gradient(90deg,var(--cyan) ${v}%,rgba(132,150,224,.24) ${v}%)`;
   };
-  if (sliders.length && gmenu) {
+  if (sliders.length) {
     const sep = document.createElement("div");
     sep.textContent = "audio";
     sep.style.cssText = "margin:8px 4px 2px;font:700 10px/1 'Chakra Petch',ui-monospace,monospace;letter-spacing:.16em;color:var(--mut)";
-    gmenu.appendChild(sep);
+    gsettings.appendChild(sep);
     sliders.forEach((sl) => {
       const row = document.createElement("div");
       row.className = "gaudio";
@@ -430,7 +440,7 @@ export function createCarPicker(
         `<span class="gmenu-ic" style="font:700 18px/1 'Chakra Petch',ui-monospace,monospace">${sl.glyph ?? "♪"}</span>` +
         `<span class="gaudio-tx"><b>${sl.label}</b><small class="gaudio-val"></small></span>` +
         `<input type="range" class="gaudio-range" min="0" max="100" step="1" aria-label="${sl.label} volume">`;
-      gmenu.appendChild(row);
+      gsettings.appendChild(row);
       const input = row.querySelector(".gaudio-range") as HTMLInputElement;
       const val = row.querySelector(".gaudio-val") as HTMLElement;
       input.value = String(Math.round(clamp01(sl.get()) * 100));
@@ -440,6 +450,29 @@ export function createCarPicker(
       input.addEventListener("click", (e) => e.stopPropagation());
       sliderEls.push({ input, val });
     });
+  }
+  // World (race-level skin) picker — opens a sub-view listing every skin
+  if (worlds) {
+    const b = document.createElement("button");
+    b.className = "gmenu-item";
+    b.dataset.go = "worlds";
+    b.innerHTML =
+      `<span class="gmenu-ic">${icon("sparkle", 20)}</span>` +
+      `<span class="gmenu-tx"><b>World</b><small>race level skin</small></span>` +
+      `<span class="gmenu-arr">${icon("chevron", 16)}</span>`;
+    gsettings.appendChild(b);
+  }
+  // the row itself only exists when there's something behind it — an empty Settings panel would be
+  // a dead end for a caller that wires none of the knobs
+  if (gmenu && gsettings.children.length) {
+    const b = document.createElement("button");
+    b.className = "gmenu-item";
+    b.dataset.go = "settings";
+    b.innerHTML =
+      `<span class="gmenu-ic">${icon("gear", 20)}</span>` +
+      `<span class="gmenu-tx"><b>Settings</b><small>style, audio &amp; world</small></span>` +
+      `<span class="gmenu-arr">${icon("chevron", 16)}</span>`;
+    gmenu.appendChild(b);
   }
 
   // account section — social identity first, then Sign in / Log out.
@@ -483,7 +516,11 @@ export function createCarPicker(
     }
     const driverName = menuPanel.querySelector("[data-driver-name]") as HTMLElement | null;
     if (driverName) driverName.textContent = menuFeatures.driverName?.current() ?? "choose your name";
-    // reflect the current Music/SFX volumes (they can change elsewhere) on every menu open
+  };
+
+  // the Music/SFX volumes can move elsewhere (home screen, boot restore) — re-read them every
+  // time the settings panel is shown, which is the only place they're on screen
+  const refreshSliders = () => {
     sliders.forEach((sl, i) => {
       const el = sliderEls[i];
       if (!el) return;
@@ -520,9 +557,15 @@ export function createCarPicker(
   garagePanel.style.display = "none";
   const garageHead = document.createElement("div");
   garageHead.className = "ghead";
+  // Upgrades sits in the garage header: tuning belongs where the cars are, not out on the plaza.
+  // Gated by the same flag as the menu's Upgrades row so a caller that suppresses the local
+  // economy gets NO upgrades affordance anywhere.
+  const garageUpgradesBtn = menuFeatures.showGarageAndUpgrades === false ? "" :
+    `<button class="gpill-btn" data-act="upgrades" aria-label="Upgrades">${icon("level", 14)}<span>UPGRADES</span></button>`;
   garageHead.innerHTML =
     `<button class="gicon-btn" data-act="back" aria-label="Back">${backIcon(18)}</button>` +
     `<span class="lbl">garage · your collection</span>` +
+    garageUpgradesBtn +
     `<button class="gicon-btn" data-act="close" aria-label="Close">✕</button>`;
   garagePanel.appendChild(garageHead);
   // rarity legend — a colour key for the gem tiers on the cards (collection info). Crate DROP ODDS
@@ -847,9 +890,11 @@ export function createCarPicker(
     menuPanel.style.display = v === "menu" ? "flex" : "none";
     garagePanel.style.display = v === "garage" ? "flex" : "none";
     worldsPanel.style.display = v === "worlds" ? "flex" : "none";
+    settingsPanel.style.display = v === "settings" ? "flex" : "none";
     if (v === "garage") { renderArt(); updateBusyUI(); }
     if (v === "worlds") renderWorlds(); // reflect the active skin + highlight it
-    if (v === "menu") refreshMenu(); // reflect current Music/SFX volumes each time the menu shows
+    if (v === "settings") refreshSliders(); // reflect current Music/SFX volumes each time it shows
+    if (v === "menu") refreshMenu(); // account row + driver name, re-read on every menu open
   };
 
   const open = () => {
@@ -873,7 +918,7 @@ export function createCarPicker(
   addEventListener("keydown", (e) => {
     if (e.key !== "Escape" || overlay.style.display === "none") return;
     if (detailScrim.classList.contains("on")) { closeDetail(); return; }
-    if (view === "menu") close(); else setView("menu");
+    if (view === "menu") close(); else setView(BACK_VIEW[view]);
   });
   overlay.addEventListener("click", (e) => {
     const t = (e.target as HTMLElement).closest("[data-act],[data-go],[data-toggle],[data-world]") as HTMLElement | null;
@@ -887,7 +932,7 @@ export function createCarPicker(
     if (t.dataset.act === "access-code") { close("chain"); menuButton.focus(); menuFeatures.onAccessCode?.(); return; }
     if (t.dataset.act === "driver-name") { close("chain"); menuButton.focus(); menuFeatures.driverName?.edit(); return; }
     if (t.dataset.act === "close") close();
-    else if (t.dataset.act === "back") setView("menu");
+    else if (t.dataset.act === "back") setView(BACK_VIEW[view]);
     else if (t.dataset.act === "upgrades") { close("chain"); onUpgrades?.(); }
     else if (t.dataset.act === "logout") { close("chain"); onLogout?.(); }
     else if (t.dataset.act === "howto") { close(); parent.dispatchEvent(new CustomEvent("raider:howto")); }
@@ -897,6 +942,7 @@ export function createCarPicker(
   overlay.appendChild(menuPanel);
   overlay.appendChild(garagePanel);
   overlay.appendChild(worldsPanel);
+  overlay.appendChild(settingsPanel);
   overlay.appendChild(detailScrim);
   wrap.appendChild(menuButton);
   wrap.appendChild(overlay);

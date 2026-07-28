@@ -324,7 +324,9 @@ describe("world (level skin) picker locking", () => {
     const parent = document.createElement("div");
     createCarPicker(parent, [{ name: "Solana Paper", url: "/models/trabant.glb" }], () => {},
       undefined, [], undefined, undefined, undefined, worlds);
-    (parent.querySelector('[data-go="worlds"]') as HTMLElement).click(); // open the World sub-view
+    // World lives under Settings now — menu → Settings → World
+    (parent.querySelector('[data-go="settings"]') as HTMLElement).click();
+    (parent.querySelector('[data-go="worlds"]') as HTMLElement).click();
     return parent;
   };
 
@@ -347,6 +349,100 @@ describe("world (level skin) picker locking", () => {
     const parent = openWorlds(worldsWith(sets));
     (parent.querySelector('[data-world="neon-city"]') as HTMLElement).click();
     expect(sets).toEqual(["neon-city"]);
+  });
+});
+
+describe("settings sub-view", () => {
+  const oneCar: CarOption[] = [{ name: "Solana Paper", url: "/models/trabant.glb" }];
+  const worlds = () => ({
+    list: () => [{ key: "synthwave", name: "Synthwave", colors: ["#ff39c0", "#27e7ff"] }],
+    current: () => "synthwave",
+    set: () => {},
+  });
+  const build = (volumes = { music: 0.5, sfx: 0.25 }) => {
+    const parent = document.createElement("div");
+    let toon = false;
+    createCarPicker(parent, oneCar, () => {}, undefined, [
+      { label: "Music", glyph: "♫", get: () => volumes.music, set: (v) => { volumes.music = v; } },
+      { label: "SFX", glyph: "🔊", get: () => volumes.sfx, set: (v) => { volumes.sfx = v; } },
+    ], undefined, undefined, undefined, worlds(), {
+      style: { get: () => toon, toggle: () => { toon = !toon; }, subscribe: () => {} },
+    });
+    return parent;
+  };
+  // the top-level list is the one holding "How to play"; the sub-view's is [data-settings-list]
+  const menuList = (parent: HTMLElement) => parent.querySelector('[data-act="howto"]')!.parentElement!;
+  const panelOf = (el: Element) => el.closest(".gpanel") as HTMLElement;
+
+  test("the menu's top level is destinations only — every knob sits behind one Settings row", () => {
+    const parent = build();
+    const menu = menuList(parent);
+    expect(menu.querySelector('[data-go="settings"]')?.textContent).toContain("Settings");
+    // the four rows that used to sit at the top level are gone from it
+    expect(menu.querySelector('[data-act="style"]')).toBeNull();
+    expect(menu.querySelector('[data-go="worlds"]')).toBeNull();
+    expect(menu.querySelectorAll(".gaudio").length).toBe(0);
+  });
+
+  test("the Settings panel hosts Style, both audio faders, and the World doorway", () => {
+    const parent = build();
+    const settings = parent.querySelector("[data-settings-list]") as HTMLElement;
+    expect(settings.querySelector('[data-act="style"]')?.textContent).toContain("Style");
+    expect([...settings.querySelectorAll(".gaudio b")].map((b) => b.textContent)).toEqual(["Music", "SFX"]);
+    expect(settings.querySelector('[data-go="worlds"]')?.textContent).toContain("World");
+  });
+
+  test("no Settings row when the caller wires none of the knobs", () => {
+    const parent = document.createElement("div");
+    createCarPicker(parent, oneCar, () => {});
+    expect(parent.querySelector('[data-go="settings"]')).toBeNull();
+    expect((parent.querySelector("[data-settings-list]") as HTMLElement).children.length).toBe(0);
+  });
+
+  test("Style toggles in place — the panel stays on Settings", () => {
+    const parent = build();
+    (parent.querySelector('[data-go="settings"]') as HTMLElement).click();
+    const settings = panelOf(parent.querySelector("[data-settings-list]")!);
+    const style = parent.querySelector('[data-act="style"]') as HTMLElement;
+    expect(style.querySelector("[data-style-mode]")?.textContent).toBe("CLASSIC");
+    style.click();
+    expect(settings.style.display).toBe("flex"); // a knob must not navigate away
+  });
+
+  test("re-reads the live volumes each time Settings is opened", () => {
+    const volumes = { music: 0.5, sfx: 0.25 };
+    const parent = build(volumes);
+    volumes.music = 0.8; // changed elsewhere (home screen / boot restore) while the panel was shut
+    (parent.querySelector('[data-go="settings"]') as HTMLElement).click();
+    const faders = parent.querySelectorAll<HTMLInputElement>(".gaudio-range");
+    expect(faders[0].value).toBe("80");
+    expect(faders[1].value).toBe("25");
+  });
+
+  test("back steps World → Settings → menu, and Escape follows the same path", () => {
+    const parent = build();
+    document.body.appendChild(parent);
+    (parent.querySelector<HTMLButtonElement>('button[aria-label="Open menu"]'))!.click();
+    const settings = panelOf(parent.querySelector("[data-settings-list]")!);
+    const worldsPanel = panelOf(parent.querySelector("[data-worlds-list]")!);
+    const menuPanel = panelOf(parent.querySelector('[data-act="howto"]')!);
+
+    (parent.querySelector('[data-go="settings"]') as HTMLElement).click();
+    (parent.querySelector('[data-go="worlds"]') as HTMLElement).click();
+    expect(worldsPanel.style.display).toBe("flex");
+
+    // Escape out of World lands on Settings — the view it was entered from, not the top level
+    dispatchEvent(new KeyboardEvent("keydown", { key: "Escape" }));
+    expect(worldsPanel.style.display).toBe("none");
+    expect(settings.style.display).toBe("flex");
+
+    // and the Settings header's own back button returns to the top level
+    (settings.querySelector('[data-act="back"]') as HTMLElement).click();
+    expect(settings.style.display).toBe("none");
+    expect(menuPanel.style.display).toBe("flex");
+
+    (parent.querySelector<HTMLButtonElement>('[data-act="close"]'))!.click();
+    parent.remove();
   });
 });
 
@@ -406,7 +502,26 @@ describe("hamburger product menu", () => {
     });
     expect(parent.querySelector('[data-act="history"]')).not.toBeNull();
     expect(parent.querySelector('[data-go="garage"]')).toBeNull();
+    // covers BOTH affordances — the menu row and the garage header's pill
     expect(parent.querySelector('[data-act="upgrades"]')).toBeNull();
+  });
+
+  it("puts an Upgrades button in the garage collection header, wired like the menu row", () => {
+    const parent = document.createElement("div");
+    const onUpgrades = vi.fn();
+    const closes: Array<string | undefined> = [];
+    createCarPicker(parent, oneCar, () => {}, onUpgrades, [], undefined, (reason) => closes.push(reason));
+
+    const pill = parent.querySelector<HTMLButtonElement>('.gpill-btn[data-act="upgrades"]')!;
+    expect(pill).not.toBeNull();
+    expect(pill.textContent).toContain("UPGRADES");
+    // it belongs to the collection view (the panel holding the card grid), not the menu
+    expect(pill.closest(".gpanel")?.querySelector(".ggrid")).not.toBeNull();
+
+    pill.click();
+    // same flow as the menu row: chain-close (another panel takes over the place), then open
+    expect(closes).toEqual(["chain"]);
+    expect(onUpgrades).toHaveBeenCalledTimes(1);
   });
 
   it("always exposes access-code redemption and invokes its action", () => {
