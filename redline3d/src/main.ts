@@ -305,6 +305,10 @@ let accountDriverName: string | null = null;
 // connects on the FIRST money action (GO or the wallet panel). Under Privy that's the moment
 // the login modal opens, so "press GO → log in → you're racing" is the whole onboarding.
 let signedIn = false, signingIn = false;
+// The identity gate can't see WHY a sign-in failed (ensureSignedIn swallows into `false`),
+// and the HUD status it does set is hidden behind the modal — so the last failure's short
+// message is kept here for the gate to display. Cleared on success.
+let lastSignInError = "";
 // `fresh` = account-chooser semantics (the identity gate's SIGN IN): any lingering wallet
 // session is dropped first so the login UI ALWAYS shows and a different account can be
 // picked. Default (resume) semantics are for re-auth of the player we already know —
@@ -328,12 +332,14 @@ async function ensureSignedIn(fresh = false): Promise<boolean> {
     const accountStash = fresh ? readSaveSnapshot(session.address()) : null;
     await syncAccount(fresh, accountStash ?? undefined);
     signedIn = true;
+    lastSignInError = "";
     restoreHighwayPosition();
     void syncTableCap(); // clamp the bet stepper to the live table limit right away
     return true;
   } catch (e) {
     console.error("sign-in failed", e);
     const msg = String((e as Error)?.message ?? e);
+    lastSignInError = msg;
     hud.setStatus(
       msg.includes("privy_login_cancelled") ? "Sign-in cancelled — press GO to try again." :
       msg.includes("privy_unreachable") ? "Couldn't reach sign-in — check your connection and try again." :
@@ -2642,6 +2648,9 @@ function showIdentityGate() {
       let ok: boolean;
       try { ok = await ensureSignedIn(true); }
       finally { zeroLocalSnapshotForSignIn = false; }
+      // Surface the REAL failure on the gate instead of the generic "didn't finish" line —
+      // ensureSignedIn already folded the error into `false`, so rethrow its saved message.
+      if (!ok && lastSignInError) throw new Error(lastSignInError);
       if (ok) {
         if (name && !accountDriverName) {
           try {

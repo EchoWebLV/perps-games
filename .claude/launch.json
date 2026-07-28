@@ -2,6 +2,33 @@
   "version": "0.0.1",
   "configurations": [
     {
+      "name": "ansem-app",
+      "runtimeExecutable": "pnpm",
+      "runtimeArgs": ["--dir", "/Users/yordanlasonov/Documents/GitHub/ansem-ore", "run", "app:dev"],
+      "port": 3100
+    },
+    {
+      "name": "ansem-app-mainnet",
+      "runtimeExecutable": "env",
+      "runtimeArgs": [
+        "NEXT_PUBLIC_KEEPER_WS=wss://keeper-production-33d5.up.railway.app",
+        "NEXT_PUBLIC_KEEPER_HTTP=https://keeper-production-33d5.up.railway.app",
+        "NEXT_PUBLIC_RPC_ENDPOINT=https://solana-rpc.publicnode.com",
+        "NEXT_PUBLIC_SOLANA_CLUSTER=mainnet-beta",
+        "pnpm",
+        "-C",
+        "/Users/yordanlasonov/Documents/GitHub/ansem-ore",
+        "-F",
+        "app",
+        "exec",
+        "next",
+        "dev",
+        "-p",
+        "3300"
+      ],
+      "port": 3300
+    },
+    {
       "name": "perps-prototype",
       "runtimeExecutable": "python3",
       "runtimeArgs": ["-m", "http.server", "8766", "--directory", "prototype"],
@@ -36,6 +63,13 @@
       "port": 4333
     },
     {
+      "name": "redline3d-paddock",
+      "runtimeExecutable": "bash",
+      "runtimeArgs": ["-c", "VITE_API_BASE=http://localhost:8081 npm run dev -- --port 4200 --strictPort --host"],
+      "cwd": "redline3d",
+      "port": 4200
+    },
+    {
       "name": "redline3d-devwallet",
       "runtimeExecutable": "bash",
       "runtimeArgs": ["-c", "VITE_WALLET=dev npm run dev -- --port 4100 --strictPort --host"],
@@ -59,7 +93,7 @@
     {
       "name": "perps-server",
       "runtimeExecutable": "bash",
-      "runtimeArgs": ["-c", "LAN_IP=$(ipconfig getifaddr en0 2>/dev/null || true); REAL_MONEY_ENABLED=false CORS_ORIGINS=\"http://localhost:4000,http://127.0.0.1:4000,http://localhost:4100,http://127.0.0.1:4100,http://localhost:4333,http://127.0.0.1:4333${LAN_IP:+,http://$LAN_IP:4000,http://$LAN_IP:4100,http://$LAN_IP:4333}\" SIGNUP_FAUCET=true DEV_ENDPOINTS=true PORT=8081 NODE_ENV=development npx tsx src/index.ts"],
+      "runtimeArgs": ["-c", "LAN_IP=$(ipconfig getifaddr en0 2>/dev/null || true); REAL_MONEY_ENABLED=false CORS_ORIGINS=\"http://localhost:4000,http://127.0.0.1:4000,http://localhost:4100,http://127.0.0.1:4100,http://localhost:4200,http://127.0.0.1:4200,http://localhost:4333,http://127.0.0.1:4333${LAN_IP:+,http://$LAN_IP:4000,http://$LAN_IP:4100,http://$LAN_IP:4200,http://$LAN_IP:4333}\" SIGNUP_FAUCET=true DEV_ENDPOINTS=true PORT=8081 NODE_ENV=development npx tsx src/index.ts"],
       "cwd": "server",
       "port": 8081
     }

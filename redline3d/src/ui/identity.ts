@@ -157,8 +157,13 @@ export function createIdentityGate(
     try {
       if (await opts.onSignIn(name)) { close(); return; }
       msg.textContent = "Sign-in didn't finish — try again, or ride as guest.";
-    } catch {
-      msg.textContent = "Sign-in didn't finish — try again, or ride as guest.";
+    } catch (e) {
+      // Show the real reason when there is one — a generic line here once hid a dead
+      // API port behind "didn't finish" through several user retries.
+      const why = e instanceof Error && e.message ? e.message : "";
+      msg.textContent = why
+        ? `Sign-in failed — ${why}`.slice(0, 180)
+        : "Sign-in didn't finish — try again, or ride as guest.";
     }
     setBusy(false);
   };

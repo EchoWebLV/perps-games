@@ -131,7 +131,11 @@ const facade: PrivyIsland = {
     if (!live.authenticated) {
       loginError = null;
       live.login(); // opens the Privy login modal (email/social)
-      await waitFor(() => live.authenticated || loginError !== null, 180_000, "privy_login_timeout");
+      // The clock includes the player's OWN pace — opening their inbox, reading the OTP —
+      // so it must be generous. Modal dismissal is caught by onError('exited_auth_flow')
+      // above; this only backstops a zombie modal nobody is looking at. 180s once expired
+      // mid-OTP on a real login (the auth SUCCEEDED — we just stopped listening).
+      await waitFor(() => live.authenticated || loginError !== null, 900_000, "privy_login_timeout");
       if (loginError !== null) {
         const code = loginError;
         loginError = null;
