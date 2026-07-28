@@ -31,12 +31,15 @@ export interface WalletOpts {
   fetchWalletSol?: () => Promise<number | null>;
   /**
    * On-chain controls. `status()` is read on every open/refresh: `playCents` = the on-chain play
-   * balance in centi-SOL units; `delegated` is kept for internal bookkeeping only (NOT surfaced to
-   * the player). `cashOut()` is the single player action — it quietly undelegates any live ER
-   * session and withdraws to the wallet, so the player never sees the session lifecycle.
+   * balance in centi-SOL units; `bookCents` = the same units sitting in the RACE BOOK seat, which
+   * is money the player never routed through GO — a Watch-&-bet-only player has `playCents` 0 and
+   * all of it here, so the Cash out gate reads the SUM or it locks them out of their own balance.
+   * `delegated` is kept for internal bookkeeping only (NOT surfaced to the player). `cashOut()` is
+   * the single player action — it quietly undelegates any live ER session, withdraws to the wallet
+   * and brings the race seat home, so the player never sees either lifecycle.
    */
   onchain: {
-    status: () => { delegated: boolean; playCents: number };
+    status: () => { delegated: boolean; playCents: number; bookCents: number };
     cashOut: () => Promise<void>;
   };
   // ── legacy off-chain fields (no longer rendered; kept optional so callers compile) ──
@@ -205,13 +208,18 @@ export function createWallet(parent: HTMLElement, opts: WalletOpts): Wallet {
   const ocEl = q<HTMLElement>("#wltOnchain");
   let ocBusy = false;
   const renderOnchain = () => {
-    const { playCents } = opts.onchain.status();
+    const { playCents, bookCents } = opts.onchain.status();
     // One button. "Cash out" moves the whole play balance to the wallet; it handles undelegating a
     // live session under the hood (see main's onchain.cashOut), so there is no player-facing "End".
+    // The gate is the SUM: money staged in the race seat is the player's, and someone who only ever
+    // watched and bet has ALL of it there — gating on playCents alone disables their way out.
+    // Named above the button (a plain .wlt-note, the panel's small-print row) so the enabled button
+    // is explained rather than mysterious, in the same "0.000 SOL" wording as the hero breakdown.
     ocEl.innerHTML =
       `<div class="wlt-oc">
+         ${bookCents > 0 ? `<div class="wlt-note">In the race book ${fmt(bookCents / 10 ** currency.displayUnitDecimals)} ${currency.symbol} — it comes home with your cash out.</div>` : ""}
          <div class="wlt-oc-btns">
-           <button class="wlt-oc-btn wd" id="wltOcCash" ${playCents > 0 ? "" : "disabled"}>Cash out to wallet</button>
+           <button class="wlt-oc-btn wd" id="wltOcCash" ${playCents + bookCents > 0 ? "" : "disabled"}>Cash out to wallet</button>
          </div>
        </div>`;
     const cashBtn = ocEl.querySelector<HTMLButtonElement>("#wltOcCash");

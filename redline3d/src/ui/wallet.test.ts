@@ -174,7 +174,7 @@ function installFakeDom() {
   vi.stubGlobal("addEventListener", vi.fn());
 }
 
-const makeOnchain = (status = { delegated: false, playCents: 0 }) => ({
+const makeOnchain = (status = { delegated: false, playCents: 0, bookCents: 0 }) => ({
   status: () => status,
   cashOut: vi.fn(async () => {}),
 });
@@ -265,7 +265,7 @@ describe("createWallet", () => {
   it("shows a single Cash out (no player-facing 'End session') that works even mid-session", async () => {
     const parent = new FakeElement("div");
     // delegated (a live ER session) — Cash out must still be enabled; it undelegates under the hood.
-    const onchain = { status: () => ({ delegated: true, playCents: 10 }), cashOut: vi.fn(async () => {}) };
+    const onchain = { status: () => ({ delegated: true, playCents: 10, bookCents: 0 }), cashOut: vi.fn(async () => {}) };
     const wallet = createWallet(parent as unknown as HTMLElement, { address: () => ADDR, balance: () => 10, onchain });
 
     wallet.open();
@@ -283,13 +283,57 @@ describe("createWallet", () => {
     const wallet = createWallet(parent as unknown as HTMLElement, {
       address: () => ADDR,
       balance: () => 0,
-      onchain: makeOnchain({ delegated: false, playCents: 0 }),
+      onchain: makeOnchain({ delegated: false, playCents: 0, bookCents: 0 }),
     });
 
     wallet.open();
 
     const overlay = parent.children[0];
     expect(overlay.querySelector<FakeElement>("#wltOcCash")?.attrs.disabled).toBe(""); // no balance → disabled
+  });
+
+  // A Watch-&-bet-only player has never pressed GO: every lamport they own is staged in the race
+  // seat, so a gate that reads only the perps balance would hand them a DISABLED way out.
+  it("keeps Cash out enabled when the money is in the race book, not the play balance", () => {
+    const parent = new FakeElement("div");
+    const wallet = createWallet(parent as unknown as HTMLElement, {
+      address: () => ADDR,
+      balance: () => 0,
+      onchain: makeOnchain({ delegated: false, playCents: 0, bookCents: 25 }),
+    });
+
+    wallet.open();
+
+    const overlay = parent.children[0];
+    expect(overlay.querySelector<FakeElement>("#wltOcCash")?.attrs.disabled).toBeUndefined();
+  });
+
+  it("names the race-book money above the button, in the panel's SOL wording", () => {
+    const parent = new FakeElement("div");
+    const wallet = createWallet(parent as unknown as HTMLElement, {
+      address: () => ADDR,
+      balance: () => 0,
+      onchain: makeOnchain({ delegated: false, playCents: 0, bookCents: 25 }), // 25 centi-SOL = 0.25 SOL
+    });
+
+    wallet.open();
+
+    const overlay = parent.children[0];
+    expect(overlay.querySelector<FakeElement>("#wltOnchain")?.innerHTML).toContain("race book 0.250 SOL");
+  });
+
+  it("says nothing about a race book the player has no money in", () => {
+    const parent = new FakeElement("div");
+    const wallet = createWallet(parent as unknown as HTMLElement, {
+      address: () => ADDR,
+      balance: () => 10,
+      onchain: makeOnchain({ delegated: false, playCents: 10, bookCents: 0 }),
+    });
+
+    wallet.open();
+
+    const overlay = parent.children[0];
+    expect(overlay.querySelector<FakeElement>("#wltOnchain")?.innerHTML).not.toContain("race book");
   });
 
   it("shows the wallet's own SOL under the hero so a deposit visibly arrives", async () => {

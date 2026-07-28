@@ -107,7 +107,7 @@ import { selectChainWalletPort } from "./chain/wallet-select";
 import { createCrateRollDraws, makeCrateRollIo } from "./chain/crate-roll";
 import { payDevnetSol } from "./chain/sol-payment";
 import { createPaddockBook, LiveStakesError, type PaddockBook } from "./chain/paddock";
-import { createPaddockStaging, type PaddockStaging } from "./chain/paddock-staging";
+import { betableOf, createPaddockStaging, type PaddockStaging } from "./chain/paddock-staging";
 import {
   createHighwayRoundReader,
   deriveHighwayRoundPda,
@@ -232,6 +232,34 @@ function paddockFor(): { client: PaddockBook; staging: PaddockStaging } | null {
     paddockPair = { client, staging: createPaddockStaging({ client }), address };
   }
   return paddockPair;
+}
+// Money staged in the race seat, in the same centi-SOL units as the play balance. The wallet
+// panel's Cash Out gate reads playCents + bookCents: a Watch-&-bet-only player never pressed GO,
+// so their whole balance lives HERE and a perps-only gate would lock them out of it. Last-known
+// by design — the panel's sync status() cannot await a chain read, so this is refreshed at the
+// three moments it can actually change: a race build, a cash-out, and opening the panel.
+let bookCents = 0;
+/** Re-read the seat away from the frame loop, then re-render the panel. `reuse` (the pair is
+ *  delegated) is the only state whose truth lives in the ER — betableOf then counts a past
+ *  race's claimable winnings, which cash_out collects too, and leaves out stakes riding the
+ *  LIVE race, which it cannot. Otherwise the money is home on L1 and the Bettor ledger is the
+ *  number. Read failures keep the last-known figure: a stale number that lets the player try
+ *  beats a zero that disables their way out. */
+async function refreshBookCents(): Promise<void> {
+  const pad = paddockFor();
+  if (!pad) return;
+  try {
+    const state = await pad.client.delegationState();
+    let base: bigint;
+    if (state === "reuse") {
+      const [race, bettor] = await Promise.all([pad.client.raceSnapshot(), pad.client.bettorSnapshot()]);
+      base = betableOf(race, bettor);
+    } else {
+      base = await pad.client.bettorL1Balance();
+    }
+    bookCents = baseToUnits(base);
+    renderKnownBalance(); // re-runs the panel's gate + its race-book line
+  } catch { /* keep the last-known figure */ }
 }
 // The cash chip + wallet hero show the player's TOTAL money — wallet SOL + play balance —
 // one number, the way the player thinks about it ("I sent 5 SOL, I have 5 SOL"). Moving
@@ -551,6 +579,16 @@ const upgrades = createUpgrades(hudRoot, {
 coins.set(upgrades.coins(), false); // no pulse on the persisted balance at load
 scrap.set(upgrades.scrap(), false);
 
+// The race seat's cash-out steps, in the player's language — the same vocabulary the bet panel
+// uses for the identical chain steps (bet-panel's STEP_LABEL), minus its top-up framing: here the
+// seat is being emptied, not refilled. Anything unmapped leaves the last line standing.
+const CASH_OUT_STATUS: Record<string, string> = {
+  claim: "Collecting your last win",
+  exit: "Freeing your seat",
+  undelegate: "Waiting for the rollup to hand it back",
+  withdraw: "Gathering your balance",
+  unwrap: "Unwrapping to SOL",
+};
 // wallet page (opened by tapping the balance chip) — shows the player's deposit QR.
 const walletUI = createWallet(hudRoot, {
   currency: ACTIVE_STAKE_CURRENCY,
@@ -560,7 +598,9 @@ const walletUI = createWallet(hudRoot, {
   // the wallet's own SOL (lamports → SOL), so a deposit visibly arrives before the first GO
   fetchWalletSol: async () => { try { return Number(await session.walletSol()) / 10 ** ACTIVE_STAKE_CURRENCY.decimals; } catch { return null; } },
   onchain: {
-    status: () => ({ delegated: session.delegated(), playCents: baseToUnits(session.balance()) }),
+    // playCents stays PERPS-ONLY — it feeds the "in play" figure under the hero. The race seat is
+    // its own number beside it; only the Cash Out gate adds the two.
+    status: () => ({ delegated: session.delegated(), playCents: baseToUnits(session.balance()), bookCents }),
     // One player action. "Cash out" quietly undelegates the ER session (if one is live) and THEN
     // withdraws to the wallet — the player never sees the delegate/undelegate lifecycle, they just
     // move their balance to their wallet in a single tap.
@@ -568,21 +608,37 @@ const walletUI = createWallet(hudRoot, {
       hud.setStatus("Cashing out…");
       if (session.delegated()) await session.endSession(); // undelegate under the hood
       await session.withdraw();
-      syncOnchainBalance();
-      // The race book comes home through the same door — one Cash Out returns ALL the money
-      // (the player never sees the seat lifecycle). A seat riding the LIVE race cannot exit
-      // yet: that is normal play, and the bet panel is already saying so; skip quietly.
-      // Ahead of the success line, so "Cashed out to your wallet." is only claimed once both
-      // legs are actually home; the perps balance is already re-read either way.
+      // The race book comes home through the same door — one Cash Out returns ALL the money (the
+      // player never sees the seat lifecycle). Through the STAGING CONTROLLER, never the client
+      // directly: it owns the single-flight slot the background refill uses (two sequences must
+      // not drive the same PDAs), and it parks the boomerang — after a successful cash-out the
+      // frame loop would otherwise re-stage the money we just withdrew.
+      let deferred = false;
       const pad = paddockFor();
       if (pad) {
-        try { await pad.client.cashOut(); }
-        catch (e) {
-          if (e instanceof LiveStakesError) console.warn("race book cash-out deferred — stakes riding the live race");
-          else throw e;
+        // The undelegate leg alone polls the L1 owner for up to ~80s. Narrate the controller's own
+        // step so that stretch reads as work in progress instead of a dead button.
+        const narrate = setInterval(() => {
+          const label = CASH_OUT_STATUS[pad.staging.status().step ?? ""];
+          if (label) hud.setStatus(label);
+        }, 500);
+        try {
+          await pad.staging.cashOutNow();
+          bookCents = 0; // the seat is empty; the panel's gate + line follow the sync below
+        } catch (e) {
+          // A seat riding the LIVE race cannot exit yet. That is normal play, not a failure: the
+          // stakes settle with the race and the money comes home on the next Cash Out.
+          if (!(e instanceof LiveStakesError)) throw e;
+          deferred = true;
+        } finally {
+          clearInterval(narrate);
         }
       }
-      hud.setStatus("Cashed out to your wallet.");
+      // After the paddock leg, so the figure the player is left looking at includes everything
+      // that actually moved.
+      syncOnchainBalance();
+      if (deferred) { hud.setStatus("Race still running — your race-book balance comes home after it settles."); return; }
+      hud.setStatus("Cashed out to your wallet."); // only when BOTH legs are clean
     },
   },
   // Log out moved to the menu (settings); the wallet page is deposit-only now.
@@ -592,7 +648,14 @@ hud.onWallet(() => {
   // guests have no wallet page — the practice chip is the sign-in upsell
   if (!identity || identity.mode === "guest") { showIdentityGate(); return; }
   // funding needs an address, so the wallet chip signs you in first (Privy modal if needed)
-  void ensureSignedIn().then((ok) => { if (ok) walletUI.open(); });
+  void ensureSignedIn().then((ok) => {
+    if (!ok) return;
+    walletUI.open();
+    // The panel paints from the last-known seat figure immediately; this re-reads it and re-renders
+    // the moment the chain answers, so a player who bet in a previous session still sees the money
+    // (and the enabled button) without having entered a race first.
+    void refreshBookCents();
+  });
 });
 
 // car picker — swap the GLB model live + apply the card's special ability
@@ -733,6 +796,11 @@ const garage = createCarPicker(hudRoot, CAR_DEFS, (c) => equipCar(c), () => upgr
     void (async () => {
       await accountSync.flush();
       await session.logout();
+      // The paddock pair is keyed to the wallet that just went away — drop it (and the seat
+      // figure it stands for) so nothing of this account's book can be read by the next one.
+      paddockPair?.staging.dispose();
+      paddockPair = null;
+      bookCents = 0;
       signedIn = false;
       identity = null;
       accountDriverName = null;
@@ -1253,6 +1321,7 @@ function exitHomeToLobby(): void { home.hide(); ensureWorlds(); enterLobby(); }
 function enterGrandprix(playerCarName: string | null): void {
   if (mode === "grandprix" || raceGame) return;                          // re-entry guard: a double-tapped race button (Android retargets the trailing click) would orphan + leak a whole race
   if (modeSwitchBlocked({ opening, phase: engine.getPhase() })) return;  // no mode switch mid-GO
+  const from = mode; // the mode this entry was asked FOR — see the re-check across the await below
   // Bound to a const and called on the next line rather than written as an inline IIFE ON PURPOSE:
   // TypeScript carries the guards' narrowing INTO an IIFE, so `mode` would still read as "not
   // grandprix" below — a narrowing that cannot survive the await between the two. Breaking the IIFE
@@ -1260,23 +1329,30 @@ function enterGrandprix(playerCarName: string | null): void {
   const openRace = async (): Promise<void> => {
     // A connected wallet plays the REAL book — the same singleton Race the crank cycles on
     // devnet; a guest keeps the local sim byte-for-byte (book absent ⇒ pre-chain behavior).
-    // Build it BEFORE the mode flips: one primed ER read, and on any failure the race still
-    // opens on the local sim rather than half-opening on a dead chain.
+    // Build it BEFORE the mode flips: a couple of primed reads, and on any failure the race
+    // still opens on the local sim rather than half-opening on a dead chain.
     let book: Awaited<ReturnType<typeof createChainBookSource>> | undefined;
     const pad = paddockFor();
     if (pad) {
       try {
         book = await createChainBookSource(pad.client, { staging: pad.staging });
+        // Entering a race is the player opting back IN to a staged seat, so it lifts any
+        // suspension a previous Cash Out left behind — without this the seat never stages
+        // again. resume() first: a suspended controller no-ops the ensure() below.
+        pad.staging.resume();
         // The moment we know a bet will be needed is NOW — stage the default stake's buffer
         // while the player is still watching the market fill in.
         pad.staging.ensure(BigInt(unitsToBase(DEFAULT_STAKE)));
+        bookCents = book.betable?.() ?? 0; // the primed snapshot makes the panel's gate real
       } catch (e) {
         console.warn("[grandprix] chain book unavailable — local sim:", e);
       }
     }
-    // Re-assert both guards across the await: a double-tap or a mode change while the ER read
-    // was in flight must not build a second race over the first (or over a mode that moved on).
+    // Re-assert the guards across the await: a double-tap or a mode change while the ER read was
+    // in flight must not build a second race over the first, nor drop a race onto a mode that
+    // moved on — the highway boot-restore is exactly such a preemptor (see unwindGrandprix).
     if (mode === "grandprix" || raceGame) return;
+    if (mode !== from) return;
     if (modeSwitchBlocked({ opening, phase: engine.getPhase() })) return;
     const seed = (Math.random() * 1e9) >>> 0;
     // Build the race FIRST: if construction throws (bad GLB path, track build) we bail here, BEFORE any
