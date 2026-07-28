@@ -120,6 +120,23 @@ function betNote(o: BookOnboarding | null): Note | null {
   return { cls: "stopped", head: "Bet not placed", body: o.betError };
 }
 
+/** BET disabled by a short balance while the refill sits between attempts — the quiet windows
+ *  (staging's first-sighting debounce, the gap between retries) where the controller reports
+ *  nothing at all. A dead button beside a wallet figure that reads full, with no line under it,
+ *  looks like a bug rather than like money in transit; this is the difference.
+ *
+ *  `betable === null` is how the panel knows it is looking at the local sim, which has no seat, no
+ *  staging and nothing to promise — there the plain disabled button is the honest answer and this
+ *  line would be an invention. It also stands down whenever staging has something real to say, so
+ *  it can never talk over progress or an error. */
+function shortNote(ctx: BetRenderCtx, stake: number): Note | null {
+  if (ctx.betable === null) return null;
+  if (ctx.betable >= stake) return null;
+  const o = ctx.onboarding;
+  if (o && (o.step !== null || o.error)) return null;
+  return { cls: "", head: "Topping up", body: `Balance short for a $${stake} bet — staging more before the next market.` };
+}
+
 /** An older ticket, and whether its result is still on the chain to be paid from. */
 function claimNote(c: BookClaim | null): Note | null {
   if (!c) return null;
@@ -446,7 +463,11 @@ export function createBetPanel(parent: HTMLElement = document.body): BetPanel {
         // sent, and anything an older ticket is still owed. Three independent facts, so three
         // independent notes — any of them can be absent, and none of them can hide another. All are
         // the book's facts, never the panel's.
-        paintNote(onboardEl, "bp-onboard", onboardNote(ctx.onboarding));
+        // The staging block says whichever of the two it has: real progress (or a stopped seat) when
+        // the controller is reporting, and the short-balance line in the quiet windows when it is
+        // not. They are mutually exclusive by construction — shortNote stands down on exactly the
+        // states onboardNote speaks up for — so one element can hold both and they can never collide.
+        paintNote(onboardEl, "bp-onboard", onboardNote(ctx.onboarding) ?? shortNote(ctx, selStake));
         paintNote(betErrEl, "bp-beterr", betNote(ctx.onboarding));
         paintNote(claimEl, "bp-claim", claimNote(ctx.claim));
       }

@@ -329,6 +329,79 @@ describe("betPanel onboarding notice", () => {
   });
 });
 
+describe("betPanel short-balance line", () => {
+  // The promise this keeps: a disabled BET always has an honest line under it. Staging has quiet
+  // windows — its first-sighting debounce, the gap between retries — where `onboarding()` reports
+  // nothing at all. Without this, those windows are a dead button beside a full-looking wallet
+  // number and no explanation, which reads as a bug.
+  const onboardEl = (el: HTMLElement) => el.querySelector(".bp-onboard") as HTMLElement;
+  const betErrEl = (el: HTMLElement) => el.querySelector(".bp-beterr") as HTMLElement;
+
+  it("explains a short balance while staging sits between attempts", () => {
+    const { el, panel } = mount();
+    panel.render(ctx({ wallet: 100, betable: 1, onboarding: null }));
+    expect(betButtons(el).every((b) => b.disabled)).toBe(true); // the button this line exists to explain
+    expect(onboardEl(el).style.display).toBe("block");
+    expect(onboardEl(el).textContent).toContain("Topping up");
+    expect(onboardEl(el).textContent).toContain("Balance short for a $5 bet — staging more before the next market.");
+    expect(onboardEl(el).className).not.toContain("stopped"); // normal play, not a fault
+    // and it quotes the chip the player is actually on
+    (el.querySelectorAll(".bp-chip")[2] as HTMLElement).click(); // $20
+    panel.render(ctx({ wallet: 100, betable: 1, onboarding: null }));
+    expect(onboardEl(el).textContent).toContain("Balance short for a $20 bet");
+    panel.dispose();
+  });
+
+  it("says nothing once the balance covers the stake", () => {
+    const { el, panel } = mount();
+    panel.render(ctx({ wallet: 100, betable: 5, onboarding: null }));
+    expect(onboardEl(el).style.display).toBe("none");
+    panel.dispose();
+  });
+
+  it("stands aside while staging has progress of its own to report", () => {
+    const { el, panel } = mount();
+    panel.render(ctx({ wallet: 100, betable: 1, onboarding: { kind: "refill", step: "deposit", index: 7, of: 9, error: null, betError: null } }));
+    expect(onboardEl(el).textContent).toContain("Topping up · 7 of 9"); // the real progress owns the area
+    expect(onboardEl(el).textContent).not.toContain("Balance short");
+    panel.dispose();
+  });
+
+  it("stands aside for a staging error — a stopped seat is the bigger news", () => {
+    const { el, panel } = mount();
+    panel.render(ctx({
+      wallet: 100, betable: 1,
+      onboarding: { kind: "setup", step: null, index: 0, of: 5, error: "Your wallet needs about 0.02 SOL to open a seat.", betError: null },
+    }));
+    expect(onboardEl(el).textContent).toContain("Setup stopped");
+    expect(onboardEl(el).textContent).not.toContain("Balance short");
+    panel.dispose();
+  });
+
+  it("stays out of the local sim entirely", () => {
+    const { el, panel } = mount();
+    // no book-reported betable → no seat, nothing staging, nothing to promise: the plain disabled
+    // button is the pre-chain behaviour and inventing a top-up line for it would be a lie
+    panel.render(ctx({ betable: null, wallet: 1 }));
+    expect(betButtons(el).every((b) => b.disabled)).toBe(true);
+    expect(onboardEl(el).style.display).toBe("none");
+    panel.dispose();
+  });
+
+  it("stacks with a refused bet — one explains the past, the other the present", () => {
+    const { el, panel } = mount();
+    panel.render(ctx({
+      wallet: 100, betable: 1,
+      onboarding: { kind: "refill", step: null, index: 0, of: 9, error: null, betError: "Not enough balance for that stake." },
+    }));
+    expect(betErrEl(el).style.display).toBe("block");
+    expect(betErrEl(el).textContent).toContain("Bet not placed");
+    expect(onboardEl(el).style.display).toBe("block");
+    expect(onboardEl(el).textContent).toContain("Balance short for a $5 bet");
+    panel.dispose();
+  });
+});
+
 describe("betPanel claim window", () => {
   const claimEl = (el: HTMLElement) => el.querySelector(".bp-claim") as HTMLElement;
 
