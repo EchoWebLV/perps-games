@@ -16,6 +16,11 @@ import type { DelegateState } from "./chain-round";
 const { BN } = anchor;
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
+/** How long `send` waits for a signature to confirm before giving up. A wall-clock budget,
+ *  not a poll count: the poll interval varies per call site and RPC round-trip time is not
+ *  free, so counting iterations would silently stretch the real deadline. */
+const CONFIRM_BUDGET_MS = 60_000;
+
 /** Grid width and the history ring's length — state.rs GRID / HISTORY_LEN. */
 export const GRID = 8;
 export const HISTORY_LEN = 32;
@@ -242,7 +247,11 @@ export interface PaddockBook {
   delegationState(): Promise<DelegateState>;
   /** The owner wallet's L1 spendables: native SOL (the thing a wSOL deposit wraps) and the
    *  owner ATA's token balance (what a non-wSOL mint would deposit). Same shape as
-   *  chain-round's walletFunds so staging code reads identically across the two programs. */
+   *  chain-round's walletFunds so staging code reads identically across the two programs.
+   *  On the wSOL book `stake` is normally 0 — `ensureBettor` wraps from native SOL — but a
+   *  wrap that landed ahead of a failed deposit leaves the shortfall sitting in the ATA, so a
+   *  funding decision that reads only `sol` will tell that player to top up money they
+   *  already have. */
   walletFunds(): Promise<{ sol: bigint; stake: bigint }>;
   /** One-time onboarding: join → deposit → delegate_bettor on L1, each step skipped if it is
    *  already done, reporting every step it actually runs through `onStep`. */
@@ -276,16 +285,21 @@ export function createPaddockBook(deps: { wallet: AnchorWalletLike; mint: Public
     tx.recentBlockhash = (await conn.getLatestBlockhash("confirmed")).blockhash;
     const signed = await wallet.signTransaction(tx);
     const sig = await conn.sendRawTransaction(signed.serialize(), { skipPreflight: true });
-    const tries = Math.ceil(60_000 / pollMs);
-    for (let i = 0; i < tries; i++) {
+    const deadline = Date.now() + CONFIRM_BUDGET_MS;
+    // Fast polls only while a healthy confirm could still land (the ER commits in well under
+    // a second); past that window fall back to 1s so a dropped tx doesn't hammer a shared
+    // anonymous endpoint for a minute — config.ts records real 429s on the public RPC from
+    // exactly this kind of burst, with confirm polls named among the causes.
+    const fastUntil = Date.now() + 2_000;
+    while (Date.now() < deadline) {
       const st = (await conn.getSignatureStatuses([sig])).value[0];
       if (st && (st.confirmationStatus === "confirmed" || st.confirmationStatus === "finalized")) {
         if (st.err) throw new Error(`tx ${sig} failed: ${JSON.stringify(st.err)}`);
         return sig;
       }
-      await sleep(pollMs);
+      await sleep(Date.now() < fastUntil ? pollMs : 1000);
     }
-    throw new Error(`tx ${sig} not confirmed within 60s`);
+    throw new Error(`tx ${sig} not confirmed within ${CONFIRM_BUDGET_MS / 1000}s`);
   }
 
   // Delegation and UNdelegation both land asynchronously: the tx confirms, then the
