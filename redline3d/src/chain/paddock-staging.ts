@@ -50,7 +50,7 @@ export interface PaddockStaging {
 }
 
 type StagingClient = Pick<PaddockBook,
-  "delegationState" | "bettorSnapshot" | "raceSnapshot" | "walletFunds" | "ensureBettor" | "cashOut">;
+  "delegationState" | "bettorSnapshot" | "raceSnapshot" | "walletFunds" | "bettorL1Balance" | "ensureBettor" | "cashOut">;
 
 const messageOf = (e: unknown): string => String((e as Error)?.message ?? e);
 
@@ -73,6 +73,7 @@ export function createPaddockStaging(deps: { client: StagingClient; onChange?: (
   let disposed = false;
 
   const set = (next: Partial<StageStatus>) => {
+    if (disposed) return;
     stat = { ...stat, ...next };
     deps.onChange?.();
   };
@@ -97,8 +98,10 @@ export function createPaddockStaging(deps: { client: StagingClient; onChange?: (
         ]);
         // On "reuse" the pair provably exists on L1, so a null bettor snapshot is always a
         // failed ER read, never a broke player — rebuilding on it would spend the ~2-cycle
-        // money round trip over one bad RPC response. Quietly retry instead.
-        if (!bettor) { set({ state: "idle", step: null, error: null }); return; }
+        // money round trip over one bad RPC response. Quietly retry instead. And on reuse the
+        // Race singleton provably exists too — a null race would silently drop the claimable
+        // term and rebuild a seat whose win covers the stake.
+        if (!bettor || !race) { set({ state: "idle", step: null, error: null }); return; }
         betable = betableOf(race, bettor);
         if (betable >= stakeBase) {
           // The seat covers the bet — but the "one number" the panel shows still needs the
@@ -122,22 +125,33 @@ export function createPaddockStaging(deps: { client: StagingClient; onChange?: (
       }
     }
 
-    // Fresh (or just-rebuilt): fail fast BEFORE spending — sends go out skipPreflight, so a
-    // 0-SOL Privy embedded wallet otherwise dies as a silent drop + a long confirm hang.
-    const funds = await client.walletFunds();
+    // Fresh (or just-rebuilt): mirror game-session's ensureSession — read what the L1 ledger
+    // already holds FIRST, so a deposit that landed ahead of a failed delegation is delegated
+    // for free instead of wedging every retry on "needs SOL" while the money sits one account
+    // over. Read blips retry quietly (the module's contract: error only when the player must act).
+    const have = await client.bettorL1Balance().catch(() => null);
+    if (have === null) { set({ state: "idle", step: null, error: null }); return; }
+    const funds = await client.walletFunds().catch(() => null);
+    if (funds === null) { set({ state: "idle", step: null, error: null }); return; }
     walletSol = funds.sol;
-    if (funds.sol < stakeBase + FEE_FLOOR_LAMPORTS) {
+    // A stranded wrap (deposit failed after its wrap landed) leaves spendable wSOL in the ATA;
+    // ensureBettor nets it before wrapping, so it counts toward affordability here.
+    const spendable = (funds.sol > FEE_FLOOR_LAMPORTS ? funds.sol - FEE_FLOOR_LAMPORTS : 0n) + funds.stake;
+    if (funds.sol < FEE_FLOOR_LAMPORTS || have + spendable < stakeBase) {
       set({ state: "error", step: null, error: "Your wallet needs SOL first — open the wallet panel and send SOL to your address." });
       return;
     }
-    // Stage a buffer of bets, capped by what the wallet can spare — their money throughout,
-    // withdrawable via cash-out. Same sizing as game-session.ensureSession.
-    const spendable = funds.sol - FEE_FLOOR_LAMPORTS;
+    // Target balance for ensureBettor (its `amount` is a target, not a delta): a buffer of
+    // bets, capped by what ledger + wallet can reach, never below what the ledger already
+    // holds — "top up", never "ignore what's there".
     const want = stakeBase * BigInt(STAKE_BUFFER_BETS);
-    const topUp = want > spendable ? spendable : want;
-    set({ state: stat.state === "refilling" ? "refilling" : "staging", error: null });
-    await client.ensureBettor(topUp, (s) => set({ step: s }));
+    const cap = have + spendable;
+    let target = want > cap ? cap : want;
+    if (target < have) target = have;
+    set({ state: stat.state === "refilling" ? "refilling" : "staging", error: null, step: null });
+    await client.ensureBettor(target, (s) => set({ step: s }));
     await readBetable();
+    if (betable < target) betable = target; // the ER clone can lag right after delegation (game-session live-hit)
     walletSol = (await client.walletFunds().catch(() => ({ sol: walletSol, stake: 0n }))).sol;
     set({ state: "ready", step: null, error: null });
   }

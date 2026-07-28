@@ -253,6 +253,12 @@ export interface PaddockBook {
    *  funding decision that reads only `sol` will tell that player to top up money they
    *  already have. */
   walletFunds(): Promise<{ sol: bigint; stake: bigint }>;
+  /** The L1 Bettor ledger balance (0n when the account does not exist). Reads the L1 copy —
+   *  the one `deposit` writes — so the staging gate can see money a failed delegation left
+   *  behind instead of demanding fresh SOL for a seat that is already funded. Only meaningful
+   *  while undelegated: anchor's owner check throws on a delegated pair (callers are on the
+   *  fresh/busy path, where the pair is home). */
+  bettorL1Balance(): Promise<bigint>;
   /** One-time onboarding: join → deposit → delegate_bettor on L1, each step skipped if it is
    *  already done, reporting every step it actually runs through `onStep`. */
   ensureBettor(amount: number | bigint, onStep?: (step: OnboardStep) => void): Promise<void>;
@@ -331,6 +337,11 @@ export function createPaddockBook(deps: { wallet: AnchorWalletLike; mint: Public
     return { sol: BigInt(sol), stake: BigInt(ata?.value.amount ?? "0") };
   }
 
+  async function bettorL1Balance(): Promise<bigint> {
+    const acct = await program.account.bettor.fetchNullable(pdas.bettor);
+    return acct ? big(acct.balance) : 0n;
+  }
+
   async function raceSnapshot(): Promise<RaceSnap | null> {
     const r = await programER.account.race.fetchNullable(pdas.race);
     return r ? raceToSnap(r) : null;
@@ -363,6 +374,7 @@ export function createPaddockBook(deps: { wallet: AnchorWalletLike; mint: Public
     bettorSnapshot,
     delegationState,
     walletFunds,
+    bettorL1Balance,
     claim,
 
     async ensureBettor(amount, onStep) {
@@ -400,11 +412,17 @@ export function createPaddockBook(deps: { wallet: AnchorWalletLike; mint: Public
         // wrapping native SOL, so the player only ever holds and spends SOL. Any other mint is
         // spl-transfer — its tokens must already be sitting in the owner's ATA.
         if (mint.equals(WSOL_MINT)) {
-          step("wrap");
           const ata = wsolAta(owner);
           const info = await baseConn.getAccountInfo(ata);
-          const ixs = buildWrapIxs({ owner, lamports: short, ataExists: !!info });
-          await send(baseConn, { async transaction() { return new Transaction().add(...ixs); } });
+          // Net what a stranded wrap already left in the ATA (a deposit that failed after its
+          // wrap landed) — wrapping the full shortfall again would just strand it a second time.
+          const ataBal = info ? BigInt((await baseConn.getTokenAccountBalance(ata)).value.amount) : 0n;
+          const wrapLamports = short > ataBal ? short - ataBal : 0n;
+          if (wrapLamports > 0n) {
+            step("wrap");
+            const ixs = buildWrapIxs({ owner, lamports: wrapLamports, ataExists: !!info });
+            await send(baseConn, { async transaction() { return new Transaction().add(...ixs); } });
+          }
         }
         step("deposit");
         await send(baseConn, program.methods.deposit(new BN(short.toString())).accountsPartial({
