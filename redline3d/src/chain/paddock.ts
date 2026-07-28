@@ -240,6 +240,10 @@ export interface PaddockBook {
   /** L1 owners of the co-delegated Bettor/Ticket pair — the only sound "can this wallet bet?"
    *  signal. The ER serves a copy of an undelegated account too, so an ER read proves nothing. */
   delegationState(): Promise<DelegateState>;
+  /** The owner wallet's L1 spendables: native SOL (the thing a wSOL deposit wraps) and the
+   *  owner ATA's token balance (what a non-wSOL mint would deposit). Same shape as
+   *  chain-round's walletFunds so staging code reads identically across the two programs. */
+  walletFunds(): Promise<{ sol: bigint; stake: bigint }>;
   /** One-time onboarding: join → deposit → delegate_bettor on L1, each step skipped if it is
    *  already done, reporting every step it actually runs through `onStep`. */
   ensureBettor(amount: number | bigint, onStep?: (step: OnboardStep) => void): Promise<void>;
@@ -265,20 +269,21 @@ export function createPaddockBook(deps: { wallet: AnchorWalletLike; mint: Public
 
   // HTTP send + getSignatureStatuses poll — same reason as chain-round.ts:203: it dodges the
   // rpc-websockets v9 "Unknown action 'undefined'" bug on the ER signature stream.
-  async function send(conn: Connection, builder: { transaction(): Promise<Transaction> }, cuLimit?: number): Promise<string> {
+  async function send(conn: Connection, builder: { transaction(): Promise<Transaction> }, cuLimit?: number, pollMs = 1000): Promise<string> {
     const tx = await builder.transaction();
     if (cuLimit) tx.instructions.unshift(ComputeBudgetProgram.setComputeUnitLimit({ units: cuLimit }));
     tx.feePayer = owner;
     tx.recentBlockhash = (await conn.getLatestBlockhash("confirmed")).blockhash;
     const signed = await wallet.signTransaction(tx);
     const sig = await conn.sendRawTransaction(signed.serialize(), { skipPreflight: true });
-    for (let i = 0; i < 60; i++) {
+    const tries = Math.ceil(60_000 / pollMs);
+    for (let i = 0; i < tries; i++) {
       const st = (await conn.getSignatureStatuses([sig])).value[0];
       if (st && (st.confirmationStatus === "confirmed" || st.confirmationStatus === "finalized")) {
         if (st.err) throw new Error(`tx ${sig} failed: ${JSON.stringify(st.err)}`);
         return sig;
       }
-      await sleep(1000);
+      await sleep(pollMs);
     }
     throw new Error(`tx ${sig} not confirmed within 60s`);
   }
@@ -302,6 +307,14 @@ export function createPaddockBook(deps: { wallet: AnchorWalletLike; mint: Public
       baseConn.getAccountInfo(pdas.ticket),
     ]);
     return classifyBettorDelegation({ bettor: bi?.owner ?? null, ticket: ti?.owner ?? null });
+  }
+
+  async function walletFunds(): Promise<{ sol: bigint; stake: bigint }> {
+    const [sol, ata] = await Promise.all([
+      baseConn.getBalance(owner),
+      baseConn.getTokenAccountBalance(ownerAta).catch(() => null),
+    ]);
+    return { sol: BigInt(sol), stake: BigInt(ata?.value.amount ?? "0") };
   }
 
   async function raceSnapshot(): Promise<RaceSnap | null> {
@@ -335,6 +348,7 @@ export function createPaddockBook(deps: { wallet: AnchorWalletLike; mint: Public
     raceSnapshot,
     bettorSnapshot,
     delegationState,
+    walletFunds,
     claim,
 
     async ensureBettor(amount, onStep) {
@@ -402,12 +416,14 @@ export function createPaddockBook(deps: { wallet: AnchorWalletLike; mint: Public
 
     async placeBet(carId, amount) {
       try {
+        // 150ms, not the 1000ms default: the ER commits in well under a second, and a
+        // second of dead button eats most of a market window's feel.
         await send(erConn, programER.methods.placeBet(carId, new BN(amount.toString())).accountsPartial({
           payer: owner, mint, race: pdas.race, bettor: pdas.bettor, ticket: pdas.ticket,
-        }));
+        }), undefined, 150);
       } catch (e) {
         const name = paddockErrorName(e);
-        if (name === "WrongPhase") throw new MarketClosedError("Betting just closed for this race — the next one is seconds away.");
+        if (name === "WrongPhase") throw new MarketClosedError("Betting just closed for this race — the next market opens in about 46 seconds.");
         if (name === "InsufficientBalance") throw new InsufficientBalanceError("Not enough in your book balance for that bet.");
         throw e;
       }
