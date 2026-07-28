@@ -1,5 +1,7 @@
-/** which functional building you drive into — the lobby is the economy town, not a market picker */
-export type BuildingKind = "garage" | "upgrades" | "crates" | "track" | "highway" | "scrapyard";
+/** which functional building you drive into — the lobby is the economy town, not a market picker.
+ *  "highway" no longer has a storefront (the plaza gave its slot to RACE) but stays in the union:
+ *  the mode itself lives on for the boot-restore of an open perpetual position. */
+export type BuildingKind = "garage" | "upgrades" | "crates" | "track" | "race" | "highway" | "scrapyard";
 
 export interface Building { kind: BuildingKind; x: number; z: number; w: number; d: number; rot: number; color: number; name: string; comingSoon?: boolean }
 export interface DoorZone { kind: BuildingKind; x: number; z: number; r: number }
@@ -11,7 +13,8 @@ export const LOT_BOUNDS = { x: 180, z: 180 };
 // TOWN SQUARE: the buildings ring a central plaza and every one faces INWARD, so from anywhere in
 // the square you can read every storefront (the crescent's readability, but as an enclosed place).
 // You enter from the OPEN south side and drive into the plaza; a loop road circles it. The two race
-// venues (TRACK/HIGHWAY) sit at the north, facing you head-on as you come in.
+// venues (TRACK, the perps ring; RACE, the chain-book grandprix) sit at the north, facing you
+// head-on as you come in.
 export const LOBBY_SPAWN = { x: 0, z: 142.5 };
 
 // the central plaza + its loop road, shared with the renderer so the road art and the layout can't
@@ -28,9 +31,10 @@ export const PLAZA = {
 // rotated by `rot` maps local +Z → (sin rot, cos rot); facing the centre from angle θ means rot = −θ.
 const RING_R = 108;
 const RING_SPEC: Array<{ kind: BuildingKind; deg: number; w: number; d: number; color: number; name: string; comingSoon?: boolean }> = [
-  // race venues — north, head-on as you enter
+  // race venues — north, head-on as you enter. TRACK is the perps ring you drive yourself; RACE is
+  // the chain-book grandprix you bet on, and it's the anchor — widest of the pair, hottest colour.
   { kind: "track",    deg:  35, w: 28, d: 12, color: 0x14f195, name: "TRACK" },
-  { kind: "highway",  deg: -35, w: 28, d: 12, color: 0xff6a3d, name: "HIGHWAY" },
+  { kind: "race",     deg: -35, w: 30, d: 12, color: 0xff2d55, name: "RACE" },
   // shops — east / west sides
   { kind: "garage",   deg:  80, w: 24, d: 16, color: 0x27e7ff, name: "GARAGE" },
   { kind: "upgrades", deg: -80, w: 24, d: 16, color: 0xffd166, name: "UPGRADES" },

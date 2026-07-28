@@ -1,7 +1,8 @@
 import { describe, it, expect } from "vitest";
 import { BUILDINGS, DOORS, LOT_BOUNDS, LOBBY_SPAWN, PLAZA, doorExitPose, entranceHit, type BuildingKind } from "./lobby-layout";
 
-const KINDS: BuildingKind[] = ["garage", "upgrades", "crates", "track", "highway", "scrapyard"];
+// "highway" is deliberately absent: the mode lives on for boot-restore, the storefront does not
+const KINDS: BuildingKind[] = ["garage", "upgrades", "crates", "track", "race", "scrapyard"];
 const find = (k: BuildingKind) => BUILDINGS.find((b) => b.kind === k)!;
 
 describe("lobby-layout", () => {
@@ -44,7 +45,7 @@ describe("lobby-layout", () => {
     const pairs: Array<[BuildingKind, BuildingKind]> = [
       ["garage", "upgrades"],
       ["crates", "scrapyard"],
-      ["track", "highway"],
+      ["track", "race"],
     ];
     for (const [east, west] of pairs) {
       const e = find(east), w = find(west);

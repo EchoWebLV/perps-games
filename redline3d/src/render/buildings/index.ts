@@ -15,6 +15,7 @@ export function buildBuilding(kind: BuildingKind, color: number, track: Track): 
   switch (kind) {
     case "garage": return buildGarage(color, track);
     case "track": return buildTrack(color, track);
+    case "race": return buildTrack(color, track); // same start-light gantry — the sign + hot-pink neon tell the two race venues apart
     case "upgrades": return buildUpgrades(color, track);
     case "crates": return buildCrates(color, track);
     case "scrapyard": return buildScrapyard(color, track);

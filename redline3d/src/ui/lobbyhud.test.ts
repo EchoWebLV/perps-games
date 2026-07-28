@@ -84,16 +84,28 @@ describe("createLobbyHud", () => {
     expect(fill.style.width).toBe("0%");
   });
 
-  test("marks the highway entry as coming soon", () => {
+  test("names the RACE entry as the real-money book", () => {
     installFakeDocument();
     const parent = new FakeElement();
 
     const hud = createLobbyHud(parent as unknown as HTMLElement);
     const el = hud.el as unknown as FakeElement;
 
-    hud.setPrompt("highway");
-    expect(el.querySelector("[data-pname]")!.textContent).toContain("HIGHWAY");
-    expect(el.querySelector("[data-pdesc]")!.textContent).toContain("coming soon");
+    hud.setPrompt("race");
+    expect(el.querySelector("[data-pname]")!.textContent).toContain("RACE");
+    expect(el.querySelector("[data-pdesc]")!.textContent).toContain("real SOL");
+  });
+
+  test("stays dark for a parked kind that has no storefront", () => {
+    installFakeDocument();
+    const parent = new FakeElement();
+
+    const hud = createLobbyHud(parent as unknown as HTMLElement);
+    const el = hud.el as unknown as FakeElement;
+    const prompt = el.querySelector("[data-prompt]")!;
+
+    hud.setPrompt("highway"); // no plaza building → no door → no card
+    expect(prompt.style.opacity).toBe("0");
   });
 
   test("toast shows a transient message", () => {

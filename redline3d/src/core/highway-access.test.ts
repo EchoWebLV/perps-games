@@ -22,19 +22,16 @@ describe("highwayAvailable", () => {
     expect(highwayEntryDecision("localhost", true, true)).toBe("coming-soon");
   });
 
-  it("gates only the Highway building branch", async () => {
+  it("keeps the Highway out of the plaza: RACE opens the book, TRACK is the perps ring", async () => {
     const main = await readFile(new URL("../main.ts", import.meta.url), "utf8");
-    const start = main.indexOf('case "highway"');
-    const end = main.indexOf("\n  }", start);
-    const branch = main.slice(start, end);
 
-    expect(start).toBeGreaterThanOrEqual(0);
-    expect(end).toBeGreaterThan(start);
-    expect(branch).toContain("highwayEntryDecision");
-    expect(branch).toContain("capacitorNative");
-    expect(branch).toContain('lobbyHud.toast("Highway coming soon")');
-    expect(branch).toContain("openDriverNameDialog(true, enterHighwayFromLobby)");
-    // the TRACK branch stays ungated — it opens the chain-book grandprix, no highway gate applies
-    expect(main).toContain('case "track": enterGrandprix(equippedCar.name);');
+    // the anchor building opens the chain-book grandprix with the equipped car on the grid
+    expect(main).toContain('case "race": enterGrandprix(equippedCar.name);');
+    // TRACK is what it always was — the perps ring, full racing HUD, GO lives there
+    expect(main).toContain('case "track": exitFrom = "track"; exitLobby();');
+    // the Highway has no storefront left, so no door can reach it and nothing needs gating.
+    // The MODE survives: the boot-restore of an open position calls enterHighway(true) directly.
+    expect(main).not.toContain('case "highway"');
+    expect(main).toContain("enterHighway(true)");
   });
 });

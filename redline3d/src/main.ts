@@ -44,7 +44,6 @@ import { createInventory } from "./core/inventory";
 import { createSessionAuth } from "./core/auth-session";
 import { ApiError, createApi } from "./core/api";
 import { showLocalEconomyMenu } from "./core/menu-visibility";
-import { highwayEntryDecision } from "./core/highway-access";
 import { createTradeHistoryRecorder } from "./core/trade-history-recorder";
 import { createTradeHistoryBridge } from "./core/trade-history-live";
 import { createAccountSync, type AccountSnapshot } from "./core/account-sync";
@@ -529,9 +528,6 @@ const accountSync = createAccountSync({
     garageForHydration?.reconcileOwnership((name) => inventory.owns(name));
   },
 });
-function driverNameConfirmed(): boolean {
-  return identity?.mode === "guest" || (identity?.mode === "privy" && accountDriverName !== null);
-}
 
 async function persistDriverName(name: string): Promise<void> {
   if (!identity) throw new Error("driver_identity_missing");
@@ -1177,11 +1173,6 @@ function enterHighway(restoring = false) {
   audio.resume(); radio.resume();
 }
 
-function enterHighwayFromLobby(): void {
-  exitFrom = "highway";
-  enterHighway();
-}
-
 function exitHighwayToLobby() {
   if (modeSwitchBlocked({ opening, phase: engine.getPhase(), roundActive })) return;
   oval?.hide(); // reached only from highway (worlds built); optional-chain guards the __hw dev hook called out-of-flow. enterLobby() at the end self-ensures anyway
@@ -1444,27 +1435,9 @@ function triggerBuilding(kind: BuildingKind) {
     case "upgrades": lobbyHud.hide(); upgrades.open(); break;        // tune your car
     case "crates": lobbyHud.hide(); crateBox.open(); break;           // open a crate → pull a car
     case "scrapyard": lobbyHud.toast("ScrapYard — coming soon"); break; // collect scrap, not built yet
-    // THE race — the same chain-book grandprix home's Watch & bet opens, with the equipped car
-    // on the grid. (Previously the octane-era in-world ring race: local sim, no book, and the
-    // plaza sitting in the race's infield — "the lobby in the middle of the race".)
-    case "track": enterGrandprix(equippedCar.name); break;
-    case "highway": {
-      const decision = highwayEntryDecision(
-        globalThis.location?.hostname ?? "",
-        driverNameConfirmed(),
-        capacitorNative,
-      );
-      if (decision === "coming-soon") {
-        lobbyHud.toast("Highway coming soon");
-        break;
-      }
-      if (decision === "driver-name") {
-        openDriverNameDialog(true, enterHighwayFromLobby);
-        break;
-      }
-      enterHighwayFromLobby();
-      break;
-    }
+    case "track": exitFrom = "track"; exitLobby(); break;            // onto the track — full racing HUD, GO lives there
+    // THE race — the same chain-book grandprix home's Watch & bet opens, with the equipped car on the grid
+    case "race": enterGrandprix(equippedCar.name); break;
   }
 }
 

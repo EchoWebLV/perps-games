@@ -55,8 +55,8 @@ function garage() { lookBuilding("garage"); }
 function track() { lookBuilding("track"); }
 function upgrades() { lookBuilding("upgrades"); }
 function crates() { lookBuilding("crates"); }
-function highway() { lookBuilding("highway"); }
-const PRESETS = { overview, garage, track, upgrades, crates, highway };
+function race() { lookBuilding("race"); }
+const PRESETS = { overview, garage, track, upgrades, crates, race };
 
 type CamKey = keyof typeof PRESETS;
 (window as unknown as { __cam: (k: string) => void }).__cam = (k) => {

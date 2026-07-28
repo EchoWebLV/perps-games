@@ -74,21 +74,17 @@ describe("first account sign-in transition", () => {
 });
 
 describe("driver name application wiring", () => {
-  it("hydrates Railway names, exposes Settings editing, and guards Highway entry", async () => {
+  // The Highway building left the plaza, and with it the only entry the driver name ever gated.
+  // What remains is the hydrate-and-edit path: the server name wins on sign-in, Settings edits it.
+  it("hydrates Railway names and exposes Settings editing", async () => {
     const main = await readFile(new URL("../main.ts", import.meta.url), "utf8");
 
     expect(main).toContain('import { createDriverNameDialog } from "./ui/driver-name";');
-    expect(main).toContain('import { highwayEntryDecision } from "./core/highway-access";');
     expect(main).toContain("const serverDriverName = accountSync.driverName();");
     expect(main).toContain("api.setDriverName(name)");
     expect(main).toContain("driverName: {");
     expect(main).toContain("current: () => identity?.name ?? null");
     expect(main).toContain("edit: () => openDriverNameDialog(false)");
-    expect(main).toContain("const decision = highwayEntryDecision(");
-    expect(main).toContain("globalThis.location?.hostname ?? \"\",");
-    expect(main).toContain("driverNameConfirmed(),");
-    expect(main).toContain("capacitorNative,");
-    expect(main).toContain("openDriverNameDialog(true, enterHighwayFromLobby)");
   });
 
   it("clears the previous account name before switching accounts", async () => {
