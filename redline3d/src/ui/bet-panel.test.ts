@@ -3,7 +3,7 @@
 // exactly the two halves of a view: it paints what it is handed, and it emits intent without touching
 // anything itself. The old tests asserted on a wallet the panel mutated — there is no such wallet now.
 import { describe, expect, it } from "vitest";
-import { createBetPanel, type BetRenderCtx } from "./bet-panel";
+import { createBetPanel, DEFAULT_STAKE, type BetRenderCtx } from "./bet-panel";
 
 const CARS = [
   { id: 0, name: "Bedrock", color: "#ffd166" },
@@ -24,6 +24,7 @@ function ctx(over: Partial<BetRenderCtx> = {}): BetRenderCtx {
     mults: pools.map((p) => (p > 0 ? (total * 0.95) / p : 0)),
     stakes: [0, 0, 0],
     wallet: 100,
+    betable: null, // no book-reported spendable → the wallet is the gate (the local sim)
     pendingCar: null,
     settle: null,
     credit: null,
@@ -140,8 +141,59 @@ describe("betPanel pending state", () => {
   });
 });
 
+describe("betPanel BET gate", () => {
+  it("gates BET on betable, not on the presence of onboarding", () => {
+    const { el, panel } = mount();
+    // A seat mid-top-up: there is money on screen (wallet counts the SOL still in the wallet and
+    // whatever is crossing back) and $1 a bet can actually spend. The clause this replaces let the
+    // mere existence of onboarding un-gate the button, which promised a bet the book would bounce.
+    const refilling = { kind: "refill" as const, step: "withdraw" as const, index: 4, of: 9, error: null, betError: null };
+    panel.render(ctx({ wallet: 100, betable: 1, onboarding: refilling }));
+    expect(betButtons(el).every((b) => b.disabled)).toBe(true);
+    // and it is the number that un-gates it, with the very same top-up still running
+    panel.render(ctx({ wallet: 100, betable: 5, onboarding: refilling }));
+    expect(betButtons(el).some((b) => b.disabled)).toBe(false);
+    panel.dispose();
+  });
+
+  it("gates on wallet when the book reports no betable", () => {
+    const { el, panel } = mount();
+    // the local sim has no seat and no staging: its wallet IS what a bet can spend
+    panel.render(ctx({ betable: null, wallet: 100 }));
+    expect(betButtons(el).some((b) => b.disabled)).toBe(false);
+    panel.render(ctx({ betable: null, wallet: 1 }));
+    expect(betButtons(el).every((b) => b.disabled)).toBe(true);
+    panel.dispose();
+  });
+
+  it("gates on the chip the player selected, not on a fixed stake", () => {
+    const { el, panel } = mount();
+    panel.render(ctx({ betable: 1, wallet: 1 }));
+    expect(betButtons(el).every((b) => b.disabled)).toBe(true); // $5 chip, $1 to spend
+    (el.querySelectorAll(".bp-chip")[0] as HTMLElement).click(); // $1
+    panel.render(ctx({ betable: 1, wallet: 1 }));
+    expect(betButtons(el).some((b) => b.disabled)).toBe(false);
+    panel.dispose();
+  });
+});
+
+describe("betPanel selected stake", () => {
+  it("exposes the selected stake", () => {
+    const { el, panel } = mount();
+    // the host stages the seat for the bet the player is ABOUT to make, so it has to be able to ask
+    expect(panel.selectedStake()).toBe(DEFAULT_STAKE);
+    expect(DEFAULT_STAKE).toBe(5);
+    (el.querySelectorAll(".bp-chip")[0] as HTMLElement).click(); // $1
+    expect(panel.selectedStake()).toBe(1);
+    (el.querySelectorAll(".bp-chip")[2] as HTMLElement).click(); // $20
+    expect(panel.selectedStake()).toBe(20);
+    panel.dispose();
+  });
+});
+
 describe("betPanel onboarding notice", () => {
   const onboardEl = (el: HTMLElement) => el.querySelector(".bp-onboard") as HTMLElement;
+  const betErrEl = (el: HTMLElement) => el.querySelector(".bp-beterr") as HTMLElement;
 
   it("says nothing at all when the book has no onboarding, or has one that is idle", () => {
     const { el, panel } = mount();
@@ -169,35 +221,74 @@ describe("betPanel onboarding notice", () => {
     panel.dispose();
   });
 
-  it("shows what stopped it, in the book's own words", () => {
+  it("shows what stopped the seat, in the book's own words", () => {
     const { el, panel } = mount();
     panel.render(ctx({
-      onboarding: { kind: "setup", step: null, index: 0, of: 5, error: "Betting just closed for this race — the next one is seconds away.", betError: null },
+      onboarding: { kind: "setup", step: null, index: 0, of: 5, error: "Your wallet needs about 0.02 SOL to open a seat.", betError: null },
     }));
     expect(onboardEl(el).className).toContain("stopped");
-    expect(onboardEl(el).textContent).toContain("Betting just closed for this race");
+    expect(onboardEl(el).textContent).toContain("Setup stopped");
+    expect(onboardEl(el).textContent).toContain("Your wallet needs about 0.02 SOL");
+    expect(betErrEl(el).style.display).toBe("none"); // nothing was sent, so nothing was refused
     panel.dispose();
   });
 
-  it("lets a wallet with no balance yet take its first bet — onboarding is what funds it", () => {
+  it("paints a top-up note for kind refill", () => {
     const { el, panel } = mount();
-    // no onboarding: the balance IS the whole story, exactly as before
-    panel.render(ctx({ wallet: 0 }));
-    expect(betButtons(el).every((b) => b.disabled)).toBe(true);
-    // with onboarding available, a zero balance must not be what stops the tap that opens the account
-    panel.render(ctx({ wallet: 0, onboarding: { kind: "setup", step: null, index: 0, of: 5, error: null, betError: null } }));
-    expect(betButtons(el).some((b) => b.disabled)).toBe(false);
+    panel.render(ctx({ onboarding: { kind: "refill", step: "undelegate", index: 3, of: 9, error: null, betError: null } }));
+    const text = onboardEl(el).textContent ?? "";
+    expect(onboardEl(el).style.display).toBe("block");
+    expect(text).toMatch(/Topping up · 3 of 9/);
+    expect(text).not.toContain("One-time setup"); // a ten-minute player is not a first-timer
+    expect(text).toContain("hand it back");       // the refill's own words for `undelegate`
+    expect(text).toContain("you can bet again next market");
+    // same rule as setup: the sequence is the progress, the clock is not ours to promise
+    expect(text).not.toMatch(/second|minute|~|\d+s\b/i);
+    panel.dispose();
+  });
 
-    const seen: Array<[number, number]> = [];
-    panel.onBet((carId, amount) => seen.push([carId, amount]));
-    betButtons(el)[1].click();
-    expect(seen).toEqual([[1, 5]]);
+  it("says a stopped top-up is a top-up, not a setup", () => {
+    const { el, panel } = mount();
+    panel.render(ctx({
+      onboarding: { kind: "refill", step: null, index: 0, of: 9, error: "Your wallet needs about 0.01 SOL for fees.", betError: null },
+    }));
+    expect(onboardEl(el).className).toContain("stopped");
+    expect(onboardEl(el).textContent).toContain("Top-up stopped");
+    expect(onboardEl(el).textContent).not.toContain("Setup stopped");
+    panel.dispose();
+  });
+
+  it("renders a bet error as its own note without hiding refill progress", () => {
+    const { el, panel } = mount();
+    panel.render(ctx({
+      onboarding: {
+        kind: "refill", step: "deposit", index: 7, of: 9, error: null,
+        betError: "Betting just closed for this race — the next market opens in about 46 seconds.",
+      },
+    }));
+    // the refill is what explains the refusal — a failed tap must never be what erases it
+    expect(onboardEl(el).style.display).toBe("block");
+    expect(onboardEl(el).textContent).toContain("Topping up · 7 of 9");
+    expect(betErrEl(el).style.display).toBe("block");
+    expect(betErrEl(el).className).toContain("stopped");
+    expect(betErrEl(el).textContent).toContain("Bet not placed");
+    expect(betErrEl(el).textContent).toContain("Betting just closed for this race");
+    panel.dispose();
+  });
+
+  it("says nothing about a bet that was never refused", () => {
+    const { el, panel } = mount();
+    panel.render(ctx());
+    expect(betErrEl(el).style.display).toBe("none");
+    panel.render(ctx({ onboarding: { kind: "refill", step: "wrap", index: 6, of: 9, error: null, betError: null } }));
+    expect(betErrEl(el).style.display).toBe("none");
     panel.dispose();
   });
 
   it("still greys every row while the bet the onboarding is for is in flight", () => {
     const { el, panel } = mount();
-    panel.render(ctx({ wallet: 0, pendingCar: 2, onboarding: { kind: "setup", step: "join", index: 1, of: 5, error: null, betError: null } }));
+    // fundable on purpose: the gate is open, so the in-flight send is the only thing greying these
+    panel.render(ctx({ wallet: 100, betable: 20, pendingCar: 2, onboarding: { kind: "setup", step: "join", index: 1, of: 5, error: null, betError: null } }));
     const btns = betButtons(el);
     expect(btns.every((b) => b.disabled)).toBe(true);
     expect(btns[2].textContent).toBe("···");           // the same amber in-flight beat as any other bet

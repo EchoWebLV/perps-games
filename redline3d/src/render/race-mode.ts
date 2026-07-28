@@ -708,6 +708,10 @@ export function createRaceGame(opts: RaceGameOptions): RaceGame {
       mults: book.multipliers(),
       stakes: book.myStakes(),
       wallet: book.wallet(),
+      // `wallet()` is the whole pile, `betable()` is the slice a bet can spend this instant — the
+      // panel gates BET on the second and prints the first. A book with no seat behind it (the local
+      // sim) reports neither, and null puts the wallet back in charge of the gate.
+      betable: book.betable?.() ?? null,
       pendingCar: book.pendingBet(),
       settle: book.lastSettle(),
       credit: book.creditNote(),

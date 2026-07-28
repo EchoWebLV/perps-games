@@ -27,12 +27,16 @@ export interface BetRenderCtx {
   total: number;                 // sum of pools
   mults: number[];               // per-car payout multiplier — live while open, frozen after the lock
   stakes: number[];              // the player's own stake per car
-  wallet: number;                // the player's spendable balance
+  wallet: number;                // the player's money as ONE number (wallet + staged + claimable)
+  /** What a single bet can spend RIGHT NOW — ≤ `wallet`, the difference being money that still has a
+   *  refill to cross before it can back a bet. This, not `wallet`, is what gates BET. Null when the
+   *  book has no such number to report (the local sim), and then `wallet` is the gate. */
+  betable: number | null;
   pendingCar: number | null;     // a bet in flight on this car (the ER is fast, not instant)
   settle: BookSettle | null;     // the settled result, painted in the FINISH card
   credit: string | null;         // non-bet winnings line (owner podium), painted alongside it
-  // The one-time account opening behind a first bet, or null when the book has none. Non-null is ALSO
-  // what says a bet can be funded past the balance on screen — see the BET-button gate in render().
+  // The seat work running behind the scenes — a one-time build, or a top-up after the balance ran
+  // short — plus anything a bet send came back with. Progress, never a flow the player drives.
   onboarding: BookOnboarding | null;
   claim: BookClaim | null;       // an older ticket still holding money, and what is left of its window
 }
@@ -44,6 +48,9 @@ export interface BetPanel {
   /** Fires on a BET tap with the tapped car and the selected chip stake. INTENT only — nothing on
    *  screen moves until the book comes back with new pools through render(). */
   onBet(fn: (carId: number, amount: number) => void): void;
+  /** The stake chip currently selected — the host feeds it to the book's ensureFunded so the
+   *  seat is staged for the bet the player is ABOUT to make, not the one they last made. */
+  selectedStake(): number;
   onSkip(fn: () => void): void;
   onRaceAgain(fn: () => void): void;
   dispose(): void;
@@ -51,47 +58,64 @@ export interface BetPanel {
 
 const STAKES = [1, 5, 20];
 
+/** The chip a fresh panel comes up on. Exported because the host has to stage a seat for a stake
+ *  before the player has touched a chip, and a second hardcoded 5 out there would be free to drift
+ *  from this one. Must be a member of STAKES, or nothing renders as selected. */
+export const DEFAULT_STAKE = 5;
+
 /** How few races have to be left on a ticket's claim window before the notice reads as a warning
  *  rather than as a fact. Emphasis only — nothing is capped, blocked or expired by this number; the
  *  ring in the program is what decides that, and `claim.expired` is what reports it. */
 const CLAIM_WARN_RACES = 8;
 
 /** What each staging step is DOING, in the player's terms. The controller's vocabulary is the
- *  program's (join / wrap / deposit / delegate / confirm for a build, claim / exit / undelegate /
- *  withdraw / unwrap for the way back out); this is the same sequence said out loud. No step names a
- *  duration — the sequence is the progress, the clock is not ours to promise. `ready` and `done` are
- *  transitions the book collapses to a stepless beat, so they are never rendered; they are here only
- *  because the map has to cover the type. */
-const ONBOARD_LABEL: Record<NonNullable<BookOnboarding["step"]>, string> = {
+ *  program's (join / wrap / deposit / delegate / confirm on the way in, claim / exit / undelegate /
+ *  withdraw / unwrap on the way back out); this is the same sequence said out loud. One map covers
+ *  both kinds — a step means the same thing whether it is running for a first seat or a top-up. No
+ *  step names a duration — the sequence is the progress, the clock is not ours to promise. `ready`
+ *  and `done` are transitions the book collapses to a stepless beat, so they are never rendered. */
+const STEP_LABEL: Record<string, string> = {
   join: "Opening your account at the book",
   wrap: "Wrapping SOL to stake",
-  deposit: "Funding your book balance",
+  deposit: "Staking your seat",
   delegate: "Delegating your seat to the rollup",
   confirm: "Waiting for the rollup to take your seat",
   ready: "Seat ready",
   claim: "Collecting your last win",
-  exit: "Closing your seat at the rollup",
-  undelegate: "Waiting for your seat to come home",
-  withdraw: "Moving your balance back to your wallet",
-  unwrap: "Unwrapping back to SOL",
-  done: "Done",
+  exit: "Freeing your seat to top it up",
+  undelegate: "Waiting for the rollup to hand it back",
+  withdraw: "Gathering your balance",
+  unwrap: "Unwrapping to SOL",
+  done: "Seat freed",
 };
 
 /** A one-block notice: an uppercase head and a line of plain text under it, or null for "say
- *  nothing". Both notices the panel paints are this shape, so one renderer covers them. */
+ *  nothing". Every notice the panel paints is this shape, so one renderer covers them all. */
 interface Note { cls: string; head: string; body: string }
 
-/** The first-bet path, as a line the player can read. Idle and silent onboarding paint nothing —
- *  a book that CAN onboard but is not is not news. */
+/** The seat work behind the scenes, as a line the player can read: a one-time build the first time,
+ *  a top-up when the balance ran short. Idle and silent staging paints nothing — a book that COULD
+ *  be staging but is not is not news. */
 function onboardNote(o: BookOnboarding | null): Note | null {
   if (!o) return null;
-  if (o.error) return { cls: "stopped", head: "Setup stopped", body: o.error };
+  if (o.error) {
+    const head = o.kind === "refill" ? "Top-up stopped" : "Setup stopped";
+    return { cls: "stopped", head, body: o.error };
+  }
   if (!o.step) return null;
-  return {
-    cls: "",
-    head: `One-time setup · ${o.index} of ${o.of}`,
-    body: `${ONBOARD_LABEL[o.step]} — later bets skip all of this.`,
-  };
+  const head = o.kind === "refill" ? `Topping up · ${o.index} of ${o.of}` : `One-time setup · ${o.index} of ${o.of}`;
+  const body = o.kind === "refill"
+    ? `${STEP_LABEL[o.step] ?? o.step} — you can bet again next market.`
+    : `${STEP_LABEL[o.step] ?? o.step} — later bets skip all of this.`;
+  return { cls: "", head, body };
+}
+
+/** A failed bet send, as its own note beside (never instead of) staging progress. The two have
+ *  different causes and different lifetimes: a tap refused BECAUSE a top-up was mid-flight must not
+ *  be what erases the top-up explaining it. */
+function betNote(o: BookOnboarding | null): Note | null {
+  if (!o?.betError) return null;
+  return { cls: "stopped", head: "Bet not placed", body: o.betError };
 }
 
 /** An older ticket, and whether its result is still on the chain to be paid from. */
@@ -147,8 +171,9 @@ const CSS = `
 .bp-slipline{font-size:11px;color:#c9d6ff;display:flex;justify-content:space-between;}
 .bp-slipline em{color:#41d67f;font-style:normal;font-weight:700;}
 .bp-empty{font-size:11px;color:#6b74a6;}
-/* notices: the one-time setup running behind a first bet, and an older ticket's claim window. Same
-   block twice, recoloured by the modifier class — amber = working / closing, red = stopped / gone. */
+/* notices: the seat work running behind the scenes, a bet the book refused, and an older ticket's
+   claim window. One block three times, recoloured by class — amber = working / closing, red =
+   stopped / refused / gone. */
 .bp-note{margin-top:10px;border-radius:8px;padding:7px 9px;border:1px solid rgba(255,255,255,.08);background:rgba(255,255,255,.03);}
 .bp-note b{display:block;font-size:10px;font-weight:700;letter-spacing:.07em;text-transform:uppercase;margin-bottom:2px;}
 .bp-note span{display:block;font-size:11px;line-height:1.42;color:#8b95c9;}
@@ -156,6 +181,8 @@ const CSS = `
 .bp-onboard b{color:#ffd166;}
 .bp-onboard.stopped{border-color:rgba(255,107,139,.55);background:rgba(255,107,139,.1);}
 .bp-onboard.stopped b{color:#ff6b8b;}
+.bp-beterr{border-color:rgba(255,107,139,.55);background:rgba(255,107,139,.1);}
+.bp-beterr b{color:#ff6b8b;}
 .bp-claim{border-color:rgba(65,214,127,.45);background:rgba(65,214,127,.08);}
 .bp-claim b{color:#41d67f;}
 .bp-claim.warn{border-color:rgba(255,209,102,.55);background:rgba(255,209,102,.1);}
@@ -211,6 +238,8 @@ body.toon-ui .bp-onboard{background:#4a3a12;}
 body.toon-ui .bp-onboard b{color:#ffd166;}
 body.toon-ui .bp-onboard.stopped{background:#4a1a29;}
 body.toon-ui .bp-onboard.stopped b{color:#ff8fa3;}
+body.toon-ui .bp-beterr{background:#4a1a29;}
+body.toon-ui .bp-beterr b{color:#ff8fa3;}
 body.toon-ui .bp-claim{background:#16402a;}
 body.toon-ui .bp-claim b{color:#3ff08a;}
 body.toon-ui .bp-claim.warn{background:#4a3a12;}
@@ -253,6 +282,7 @@ export function createBetPanel(parent: HTMLElement = document.body): BetPanel {
       <div class="bp-stakes"></div>
       <div class="bp-slip"></div>
       <div class="bp-note bp-onboard" style="display:none"><b></b><span></span></div>
+      <div class="bp-note bp-beterr" style="display:none"><b></b><span></span></div>
       <div class="bp-note bp-claim" style="display:none"><b></b><span></span></div>
       <div class="bp-foot">
         <span class="bp-wallet">Wallet <span>$100.00</span></span>
@@ -278,6 +308,7 @@ export function createBetPanel(parent: HTMLElement = document.body): BetPanel {
   const stakesEl = root.querySelector(".bp-stakes") as HTMLElement;
   const slipEl = root.querySelector(".bp-slip") as HTMLElement;
   const onboardEl = root.querySelector(".bp-onboard") as HTMLElement;
+  const betErrEl = root.querySelector(".bp-beterr") as HTMLElement;
   const claimEl = root.querySelector(".bp-claim") as HTMLElement;
   const walletEl = root.querySelector(".bp-wallet span") as HTMLElement;
   const skipEl = root.querySelector(".bp-skip") as HTMLElement;
@@ -293,7 +324,7 @@ export function createBetPanel(parent: HTMLElement = document.body): BetPanel {
   // ---- view state ONLY: the roster, which chip is selected, and where to send a bet. Everything
   // else on screen arrives per-frame in the render ctx and is never cached here. ----
   let cars: BetCar[] = [];
-  let selStake = 5;
+  let selStake = DEFAULT_STAKE;
   let betFn: ((carId: number, amount: number) => void) | null = null;
 
   // per-car row element refs
@@ -339,8 +370,8 @@ export function createBetPanel(parent: HTMLElement = document.body): BetPanel {
           <button class="bp-bet" type="button">BET</button>`;
         rowsEl.appendChild(row);
         const bet = row.querySelector(".bp-bet") as HTMLButtonElement;
-        // `disabled` is the only gate: render() sets it from the wallet, the phase and any in-flight
-        // bet, so the affordance and the guard are the same fact. jsdom + keyboard Enter still reach
+        // `disabled` is the only gate: render() sets it from what a bet can spend, the phase and any
+        // in-flight bet, so the affordance and the guard are the same fact. jsdom + keyboard Enter still reach
         // this handler on a disabled button, hence the explicit check rather than trusting the browser.
         onTap(bet, () => { if (!bet.disabled) betFn?.(c.id, selStake); });
         rows.push({
@@ -362,10 +393,12 @@ export function createBetPanel(parent: HTMLElement = document.body): BetPanel {
       // the whole point of a pari-mutuel market and why both are printed off one figure.
       const T = ctx.total || 1;
       const pending = ctx.pendingCar !== null;
-      // The balance on screen is the whole story ONLY when the book cannot fund past it. Where there
-      // is onboarding, the first bet is the thing that OPENS the account that balance comes from — so
-      // a zero balance must not be what stops the tap that would create it.
-      const canFund = ctx.wallet >= selStake || ctx.onboarding !== null;
+      // What one bet can spend right now decides the button — never the wallet figure beside it, and
+      // never the mere fact that staging is running. A 15s market will not wait for a seat to be
+      // built, so a tap that cannot be funded has to be a disabled button with an honest line under
+      // it (the note says what is crossing), not a promise the book would go on to refuse.
+      const betable = ctx.betable ?? ctx.wallet;
+      const canFund = betable >= selStake;
 
       if (showPanel) {
         timerEl.textContent = `OPEN ${Math.max(0, Math.ceil(ctx.marketRemaining))}s`;
@@ -402,9 +435,12 @@ export function createBetPanel(parent: HTMLElement = document.body): BetPanel {
           });
         }
 
-        // Below the slip: what the book is doing behind a first bet, and anything an older ticket is
-        // still owed. Either can be absent; both are the book's facts, never the panel's.
+        // Below the slip: what the book is doing behind the scenes, what it said about the last bet
+        // sent, and anything an older ticket is still owed. Three independent facts, so three
+        // independent notes — any of them can be absent, and none of them can hide another. All are
+        // the book's facts, never the panel's.
         paintNote(onboardEl, "bp-onboard", onboardNote(ctx.onboarding));
+        paintNote(betErrEl, "bp-beterr", betNote(ctx.onboarding));
         paintNote(claimEl, "bp-claim", claimNote(ctx.claim));
       }
 
@@ -435,6 +471,7 @@ export function createBetPanel(parent: HTMLElement = document.body): BetPanel {
       }
     },
     onBet(fn) { betFn = fn; },
+    selectedStake: () => selStake,
     onSkip(fn) { onTap(skipEl, () => fn()); },
     onRaceAgain(fn) { onTap(againBtn, () => fn()); },
     dispose() { root.remove(); },
