@@ -538,6 +538,12 @@ export function createRaceGame(opts: RaceGameOptions): RaceGame {
     // module telling it when to look. The local book no-ops the moment its odds freeze, so polling it
     // outside MARKET costs nothing and changes nothing.
     book.poll(dt);
+    // Keep the seat staged for the stake the player has SELECTED — the governing rule is "never start
+    // a slow chain operation on a BET tap; start it the moment you know it will be needed", and the
+    // selected chip is that moment. The call is cheap every frame (the controller throttles itself);
+    // the consequence — at most once per retry gap — can be a multi-race-cycle refill round trip,
+    // which is exactly the point: it happens in the background, ahead of the tap that would wait.
+    book.ensureFunded?.(betPanel.selectedStake());
     const bp = book.phase();
     if (bp !== null) chainDriven = true;
     if (chainDriven) { stepChain(dt, bp); return; }

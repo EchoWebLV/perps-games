@@ -3,6 +3,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import * as THREE from "three";
 import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader.js";
 import { createRaceGame, DEFAULT_GRID } from "./race-mode";
+import { localBookSource } from "./race-book-source";
+import { DEFAULT_STAKE } from "../ui/bet-panel";
 
 // The repo ships no jsdom canvas (see minimap.test.ts): getContext("2d") returns null, but the race
 // sim builds cel-ramp + tail/shadow canvas textures at construction. Hand a Proxy that no-ops every
@@ -160,6 +162,38 @@ describe("createRaceGame", () => {
 
     expect(mapDisposed).toHaveBeenCalled();      // GLB-owned texture freed → no per-race texture leak
     expect(rampDisposed).not.toHaveBeenCalled(); // gradientMap (shared cel ramp) left intact
+  });
+
+  it("keeps a staged book funded for the stake the player has SELECTED, every frame", () => {
+    // The governing rule of the chain book: never start a slow chain operation on a BET tap — start it
+    // the moment you know it will be needed. The selected chip IS that moment, so the frame loop tells
+    // the book which stake to stand ready for; the book's controller throttles the actual work.
+    const book = localBookSource();
+    const ensureFunded = vi.fn();
+    book.ensureFunded = ensureFunded;
+    const hudParent = document.createElement("div");
+    const game = makeGame({ book, hudParent });
+
+    game.update(1 / 30);
+    expect(ensureFunded).toHaveBeenCalledWith(DEFAULT_STAKE); // staged before a chip is ever touched
+
+    (hudParent.querySelectorAll(".bp-chip")[0] as HTMLElement).click(); // the player picks $1
+    ensureFunded.mockClear();
+    game.update(1 / 30);
+    expect(ensureFunded).toHaveBeenCalledWith(1);                      // the seat follows the chip
+
+    game.dispose();
+  });
+
+  it("a book with no ensureFunded (the local sim's shape) runs the whole race untouched", () => {
+    const book = localBookSource();
+    expect(book.ensureFunded).toBeUndefined(); // the sim has no seat to stage — the optional call no-ops
+    const game = makeGame({ book });
+    expect(() => {
+      for (let t = 0; t < 300 && game.phase() !== "FINISH"; t += 1 / 30) game.update(1 / 30);
+    }).not.toThrow();
+    expect(game.phase()).toBe("FINISH");
+    game.dispose();
   });
 
   it("provideSceneLighting mounts a hemi/key/rim rig and saves+restores the global scene fog/env", () => {
