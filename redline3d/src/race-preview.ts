@@ -19,6 +19,7 @@ import { pNum, pColor } from "./config/visual-presets";
 import { createRaceGame, DEFAULT_GRID, type RaceGame } from "./render/race-mode";
 import { createChainBookSource, type RaceBookSource } from "./render/race-book-source";
 import { createPaddockBook } from "./chain/paddock";
+import { createPaddockStaging } from "./chain/paddock-staging";
 import { createDevKeypairPort } from "./chain/dev-keypair-port";
 import { portToAnchorWallet } from "./chain/anchor-wallet";
 import { CHAIN } from "./chain/config";
@@ -33,22 +34,20 @@ import { CHAIN } from "./chain/config";
 // no SOL at all: an AnchorProvider just needs SOME pubkey to build against.
 //
 // ?bet=1 adds the WRITE path on top, and is OFF by default because it is the half that costs money.
-// It wires `ChainBookOptions.onboard` to the client's `ensureBettor`, which turns the panel's BET
-// button into the real first-bet tap: join → wrap → deposit → delegate_bettor on L1, then the bet
-// into the ER. Without it the book stays exactly the read-only bench it has always been — which is
-// the right default, because offering a bet to an unfunded keypair is offering a bet that cannot land.
+// It wires `ChainBookOptions.staging` to a real `createPaddockStaging`, which builds the seat AHEAD
+// of any tap (join → wrap → deposit → delegate_bettor on L1) and silently refills it when it runs
+// short, so the BET button is a single ER send. Without it the book stays exactly the read-only bench
+// it has always been — the right default, because offering a bet to an unfunded keypair is offering
+// a bet that cannot land.
 const params = new URLSearchParams(location.search);
 const chainMode = params.get("chain") === "1";
 const betMode = chainMode && params.get("bet") === "1";
 
-/** What the harness deposits behind a first bet, in wSOL base units (8e7 lamports = 0.08 SOL, which
- *  the game's stake-currency convention prints as $8.00).
- *
- *  `ChainBookOptions.onboard` hands through the BET's own amount and deliberately no more — sizing a
- *  first deposit is the host's call, not the book's. It has to be BIGGER than one bet, and not by
- *  accident: `ensureBettor` refuses to top a bettor up once it is delegated (the L1 `deposit` write
- *  is rejected while the delegation program owns the account), so whatever goes in on the first bet
- *  is the whole bankroll until a cash-out. `?deposit=<SOL>` overrides it for a cheaper/richer run. */
+/** The STAKE the harness stages against on entry, in base units (8e7 lamports = 0.08 SOL, which the
+ *  game's stake-currency convention prints as $8.00). It is `ensure()`'s argument, not a deposit
+ *  size: the controller targets `STAKE_BUFFER_BETS` × this, capped by what the wallet can actually
+ *  reach, so the seat holds several bets' worth and the heavy refill round trip stays rare.
+ *  `?deposit=<SOL>` overrides it for a cheaper/richer run. */
 const DEV_DEPOSIT_LAMPORTS = (() => {
   const sol = Number(params.get("deposit"));
   return Number.isFinite(sol) && sol > 0 ? BigInt(Math.round(sol * 1e9)) : 80_000_000n;
@@ -176,17 +175,19 @@ function chainBanner(text: string, ok: boolean): HTMLElement {
 async function makeChainBook(): Promise<RaceBookSource> {
   const wallet = portToAnchorWallet(createDevKeypairPort());
   const client = createPaddockBook({ wallet, mint: CHAIN.PADDOCK_BOOK_MINT });
+  // Absent in read-only mode, which is what makes `onboarding()` null and the BET button gate purely
+  // on the balance on screen.
+  const staging = betMode ? createPaddockStaging({ client }) : undefined;
   const book = await createChainBookSource(client, {
     onError: (where, e) => console.warn("[race-preview] chain book", where, e),
-    // The first bet and the account it needs are the same tap — see ChainBookOptions.onboard. Absent
-    // in read-only mode, which is what makes `onboarding()` null and the BET button gate purely on
-    // the balance on screen.
-    onboard: betMode
-      ? (amount, onStep) => client.ensureBettor(amount > DEV_DEPOSIT_LAMPORTS ? amount : DEV_DEPOSIT_LAMPORTS, onStep)
-      : undefined,
+    staging,
   });
+  // Stage on ENTRY, never on the tap: the seat is built while the harness boots, so by the time a
+  // market is open the BET button is one ER send. Fire-and-forget — the controller throttles itself
+  // and reports progress through `book.onboarding()`.
+  staging?.ensure(DEV_DEPOSIT_LAMPORTS);
   chainBanner(
-    `CHAIN MODE · devnet\nprogram ${CHAIN.PADDOCK_PROGRAM_ID.toBase58()}\nmint    ${CHAIN.PADDOCK_BOOK_MINT.toBase58()}\nrace    ${client.pdas.race.toBase58()}\nER      ${CHAIN.ER_RPC}\nwallet  ${client.address} ${betMode ? `(BETTING — deposits ${Number(DEV_DEPOSIT_LAMPORTS) / 1e9} SOL on the first bet)` : "(read-only — no bettor joined)"}`,
+    `CHAIN MODE · devnet\nprogram ${CHAIN.PADDOCK_PROGRAM_ID.toBase58()}\nmint    ${CHAIN.PADDOCK_BOOK_MINT.toBase58()}\nrace    ${client.pdas.race.toBase58()}\nER      ${CHAIN.ER_RPC}\nwallet  ${client.address} ${betMode ? `(BETTING — stages a seat against ${Number(DEV_DEPOSIT_LAMPORTS) / 1e9} SOL bets)` : "(read-only — no bettor joined)"}`,
     true,
   );
   // DEV: the client itself. The panel has no claim button — the program settles a winning ticket on

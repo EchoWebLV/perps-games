@@ -11,8 +11,9 @@ import { describe, expect, it, vi } from "vitest";
 // through vite-plugin-node-polyfills, which stubs it.
 import paddockStateRs from "../../../onchain/raider/programs/paddock/src/state.rs?raw";
 import paddockLibRs from "../../../onchain/raider/programs/paddock/src/lib.rs?raw";
-import { chainBookSource, createChainBookSource, CHAIN_PHASE_SECS, ONBOARD_STEPS, type PaddockBookReader } from "./race-book-source";
-import { GRID, HISTORY_LEN, PHASE_MARKET, PHASE_RACING, PHASE_SETTLED, payoutOf, settlePool, TICKET_NO_RACE, type BettorSnap, type OnboardStep, type RaceResultSnap, type RaceSnap } from "../chain/paddock";
+import { chainBookSource, createChainBookSource, CHAIN_PHASE_SECS, ONBOARD_STEPS, REFILL_STEPS, type PaddockBookReader } from "./race-book-source";
+import { GRID, HISTORY_LEN, PHASE_MARKET, PHASE_RACING, PHASE_SETTLED, payoutOf, settlePool, TICKET_NO_RACE, type BettorSnap, type RaceResultSnap, type RaceSnap } from "../chain/paddock";
+import type { StageStatus } from "../chain/paddock-staging";
 
 // 1 display unit = 1e7 lamports (stake-currency: 9 decimals, 2 display decimals) — so 100 units is
 // 1 wSOL, and the panel's $1/$5/$20 chips are 0.01/0.05/0.20 SOL bets.
@@ -58,8 +59,25 @@ function stakesOn(slot: number, amount: bigint): bigint[] {
   return s;
 }
 
-/** Let a fire-and-forget bet path (onboarding → send → refresh) run to completion. */
+/** Let a fire-and-forget bet path (send → refresh) run to completion. */
 const settleAsync = async () => { for (let i = 0; i < 12; i++) await new Promise((r) => setTimeout(r, 0)); };
+
+/** A `PaddockStaging` that runs nothing. `status()` hands back the SAME object every call, so a test
+ *  can drive the book's view by mutating it — which is also how the real controller behaves (the book
+ *  re-reads status every frame rather than latching it). `ensure` is a spy because the one thing this
+ *  module owes the controller is a trigger carrying the freshly-observed balance. */
+const fakeStaging = (over: Partial<StageStatus> = {}) => {
+  const status: StageStatus = { state: "idle", step: null, error: null, ...over };
+  return {
+    status: () => status,
+    set: (next: Partial<StageStatus>) => { Object.assign(status, next); },
+    betableBase: () => 0n,
+    walletSolBase: () => 0n,
+    ensure: vi.fn(),
+    ensureNow: vi.fn(async () => {}),
+    dispose: () => {},
+  };
+};
 
 function fakeClient(state: { race: RaceSnap | null; bettor: BettorSnap | null }) {
   const placed: Array<{ slot: number; amount: bigint }> = [];
@@ -310,100 +328,151 @@ describe("chainBookSource", () => {
     expect(book.onboarding!()).toBeNull();
   });
 
-  it("runs the one-time onboarding before the first bet, reporting each step's place in the sequence", async () => {
+  it("placeBet sends exactly one ER transaction and nothing else", async () => {
+    // The market is 15 seconds long and will not wait for a seat to be built, so a TAP never stages:
+    // whatever the button was about to cost was staged before it was pressed. A tap that cannot be
+    // funded is a disabled button with an honest line, not a slow flow the player sits through.
     const state = { race: raceSnap(), bettor: null };
     const { client, placed } = fakeClient(state);
-    const trace: string[] = [];
-    const amounts: bigint[] = [];
-    // The steps a FIRST-TIME wSOL wallet actually runs. `ensureBettor` emits only what it runs, which
-    // is the whole reason `index` is a position in the fixed sequence and not a count of steps taken.
-    const steps: OnboardStep[] = ["join", "wrap", "deposit", "delegate", "confirm", "ready"];
-    const book = chainBookSource(client, {
-      onboard: async (amount, onStep) => {
-        amounts.push(amount);
-        for (const s of steps) {
-          onStep(s);
-          const o = book.onboarding!()!;
-          trace.push(`${o.step}:${o.index}/${o.of}`);
-          await Promise.resolve();
-        }
-      },
-    });
+    const staging = fakeStaging();
+    const book = chainBookSource(client, { staging });
     await book.refresh();
-    expect(book.onboarding!()).toEqual({ step: null, index: 0, of: ONBOARD_STEPS.length, error: null });
+    expect(book.onboarding!()).toBeNull();          // idle staging with nothing wrong is not news
 
-    book.placeBet(2, 5);                 // car 2 is standing in SLOT 1
-    expect(book.pendingBet()).toBe(2);   // the panel's amber "···" holds for the WHOLE sequence
+    book.placeBet(2, 5);                            // car 2 is standing in SLOT 1
+    expect(book.pendingBet()).toBe(2);
     await settleAsync();
 
-    expect(trace).toEqual(["join:1/5", "wrap:2/5", "deposit:3/5", "delegate:4/5", "confirm:5/5", "ready:5/5"]);
-    expect(amounts).toEqual([5n * UNIT]); // the bet's own amount, in base units — the book invents no deposit size
-    expect(placed).toEqual([{ slot: 1, amount: 5n * UNIT }]); // and only THEN does the bet go out
+    expect(placed).toEqual([{ slot: 1, amount: 5n * UNIT }]); // ONE send, in base units, on the slot
+    expect(staging.ensure).not.toHaveBeenCalled();  // the tap stages nothing…
+    expect(staging.ensureNow).not.toHaveBeenCalled();
     expect(book.pendingBet()).toBeNull();
-    expect(book.onboarding!()).toEqual({ step: null, index: 0, of: ONBOARD_STEPS.length, error: null });
+    expect(book.onboarding!()).toBeNull();          // …and has nothing to report afterwards
   });
 
-  it("a returning wallet skips to the end of the sequence rather than counting from one", async () => {
-    // `ensureBettor` returns `ready` immediately when the Bettor/Ticket pair is already delegated.
-    // The counter jumping to the end is the honest report of that: no step was needed.
-    const state = { race: raceSnap(), bettor: null };
-    const { client } = fakeClient(state);
-    const book = chainBookSource(client, { onboard: async (_a, onStep) => { onStep("ready"); } });
+  it("betable counts a past ticket's claimable win", async () => {
+    // `place_bet` auto-settles a past ticket BEFORE its balance check (proven live, 2026-07-28: $3
+    // balance + $4.75 claimable funded a $5 bet). A book that gated on `balance` alone would grey the
+    // button over money the program would have paid the bet with.
+    const multFp = 9_500_000n;                                 // 9.5x, as settle_pool would price it
+    const state = {
+      race: raceSnap({ seq: 18n, history: ring([{ seq: 17n, winner: 0, multFp }]) }),
+      bettor: { balance: 0n, stakes: stakesOn(0, 4n * UNIT), raceSeq: 17n } as BettorSnap,
+    };
+    const book = chainBookSource(fakeClient(state).client, { staging: fakeStaging() });
     await book.refresh();
-    book.placeBet(2, 5);
-    await settleAsync();
-    expect(book.onboarding!()).toEqual({ step: null, index: 0, of: 5, error: null }); // cleared once the bet landed
+
+    const owed = Number(payoutOf(4n * UNIT, multFp)) / 1e7;    // 4 units on the winner at 9.5x = 38
+    expect(owed).toBeCloseTo(38, 9);
+    expect(book.betable!()).toBeCloseTo(owed, 9);              // balance 0 + claimable 38
+    expect(book.wallet()).toBeCloseTo(owed, 9);                // one number: + L1 SOL, 0 in this fake
+    expect(book.claimWindow!()!.amount).toBeCloseTo(owed, 9);  // and the same money the claim line names
   });
 
-  it("keeps what stopped the first-bet path on screen, in the client's own words", async () => {
+  it("ensureFunded triggers staging.ensure with the stake in base units and the observed betable", async () => {
+    const multFp = 9_500_000n;
+    const state = {
+      race: raceSnap({ seq: 18n, history: ring([{ seq: 17n, winner: 0, multFp }]) }),
+      bettor: { balance: 3n * UNIT, stakes: stakesOn(0, 4n * UNIT), raceSeq: 17n } as BettorSnap,
+    };
+    const staging = fakeStaging();
+    const book = chainBookSource(fakeClient(state).client, { staging });
+
+    // Before the first snapshot there is nothing observed to pass — and 0n would read as a DRAINED
+    // seat rather than as "not read yet", which is a different instruction to the controller.
+    book.ensureFunded!(5);
+    expect(staging.ensure).toHaveBeenCalledWith(5n * UNIT, undefined);
+
+    await book.refresh();
+    book.ensureFunded!(5);
+    // The controller's own cache only moves when a staging RUN executes, so the freshly-read balance
+    // has to travel with every trigger; without it a drained seat short-circuits "ready" forever and
+    // the silent mid-session refill never fires.
+    expect(staging.ensure).toHaveBeenLastCalledWith(5n * UNIT, 3n * UNIT + payoutOf(4n * UNIT, multFp));
+  });
+
+  it("onboarding view maps staging status", async () => {
+    const state = { race: raceSnap(), bettor: null };
+    const staging = fakeStaging();
+    const book = chainBookSource(fakeClient(state).client, { staging });
+    await book.refresh();
+
+    expect(book.onboarding!()).toBeNull();                     // idle and quiet: nothing to explain
+
+    staging.set({ state: "staging", step: "deposit" });
+    expect(book.onboarding!()).toEqual({ kind: "setup", step: "deposit", index: 3, of: 5, error: null });
+
+    staging.set({ state: "refilling", step: "exit" });
+    expect(book.onboarding!()).toEqual({ kind: "refill", step: "exit", index: 2, of: 9, error: null });
+
+    // `done` / `ready` are transitions, not work: collapsed to a stepless beat rather than letting
+    // indexOf(-1) yank the bar back to the start of the sequence.
+    staging.set({ state: "refilling", step: "done" });
+    expect(book.onboarding!()).toEqual({ kind: "refill", step: null, index: 0, of: 9, error: null });
+    staging.set({ state: "staging", step: "ready" });
+    expect(book.onboarding!()).toEqual({ kind: "setup", step: null, index: 0, of: 5, error: null });
+
+    staging.set({ state: "ready", step: null });
+    expect(book.onboarding!()).toBeNull();                     // a built seat says nothing at all
+
+    // the one state the player has to act on survives idle, because it is not progress — it is news
+    staging.set({ state: "error", step: null, error: "Your wallet needs SOL first — open the wallet panel and send SOL to your address." });
+    expect(book.onboarding!()).toEqual({ kind: "setup", step: null, index: 0, of: 5, error: expect.stringContaining("needs SOL") });
+  });
+
+  it("keeps what stopped a bet on screen, in the client's own words, until the next market", async () => {
     const state = { race: raceSnap(), bettor: null };
     const { client, placed } = fakeClient(state);
     const warned: string[] = [];
-    let onboardingWorks = false;
-    const book = chainBookSource(client, {
-      onError: (w) => warned.push(w),
-      onboard: async (_a, onStep) => {
-        onStep("delegate");
-        if (!onboardingWorks) throw new Error("delegate_bettor: Bettor/Ticket did not reach owner in time");
-        onStep("ready");
-      },
-    });
+    const staging = fakeStaging();
+    const book = chainBookSource(client, { onError: (w) => warned.push(w), staging });
     await book.refresh();
-    book.placeBet(2, 5);
-    await settleAsync();
-    expect(placed).toEqual([]);                       // the bet never went out
-    expect(book.pendingBet()).toBeNull();             // and the button is free again, not stuck
-    expect(warned).toEqual(["placeBet"]);
-    expect(book.onboarding!()!.error).toContain("did not reach owner");
 
-    // the SEND failing after a clean onboarding lands on the same line — the send is what it was for
-    onboardingWorks = true;
-    client.placeBet = async () => { throw new Error("Betting just closed for this race — the next one is seconds away."); };
+    const fail = async () => { throw new Error("Betting just closed for this race — the next one is seconds away."); };
+    client.placeBet = fail;
     book.placeBet(2, 5);
     await settleAsync();
+    expect(placed).toEqual([]);                                // the send threw; nothing landed
+    expect(book.pendingBet()).toBeNull();                      // the button is free again, not stuck
+    expect(warned).toEqual(["placeBet"]);
     expect(book.onboarding!()!.error).toContain("Betting just closed");
 
-    // …and the next market clears it, since the chain opens one every MARKET_SECS
-    book.openMarket({ seed: 1, strengths: [], rng: () => 0 });
-    expect(book.onboarding!()!.error).toBeNull();
-  });
+    // a retry supersedes it: the line on screen is about the LAST attempt, never a stale one
+    client.placeBet = async (slot, amount) => { placed.push({ slot, amount: BigInt(amount.toString()) }); };
+    book.placeBet(2, 5);
+    expect(book.onboarding!()).toBeNull();                     // cleared the moment the new send goes out
+    await settleAsync();
+    expect(placed).toEqual([{ slot: 1, amount: 5n * UNIT }]);
+    expect(book.onboarding!()).toBeNull();
 
-  it("never blanks an onboarding that is still running when the chain rolls the market", async () => {
-    const state = { race: raceSnap(), bettor: null };
-    const { client } = fakeClient(state);
-    let held: (() => void) | null = null;
-    const book = chainBookSource(client, {
-      onboard: (_a, onStep) => new Promise<void>((res) => { onStep("confirm"); held = res; }),
-    });
-    await book.refresh();
+    client.placeBet = fail;
     book.placeBet(2, 5);
     await settleAsync();
-    expect(book.onboarding!()!.step).toBe("confirm");
-    // the ~25×1s owner poll outlives a 15s market: the chain rolls into the next one mid-onboarding
+
+    // a refill running underneath keeps its OWN progress — the bet's message rides alongside it
+    staging.set({ state: "refilling", step: "withdraw" });
+    expect(book.onboarding!()).toEqual({ kind: "refill", step: "withdraw", index: 4, of: 9, error: expect.stringContaining("Betting just closed") });
+
+    // …and the next market clears the bet's message, since the chain opens one every MARKET_SECS.
+    // The staging behind it is untouched: it is read live every frame, never latched by this book,
+    // so a rebuild that outlives a 15s market can never be blanked by the roll.
     book.openMarket({ seed: 1, strengths: [], rng: () => 0 });
-    expect(book.onboarding!()!.step).toBe("confirm"); // still running → still on screen
-    held!();
-    await settleAsync();
+    expect(book.onboarding!()).toEqual({ kind: "refill", step: "withdraw", index: 4, of: 9, error: null });
+  });
+
+  it("REFILL_STEPS is the whole way out and then back in, in cashOut + ensureBettor's own order", () => {
+    // Cross-source guard, the ONBOARD_STEPS idiom: a refill runs cashOut end to end and then re-stages
+    // from the wallet, so the bar has to be able to name every step of BOTH halves.
+    expect(REFILL_STEPS).toEqual(["claim", "exit", "undelegate", "withdraw", "unwrap", "wrap", "deposit", "delegate", "confirm"]);
+    // The steps that are program instructions have to keep existing under those names. `undelegate`
+    // (the L1 owner poll), `unwrap`/`wrap` (native wSOL) and `confirm` are client-side, as in ONBOARD_STEPS.
+    for (const [step, fn] of [["claim", "claim"], ["exit", "exit_bettor"], ["withdraw", "withdraw"], ["deposit", "deposit"], ["delegate", "delegate_bettor"]] as const) {
+      expect(REFILL_STEPS).toContain(step);
+      expect(paddockLibRs).toContain(`pub fn ${fn}(`);
+    }
+    expect(REFILL_STEPS).not.toContain("done");   // a transition out of the work, not a piece of it
+    expect(REFILL_STEPS).not.toContain("join");   // the seat already exists — a refill only re-funds it
+    for (const s of ONBOARD_STEPS) if (s !== "join") expect(REFILL_STEPS).toContain(s);
   });
 
   it("ONBOARD_STEPS names steps the program (or the wSOL path) actually has", () => {

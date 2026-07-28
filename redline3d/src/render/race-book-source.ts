@@ -28,6 +28,7 @@ import {
   findResult, payoutOf, settlePool, settleTicket,
   type BettorSnap, type OnboardStep, type PaddockBook, type RaceSnap,
 } from "../chain/paddock";
+import { betableOf, type PaddockStaging, type StageStep } from "../chain/paddock-staging";
 import { baseToUnits, unitsToBase } from "../core/stake-currency";
 
 /** The market's own phase — deliberately the same three states the program's `Race.phase` uses
@@ -44,27 +45,36 @@ export interface BookSettle {
   walletAfter: number;
 }
 
-/** The one-time onboarding a book has to run before this wallet's FIRST bet can land, expressed as
- *  progress rather than as a frozen button. `delegate_bettor` costs a ~25×1s owner poll (the poll in
- *  `PaddockBook.ensureBettor`), so the product's shape is: the first bet is slow, every bet after it
- *  is instant — a fact to show, not to hide. */
+/** The chain plumbing running behind the scenes, expressed as progress. Two kinds:
+ *  "setup" — the one-time seat build on first arrival; "refill" — the background top-up
+ *  after the balance ran short. Either way the player's only verb is BET; this is the line
+ *  that explains why BET is briefly unavailable, never a flow they drive. */
 export interface BookOnboarding {
-  /** The step running right now, or null when nothing is in flight (idle, or finished). */
-  step: OnboardStep | null;
-  /** 1-based position of `step` in `ONBOARD_STEPS`; 0 while idle. `ensureBettor` emits only the steps
-   *  it actually RUNS — a returning wallet skips straight to `ready`, a non-wSOL mint never wraps — so
-   *  this is a position in the fixed sequence, not a count of steps taken, and it can jump. */
+  kind: "setup" | "refill";
+  /** The step running right now, or null when nothing is in flight (idle, finished, or on one of the
+   *  `done`/`ready` transitions the mapper collapses). */
+  step: StageStep | null;
+  /** 1-based position of `step` in the kind's own sequence; 0 when between steps. The controller emits
+   *  only the steps it actually RUNS — a returning wallet skips most of them, a non-wSOL mint never
+   *  wraps — so this is a position in a fixed sequence, not a count of steps taken, and it can jump. */
   index: number;
-  /** `ONBOARD_STEPS.length`. */
+  /** `ONBOARD_STEPS.length` or `REFILL_STEPS.length`, whichever kind this is. */
   of: number;
-  /** What stopped the first-bet path: the onboarding step that threw, or the bet send that followed
-   *  it (the send is what the onboarding was FOR, so both belong on the same line). Null otherwise. */
+  /** What the player has to act on: an unfunded wallet the staging cannot get past, or the bet send
+   *  that just failed. Null otherwise. */
   error: string | null;
 }
 
 /** The onboarding sequence, in the order `ensureBettor` runs it. `ready` is deliberately absent: it
  *  is the end of the work, not a piece of it, and is reported at the end of the bar. */
 export const ONBOARD_STEPS: readonly OnboardStep[] = ["join", "wrap", "deposit", "delegate", "confirm"];
+
+/** The refill path, in the order `cashOut` + `ensureBettor` actually run it: the whole way out
+ *  (claim → exit → undelegate → withdraw → unwrap), then the buffer back in (wrap → deposit →
+ *  delegate → confirm). `done`/`ready` are transitions, not work — the mapper collapses them
+ *  to a stepless beat rather than letting `indexOf(-1)` yank the bar backwards. `join` is absent
+ *  for the same reason `ready` is absent above: the account already exists by the time a refill runs. */
+export const REFILL_STEPS: readonly StageStep[] = ["claim", "exit", "undelegate", "withdraw", "unwrap", "wrap", "deposit", "delegate", "confirm"];
 
 /** An older ticket the player is still holding, and how much of the claim window is left on it.
  *
@@ -129,7 +139,9 @@ export interface RaceBookSource {
   multipliers(): number[];
   /** The player's own stake per CAR. */
   myStakes(): number[];
-  /** The player's spendable balance. */
+  /** The ONE number the player thinks of as "my money". The local sim has only one; a chain book
+   *  folds the delegated balance, an uncollected win and the L1 SOL still in the wallet into it.
+   *  `betable()` is the narrower number a SINGLE bet can spend, and is what gates BET. */
   wallet(): number;
   /** Winner-first CAR indices (NOT slots), or null while the result is undecided (a chain market that
    *  has not locked yet). */
@@ -152,14 +164,19 @@ export interface RaceBookSource {
   lastSettle(): BookSettle | null;
   /** The last `credit()` line, or null. Cleared on the next `openMarket()`. */
   creditNote(): string | null;
-  /** Optional: the one-time onboarding this book runs before its first bet lands.
+  /** Optional: the chain plumbing running behind the scenes right now, as progress to show.
    *
-   *  OMITTED ENTIRELY by a book that has no onboarding — the local sim, whose wallet is a variable in
-   *  this file. Returns null when the book HAS the concept but cannot run it (a read-only chain book
-   *  with no wallet behind it). A non-null value is therefore also the answer to "can a bet be funded
-   *  beyond the balance on screen?", which is what lets the panel offer a first bet to a wallet whose
-   *  book balance is still zero. */
+   *  OMITTED ENTIRELY by a book with no plumbing — the local sim, whose wallet is a variable in this
+   *  file. Returns null when there is genuinely nothing to say: no staging wired (a read-only chain
+   *  book), or staging that is idle/ready and untroubled. Non-null is the line explaining why BET is
+   *  briefly unavailable — never a flow the player drives. */
   onboarding?(): BookOnboarding | null;
+  /** Optional: spendable in ONE bet right now (delegated balance + auto-settleable past win), display
+   *  units. Absent → `wallet()` is the gate, exactly the pre-chain behavior. */
+  betable?(): number;
+  /** Optional: tell the book what stake the player has selected so it can stage/refill AHEAD of the
+   *  tap. Cheap to call every frame; the staging controller throttles itself. */
+  ensureFunded?(stakeUnits: number): void;
   /** Optional: an older ticket still holding money, and how much of the claim window is left on it.
    *  Null when there is nothing to say; omitted by a book with no claim window (the local sim settles
    *  in the browser, on the spot). */
@@ -304,25 +321,13 @@ const POLL_SECS = 1.0;
 
 const ZERO_GRID = () => new Array<number>(GRID).fill(0);
 
-/** Onboarding with nothing in flight — what a book that CAN onboard reports when it is not. */
-const idleOnboarding = (): BookOnboarding => ({ step: null, index: 0, of: ONBOARD_STEPS.length, error: null });
-
-/** Where `step` sits in the fixed sequence. `ready` is the END of the work rather than a sixth piece
- *  of it, so it reads at the end of the bar; a step the sequence does not name reports 0. */
-const onboardingAt = (step: OnboardStep): BookOnboarding => ({
-  step,
-  index: step === "ready" ? ONBOARD_STEPS.length : ONBOARD_STEPS.indexOf(step) + 1,
-  of: ONBOARD_STEPS.length,
-  error: null,
-});
-
 const messageOf = (e: unknown): string => (e instanceof Error ? e.message : String(e));
 
 /** Exactly the slice of `PaddockBook` a book source touches: read the race, read my ticket, send a
  *  bet. Delegation state and `claim` belong to the wallet flow, not to the thing that paints a market
  *  — narrowing here says so in the type, and keeps this module from quietly growing a dependency on
- *  the rest of the client. Onboarding is the one thing the bet path cannot be separated from (it is
- *  the same tap), and it arrives as a lone callback on `ChainBookOptions`, not as the whole client. */
+ *  the rest of the client. Building and refilling the seat is NOT part of the bet path — it happens
+ *  ahead of the tap, behind `ChainBookOptions.staging` — so none of it widens this type. */
 export type PaddockBookReader = Pick<PaddockBook, "raceSnapshot" | "bettorSnapshot" | "placeBet">;
 
 export interface ChainBookOptions {
@@ -331,15 +336,13 @@ export interface ChainBookOptions {
   /** Anything that went wrong off the frame path (a failed bet, a dropped snapshot fetch). Default
    *  `console.warn` — the book has no UI of its own and swallowing these silently is worse. */
   onError?: (where: string, e: unknown) => void;
-  /** The one-time onboarding — `PaddockBook.ensureBettor`, when the host holds a wallet that can run
-   *  it. Absent → a READ-ONLY book: `onboarding()` is null and `placeBet` sends straight to the ER,
-   *  which is exactly what the dev harness wants from an unfunded keypair. Present → every bet runs
-   *  it first; `ensureBettor` is self-skipping, so for a wallet that is already delegated that costs
-   *  one L1 account read and reports `ready` immediately.
-   *
-   *  The book passes the BET's own amount in base units and nothing else: how much a first deposit
-   *  should actually be is the host's call, not a number this module gets to invent. */
-  onboard?: (amount: bigint, onStep: (step: OnboardStep) => void) => Promise<void>;
+  /** The staging controller, when the host holds a wallet that can fund a seat. Absent → a
+   *  READ-ONLY book: `onboarding()` is null, `betable()` mirrors the balance, and `placeBet`
+   *  sends straight to the ER — the dev harness's shape. Present → the book reports staging
+   *  progress and `ensureFunded` keeps the seat ahead of the selected stake. The tap itself
+   *  NEVER stages: the 15s market does not wait, so a tap that cannot be funded is a
+   *  disabled button with an honest line, not a slow flow. */
+  staging?: PaddockStaging;
 }
 
 /** A `RaceBookSource` backed by the paddock program's shared Race in the ER.
@@ -361,14 +364,14 @@ export function chainBookSource(
 ): RaceBookSource & { refresh(): Promise<void> } {
   const pollSecs = opts.pollSecs ?? POLL_SECS;
   const report = opts.onError ?? ((where: string, e: unknown) => console.warn(`[chain-book] ${where}:`, e));
-  const onboard = opts.onboard;
+  const staging = opts.staging;
 
   let race: RaceSnap | null = null;
   let bettor: BettorSnap | null = null;
   let lockedMult: number[] = [];   // CAR-indexed, frozen at lock()
   let settled: BookSettle | null = null;
   let pending: number | null = null; // CAR id of a bet in flight
-  let onboardState = idleOnboarding();
+  let betError: string | null = null; // what the last send said, until the next market opens
   let lastPoll = 0;                  // WALL-CLOCK ms of the last read (see poll)
   let fetching = false;              // one ER read at a time — a slow RPC must not stack requests
   let disposed = false;
@@ -433,10 +436,11 @@ export function chainBookSource(
     openMarket() {
       lockedMult = [];
       settled = null;
-      // A finished first-bet path's message is cleared by the next market rather than sitting there
-      // forever — but NEVER while one is still running. Onboarding outlives a 15s market comfortably,
-      // so clearing unconditionally would blank the progress the player is watching.
-      if (pending === null) onboardState = idleOnboarding();
+      // A failed send's message is this book's ONLY latched state, and the next market is what clears
+      // it — the chain opens one every MARKET_SECS, so it never sits there forever. Staging progress
+      // is deliberately not touched: it is read live off the controller every frame, so a rebuild that
+      // outlives a 15s market cannot be blanked by the roll.
+      betError = null;
     },
 
     /** Deliberately ignores `dt` and reads the WALL clock. `dt` is the host's sim step — clamped
@@ -481,7 +485,12 @@ export function chainBookSource(
       return base.length ? toCar(base) : ZERO_GRID();
     },
 
-    wallet: () => (bettor ? baseToUnits(bettor.balance) : 0),
+    /** ONE number, the way the perps chip shows wallet+play together: the delegated balance,
+     *  a past ticket's claimable win, and the L1 SOL still in the wallet. The BET gate is
+     *  `betable()`, which is ≤ this — the difference is money that needs a (background) refill
+     *  crossing before a bet can spend it. */
+    wallet: () => baseToUnits(betableOf(race, bettor))
+      + (staging ? baseToUnits(staging.walletSolBase()) : 0),
 
     /** Null until the crank locks the market. `Race.order` is ZEROED on every roll into MARKET, so a
      *  market-phase read would hand back a perfectly well-formed `[0,0,0,0,0,0,0,0]` — an "order" that
@@ -495,32 +504,27 @@ export function chainBookSource(
 
     /** `carId` is a roster index; the chain wants the SLOT that car is starting from.
      *
-     *  With `onboard` wired this is the FIRST-BET path as well as the bet path, because they are the
-     *  same tap: onboarding runs, reporting each step through `onboarding()`, and only then does the
-     *  bet go out. `ensureBettor` skips whatever is already done, so a wallet that is already
-     *  delegated pays one L1 account read for the privilege and reports `ready` at once. */
+     *  ONE send, and nothing else. The seat this spends from was staged before the button was tapped
+     *  (`ensureFunded`, off the frame loop) — a 15s market will not wait for a build, so a tap that
+     *  cannot be funded has to be a disabled button with an honest line, never a slow flow. */
     placeBet(carId, amount) {
       if (!race || race.phase !== PHASE_MARKET) return; // the market is shut; the program would reject it
       if (pending !== null) return;                     // one bet in flight at a time (the panel greys the rest)
       const slot = race.entrants.indexOf(carId);
       if (slot < 0) return;
       pending = carId;
+      betError = null;                                  // a fresh attempt supersedes the last one's message
       const base = BigInt(unitsToBase(amount));
       void (async () => {
         try {
-          if (onboard) {
-            onboardState = idleOnboarding();            // drop a previous attempt's message
-            await onboard(base, (step) => { onboardState = onboardingAt(step); });
-          }
           await client.placeBet(slot, base);
           await refresh();                              // pull the landed pools/stakes back before the button frees up
-          if (onboard) onboardState = idleOnboarding();
         } catch (e) {
           report("placeBet", e);
           // The client's own errors are written for a player to read (MarketClosedError,
           // InsufficientBalanceError, BettorTornError in chain/paddock.ts), so the message goes
           // through as it stands rather than being re-worded here.
-          if (onboard) onboardState = { ...idleOnboarding(), error: messageOf(e) };
+          betError = messageOf(e);
         } finally {
           pending = null;
         }
@@ -528,9 +532,37 @@ export function chainBookSource(
     },
     pendingBet: () => pending,
 
-    /** Null when this book cannot onboard at all — no wallet was wired, so the balance on screen is
-     *  the whole story and the panel gates bets on it exactly as before. */
-    onboarding: () => (onboard ? onboardState : null),
+    /** Null when this book has no staging behind it (read-only) — the balance on screen is
+     *  then the whole story and the panel gates on it exactly as before. */
+    onboarding() {
+      if (!staging) return null;
+      const s = staging.status();
+      const kind: BookOnboarding["kind"] = s.state === "refilling" ? "refill" : "setup";
+      const seq = kind === "refill" ? REFILL_STEPS : ONBOARD_STEPS;
+      const error = betError ?? s.error;
+      if (s.state === "idle" || s.state === "ready") {
+        return error ? { kind, step: null, index: 0, of: seq.length, error } : null;
+      }
+      const step = s.step === "done" || s.step === "ready" ? null : s.step;
+      const index = step ? Math.max(0, seq.indexOf(step)) + 1 : 0;
+      return { kind, step, index, of: seq.length, error };
+    },
+
+    /** balance + a past ticket's claimable win — what ONE bet can spend right now, because
+     *  `place_bet` auto-settles the old ticket before its balance check (proven live). The
+     *  math lives in paddock-staging's exported `betableOf`; imported, never re-derived. */
+    betable() {
+      return baseToUnits(betableOf(race, bettor));
+    },
+
+    ensureFunded(stakeUnits) {
+      if (!staging) return;
+      // Feed the controller what THIS module just read off the chain — its own cache only
+      // updates when a staging run executes, so without the observation a drained balance
+      // would short-circuit "ready" forever and the silent refill would never fire.
+      const observed = race && bettor ? betableOf(race, bettor) : undefined;
+      staging.ensure(BigInt(unitsToBase(stakeUnits)), observed);
+    },
 
     /** An older ticket still holding money, and what is left of its claim window.
      *

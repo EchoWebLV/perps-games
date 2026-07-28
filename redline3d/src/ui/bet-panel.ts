@@ -56,16 +56,25 @@ const STAKES = [1, 5, 20];
  *  ring in the program is what decides that, and `claim.expired` is what reports it. */
 const CLAIM_WARN_RACES = 8;
 
-/** What each onboarding step is DOING, in the player's terms. `ensureBettor`'s vocabulary is the
- *  program's (join / wrap / deposit / delegate / confirm / ready); this is the same sequence said out
- *  loud. No step names a duration — the sequence is the progress, the clock is not ours to promise. */
+/** What each staging step is DOING, in the player's terms. The controller's vocabulary is the
+ *  program's (join / wrap / deposit / delegate / confirm for a build, claim / exit / undelegate /
+ *  withdraw / unwrap for the way back out); this is the same sequence said out loud. No step names a
+ *  duration — the sequence is the progress, the clock is not ours to promise. `ready` and `done` are
+ *  transitions the book collapses to a stepless beat, so they are never rendered; they are here only
+ *  because the map has to cover the type. */
 const ONBOARD_LABEL: Record<NonNullable<BookOnboarding["step"]>, string> = {
   join: "Opening your account at the book",
   wrap: "Wrapping SOL to stake",
   deposit: "Funding your book balance",
   delegate: "Delegating your seat to the rollup",
   confirm: "Waiting for the rollup to take your seat",
-  ready: "Seat ready — sending your bet",
+  ready: "Seat ready",
+  claim: "Collecting your last win",
+  exit: "Closing your seat at the rollup",
+  undelegate: "Waiting for your seat to come home",
+  withdraw: "Moving your balance back to your wallet",
+  unwrap: "Unwrapping back to SOL",
+  done: "Done",
 };
 
 /** A one-block notice: an uppercase head and a line of plain text under it, or null for "say
