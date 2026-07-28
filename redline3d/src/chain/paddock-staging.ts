@@ -38,10 +38,14 @@ export interface PaddockStaging {
   betableBase(): bigint;
   /** Last-known L1 native SOL (lamports) — the rest of the "one number" the panel shows. */
   walletSolBase(): bigint;
-  /** Fire-and-forget trigger. Cheap when already ready/inflight/throttled. */
-  ensure(stakeBase: bigint): void;
+  /** Fire-and-forget trigger. Cheap when already ready/inflight/throttled. The caller that
+   *  polls the chain anyway (the book source) passes what it just read as
+   *  `observedBetableBase` — the controller's own cache only updates when a staging run
+   *  executes, so without the observation a drained balance would short-circuit "ready"
+   *  forever and the silent refill would never fire. */
+  ensure(stakeBase: bigint, observedBetableBase?: bigint): void;
   /** Awaitable variant — main.ts entry kick and tests. Never rejects; failures land in status(). */
-  ensureNow(stakeBase: bigint): Promise<void>;
+  ensureNow(stakeBase: bigint, observedBetableBase?: bigint): Promise<void>;
   dispose(): void;
 }
 
@@ -138,8 +142,9 @@ export function createPaddockStaging(deps: { client: StagingClient; onChange?: (
     set({ state: "ready", step: null, error: null });
   }
 
-  async function ensureNow(stakeBase: bigint): Promise<void> {
+  async function ensureNow(stakeBase: bigint, observedBetableBase?: bigint): Promise<void> {
     if (disposed) return;
+    if (observedBetableBase !== undefined) betable = observedBetableBase;
     if (inflight) return inflight;
     if (stat.state === "ready" && betable >= stakeBase) return;
     const now = Date.now();
@@ -156,7 +161,7 @@ export function createPaddockStaging(deps: { client: StagingClient; onChange?: (
     status: () => stat,
     betableBase: () => betable,
     walletSolBase: () => walletSol,
-    ensure: (stakeBase) => { void ensureNow(stakeBase); },
+    ensure: (stakeBase, observedBetableBase) => { void ensureNow(stakeBase, observedBetableBase); },
     ensureNow,
     dispose() { disposed = true; },
   };

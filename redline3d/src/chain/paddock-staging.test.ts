@@ -154,6 +154,28 @@ describe("createPaddockStaging", () => {
     expect(s.status().error).toBeNull();
   });
 
+  it("a caller-observed drained balance re-arms the refill past the stale ready cache", async () => {
+    const now = vi.spyOn(Date, "now");
+    now.mockReturnValue(1_000_000);
+    let onChain = STAKE * 5n;
+    const client = fakeClient({
+      delegationState: vi.fn(async () => "reuse" as const),
+      bettorSnapshot: vi.fn(async () => bettorSnap(onChain)),
+    });
+    const s = createPaddockStaging({ client });
+    await s.ensureNow(STAKE);                 // ready on a full buffer
+    expect(s.status().state).toBe("ready");
+    // Bets drain the seat on-chain; the controller's cache still says covered. The book
+    // source reads the live balance every poll and passes it through. run() re-reads and is
+    // authoritative — the hint only INVALIDATES the stale cache, it is never trusted as
+    // truth (trusting it would rebuild a healthy seat on one stale observation).
+    onChain = 0n;
+    now.mockReturnValue(1_000_000 + 6_000);   // past RETRY_GAP_MS
+    await s.ensureNow(STAKE, 0n);
+    expect(client.cashOut).toHaveBeenCalledTimes(1); // the silent rebuild actually fired
+    now.mockRestore();
+  });
+
   it("throttles repeat attempts (min interval) so a frame-loop trigger cannot hammer RPC", async () => {
     const client = fakeClient({ walletFunds: vi.fn(async () => ({ sol: 0n, stake: 0n })) });
     const s = createPaddockStaging({ client });
