@@ -34,6 +34,7 @@ describe("highwayAvailable", () => {
     expect(branch).toContain("capacitorNative");
     expect(branch).toContain('lobbyHud.toast("Highway coming soon")');
     expect(branch).toContain("openDriverNameDialog(true, enterHighwayFromLobby)");
-    expect(main).toContain('case "track": exitFrom = "track"; exitLobby();');
+    // the TRACK branch stays ungated — it opens the chain-book grandprix, no highway gate applies
+    expect(main).toContain('case "track": enterGrandprix(equippedCar.name);');
   });
 });

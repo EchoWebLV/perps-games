@@ -1385,6 +1385,11 @@ function enterGrandprix(playerCarName: string | null): void {
     // other group is hidden here), and their moody purple/pink wash is exactly what made the race look
     // wrong. With them off the race renders under ONLY its harness-matched rig. exitGrandprix restores.
     if (world) world.group.visible = false; // may be null: grandprix is enterable straight from home before any lobby/3D visit ever built the world (nothing to hide then)
+    // The strip plaza (and every bit of dressing parented under it — meet cars, cruisers, board):
+    // a from-LOBBY entry (the TRACK gate) leaves it standing in the race's infield otherwise.
+    // Null before the first lobby visit; already hidden on a from-home entry — both no-ops.
+    lobby?.hide();
+    lobbyHud.setPrompt(null); // a lingering "enter TRACK" door card must not survive into the race
     pickups.group.visible = false; fireTrail.group.visible = false; car.group.visible = false; // eager groups — always exist
     ctx.ambient.visible = false; ctx.key.visible = false;
     // Share the harness's tonal operator: the perps world runs NoToneMapping (tone-mapping deferred to the
@@ -1439,7 +1444,10 @@ function triggerBuilding(kind: BuildingKind) {
     case "upgrades": lobbyHud.hide(); upgrades.open(); break;        // tune your car
     case "crates": lobbyHud.hide(); crateBox.open(); break;           // open a crate → pull a car
     case "scrapyard": lobbyHud.toast("ScrapYard — coming soon"); break; // collect scrap, not built yet
-    case "track": exitFrom = "track"; exitLobby(); break;            // onto the track — full racing HUD, GO lives there
+    // THE race — the same chain-book grandprix home's Watch & bet opens, with the equipped car
+    // on the grid. (Previously the octane-era in-world ring race: local sim, no book, and the
+    // plaza sitting in the race's infield — "the lobby in the middle of the race".)
+    case "track": enterGrandprix(equippedCar.name); break;
     case "highway": {
       const decision = highwayEntryDecision(
         globalThis.location?.hostname ?? "",
