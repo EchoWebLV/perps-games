@@ -1,6 +1,6 @@
 // Design-preview harness (dev-only, not part of the game): renders the real createLobby() so the
 // four themed corner buildings can be surveyed with a free camera. Point the camera from the
-// browser console with __cam('overview'|'garage'|'track'|'race'|'crates'). The layout +
+// browser console with __cam('overview'|'garage'|'track'|'upgrades'|'race'|'crates'). The layout +
 // builders are the exact ones the game uses, so this faithfully previews the in-lobby result.
 import * as THREE from "three";
 import { createLobby } from "./render/lobby";
@@ -53,9 +53,10 @@ function lookBuilding(kind: string) {
 function overview() { const s = LOT_BOUNDS.z; view(0, s * 1.35, s * 1.15, 0, 0, -s * 0.38); }
 function garage() { lookBuilding("garage"); }
 function track() { lookBuilding("track"); }
+function upgrades() { lookBuilding("upgrades"); }
 function crates() { lookBuilding("crates"); }
 function race() { lookBuilding("race"); }
-const PRESETS = { overview, garage, track, crates, race }; // no upgrades preset — it left the plaza
+const PRESETS = { overview, garage, track, upgrades, crates, race };
 
 type CamKey = keyof typeof PRESETS;
 (window as unknown as { __cam: (k: string) => void }).__cam = (k) => {

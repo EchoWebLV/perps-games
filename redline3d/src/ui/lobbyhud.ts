@@ -13,10 +13,10 @@ export interface LobbyHud {
 }
 
 /** what each building offers, in player terms — shown on the entry-ring card. Partial by design:
- *  "highway" and "upgrades" are parked kinds with no storefront left in the plaza (upgrades opens
- *  from inside the garage now), so no doorway can raise a card for either. */
+ *  "highway" is a parked kind with no storefront left in the plaza, so no doorway can raise it. */
 const OFFERS: Partial<Record<BuildingKind, { name: string; desc: string; css: string }>> = {
   garage: { name: "GARAGE", desc: "Your cars — pick your ride", css: "#27e7ff" },
+  upgrades: { name: "UPGRADES", desc: "Tune your car — spend coins", css: "#ffd166" },
   crates: { name: "CRATES", desc: "Loot crates — win new cars", css: "#ff39c0" },
   scrapyard: { name: "SCRAPYARD", desc: "Collect scrap — coming soon", css: "#d94a2b" },
   track: { name: "TRACK", desc: "The main event — race the live price", css: "#14f195" },

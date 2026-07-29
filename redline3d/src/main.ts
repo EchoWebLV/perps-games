@@ -1435,6 +1435,7 @@ function exitGrandprixToHome(): void {
 function triggerBuilding(kind: BuildingKind) {
   switch (kind) {
     case "garage": exitFrom = "garage"; enterGarage(); break;        // drive-in showroom (car + collection, and Upgrades)
+    case "upgrades": lobbyHud.hide(); upgrades.open(); break;        // tune your car
     case "crates": lobbyHud.hide(); crateBox.open(); break;           // open a crate → pull a car
     case "scrapyard": lobbyHud.toast("ScrapYard — coming soon"); break; // collect scrap, not built yet
     case "track": exitFrom = "track"; exitLobby(); break;            // onto the track — full racing HUD, GO lives there
