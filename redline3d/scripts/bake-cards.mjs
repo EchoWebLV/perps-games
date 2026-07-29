@@ -23,10 +23,10 @@ const CHROME = process.env.PUPPETEER_EXECUTABLE_PATH || [
 
 const PORT = 5188;
 const ORIGIN = `http://localhost:${PORT}`;
-// The GAME lives at /play/ (root "/" is the marketing landing page — no garage there). `?nohome=1` is a
-// DEV-only boot hook in main.ts that skips the Slopwheels home overlay and lands in the lobby, so the
-// hamburger → Garage chrome this script drives is on screen.
-const BASE = `${ORIGIN}/play/?nohome=1`;
+// The GAME lives at /play/ (root "/" is the marketing landing page — no garage there). Boot lands in
+// the 3D lobby for everyone now, so the hamburger → Garage chrome this script drives is on screen
+// with no flag needed (the old `?nohome=1` hook is gone).
+const BASE = `${ORIGIN}/play/`;
 const OUT = "public/cards";
 
 const waitForServer = (url, tries = 80) =>

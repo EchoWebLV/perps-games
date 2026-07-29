@@ -175,12 +175,13 @@ function setWorldTheme(key: string): string {
   next: () => setWorldTheme(nextThemeKey(world?.currentTheme() ?? loadThemeKey())),
   current: () => world?.currentTheme() ?? loadThemeKey(),
 };
-// Home now owns the splash hide (enterHome calls hideSplash — "home-ready IS boot-ready"), so the
-// car-GLB settle no longer dismisses the splash. The bounded 20s fallback stays wired (belt-and-
-// suspenders: if boot wedged before enterHome, the timeout still frees a trapped player).
+// The boot tail owns the splash hide — it calls hideSplash right after enterLobby() ("lobby-ready IS
+// boot-ready"), so the car-GLB settle no longer dismisses the splash. enterHome keeps its own
+// idempotent hideSplash for the later visits to the collection. The bounded 20s fallback stays wired
+// (belt-and-suspenders: if boot wedged before the tail ran, the timeout still frees a trapped player).
 const bootReveal = createBootReveal({
   timeoutMs: 20_000,
-  reveal: () => (window as Window & { hideSplash?: () => void }).hideSplash?.(), // fallback only; enterHome is the normal path
+  reveal: () => (window as Window & { hideSplash?: () => void }).hideSplash?.(), // fallback only; the boot tail is the normal path
 });
 const car = createCar((outcome) => bootReveal.modelSettled(outcome));
 const localEmoteResources = createEmoteVisualResources();
@@ -1044,10 +1045,11 @@ const SLOPE_CLAMP = 0.35;
 let hwBillboardCd = 0; // billboard redraw cooldown (CanvasTexture upload ≈ not free)
 // "grandprix" is the in-app race mode: entered from home with the player's owned car (createRaceGame
 // owns the track/sim/HUD; the host just drives update+render and disposes on exit).
-// Default "home": home IS the boot surface, and the boot tail always calls enterHome()/enterLobby()
-// (which sets this) before the first frame — so no code ever reads this default today. It's a safety
-// floor: if the boot tail is ever re-ordered so a frame runs first, "home" falls into the harmless
-// reschedule branch (frame() returns early for mode==="home") instead of the race branch's `world!` null-deref.
+// Default "home": an inert mode that renders nothing — kept purely as a backstop. The boot tail
+// always calls enterLobby() (which sets this) before the first frame, so no code ever reads this
+// default today. It's a safety floor: if the boot tail is ever re-ordered so a frame runs first,
+// "home" falls into the harmless reschedule branch (frame() returns early for mode==="home")
+// instead of the race branch's `world!` null-deref.
 let mode: "race" | "lobby" | "highway" | "garage" | "home" | "grandprix" = "home";
 let raceGame: RaceGame | null = null; // the live in-app race, or null when not in grandprix
 // perps renderer tone-mapping saved on grandprix entry, restored on its single exit (the race shares the
@@ -1451,7 +1453,7 @@ function backOutToHome(): void {
   if (mode === "race") enterLobby();
   else if (mode === "highway") exitHighwayToLobby();
   else if (mode === "garage") exitGarageToLobby();
-  else if (mode === "lobby") enterHome(); // the strip is no longer root — back it out to the collection
+  else if (mode === "lobby") enterHome(); // the strip IS root — Home from it visits the collection screen
 }
 const lobbyHud = createLobbyHud(hudRoot);
 let presence: PresenceClient | null = null;
@@ -2497,19 +2499,14 @@ setInterval(async () => {
   finally { polling = false; }
 }, 650);
 
-// Boot into the Slopwheels collection: the card grid IS the intro screen now (no 3D render behind it,
-// and no 3D world built — ensureWorlds() defers all of that to the first entry FROM home). The lobby/
-// track are reached FROM home — [Drive lobby] on a card lands in the 3D strip. Shader warming (the old
-// boot-time precompileModes() call) now rides that first ensureWorlds(), since nothing 3D exists yet.
-// DEV-ONLY bake-harness hook: scripts/bake-cards.mjs drives the lobby's Garage to render card art, but
-// home now covers that chrome. `?nohome=1` (dev builds only — stripped from prod) boots straight to the
-// lobby and dismisses the splash so the baker can reach the hamburger → Garage.
-if (import.meta.env.DEV && new URLSearchParams(location.search).has("nohome")) {
-  enterLobby(); // self-ensures worlds (ensureWorlds() at its top) before the baker touches the 3D lobby
-  (window as Window & { hideSplash?: () => void }).hideSplash?.(); // no home path to dismiss the splash here
-} else {
-  enterHome();
-}
+// Boot into the 3D strip: the lobby IS the front door (the landing page's "Crack crates now" should
+// drop you into the game world, not another landing page). enterLobby() self-ensures worlds, so the
+// 3D build + shader warming happen here under the splash; home — the card collection — is a screen
+// you VISIT via the Home button, not the boot surface. This also covers scripts/bake-cards.mjs,
+// which needs the lobby to reach the hamburger → Garage (the old `?nohome=1` dev flag is gone:
+// booting to the lobby is simply the default now).
+enterLobby();
+(window as Window & { hideSplash?: () => void }).hideSplash?.(); // lobby-ready IS boot-ready
 // The identity gate over the strip — the game's whole login screen. Shows on first
 // launch and after every log-out. Two doors:
 //   RIDE AS GUEST (name required) → practice mode: engine-only rounds, no wallet, ever.
@@ -2692,7 +2689,7 @@ function bootIdentity() {
 // Boot ALWAYS resumes the identity flow now; the wall is deferred into whichever path the player picks.
 bootIdentity();
 (window as Window & { setSplashProgress?: (pct: number) => void }).setSplashProgress?.(90); // boot milestone: identity resolved
-// Boot-order invariant: the enterHome()/enterLobby() in the boot tail above MUST run before this kick —
+// Boot-order invariant: the enterLobby() in the boot tail above MUST run before this kick —
 // the first frame() dispatches on `mode`, and only home mode renders nothing (the 3D branches deref the
 // deferred world). rAF is async so it can't beat the synchronous boot tail; the "home" default backstops a re-order.
 requestAnimationFrame(frame);
