@@ -683,11 +683,6 @@ a {
   color: var(--ink);
 }
 
-.earn .cols .tk {
-  color: var(--slime);
-  font-weight: 900;
-}
-
 /* ---- live demo crate ("Crack one open") ---- */
 .demo-crack {
   padding-top: 20px;
@@ -863,100 +858,6 @@ a {
 .why-lines .hl {
   color: var(--gold);
   text-shadow: 0 0 20px rgba(255, 201, 60, 0.4);
-}
-
-/* ---- $SLOPS teaser panel (melting bottom edge) ---- */
-.slops-wrap {
-  position: relative;
-  max-width: 900px;
-  margin: 0 auto;
-}
-
-.slops {
-  position: relative;
-  border-radius: 26px;
-  overflow: hidden;
-  background:
-    radial-gradient(120% 120% at 20% 0%, rgba(192, 240, 48, 0.14), transparent 55%),
-    linear-gradient(160deg, #242a52, #191d34);
-  border: 1px solid var(--panel-line);
-  padding: 44px 40px 40px;
-  text-align: center;
-  box-shadow: 0 30px 70px -30px rgba(0, 0, 0, 0.8), 0 0 44px -20px rgba(192, 240, 48, 0.5);
-}
-
-.slops .badge {
-  display: inline-flex;
-  align-items: center;
-  gap: 0.5em;
-  font-family: var(--font-d);
-  font-size: 0.8rem;
-  letter-spacing: 0.12em;
-  color: var(--slime);
-  border: 1px solid var(--line);
-  background: rgba(192, 240, 48, 0.08);
-  padding: 0.5em 1em;
-  border-radius: 999px;
-}
-
-.slops h2 {
-  font-family: var(--font-d);
-  text-transform: uppercase;
-  font-size: clamp(2.1rem, 5.5vw, 3.4rem);
-  margin: 18px 0 4px;
-}
-
-.slops .tk {
-  color: var(--slime);
-  text-shadow: 0 0 28px rgba(192, 240, 48, 0.6);
-}
-
-.slops p {
-  max-width: 640px;
-  margin: 14px auto 0;
-  color: var(--ink-dim);
-  font-weight: 600;
-  font-size: 1.05rem;
-}
-
-.slops p b {
-  color: var(--ink);
-}
-
-.slops .pills {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 10px;
-  justify-content: center;
-  margin-top: 22px;
-}
-
-.slops .pills span {
-  font-weight: 800;
-  font-size: 0.78rem;
-  letter-spacing: 0.06em;
-  text-transform: uppercase;
-  color: var(--slime);
-  border: 1px solid var(--line);
-  border-radius: 999px;
-  padding: 0.5em 1em;
-  background: rgba(192, 240, 48, 0.05);
-}
-
-.slops-melt {
-  position: absolute;
-  left: 0;
-  right: 0;
-  bottom: -1px;
-  line-height: 0;
-  z-index: 3;
-}
-
-.slops-melt svg {
-  width: 100%;
-  height: 44px;
-  display: block;
-  filter: drop-shadow(0 6px 12px rgba(0, 0, 0, 0.5));
 }
 
 /* ============ PULL / BET / WIN ============ */
@@ -1730,7 +1631,7 @@ a {
   .hero h1 { font-size: clamp(2.5rem, 10.5vw, 3.4rem); }
   .hero-sub { font-size: 1rem; }
   .cta-xl { font-size: 1.2rem; padding: 0.9em 1.5em; }
-  .slops, .demo-crack-panel { padding: 34px 20px 34px; }
+  .demo-crack-panel { padding: 34px 20px 34px; }
   .why-lines p { font-size: 1.08rem; }
   .mech { grid-template-columns: 1fr; text-align: center; gap: 12px; }
   .mech-clip { width: 100%; max-width: 300px; margin: 0 auto; }

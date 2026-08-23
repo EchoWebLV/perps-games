@@ -53,14 +53,20 @@ describe("how-to seen flag", () => {
 });
 
 describe("how-to gameplay cards", () => {
-  test("captures pointer input above the canvas joystick", () => {
+  // The first-run walkthrough opens from the identity-gate callbacks while home (30) is still up, and it
+  // runs BEFORE the welcome crate, so it must never sit under home or the crate shop (34) — masked there,
+  // onDone never fires and markHowToSeen is never reached. The access wall (40) and the driver-name /
+  // trade-history modals (42) are hard gates and stay ABOVE the walkthrough.
+  test("hosts above home and the crate shop, below the access wall", () => {
     const { host, panel } = openHowTo({ reducedMotion: () => true });
     host.style.pointerEvents = "none";
     const overlay = panel.parentElement as HTMLElement;
 
     expect(overlay.style.position).toBe("fixed");
     expect(overlay.style.pointerEvents).toBe("auto");
-    expect(overlay.style.zIndex).toBe("12");
+    const layer = Number(overlay.style.zIndex);
+    expect(layer).toBeGreaterThan(34); // home + identity gate (30) and the crate shop (34)
+    expect(layer).toBeLessThan(40);    // access wall (and the 42 modals above it)
   });
 
   test("shows the five approved cards in order", () => {

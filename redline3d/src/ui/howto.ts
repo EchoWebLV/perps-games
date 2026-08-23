@@ -136,7 +136,13 @@ function injectStyles() {
 export function createHowTo(parent: HTMLElement, options: HowToOptions = {}): HowTo {
   injectStyles();
   const overlay = document.createElement("div");
-  overlay.style.cssText = ["position:fixed","inset:0","z-index:12","display:none","align-items:center","justify-content:center","padding:20px","background:rgba(0,0,0,.84)","backdrop-filter:blur(3px)","pointer-events:auto"].join(";");
+  // The first-run walkthrough (also the hamburger's "How to play" row) fires from the identity-gate
+  // callbacks while home (30) is still up. At z-12 it opened UNDER home — fully masked and unclickable,
+  // so onDone never fired and markHowToSeen was never reached. 35 hosts it above home (30), the identity
+  // gate (30) and the crate shop (34): main.ts runs the walkthrough BEFORE the welcome crate by design,
+  // so no shop surface may mask it. Stays below the access wall (40) and driver-name / trade-history
+  // (42) — those are hard gates and must keep covering the walkthrough.
+  overlay.style.cssText = ["position:fixed","inset:0","z-index:35","display:none","align-items:center","justify-content:center","padding:20px","background:rgba(0,0,0,.84)","backdrop-filter:blur(3px)","pointer-events:auto"].join(";");
   const panel = document.createElement("div");
   panel.className = "ht-panel";
   overlay.appendChild(panel);

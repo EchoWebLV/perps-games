@@ -18,7 +18,7 @@ import { buildWheelRig, type WheelRig } from "./wheels";
 import { tierOf } from "../core/rarity";
 import { createRaceTrack } from "./race-track";
 import { createRaceEnvironment } from "./race-environment";
-import { toonify, reclaimToonVariants } from "./toon";
+import { toonify, reclaimToonVariants, isToonEnabled } from "./toon";
 import { createRaceDirector, type DirectorCar, type DirectorMode } from "./race-director";
 import { createRaceHud, type RacePhase } from "../ui/race-hud";
 import { createBetPanel } from "../ui/bet-panel";
@@ -187,6 +187,35 @@ function disposeModel(o: THREE.Object3D): void {
   for (const mm of materials) mm.dispose();
   for (const g of geometries) g.dispose();
 }
+
+// CLASSIC-mode readability. Most car GLBs ship near-mirror (metalness 1, roughness 0–0.2), and a metal
+// surface has NO diffuse term — all of its colour is the reflected environment. Under the race's room
+// IBL every such car reflects the same bright room and the grid reads as one silver blob: you can't
+// tell a Cybertruck from a DeLorean at chase distance. Capping the mirror hands the look back to each
+// car's own base colour. Transparent mats (glass/canopies) keep their sheen — they're small and a flat
+// windscreen looks wrong. Call BEFORE toonify so the tamed material is the one registered as the classic
+// variant; toon mode is unaffected (MeshToonMaterial has neither field and is built from base colour).
+const CLASSIC_METAL_MAX = 0.35;
+const CLASSIC_ROUGH_MIN = 0.45;
+function tameClassicPaint(root: THREE.Object3D): void {
+  root.traverse((o) => {
+    const mesh = o as THREE.Mesh;
+    if (!mesh.isMesh) return;
+    for (const m of Array.isArray(mesh.material) ? mesh.material : [mesh.material]) {
+      const sm = m as THREE.MeshStandardMaterial | undefined;
+      if (!sm?.isMeshStandardMaterial || sm.transparent) continue;
+      sm.metalness = Math.min(sm.metalness, CLASSIC_METAL_MAX);
+      sm.roughness = Math.max(sm.roughness, CLASSIC_ROUGH_MIN);
+    }
+  });
+}
+
+/** Scene IBL strength for the race, by art style. TOON cars are MeshToonMaterial and take nothing from
+ *  the env map, so full IBL there only lights the track and was tuned at 1. CLASSIC cars ARE standard
+ *  materials: at full strength the room IBL floods them, pale bodies blow past the bloom threshold and
+ *  every car reads as the same glowing silver. Dimmed, each one keeps its own paint. Exported so the dev
+ *  harness (race-preview.ts) lights the same race the same way. */
+export function raceEnvIntensity(): number { return isToonEnabled() ? 1 : 0.45; }
 
 // ── in-app race lighting (provideSceneLighting) ────────────────────────────────────────────────
 // The DEV Light Lab has no unregister, and other scenes register once for a lifetime object. The race
@@ -777,6 +806,7 @@ export function createRaceGame(opts: RaceGameOptions): RaceGame {
       car.anchor.updateMatrixWorld(true);
       car.rig = buildWheelRig(model, scale, { probe: false });
       car.anchor.rotation.y = savedRot;
+      tameClassicPaint(model);               // classic look: cap the chrome so paint colour reads
       toonify(model, { outlineWidth: 0.3 }); // cel-shade + bold outline (reads at chase distance)
       car.model = model;
     }, undefined, (err) => { console.warn("[race-mode] GLB failed:", car.entrant.url, err); });
@@ -848,7 +878,7 @@ export function createRaceGame(opts: RaceGameOptions): RaceGame {
     const prevFog = scene.fog, prevBg = scene.background, prevEnvI = scene.environmentIntensity;
     scene.fog = new THREE.Fog(pColor("race-track", "fogColor", "#3a2246"), pNum("race-track", "fogNear", 260), pNum("race-track", "fogFar", 1300));
     scene.background = new THREE.Color(0x140a24);
-    scene.environmentIntensity = 1;
+    scene.environmentIntensity = raceEnvIntensity();
     // Lift the host camera's far plane to harness parity (race-preview.ts uses 4000). The toon sky dome
     // (race-environment.ts, radius ≈ R+1400 = 1791 about the track center) dips below the horizon and its
     // warm-orange bowl is what backs the semi-transparent near-black floor into a warm dusk. From the orbit
@@ -879,6 +909,13 @@ export function createRaceGame(opts: RaceGameOptions): RaceGame {
       // its own — then it decides when a market opens, and flashing a local one over a chain that is
       // mid-race would show a market nobody can bet into. `phase()` is a pure read on both books.
       if (phase === "LOADING" && book.phase() === null) enterMarket();
+      // The style toggle is live mid-race (STYLE button / key T). We own scene.environmentIntensity only
+      // when we mounted the lighting; re-assert it here rather than through onToonChanged, which has no
+      // unregister and would leak a listener per race entry.
+      if (opts.provideSceneLighting) {
+        const wantEnv = raceEnvIntensity();
+        if (scene.environmentIntensity !== wantEnv) scene.environmentIntensity = wantEnv;
+      }
       step(dt);
       placeCars(dt);      // update world poses first so the director frames current positions
       runDirector(dt);

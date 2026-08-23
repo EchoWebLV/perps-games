@@ -1,0 +1,26 @@
+[package]
+name = "vrf-signer-probe"
+version = "0.1.0"
+description = "THROWAWAY SPIKE: can a no-signer scheduler-executed ix issue an ephemeral-vrf request in-rollup?"
+edition = "2021"
+
+[lib]
+crate-type = ["cdylib", "lib"]
+name = "vrf_signer_probe"
+
+[features]
+default = []
+cpi = ["no-entrypoint"]
+no-entrypoint = []
+no-idl = []
+no-log-ix-name = []
+idl-build = ["anchor-lang/idl-build"]
+
+[dependencies]
+anchor-lang = "0.32.1"
+ephemeral-rollups-sdk = { version = "0.15.5", features = ["anchor-compat"] }
+# Direct dependency with `anchor-compat`, exactly like programs/crate-roll.
+# Do NOT enable ephemeral-rollups-sdk/vrf: it flips the proc-macro's path emission.
+ephemeral-vrf-sdk = { version = "0.4.1", features = ["anchor-compat"] }
+magicblock-magic-program-api = "0.10.1"
+bincode = "1.3"

@@ -86,10 +86,11 @@ function injectStyles() {
   stylesInjected = true;
   const s = document.createElement("style");
   s.textContent = `
-    /* z-index 30 sits below the crate shop (34), the access wall (40) and splash (50). The identity
-       gate ALSO uses 30, so it wins over home purely by DOM append order (main.ts creates the gate
-       after home) — keep that ordering if either is reworked, or bump one of the two to an explicit
-       different layer. The crate shop is deliberately ABOVE: it hosts over home, never under it. */
+    /* z-index 30 sits below the crate shop (34), the how-to walkthrough (35), the access wall (40) and
+       splash (50). The identity gate ALSO uses 30, so it wins over home purely by DOM append order
+       (main.ts creates the gate after home) — keep that ordering if either is reworked, or bump one of
+       the two to an explicit different layer. The crate shop and the walkthrough are deliberately
+       ABOVE: both host over home, never under it. */
     .sw-home{--acid:#c1f832;--ink:#e8edf3;--mut:#79838f;--edge:#05070b;
       position:fixed;inset:0;z-index:30;display:none;flex-direction:column;pointer-events:auto;
       background:radial-gradient(130% 80% at 50% -10%,rgba(193,248,50,.08),transparent 55%),#0a0c10;

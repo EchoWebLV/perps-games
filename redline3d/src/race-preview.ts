@@ -16,7 +16,7 @@ import { installOutlineDevControls, isToonEnabled, onToonChanged, refreshToonSty
 import { EdgeOutlinePass, edgePassEnabled, setEdgePassEnabled } from "./render/edge-outline-pass";
 import { registerLightLab } from "./ui/light-lab";
 import { pNum, pColor } from "./config/visual-presets";
-import { createRaceGame, DEFAULT_GRID, type RaceGame } from "./render/race-mode";
+import { createRaceGame, raceEnvIntensity, DEFAULT_GRID, type RaceGame } from "./render/race-mode";
 import { createChainBookSource, type RaceBookSource } from "./render/race-book-source";
 import { createPaddockBook } from "./chain/paddock";
 import { createPaddockStaging } from "./chain/paddock-staging";
@@ -72,9 +72,12 @@ const scene = new THREE.Scene();
 // Atmosphere follows the art style, swapped live by the toggle. TOON = warm dusk haze (city recedes
 // into it while the sun + parallax mountains own the horizon, far pushed out). CLASSIC = the pre-toon
 // dark-violet night void.
+// IBL strength rides along: raceEnvIntensity() dims the env map in CLASSIC so the standard-material
+// cars keep their paint instead of all mirroring the same bright room (see race-mode.ts).
 const applyStyleFog = (on: boolean): void => {
   if (on) { scene.background = new THREE.Color(0x140a24); scene.fog = new THREE.Fog(pColor("race-track", "fogColor", "#3a2246"), pNum("race-track", "fogNear", 260), pNum("race-track", "fogFar", 1300)); }
   else { scene.background = new THREE.Color(0x05030f); scene.fog = new THREE.Fog(0x0a0518, 210, 760); }
+  scene.environmentIntensity = raceEnvIntensity();
 };
 applyStyleFog(isToonEnabled());
 onToonChanged(applyStyleFog);

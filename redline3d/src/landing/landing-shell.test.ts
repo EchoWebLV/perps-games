@@ -50,11 +50,12 @@ describe("Slopwheels landing shell — Midnight Drop", () => {
     expect(landingHtml).not.toContain('/src/main.ts'); // the game entry never ships on the landing page
   });
 
-  it("wears the Slopwheels brand — singular $SLOP, never SLOBS or SLOPS", () => {
+  it("wears the Slopwheels brand — the shelved $SLOP token never appears", () => {
     expect(landingHtml).toContain("<title>Slopwheels");
-    expect(landingHtml).toContain("$SLOP");
+    expect(landingHtml).not.toContain("$SLOP"); // token shelved — no ticker anywhere
+    expect(landingHtml).not.toMatch(/token/i); // and no token talk in any spelling
     expect(landingHtml).not.toContain("SLOBS");
-    expect(landingHtml).not.toContain("SLOPS"); // ticker is singular $SLOP now
+    expect(landingHtml).not.toContain("SLOPS");
     expect(landingHtml).toContain('property="og:image" content="/assets/landing/og-slopwheels.png"');
     const manifest = JSON.parse(manifestText);
     expect(manifest.name).toBe("Slopwheels");
@@ -81,7 +82,6 @@ describe("Slopwheels landing shell — Midnight Drop", () => {
       'id="crack"',                // live demo crate
       "How the drop works",        // how the drop works
       'id="why"',                  // why collect
-      "What is <span",             // what is $SLOPS?
       'id="how"',                  // pull / bet / win
       'id="garage"',               // card gallery
       'id="lobby"',                // lobby
@@ -101,7 +101,7 @@ describe("Slopwheels landing shell — Midnight Drop", () => {
   it("carries the verbatim story copy for every section", () => {
     expect(landingHtml).toContain("Crack crates.");
     expect(landingHtml).toContain("Collect wheels.");
-    expect(landingHtml).toContain("Earn your $SLOP.");
+    expect(landingHtml).toContain("Win the pot.");
     expect(landingHtml).toContain("Not all crates hit the same.");
     expect(landingHtml).toContain("Three moves, one loop");
     expect(landingHtml).toContain("The garage");
@@ -111,7 +111,7 @@ describe("Slopwheels landing shell — Midnight Drop", () => {
     expect(landingHtml).toContain("five rarity tiers"); // rarity survives in "How the drop works"
   });
 
-  it("reserves 'slop' for the $SLOP token — collectibles are 'wheels'", () => {
+  it("reserves 'slop' for the brand — collectibles are 'wheels', the token is gone", () => {
     // hero green line + earn headline now say "wheels"
     expect(landingHtml).toContain("<span>Collect wheels.</span>");
     expect(landingHtml).toContain("Collect the wheels.");
@@ -120,10 +120,10 @@ describe("Slopwheels landing shell — Midnight Drop", () => {
     expect(landingHtml).not.toContain("Collect the slop");
     expect(landingHtml).not.toContain("Built for the slop");
     expect(landingHtml).not.toMatch(/alt="[^"]*slopface[^"]*"/); // alt text de-slopped (the /brands/slopface.png asset path stays)
-    // brand, event name, and the token keep their exact spellings
+    // brand and event name keep their exact spellings; the shelved token never appears
     expect(landingHtml).toContain("Slopwheels");
     expect(landingHtml).toContain("The Slop Drop");
-    expect(landingHtml).toContain("$SLOP");
+    expect(landingHtml).not.toContain("$SLOP");
   });
 
   it("explains the product in plain English — no unexplained jargon", () => {
@@ -134,7 +134,6 @@ describe("Slopwheels landing shell — Midnight Drop", () => {
     // verified facts survive the rewrite
     expect(landingHtml).toContain("five rarity tiers");
     expect(landingHtml).toContain("finishes on the podium");
-    expect(landingHtml).toContain("upcoming $SLOP token");
   });
 
   it("sorts the card gallery ascending — commons first, legendaries last", () => {
@@ -159,6 +158,15 @@ describe("Slopwheels landing shell — Midnight Drop", () => {
     const css = await readLandingCss();
     expect(css).not.toContain(".shrine");
     expect(css).not.toContain(".ladder");
+  });
+
+  it("removes the $SLOP teaser panel entirely — no orphan section or styles", async () => {
+    expect(landingHtml).not.toContain("What is <span");
+    expect(landingHtml).not.toContain('class="slops');
+    expect(landingHtml).not.toContain("first in line");
+    const css = await readLandingCss();
+    expect(css).not.toContain(".slops");
+    expect(css).not.toContain(".tk");
   });
 
   it("labels the highway section 'Perps' and the gallery link 'Garage' — no 'Mode 2'", () => {

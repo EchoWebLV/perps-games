@@ -1,0 +1,769 @@
+<!doctype html>
+<html lang="en" class="has-js">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover" />
+    <title>Slopwheels — Crack the crate. Collect the slop.</title>
+    <meta name="description" content="Slopwheels is a toon-car gacha racer on Solana. Crack crates for 20+ collectible cars across 5 rarity tiers, then bet chaotic pari-mutuel races. Collecting now counts toward the upcoming $SLOBS token." />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=Titan+One&family=Baloo+2:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
+    <style>
+      :root {
+        --yellow: #F6CE5F;
+        --yellow-deep: #F1B93E;
+        --yellow-soft: #FBE4A6;
+        --cream: #F7F0DE;
+        --cream-2: #FCF7EC;
+        --navy: #2B3054;
+        --navy-deep: #21254280;
+        --navy-solid: #212542;
+        --ink-70: #4a507a;
+        --green: #C0F030;
+        --green-deep: #97C41c;
+        --green-darker: #7ba30f;
+        --pink: #FF5CA8;
+        --pink-deep: #E23C8A;
+
+        --r-gray:   #9AA3B2;
+        --r-green:  #57C067;
+        --r-blue:   #3E8EF7;
+        --r-purple: #A66BF0;
+        --r-gold:   #F5B324;
+
+        --r-gray-t:   #EEF1F6;
+        --r-green-t:  #E7F7EB;
+        --r-blue-t:   #E8F1FE;
+        --r-purple-t: #F2EBFD;
+        --r-gold-t:   #FEF3DA;
+
+        --wrap: 1180px;
+        --shadow-soft: 0 22px 45px -18px rgba(33,37,66,.45);
+        --shadow-card: 0 16px 30px -14px rgba(33,37,66,.35);
+        --display: "Titan One", "Baloo 2", system-ui, sans-serif;
+        --body: "Baloo 2", system-ui, -apple-system, sans-serif;
+      }
+
+      * { box-sizing: border-box; }
+      html, body { margin: 0; padding: 0; }
+      body {
+        font-family: var(--body);
+        color: var(--navy);
+        background: var(--cream);
+        -webkit-font-smoothing: antialiased;
+        text-rendering: optimizeLegibility;
+        overflow-x: hidden;
+        line-height: 1.5;
+      }
+      img { max-width: 100%; display: block; }
+      a { color: inherit; text-decoration: none; }
+      h1, h2, h3 { margin: 0; line-height: 1.02; font-family: var(--display); font-weight: 400; letter-spacing: .2px; }
+      p { margin: 0; }
+
+      .wrap { width: min(100% - 40px, var(--wrap)); margin-inline: auto; }
+      .center { text-align: center; }
+
+      /* ---------- Buttons ---------- */
+      .btn {
+        display: inline-flex; align-items: center; justify-content: center; gap: .55em;
+        font-family: var(--display); font-size: clamp(1rem, 1vw + .7rem, 1.35rem);
+        border-radius: 999px; padding: .8em 1.6em; border: 4px solid var(--navy);
+        cursor: pointer; transition: transform .12s ease, box-shadow .12s ease; line-height: 1;
+        text-transform: uppercase; letter-spacing: .4px; white-space: nowrap;
+      }
+      .btn--green { background: var(--green); color: var(--navy); box-shadow: 0 7px 0 var(--green-darker); }
+      .btn--green:hover { transform: translateY(-2px); box-shadow: 0 9px 0 var(--green-darker); }
+      .btn--green:active { transform: translateY(5px); box-shadow: 0 2px 0 var(--green-darker); }
+      .btn--navy { background: var(--navy-solid); color: #fff; border-color: var(--navy-solid); box-shadow: 0 6px 0 #12142b; }
+      .btn--navy:hover { transform: translateY(-2px); box-shadow: 0 8px 0 #12142b; }
+      .btn--navy:active { transform: translateY(4px); box-shadow: 0 2px 0 #12142b; }
+      .btn--pink { background: var(--pink); color: #fff; border-color: var(--navy); box-shadow: 0 7px 0 var(--pink-deep); }
+      .btn--pink:hover { transform: translateY(-2px); }
+      .btn--jumbo { font-size: clamp(1.2rem, 2.4vw + .7rem, 2.15rem); padding: .78em 1.7em; border-width: 5px; }
+
+      /* ---------- Nav ---------- */
+      .nav {
+        position: sticky; top: 0; z-index: 100;
+        display: flex; align-items: center; gap: 18px;
+        padding: 14px clamp(16px, 3vw, 34px);
+        transition: background .25s ease, box-shadow .25s ease, padding .25s ease;
+      }
+      .nav.scrolled {
+        background: rgba(252,247,236,.82);
+        backdrop-filter: blur(12px) saturate(1.1);
+        box-shadow: 0 8px 24px -18px rgba(33,37,66,.6);
+        padding-top: 10px; padding-bottom: 10px;
+      }
+      .brand { display: flex; align-items: center; gap: 11px; margin-right: auto; }
+      .brand img { width: 46px; height: 46px; filter: drop-shadow(0 4px 6px rgba(33,37,66,.28)); }
+      .brand b {
+        font-family: var(--display); font-size: 1.5rem; color: var(--navy);
+        letter-spacing: .3px; line-height: 1;
+      }
+      .nav-pill {
+        display: flex; align-items: center; gap: 2px;
+        background: #fff; border: 3px solid var(--navy);
+        border-radius: 999px; padding: 5px; box-shadow: var(--shadow-card);
+      }
+      .nav-pill a {
+        font-weight: 800; font-size: .82rem; letter-spacing: .6px; text-transform: uppercase;
+        padding: 9px 15px; border-radius: 999px; color: var(--navy); transition: background .15s ease, color .15s ease;
+      }
+      .nav-pill a:hover { background: var(--yellow); }
+      .nav-launch { font-size: .92rem; padding: .7em 1.25em; border-width: 3px; box-shadow: 0 5px 0 #12142b; }
+
+      /* ---------- Drip dividers ---------- */
+      .drip { display: block; width: 100%; height: clamp(52px, 6vw, 92px); line-height: 0; margin: 0; }
+      .drip svg { width: 100%; height: 100%; display: block; }
+      .drip-wobble { animation: wobble 7s ease-in-out infinite; transform-origin: top center; }
+
+      /* ---------- Hero ---------- */
+      .hero {
+        position: relative; overflow: hidden;
+        background:
+          radial-gradient(120% 90% at 50% -10%, #FCE39A 0%, var(--yellow) 42%, var(--yellow-deep) 100%);
+        padding-top: clamp(6px, 2vw, 24px);
+        padding-bottom: clamp(24px, 4vw, 54px);
+      }
+      .hero-blob { position: absolute; border-radius: 50%; filter: blur(6px); opacity: .5; pointer-events: none; }
+      .hero-blob.b1 { width: 260px; height: 260px; background: #ffffff8c; top: 6%; left: -70px; }
+      .hero-blob.b2 { width: 200px; height: 200px; background: var(--pink); opacity: .16; bottom: 8%; right: -40px; filter: blur(30px); }
+      .hero-blob.b3 { width: 160px; height: 160px; background: var(--green); opacity: .22; top: 40%; right: 10%; filter: blur(34px); }
+
+      .hero-inner { position: relative; z-index: 2; padding-top: 6px; }
+      .eyebrow {
+        display: inline-flex; align-items: center; gap: 9px; margin-inline: auto;
+        background: #fff; border: 3px solid var(--navy); border-radius: 999px;
+        padding: 8px 18px; font-weight: 800; letter-spacing: 1.4px; font-size: .78rem;
+        text-transform: uppercase; box-shadow: var(--shadow-card);
+      }
+      .eyebrow .dot { width: 10px; height: 10px; border-radius: 50%; background: var(--green); border: 2px solid var(--navy); box-shadow: 0 0 0 3px #c0f0304d; }
+      .eyebrow-row { display: flex; justify-content: center; margin-bottom: 6px; }
+
+      .stage {
+        position: relative; width: min(96vw, 960px); margin: 4px auto 0;
+        aspect-ratio: 96 / 60;
+      }
+      .glow-pool {
+        position: absolute; inset: 12% 8% 6%; border-radius: 50%;
+        background: radial-gradient(closest-side, #ffffffb0, #ffffff00 70%);
+        filter: blur(8px); z-index: 0;
+      }
+      .hcard-pos { position: absolute; transform: translate(-50%, -50%) rotate(var(--rot, 0deg)); }
+      .hcard {
+        background: #fff; border: 5px solid var(--navy); border-radius: 24px;
+        padding: 9px; box-shadow: var(--shadow-soft);
+        animation: bob var(--dur, 5s) ease-in-out infinite; animation-delay: var(--delay, 0s);
+      }
+      .hcard .art {
+        aspect-ratio: 600 / 448; border-radius: 15px; overflow: hidden;
+        display: grid; place-items: center; padding: 4px;
+        background: radial-gradient(circle at 50% 40%, var(--tint, #eef1f6), #ffffff 78%);
+      }
+      .hcard .art img { width: 100%; height: 100%; object-fit: contain; filter: drop-shadow(0 8px 8px rgba(33,37,66,.22)); }
+      .hcard .tag {
+        position: absolute; left: 50%; bottom: -13px; transform: translateX(-50%);
+        background: var(--navy-solid); color: #fff; font-family: var(--display);
+        font-size: .62rem; letter-spacing: .6px; padding: 4px 12px; border-radius: 999px;
+        white-space: nowrap; border: 2px solid #fff; box-shadow: 0 4px 8px rgba(33,37,66,.3);
+      }
+      .slopface-hero {
+        position: absolute; left: 50%; top: 20%; width: 22%;
+        transform: translate(-50%, -50%); z-index: 20;
+        animation: bobface 5.5s ease-in-out infinite;
+        filter: drop-shadow(0 14px 16px rgba(33,37,66,.35));
+      }
+
+      .hero-cta-wrap { text-align: center; margin-top: clamp(6px, 1.5vw, 18px); position: relative; z-index: 5; }
+      .hero-sub { margin-top: 16px; font-weight: 700; color: var(--navy); font-size: clamp(.92rem, .5vw + .8rem, 1.08rem); letter-spacing: .2px; }
+      .hero-sub b { color: var(--pink-deep); }
+
+      /* ---------- Sections ---------- */
+      .band { position: relative; }
+      .band--cream { background: var(--cream); }
+      .band--cream2 { background: var(--cream-2); }
+      .band--navy { background: var(--navy-solid); color: #fff; }
+      .band--yellow { background: radial-gradient(120% 120% at 50% 0%, #FCE39A, var(--yellow) 55%, var(--yellow-deep)); }
+      .sec { padding-block: clamp(48px, 7vw, 96px); }
+      .sec-tight { padding-block: clamp(38px, 5vw, 68px); }
+
+      .kicker {
+        display: inline-flex; align-items: center; gap: 8px;
+        font-weight: 800; text-transform: uppercase; letter-spacing: 1.8px; font-size: .78rem;
+        color: var(--pink-deep); margin-bottom: 14px;
+      }
+      .band--navy .kicker { color: var(--green); }
+      .kicker::before { content: ""; width: 22px; height: 4px; border-radius: 4px; background: currentColor; }
+
+      h2.big { font-size: clamp(2.1rem, 4.6vw, 3.9rem); color: var(--navy); letter-spacing: .3px; }
+      .band--navy h2.big { color: #fff; }
+      h2.big .hl { color: var(--pink-deep); }
+      .band--navy h2.big .hl { color: var(--green); }
+      .lead { font-size: clamp(1.02rem, .7vw + .9rem, 1.28rem); font-weight: 600; color: var(--ink-70); max-width: 62ch; }
+      .band--navy .lead { color: #d7dbf0; }
+      .measure { max-width: 720px; margin-inline: auto; }
+
+      /* ---------- Story / headline ---------- */
+      .story-head h2.big { font-size: clamp(2.3rem, 5.6vw, 4.5rem); }
+      .story-para { display: grid; gap: 20px; max-width: 720px; margin: 26px auto 0; }
+      .story-para p { font-size: clamp(1.05rem, .7vw + .9rem, 1.3rem); font-weight: 600; color: var(--ink-70); }
+      .token-word { color: var(--navy); background: var(--green); padding: 0 .28em; border-radius: 8px; box-decoration-break: clone; -webkit-box-decoration-break: clone; font-weight: 800; }
+
+      /* ---------- How the drop works ---------- */
+      .drop-grid {
+        display: grid; grid-template-columns: repeat(4, 1fr); gap: 20px; margin-top: 44px;
+      }
+      .drop-card {
+        background: #fff; border: 4px solid var(--navy); border-radius: 26px;
+        padding: 26px 20px 24px; text-align: center; box-shadow: var(--shadow-card);
+      }
+      .drop-ico {
+        width: 76px; height: 76px; margin: 0 auto 16px; border-radius: 22px;
+        display: grid; place-items: center; border: 4px solid var(--navy);
+        background: var(--green); box-shadow: 0 5px 0 var(--green-darker);
+      }
+      .drop-card:nth-child(2) .drop-ico { background: var(--yellow); box-shadow: 0 5px 0 var(--yellow-deep); }
+      .drop-card:nth-child(3) .drop-ico { background: var(--pink); box-shadow: 0 5px 0 var(--pink-deep); }
+      .drop-card:nth-child(4) .drop-ico { background: #7CC6FF; box-shadow: 0 5px 0 #3E8EF7; }
+      .drop-ico svg { width: 40px; height: 40px; }
+      .drop-card p { font-weight: 700; color: var(--navy); font-size: 1.02rem; line-height: 1.35; }
+
+      /* ---------- Why collect ---------- */
+      .why {
+        margin-top: 46px; display: grid; grid-template-columns: 1.1fr 1fr; gap: 26px; align-items: stretch;
+      }
+      .why-note {
+        background: var(--navy-solid); color: #fff; border-radius: 30px; padding: 40px;
+        border: 4px solid var(--navy); box-shadow: var(--shadow-soft); display: flex; flex-direction: column; justify-content: center;
+      }
+      .why-note h3 { font-family: var(--display); font-size: clamp(1.6rem, 2.4vw, 2.3rem); margin-bottom: 16px; }
+      .why-note h3 .hl { color: var(--green); }
+      .why-note p { color: #d7dbf0; font-weight: 600; font-size: 1.1rem; }
+      .why-pull {
+        background: var(--pink); border: 4px solid var(--navy); border-radius: 30px; padding: 36px;
+        display: flex; flex-direction: column; justify-content: center; box-shadow: var(--shadow-soft); color: #fff;
+      }
+      .why-pull b.tiny { font-weight: 800; text-transform: uppercase; letter-spacing: 1.6px; font-size: .78rem; opacity: .95; }
+      .why-pull strong { font-family: var(--display); font-weight: 400; font-size: clamp(1.5rem, 2.6vw, 2.15rem); display: block; margin-top: 8px; line-height: 1.05; }
+
+      /* ---------- $SLOBS ---------- */
+      .slobs { position: relative; overflow: hidden; }
+      .slobs .glimmer { position: absolute; width: 340px; height: 340px; border-radius: 50%; background: var(--green); opacity: .12; filter: blur(40px); top: -80px; right: -40px; }
+      .slobs-badge {
+        display: inline-flex; align-items: center; gap: 10px; background: #ffffff10; border: 2px solid #ffffff33;
+        border-radius: 999px; padding: 7px 16px; font-weight: 800; letter-spacing: 1.4px; text-transform: uppercase; font-size: .76rem; color: var(--green); margin-bottom: 18px;
+      }
+      .slobs h2 { font-family: var(--display); font-size: clamp(2.4rem, 5vw, 4rem); }
+      .slobs h2 .token { color: var(--green); }
+      .slobs p { margin-top: 22px; font-weight: 600; color: #d7dbf0; font-size: clamp(1.05rem, .7vw + .9rem, 1.3rem); }
+      .slobs .upcoming-chip { display: inline-block; margin-top: 26px; font-weight: 800; letter-spacing: 1px; font-size: .84rem; text-transform: uppercase; color: var(--navy-solid); background: var(--green); padding: 9px 18px; border-radius: 999px; border: 3px solid #0f1128; }
+
+      /* ---------- Steps ---------- */
+      .steps { display: grid; grid-template-columns: repeat(3, 1fr); gap: 24px; margin-top: 46px; }
+      .step {
+        background: #fff; border: 4px solid var(--navy); border-radius: 28px; overflow: hidden;
+        box-shadow: var(--shadow-card); display: flex; flex-direction: column;
+      }
+      .step .shot { position: relative; aspect-ratio: 640 / 360; overflow: hidden; background: #14162e; }
+      .step .shot img { width: 100%; height: 100%; object-fit: cover; }
+      .step .num {
+        position: absolute; top: 12px; left: 12px; font-family: var(--display);
+        background: var(--green); color: var(--navy); border: 3px solid var(--navy);
+        border-radius: 999px; padding: 5px 14px; font-size: .82rem; letter-spacing: .6px; box-shadow: 0 4px 0 var(--green-darker);
+      }
+      .step:nth-child(2) .num { background: var(--yellow); box-shadow: 0 4px 0 var(--yellow-deep); }
+      .step:nth-child(3) .num { background: var(--pink); color: #fff; box-shadow: 0 4px 0 var(--pink-deep); }
+      .step .body { padding: 22px 24px 26px; }
+      .step .body h3 { font-family: var(--display); font-size: 1.55rem; color: var(--navy); margin-bottom: 8px; }
+      .step .body p { font-weight: 600; color: var(--ink-70); font-size: 1.02rem; }
+
+      /* ---------- Rarity ---------- */
+      .rarity-grid { display: grid; grid-template-columns: repeat(5, 1fr); gap: 16px; margin-top: 44px; }
+      .tier {
+        border-radius: 24px; overflow: hidden; border: 4px solid var(--navy); background: #fff;
+        box-shadow: var(--shadow-card); text-align: center;
+      }
+      .tier .cap { padding: 22px 10px 18px; color: #fff; position: relative; }
+      .tier .cap .odds { font-family: var(--display); font-size: clamp(2rem, 3vw, 2.9rem); line-height: 1; }
+      .tier .cap .odds small { font-size: .5em; }
+      .tier .foot { padding: 14px 8px 18px; }
+      .tier .foot b { font-family: var(--display); font-weight: 400; display: block; font-size: 1.15rem; color: var(--navy); letter-spacing: .3px; }
+      .tier .foot span { font-weight: 700; font-size: .82rem; color: var(--ink-70); text-transform: uppercase; letter-spacing: 1px; }
+      .tier.gray .cap   { background: var(--r-gray); }
+      .tier.green .cap  { background: var(--r-green); }
+      .tier.blue .cap   { background: var(--r-blue); }
+      .tier.purple .cap { background: var(--r-purple); }
+      .tier.gold .cap   { background: var(--r-gold); color: var(--navy); }
+
+      /* ---------- Card grid ---------- */
+      .cards { display: grid; grid-template-columns: repeat(4, 1fr); gap: 22px; margin-top: 44px; }
+      .tcard {
+        background: #fff; border: 4px solid var(--navy); border-radius: 22px; overflow: hidden;
+        box-shadow: var(--shadow-card); transition: transform .18s ease, box-shadow .18s ease;
+      }
+      .tcard:hover { transform: translateY(-6px) rotate(-.6deg); box-shadow: var(--shadow-soft); }
+      .tcard .head {
+        background: var(--navy-solid); color: #fff; display: flex; align-items: center; justify-content: space-between;
+        gap: 8px; padding: 12px 14px;
+      }
+      .tcard .head b { font-family: var(--display); font-weight: 400; font-size: 1.02rem; letter-spacing: .3px; }
+      .chip {
+        font-weight: 800; font-size: .62rem; text-transform: uppercase; letter-spacing: .8px;
+        padding: 4px 9px; border-radius: 999px; color: #fff; white-space: nowrap; border: 2px solid #ffffff2e;
+      }
+      .chip.gray { background: var(--r-gray); }
+      .chip.green { background: var(--r-green); }
+      .chip.blue { background: var(--r-blue); }
+      .chip.purple { background: var(--r-purple); }
+      .chip.gold { background: var(--r-gold); color: var(--navy); border-color: #0002; }
+      .tcard .art { aspect-ratio: 600 / 448; display: grid; place-items: center; padding: 12px; }
+      .tcard.gray .art   { background: radial-gradient(circle at 50% 42%, var(--r-gray-t), #fff 80%); }
+      .tcard.green .art  { background: radial-gradient(circle at 50% 42%, var(--r-green-t), #fff 80%); }
+      .tcard.blue .art   { background: radial-gradient(circle at 50% 42%, var(--r-blue-t), #fff 80%); }
+      .tcard.purple .art { background: radial-gradient(circle at 50% 42%, var(--r-purple-t), #fff 80%); }
+      .tcard.gold .art   { background: radial-gradient(circle at 50% 42%, var(--r-gold-t), #fff 80%); }
+      .tcard .art img { width: 100%; height: 100%; object-fit: contain; filter: drop-shadow(0 8px 8px rgba(33,37,66,.2)); }
+      .tcard .foot { display: flex; align-items: center; justify-content: space-between; padding: 11px 14px; border-top: 3px solid #eee6d0; }
+      .tcard .foot span { font-weight: 800; font-size: .76rem; text-transform: uppercase; letter-spacing: .8px; color: var(--ink-70); }
+      .tcard .foot .dot { display: inline-flex; align-items: center; gap: 6px; }
+      .tcard .foot .dot i { width: 11px; height: 11px; border-radius: 50%; border: 2px solid var(--navy); }
+      .tcard.gray .foot i { background: var(--r-gray); }
+      .tcard.green .foot i { background: var(--r-green); }
+      .tcard.blue .foot i { background: var(--r-blue); }
+      .tcard.purple .foot i { background: var(--r-purple); }
+      .tcard.gold .foot i { background: var(--r-gold); }
+      .tcard .foot .pct { font-family: var(--display); color: var(--navy); font-size: .9rem; letter-spacing: 0; }
+
+      /* ---------- Mode 2 ---------- */
+      .mode2 {
+        display: grid; grid-template-columns: 1fr 1fr; gap: 0; overflow: hidden;
+        border: 5px solid var(--navy); border-radius: 34px; background: var(--navy-solid); color: #fff;
+        box-shadow: var(--shadow-soft); margin-top: 8px;
+      }
+      .mode2 .m-copy { padding: clamp(28px, 4vw, 52px); }
+      .mode2 .m-copy h2 { font-family: var(--display); font-size: clamp(1.9rem, 3.2vw, 2.9rem); }
+      .mode2 .m-copy h2 .hl { color: var(--green); }
+      .mode2 .m-copy p { margin-top: 18px; color: #d7dbf0; font-weight: 600; font-size: 1.08rem; max-width: 46ch; }
+      .lev {
+        margin-top: 26px; display: inline-flex; flex-direction: column; gap: 4px;
+        background: #ffffff0f; border: 2px solid #ffffff26; border-radius: 20px; padding: 18px 26px;
+      }
+      .lev b { font-family: var(--display); font-size: clamp(2.2rem, 4vw, 3.4rem); color: var(--green); line-height: 1; }
+      .lev span { font-weight: 800; letter-spacing: 1.4px; text-transform: uppercase; font-size: .72rem; color: #b9c0e6; }
+      .mode2 .m-shot { position: relative; min-height: 320px; background: #10122a; }
+      .mode2 .m-shot img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; }
+      .mode2 .m-shot::after { content: ""; position: absolute; inset: 0; background: linear-gradient(90deg, #21254299, transparent 30%); }
+      .m-tag { position: absolute; z-index: 2; bottom: 18px; right: 18px; background: var(--pink); color: #fff; font-family: var(--display); font-size: .8rem; padding: 7px 16px; border-radius: 999px; border: 3px solid #fff; letter-spacing: .5px; }
+
+      /* ---------- Built on ---------- */
+      .built {
+        margin-top: 8px; display: grid; grid-template-columns: auto 1fr; gap: 34px; align-items: center;
+        background: #fff; border: 4px solid var(--navy); border-radius: 30px; padding: clamp(26px, 3vw, 40px);
+        box-shadow: var(--shadow-card);
+      }
+      .built .logos { display: flex; align-items: center; gap: 28px; }
+      .built .logos .lo { display: grid; place-items: center; gap: 8px; }
+      .built .logos img { height: 46px; width: auto; }
+      .built .logos img.sol { height: 40px; }
+      .built .logos small { font-weight: 800; font-size: .66rem; letter-spacing: 1.2px; text-transform: uppercase; color: var(--ink-70); }
+      .built .vr { width: 3px; align-self: stretch; background: #eee6d0; border-radius: 3px; }
+      .built p { font-weight: 700; font-size: clamp(1rem, .6vw + .85rem, 1.22rem); color: var(--navy); }
+      .built p b { color: var(--pink-deep); }
+
+      /* ---------- Final CTA ---------- */
+      .final { text-align: center; position: relative; overflow: hidden; }
+      .final .slopface-final { width: clamp(96px, 12vw, 140px); margin: 0 auto 20px; animation: bobface 5s ease-in-out infinite; filter: drop-shadow(0 12px 12px rgba(33,37,66,.3)); }
+      .final h2 { font-size: clamp(2.4rem, 6vw, 4.6rem); color: var(--navy); }
+      .final h2 .hl { color: var(--pink-deep); }
+      .final .note { margin-top: 24px; font-weight: 700; color: var(--navy); font-size: 1rem; }
+      .final .note b { color: var(--pink-deep); }
+
+      /* ---------- Footer ---------- */
+      .footer { background: var(--navy-solid); color: #fff; padding: clamp(40px, 5vw, 70px) 0 44px; }
+      .footer-top { display: flex; align-items: center; gap: 16px; flex-wrap: wrap; }
+      .footer-top .brand b { color: #fff; }
+      .footer-links { margin-left: auto; display: flex; gap: 10px; flex-wrap: wrap; }
+      .footer-links a { font-weight: 800; font-size: .82rem; text-transform: uppercase; letter-spacing: .8px; padding: 10px 18px; border: 2px solid #ffffff30; border-radius: 999px; transition: background .15s ease; }
+      .footer-links a:hover { background: #ffffff16; }
+      .footer hr { border: none; border-top: 2px solid #ffffff18; margin: 30px 0 24px; }
+      .risk-note { font-weight: 600; color: #aab1d8; font-size: .96rem; max-width: 72ch; }
+      .risk-note strong { color: #fff; font-weight: 800; }
+      .copyright { margin-top: 14px; font-weight: 700; color: #7c83ad; font-size: .82rem; letter-spacing: .3px; }
+
+      /* ---------- Reveal ---------- */
+      .has-js .reveal { opacity: 0; transform: translateY(26px); transition: opacity .6s ease, transform .6s cubic-bezier(.2,.7,.2,1); }
+      .has-js .reveal.in { opacity: 1; transform: none; }
+
+      /* ---------- Keyframes ---------- */
+      @keyframes bob { 0%, 100% { transform: translateY(0) rotate(0deg); } 50% { transform: translateY(-11px) rotate(1.4deg); } }
+      @keyframes bobface { 0%, 100% { transform: translateY(0) rotate(-2deg); } 50% { transform: translateY(-14px) rotate(2deg); } }
+      @keyframes wobble { 0%, 100% { transform: scaleY(1) skewX(0deg); } 50% { transform: scaleY(1.06) skewX(1.2deg); } }
+
+      /* ---------- Responsive ---------- */
+      @media (max-width: 1024px) {
+        .cards { grid-template-columns: repeat(3, 1fr); }
+        .built { grid-template-columns: 1fr; gap: 22px; text-align: center; }
+        .built .logos { justify-content: center; }
+        .built .vr { display: none; }
+      }
+      @media (max-width: 860px) {
+        .nav-pill { display: none; }
+        .drop-grid { grid-template-columns: repeat(2, 1fr); }
+        .why { grid-template-columns: 1fr; }
+        .steps { grid-template-columns: 1fr; }
+        .mode2 { grid-template-columns: 1fr; }
+        .mode2 .m-shot { min-height: 240px; order: -1; }
+        .rarity-grid { grid-template-columns: repeat(3, 1fr); }
+      }
+      @media (max-width: 620px) {
+        .brand b { font-size: 1.2rem; }
+        .brand img { width: 38px; height: 38px; }
+        .cards { grid-template-columns: repeat(2, 1fr); gap: 14px; }
+        .drop-grid { grid-template-columns: 1fr; }
+        .rarity-grid { grid-template-columns: repeat(2, 1fr); }
+        .hcard-pos.mobile-hide { display: none; }
+        .stage { aspect-ratio: 90 / 74; width: 98vw; }
+        .slopface-hero { top: 14%; width: 30%; }
+        .why-note, .why-pull { padding: 28px; }
+        h2.big { font-size: clamp(1.9rem, 8vw, 2.6rem); }
+      }
+      @media (prefers-reduced-motion: reduce) {
+        .hcard, .slopface-hero, .slopface-final, .drip-wobble { animation: none !important; }
+        .has-js .reveal { opacity: 1 !important; transform: none !important; transition: none !important; }
+      }
+    </style>
+  </head>
+  <body>
+    <!-- Drip divider symbol defs -->
+    <svg width="0" height="0" style="position:absolute" aria-hidden="true">
+      <symbol id="dripA" viewBox="0 0 1440 140" preserveAspectRatio="none">
+        <path fill="currentColor" d="M0,0 H1440 V34 H1414.0 C1414.0,52.4 1423.0,48.7 1423.0,61.6 C1423.0,73.6 1409.2,80 1400,80 C1390.8,80 1377.0,73.6 1377.0,61.6 C1377.0,48.7 1386.0,52.4 1386.0,34 H1288.0 C1288.0,66.0 1301.0,59.6 1301.0,82.0 C1301.0,102.8 1282.4,114 1270,114 C1257.6,114 1239.0,102.8 1239.0,82.0 C1239.0,59.6 1252.0,66.0 1252.0,34 H1136.0 C1136.0,57.2 1147.0,52.6 1147.0,68.8 C1147.0,83.9 1130.8,92 1120,92 C1109.2,92 1093.0,83.9 1093.0,68.8 C1093.0,52.6 1104.0,57.2 1104.0,34 H980.0 C980.0,74.0 995.0,66.0 995.0,94.0 C995.0,120.0 974.0,134 960,134 C946.0,134 925.0,120.0 925.0,94.0 C925.0,66.0 940.0,74.0 940.0,34 H813.0 C813.0,51.6 822.0,48.1 822.0,60.4 C822.0,71.8 808.8,78 800,78 C791.2,78 778.0,71.8 778.0,60.4 C778.0,48.1 787.0,51.6 787.0,34 H657.0 C657.0,63.6 670.0,57.7 670.0,78.4 C670.0,97.6 652.0,108 640,108 C628.0,108 610.0,97.6 610.0,78.4 C610.0,57.7 623.0,63.6 623.0,34 H515.0 C515.0,54.8 526.0,50.6 526.0,65.2 C526.0,78.7 510.4,86 500,86 C489.6,86 474.0,78.7 474.0,65.2 C474.0,50.6 485.0,54.8 485.0,34 H369.0 C369.0,70.8 383.0,63.4 383.0,89.2 C383.0,113.1 363.2,126 350,126 C336.8,126 317.0,113.1 317.0,89.2 C317.0,63.4 331.0,70.8 331.0,34 H224.0 C224.0,50.0 233.0,46.8 233.0,58.0 C233.0,68.4 219.2,74 210,74 C200.8,74 187.0,68.4 187.0,58.0 C187.0,46.8 196.0,50.0 196.0,34 H87.0 C87.0,58.8 99.0,53.8 99.0,71.2 C99.0,87.3 81.6,96 70,96 C58.4,96 41.0,87.3 41.0,71.2 C41.0,53.8 53.0,58.8 53.0,34 H0 Z"/>
+      </symbol>
+      <symbol id="dripB" viewBox="0 0 1440 140" preserveAspectRatio="none">
+        <path fill="currentColor" d="M0,0 H1440 V30 H1408.0 C1408.0,60.4 1420.0,54.3 1420.0,75.6 C1420.0,95.4 1402.0,106 1390,106 C1378.0,106 1360.0,95.4 1360.0,75.6 C1360.0,54.3 1372.0,60.4 1372.0,30 H1257.0 C1257.0,56.4 1268.0,51.1 1268.0,69.6 C1268.0,86.8 1251.2,96 1240,96 C1228.8,96 1212.0,86.8 1212.0,69.6 C1212.0,51.1 1223.0,56.4 1223.0,30 H1100.0 C1100.0,68.4 1114.0,60.7 1114.0,87.6 C1114.0,112.6 1093.6,126 1080,126 C1066.4,126 1046.0,112.6 1046.0,87.6 C1046.0,60.7 1060.0,68.4 1060.0,30 H944.0 C944.0,49.2 954.0,45.4 954.0,58.8 C954.0,71.3 939.6,78 930,78 C920.4,78 906.0,71.3 906.0,58.8 C906.0,45.4 916.0,49.2 916.0,30 H779.0 C779.0,66.0 793.0,58.8 793.0,84.0 C793.0,107.4 773.2,120 760,120 C746.8,120 727.0,107.4 727.0,84.0 C727.0,58.8 741.0,66.0 741.0,30 H606.0 C606.0,54.0 617.0,49.2 617.0,66.0 C617.0,81.6 600.8,90 590,90 C579.2,90 563.0,81.6 563.0,66.0 C563.0,49.2 574.0,54.0 574.0,30 H451.0 C451.0,71.6 466.0,63.3 466.0,92.4 C466.0,119.4 444.4,134 430,134 C415.6,134 394.0,119.4 394.0,92.4 C394.0,63.3 409.0,71.6 409.0,30 H275.0 C275.0,51.6 285.0,47.3 285.0,62.4 C285.0,76.4 270.0,84 260,84 C250.0,84 235.0,76.4 235.0,62.4 C235.0,47.3 245.0,51.6 245.0,30 H129.0 C129.0,63.6 142.0,56.9 142.0,80.4 C142.0,102.2 122.8,114 110,114 C97.2,114 78.0,102.2 78.0,80.4 C78.0,56.9 91.0,63.6 91.0,30 H0 Z"/>
+      </symbol>
+      <symbol id="dripC" viewBox="0 0 1440 140" preserveAspectRatio="none">
+        <path fill="currentColor" d="M0,0 H1440 V28 H1423.0 C1423.0,44.8 1432.0,41.4 1432.0,53.2 C1432.0,64.1 1418.8,70 1410,70 C1401.2,70 1388.0,64.1 1388.0,53.2 C1388.0,41.4 1397.0,44.8 1397.0,28 H1317.0 C1317.0,54.4 1327.0,49.1 1327.0,67.6 C1327.0,84.8 1310.8,94 1300,94 C1289.2,94 1273.0,84.8 1273.0,67.6 C1273.0,49.1 1283.0,54.4 1283.0,28 H1174.0 C1174.0,47.2 1183.0,43.4 1183.0,56.8 C1183.0,69.3 1169.2,76 1160,76 C1150.8,76 1137.0,69.3 1137.0,56.8 C1137.0,43.4 1146.0,47.2 1146.0,28 H1036.0 C1036.0,52.0 1046.0,47.2 1046.0,64.0 C1046.0,79.6 1030.4,88 1020,88 C1009.6,88 994.0,79.6 994.0,64.0 C994.0,47.2 1004.0,52.0 1004.0,28 H893.0 C893.0,44.0 902.0,40.8 902.0,52.0 C902.0,62.4 888.8,68 880,68 C871.2,68 858.0,62.4 858.0,52.0 C858.0,40.8 867.0,44.0 867.0,28 H757.0 C757.0,56.0 768.0,50.4 768.0,70.0 C768.0,88.2 751.2,98 740,98 C728.8,98 712.0,88.2 712.0,70.0 C712.0,50.4 723.0,56.0 723.0,28 H614.0 C614.0,46.4 623.0,42.7 623.0,55.6 C623.0,67.6 609.2,74 600,74 C590.8,74 577.0,67.6 577.0,55.6 C577.0,42.7 586.0,46.4 586.0,28 H475.0 C475.0,51.2 485.0,46.6 485.0,62.8 C485.0,77.9 470.0,86 460,86 C450.0,86 435.0,77.9 435.0,62.8 C435.0,46.6 445.0,51.2 445.0,28 H332.0 C332.0,43.2 341.0,40.2 341.0,50.8 C341.0,60.7 328.4,66 320,66 C311.6,66 299.0,60.7 299.0,50.8 C299.0,40.2 308.0,43.2 308.0,28 H196.0 C196.0,54.4 207.0,49.1 207.0,67.6 C207.0,84.8 190.8,94 180,94 C169.2,94 153.0,84.8 153.0,67.6 C153.0,49.1 164.0,54.4 164.0,28 H73.0 C73.0,45.6 82.0,42.1 82.0,54.4 C82.0,65.8 68.8,72 60,72 C51.2,72 38.0,65.8 38.0,54.4 C38.0,42.1 47.0,45.6 47.0,28 H0 Z"/>
+      </symbol>
+    </svg>
+
+    <!-- ============ NAV ============ -->
+    <header class="nav" id="nav">
+      <a class="brand" href="/" aria-label="Slopwheels home">
+        <img src="/assets/brands/slopface.png" alt="" width="900" height="850" />
+        <b>SLOPWHEELS</b>
+      </a>
+      <nav class="nav-pill" aria-label="Primary">
+        <a href="#steps">Crack Crates</a>
+        <a href="#grid">My Garage</a>
+        <a href="#rarity">Rarities</a>
+        <a href="#mode2">Mode 2</a>
+      </nav>
+      <a class="btn btn--navy nav-launch" href="/play/">Launch Game</a>
+    </header>
+
+    <main>
+      <!-- ============ HERO ============ -->
+      <section class="hero" aria-label="Slopwheels hero">
+        <span class="hero-blob b1"></span>
+        <span class="hero-blob b2"></span>
+        <span class="hero-blob b3"></span>
+        <div class="hero-inner wrap">
+          <div class="eyebrow-row">
+            <span class="eyebrow"><span class="dot"></span> Season 1 · Live on Solana</span>
+          </div>
+
+          <div class="stage" role="img" aria-label="A pile of collectible toon cars posing with the Slopwheels mascot">
+            <span class="glow-pool"></span>
+
+            <div class="hcard-pos mobile-hide" style="left:15%;top:60%;--rot:-22deg;z-index:3;width:24%">
+              <div class="hcard" style="--tint:var(--r-gold-t);--dur:5.6s;--delay:-.4s"><div class="art"><img src="/cards/dragon.png" alt="" /></div></div>
+            </div>
+            <div class="hcard-pos mobile-hide" style="left:85%;top:60%;--rot:22deg;z-index:3;width:24%">
+              <div class="hcard" style="--tint:var(--r-blue-t);--dur:6.1s;--delay:-2.1s"><div class="art"><img src="/cards/delorean.png" alt="" /></div></div>
+            </div>
+
+            <div class="hcard-pos" style="left:31%;top:48%;--rot:-14deg;z-index:5;width:29%">
+              <div class="hcard" style="--tint:var(--r-gold-t);--dur:5.2s;--delay:-1.1s">
+                <div class="art"><img src="/cards/clown-car.png" alt="" /></div>
+                <span class="tag">Clown Car</span>
+              </div>
+            </div>
+            <div class="hcard-pos" style="left:69%;top:48%;--rot:14deg;z-index:5;width:29%">
+              <div class="hcard" style="--tint:var(--r-blue-t);--dur:5.8s;--delay:-.7s">
+                <div class="art"><img src="/cards/cybertruck.png" alt="" /></div>
+                <span class="tag">Cybertruck</span>
+              </div>
+            </div>
+
+            <div class="hcard-pos" style="left:34%;top:73%;--rot:-7deg;z-index:6;width:27%">
+              <div class="hcard" style="--tint:var(--r-green-t);--dur:4.9s;--delay:-2.6s">
+                <div class="art"><img src="/cards/banana.png" alt="" /></div>
+                <span class="tag">Banana</span>
+              </div>
+            </div>
+            <div class="hcard-pos" style="left:66%;top:73%;--rot:10deg;z-index:6;width:27%">
+              <div class="hcard" style="--tint:var(--r-purple-t);--dur:5.4s;--delay:-1.7s">
+                <div class="art"><img src="/cards/the-kraken.png" alt="" /></div>
+                <span class="tag">The Kraken</span>
+              </div>
+            </div>
+
+            <div class="hcard-pos" style="left:50%;top:60%;--rot:-2deg;z-index:7;width:30%">
+              <div class="hcard" style="--tint:var(--r-purple-t);--dur:5.1s;--delay:-.2s">
+                <div class="art"><img src="/cards/slot-machine.png" alt="" /></div>
+                <span class="tag">Slot Machine</span>
+              </div>
+            </div>
+
+            <img class="slopface-hero" src="/assets/brands/slopface.png" alt="Slopwheels slime mascot" />
+          </div>
+
+          <div class="hero-cta-wrap">
+            <a class="btn btn--green btn--jumbo" href="/play/">Crack Crates Now</a>
+            <p class="hero-sub">20+ toon cars · 5 rarity tiers · <b>provably-fair pulls</b></p>
+          </div>
+        </div>
+      </section>
+
+      <div class="drip drip-wobble" style="color:var(--yellow-deep);background:var(--cream)" aria-hidden="true">
+        <svg preserveAspectRatio="none"><use href="#dripA"/></svg>
+      </div>
+
+      <!-- ============ STORY / HEADLINE ============ -->
+      <section class="band band--cream sec" id="story">
+        <div class="wrap center story-head reveal">
+          <div class="kicker" style="justify-content:center">The drop is open</div>
+          <h2 class="big">Collect the slop.<br /><span class="hl">Earn your $SLOBS.</span></h2>
+          <div class="story-para">
+            <p>Season 1 cars are pullable <strong>right now</strong>. Crack a crate, watch it split open, and whatever tumbles out is yours to keep, race, and show off in your garage.</p>
+            <p>Every crate you crack and every race you enter builds your stake in the <span class="token-word">upcoming $SLOBS token</span>. Collect early, race often, get in line before the grid fills up.</p>
+          </div>
+        </div>
+
+        <!-- ===== How the drop works ===== -->
+        <div class="wrap sec-tight" id="how" style="padding-bottom:0">
+          <div class="center reveal">
+            <div class="kicker" style="justify-content:center">How the drop works</div>
+            <h2 class="big">Four moves. One garage.</h2>
+          </div>
+          <div class="drop-grid">
+            <div class="drop-card reveal">
+              <div class="drop-ico" aria-hidden="true">
+                <svg viewBox="0 0 24 24" fill="none" stroke="#212542" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 8l9-5 9 5v8l-9 5-9-5z"/><path d="M3 8l9 5 9-5"/><path d="M12 13v8"/></svg>
+              </div>
+              <p>Crack crates and reveal your cars the instant they open.</p>
+            </div>
+            <div class="drop-card reveal">
+              <div class="drop-ico" aria-hidden="true">
+                <svg viewBox="0 0 24 24" fill="none" stroke="#212542" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="8.5"/><path d="M12 7v10M9.5 9.2c0-1.2 1.1-1.9 2.5-1.9s2.5.7 2.5 1.9-1.1 1.7-2.5 1.9-2.5.7-2.5 1.9 1.1 1.9 2.5 1.9 2.5-.7 2.5-1.9"/></svg>
+              </div>
+              <p>Every pull counts toward the upcoming $SLOBS token.</p>
+            </div>
+            <div class="drop-card reveal">
+              <div class="drop-ico" aria-hidden="true">
+                <svg viewBox="0 0 24 24" fill="none" stroke="#212542" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M2 14l2-5a2 2 0 0 1 1.9-1.3h12.2A2 2 0 0 1 22 9l2 5"/><path d="M2 14h20v3a1 1 0 0 1-1 1h-1a2 2 0 0 1-4 0H8a2 2 0 0 1-4 0H3a1 1 0 0 1-1-1z"/><circle cx="6.5" cy="14.5" r="1.3"/><circle cx="17.5" cy="14.5" r="1.3"/></svg>
+              </div>
+              <p>20+ cars to collect across 5 rarity tiers.</p>
+            </div>
+            <div class="drop-card reveal">
+              <div class="drop-ico" aria-hidden="true">
+                <svg viewBox="0 0 24 24" fill="none" stroke="#212542" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 21V4"/><path d="M5 5h13l-2.5 3.5L18 12H5"/><path d="M5 6h4v3H5zM9 9h4v3H9zM13 6h4M14 9h4"/></svg>
+              </div>
+              <p>Race what you pull — podium owners get paid from every pot.</p>
+            </div>
+          </div>
+        </div>
+
+        <!-- ===== Why collect ===== -->
+        <div class="wrap sec-tight" style="padding-bottom:0">
+          <div class="why">
+            <div class="why-note reveal">
+              <h3>Why collect? <span class="hl">Because not all crates hit the same.</span></h3>
+              <p>Rarer cars are harder to find, and the rarest ones aren't sitting in a shop — they're pulled, and they're pulled rarely. Your garage is your collection, and no two look quite alike.</p>
+            </div>
+            <div class="why-pull reveal">
+              <b class="tiny">The house rule</b>
+              <strong>The rarest cars aren't for sale. They're pulled.</strong>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <div class="drip drip-wobble" style="color:var(--cream);background:var(--navy-solid)" aria-hidden="true">
+        <svg preserveAspectRatio="none"><use href="#dripB"/></svg>
+      </div>
+
+      <!-- ============ $SLOBS ============ -->
+      <section class="band band--navy sec slobs" id="slobs">
+        <span class="glimmer" aria-hidden="true"></span>
+        <div class="wrap measure center reveal">
+          <span class="slobs-badge">◆ Upcoming token</span>
+          <h2>What is <span class="token">$SLOBS</span>?</h2>
+          <p><span class="token" style="color:var(--green);font-weight:800">$SLOBS</span> is the upcoming token of the Slopwheels universe. It isn't live yet — but collectors and racers are first in line. Every car you pull and every race you run <em>right now</em> counts toward what's coming.</p>
+          <span class="upcoming-chip">Collect now · Get in line</span>
+        </div>
+      </section>
+
+      <div class="drip drip-wobble" style="color:var(--navy-solid);background:var(--cream)" aria-hidden="true">
+        <svg preserveAspectRatio="none"><use href="#dripC"/></svg>
+      </div>
+
+      <!-- ============ PULL / BET / WIN ============ -->
+      <section class="band band--cream sec" id="steps">
+        <div class="wrap center reveal">
+          <div class="kicker" style="justify-content:center">Pull · Bet · Win</div>
+          <h2 class="big">Three moves to the podium.</h2>
+          <p class="lead" style="margin:16px auto 0">Collect the slop, back it with money, and let the pool settle. Every loop runs the same.</p>
+        </div>
+        <div class="wrap steps">
+          <article class="step reveal">
+            <div class="shot"><span class="num">01 · Pull</span><img src="/assets/landing/step-pull.webp" alt="A Slopwheels crate cracking open to reveal a toon car" /></div>
+            <div class="body"><h3>Crack a crate</h3><p>Roll the odds on 20+ toon cars across five rarity tiers. Whatever drops is yours to keep.</p></div>
+          </article>
+          <article class="step reveal">
+            <div class="shot"><span class="num">02 · Bet</span><img src="/assets/landing/step-bet.webp" alt="Toon cars lining up on the grand-prix grid before a race" /></div>
+            <div class="body"><h3>Back the race</h3><p>Send a car to the grid and bet the pari-mutuel pool against seven chaotic rivals.</p></div>
+          </article>
+          <article class="step reveal">
+            <div class="shot"><span class="num">03 · Win</span><img src="/assets/landing/step-win.webp" alt="A Slopwheels car crossing the finish line" /></div>
+            <div class="body"><h3>Get paid</h3><p>The pool settles to the cent. Podium car owners take a cut of every pot they place in.</p></div>
+          </article>
+        </div>
+      </section>
+
+      <!-- ============ RARITY ============ -->
+      <section class="band band--cream2 sec-tight" id="rarity" style="border-top:3px solid #eee6d0">
+        <div class="wrap center reveal">
+          <div class="kicker" style="justify-content:center">Five tiers</div>
+          <h2 class="big">The odds on every crack.</h2>
+          <p class="lead" style="margin:16px auto 0">The rarer the car, the harder it hides. Same odds in practice as on-chain.</p>
+        </div>
+        <div class="wrap rarity-grid">
+          <div class="tier gray reveal"><div class="cap"><div class="odds">50<small>%</small></div></div><div class="foot"><b>Common</b><span>Gray</span></div></div>
+          <div class="tier green reveal"><div class="cap"><div class="odds">28<small>%</small></div></div><div class="foot"><b>Uncommon</b><span>Green</span></div></div>
+          <div class="tier blue reveal"><div class="cap"><div class="odds">14<small>%</small></div></div><div class="foot"><b>Rare</b><span>Blue</span></div></div>
+          <div class="tier purple reveal"><div class="cap"><div class="odds">6<small>%</small></div></div><div class="foot"><b>Epic</b><span>Purple</span></div></div>
+          <div class="tier gold reveal"><div class="cap"><div class="odds">2<small>%</small></div></div><div class="foot"><b>Legendary</b><span>Gold</span></div></div>
+        </div>
+      </section>
+
+      <!-- ============ CARD GRID ============ -->
+      <section class="band band--cream sec" id="grid">
+        <div class="wrap center reveal">
+          <div class="kicker" style="justify-content:center">The Season 1 lineup</div>
+          <h2 class="big">A taste of what's pullable.</h2>
+          <p class="lead" style="margin:16px auto 0">Twenty-plus cars and counting. Here's a slice of the garage.</p>
+        </div>
+        <div class="wrap cards">
+          <!-- gold -->
+          <article class="tcard gold reveal"><div class="head"><b>Clown Car</b><span class="chip gold">Legendary</span></div><div class="art"><img src="/cards/clown-car.png" alt="Clown Car" /></div><div class="foot"><span class="dot"><i></i> Legendary</span><span class="pct">2%</span></div></article>
+          <article class="tcard gold reveal"><div class="head"><b>Dragon</b><span class="chip gold">Legendary</span></div><div class="art"><img src="/cards/dragon.png" alt="Dragon" /></div><div class="foot"><span class="dot"><i></i> Legendary</span><span class="pct">2%</span></div></article>
+          <!-- purple -->
+          <article class="tcard purple reveal"><div class="head"><b>The Kraken</b><span class="chip purple">Epic</span></div><div class="art"><img src="/cards/the-kraken.png" alt="The Kraken" /></div><div class="foot"><span class="dot"><i></i> Epic</span><span class="pct">6%</span></div></article>
+          <article class="tcard purple reveal"><div class="head"><b>Slot Machine</b><span class="chip purple">Epic</span></div><div class="art"><img src="/cards/slot-machine.png" alt="Slot Machine" /></div><div class="foot"><span class="dot"><i></i> Epic</span><span class="pct">6%</span></div></article>
+          <article class="tcard purple reveal"><div class="head"><b>Homewrecker</b><span class="chip purple">Epic</span></div><div class="art"><img src="/cards/homewrecker.png" alt="Homewrecker" /></div><div class="foot"><span class="dot"><i></i> Epic</span><span class="pct">6%</span></div></article>
+          <!-- blue -->
+          <article class="tcard blue reveal"><div class="head"><b>Cybertruck</b><span class="chip blue">Rare</span></div><div class="art"><img src="/cards/cybertruck.png" alt="Cybertruck" /></div><div class="foot"><span class="dot"><i></i> Rare</span><span class="pct">14%</span></div></article>
+          <article class="tcard blue reveal"><div class="head"><b>DeLorean</b><span class="chip blue">Rare</span></div><div class="art"><img src="/cards/delorean.png" alt="DeLorean" /></div><div class="foot"><span class="dot"><i></i> Rare</span><span class="pct">14%</span></div></article>
+          <article class="tcard blue reveal"><div class="head"><b>Skull</b><span class="chip blue">Rare</span></div><div class="art"><img src="/cards/skull.png" alt="Skull" /></div><div class="foot"><span class="dot"><i></i> Rare</span><span class="pct">14%</span></div></article>
+          <!-- green -->
+          <article class="tcard green reveal"><div class="head"><b>Big Frank</b><span class="chip green">Uncommon</span></div><div class="art"><img src="/cards/big-frank.png" alt="Big Frank" /></div><div class="foot"><span class="dot"><i></i> Uncommon</span><span class="pct">28%</span></div></article>
+          <article class="tcard green reveal"><div class="head"><b>Banana</b><span class="chip green">Uncommon</span></div><div class="art"><img src="/cards/banana.png" alt="Banana" /></div><div class="foot"><span class="dot"><i></i> Uncommon</span><span class="pct">28%</span></div></article>
+          <!-- gray -->
+          <article class="tcard gray reveal"><div class="head"><b>Noodler</b><span class="chip gray">Common</span></div><div class="art"><img src="/cards/noodler.png" alt="Noodler" /></div><div class="foot"><span class="dot"><i></i> Common</span><span class="pct">50%</span></div></article>
+          <article class="tcard gray reveal"><div class="head"><b>Trabant</b><span class="chip gray">Common</span></div><div class="art"><img src="/cards/trabant.png" alt="Trabant" /></div><div class="foot"><span class="dot"><i></i> Common</span><span class="pct">50%</span></div></article>
+        </div>
+      </section>
+
+      <!-- ============ MODE 2 ============ -->
+      <section class="band band--cream2 sec" id="mode2" style="border-top:3px solid #eee6d0">
+        <div class="wrap">
+          <div class="mode2 reveal">
+            <div class="m-copy">
+              <div class="kicker" style="color:var(--green)">Mode 2 · Perps racing</div>
+              <h2>There's a real perp <span class="hl">under the hood.</span></h2>
+              <p>Slopwheels hides a full perps game. Pick BTC, ETH, or SOL, rev the throttle, and bank the position before liquidation turns it into a wreck.</p>
+              <div class="lev"><b>10× to 3000×</b><span>Leverage on tap · live prices</span></div>
+            </div>
+            <div class="m-shot">
+              <img src="/assets/landing/hero-grandprix.png" alt="Neon Slopwheels racetrack curving into a synthwave skyline" />
+              <span class="m-tag">Real risk</span>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- ============ BUILT ON ============ -->
+      <section class="band band--cream sec-tight" id="built">
+        <div class="wrap">
+          <div class="built reveal">
+            <div class="logos">
+              <div class="lo"><img class="sol" src="/assets/brands/solana-mark.svg" alt="Solana" /><small>Settlement</small></div>
+              <div class="lo"><img src="/assets/brands/magicblock-logo.svg" alt="MagicBlock" /><small>VRF</small></div>
+            </div>
+            <div class="vr" aria-hidden="true"></div>
+            <p>Every signed-in crate pull rolls on-chain randomness through <b>MagicBlock VRF</b> — provably fair, not a server dice — and settles on <b>Solana</b>.</p>
+          </div>
+        </div>
+      </section>
+
+      <div class="drip drip-wobble" style="color:var(--cream);background:var(--yellow)" aria-hidden="true">
+        <svg preserveAspectRatio="none"><use href="#dripA"/></svg>
+      </div>
+
+      <!-- ============ FINAL CTA ============ -->
+      <section class="band band--yellow sec final">
+        <div class="wrap center reveal">
+          <img class="slopface-final" src="/assets/brands/slopface.png" alt="Slopwheels slime mascot" />
+          <div class="kicker" style="justify-content:center">The grid is forming</div>
+          <h2>What are you<br /><span class="hl">pulling next?</span></h2>
+          <div style="margin-top:32px"><a class="btn btn--green btn--jumbo" href="/play/">Crack Crates Now</a></div>
+          <p class="note"><b>Practice free.</b> Sign in when you want the pulls on-chain.</p>
+        </div>
+      </section>
+
+      <div class="drip" style="color:var(--yellow-deep);background:var(--navy-solid)" aria-hidden="true">
+        <svg preserveAspectRatio="none"><use href="#dripB"/></svg>
+      </div>
+    </main>
+
+    <!-- ============ FOOTER ============ -->
+    <footer class="footer">
+      <div class="wrap">
+        <div class="footer-top">
+          <a class="brand" href="/"><img src="/assets/brands/slopface.png" alt="" width="900" height="850" /><b>SLOPWHEELS</b></a>
+          <div class="footer-links">
+            <a href="/play/">Enter game ↗</a>
+            <a href="#rarity">Rarities</a>
+            <a href="#mode2">Mode 2</a>
+          </div>
+        </div>
+        <hr />
+        <p class="risk-note"><strong>REAL SOL INVOLVES REAL RISK.</strong> You can lose your play amount. Only play with what you can afford to lose.</p>
+        <p class="copyright">© 2026 Slopwheels · $SLOBS is upcoming. Nothing here is financial advice.</p>
+      </div>
+    </footer>
+
+    <script>
+      // Nav shadow on scroll
+      var nav = document.getElementById("nav");
+      var onScroll = function () { nav.classList.toggle("scrolled", window.scrollY > 16); };
+      onScroll();
+      window.addEventListener("scroll", onScroll, { passive: true });
+
+      // Scroll reveal
+      var reveals = document.querySelectorAll(".reveal");
+      if ("IntersectionObserver" in window) {
+        var io = new IntersectionObserver(function (entries) {
+          entries.forEach(function (e) {
+            if (e.isIntersecting) { e.target.classList.add("in"); io.unobserve(e.target); }
+          });
+        }, { rootMargin: "0px 0px -8% 0px", threshold: 0.08 });
+        reveals.forEach(function (el) { io.observe(el); });
+      } else {
+        reveals.forEach(function (el) { el.classList.add("in"); });
+      }
+    </script>
+  </body>
+</html>
