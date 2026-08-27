@@ -49,6 +49,7 @@ describe("IDENTITY_KEYS — the single source of truth for what swaps with ident
       "redline.garage.v1",  // coins / scrap / upgrade levels / finishes
       "redline.levels.v1",  // level-skin inventory
       "redline.owned.v1",   // counted car inventory
+      "redline.pity.v1",    // crate pity counters
     ]);
   });
 });

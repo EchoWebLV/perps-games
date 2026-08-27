@@ -58,12 +58,13 @@ export function inkScale(): number { return outlineScaleUniform.value; }
 // the roots: restore/reapply materials, show/hide `__outline` hulls, and toggle visibility of any
 // object tagged `userData.styleVariant` ('toon' | 'classic'). No disposal — material-pointer and
 // visibility swaps only, so switching is instant. Persisted to localStorage `toon.enabled` (default
-// TRUE), read before the first toonify so a classic-mode boot ends with original mats + hidden hulls.
+// FALSE = CLASSIC / OG neon), read before the first toonify so a classic-mode boot ends with original mats + hidden hulls.
 // ─────────────────────────────────────────────────────────────────────────────────────────────
 const TOON_ENABLED_KEY = "toon.enabled";
+export const TOON_DEFAULT = false;
 function loadToonEnabled(): boolean {
-  try { const raw = localStorage.getItem(TOON_ENABLED_KEY); return raw == null ? true : raw !== "false"; }
-  catch { return true; }
+  try { const raw = localStorage.getItem(TOON_ENABLED_KEY); return raw == null ? TOON_DEFAULT : raw !== "false"; }
+  catch { return TOON_DEFAULT; }
 }
 let _toonEnabled = loadToonEnabled();
 type MatOrArray = THREE.Material | THREE.Material[];

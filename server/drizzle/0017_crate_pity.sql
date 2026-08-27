@@ -1,0 +1,1 @@
+ALTER TABLE "users" ADD COLUMN IF NOT EXISTS "crate_pity" text NOT NULL DEFAULT '{}';

@@ -6,6 +6,7 @@ import { makeLedger } from "./services/ledger.js";
 import { makeInventory } from "./services/inventory.js";
 import { makeRounds } from "./services/rounds.js";
 import { makeUpgrades } from "./services/upgrades.js";
+import { makeCrateOpen } from "./services/crate-open.js";
 import { makeEntitlements } from "./services/entitlements.js";
 import { makeEarnLimit } from "./services/earn-limit.js";
 import { makeTradeHistory } from "./services/trade-history.js";
@@ -167,6 +168,7 @@ async function main(): Promise<void> {
   });
   const inventory = makeInventory(db);
   const upgrades = makeUpgrades(db, ledger);
+  const crateOpen = makeCrateOpen(ledger, inventory, users);
   const entitlements = makeEntitlements({ inventory, upgrades }); // consumed by Phase 2's /authorize; wired now as the seam
   const earnLimit = makeEarnLimit(db, { ceiling: env.EARN_WINDOW_CEILING, windowMs: env.EARN_WINDOW_MS });
   const presenceRoom = makePresenceRoom();
@@ -212,6 +214,7 @@ async function main(): Promise<void> {
     payoutSigner,
     adminSecret: env.ADMIN_API_SECRET ?? null,
     upgrades,
+    crateOpen,
     entitlements,
     earnLimit,
     presenceRoom,

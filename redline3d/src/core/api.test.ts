@@ -266,6 +266,14 @@ describe("createApi", () => {
     expect(await mk({ seeded: true }).migrate({ coins: 10, scrap: 2, cars: { orion: 1 } }))
       .toEqual({ seeded: true });
     expect(seen[4].url).toBe("http://x/v1/migrate");
+
+    expect(await mk({ carId: "Banana", isNew: true, count: 1, scrap: 25, scrapTotal: 25, coins: 750, levelKey: null, pity: { wooden: 1, silver: 0, gold: 0 } })
+      .openCrate({ crateKey: "wooden", payment: "coins", vrfBytes: "0".repeat(64) }))
+      .toMatchObject({ carId: "Banana" });
+    expect(seen[5]).toEqual({
+      url: "http://x/v1/crates/open",
+      body: { crateKey: "wooden", payment: "coins", vrfBytes: "0".repeat(64) },
+    });
   });
 
   it("saves the account driver name through the profile endpoint", async () => {

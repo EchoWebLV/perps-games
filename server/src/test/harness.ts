@@ -4,6 +4,7 @@ import { makeLedger, type Ledger } from "../services/ledger.js";
 import { makeInventory, type Inventory } from "../services/inventory.js";
 import { makeRounds, type Rounds } from "../services/rounds.js";
 import { makeUpgrades, type Upgrades } from "../services/upgrades.js";
+import { makeCrateOpen } from "../services/crate-open.js";
 import { makeEntitlements, type Entitlements } from "../services/entitlements.js";
 import { makeEarnLimit, type EarnLimit } from "../services/earn-limit.js";
 import { makeTradeHistory, type TradeHistory } from "../services/trade-history.js";
@@ -84,6 +85,7 @@ export async function makeTestDb(opts: MakeTestDbOptions = {}): Promise<TestCtx>
   const houseUserId = await ensureHouseUserId(users);
   const rounds = makeRounds({ db, ledger, feed, stakeAsset, houseUserId });
   const upgrades = makeUpgrades(db, ledger);
+  const crateOpen = makeCrateOpen(ledger, inventory, users);
   const entitlements = makeEntitlements({ inventory, upgrades });
   // deliberately huge default ceiling so unrelated suites never trip the cap; cap tests override it.
   const earnLimit = makeEarnLimit(db, opts.earnLimit ?? { ceiling: 1_000_000, windowMs: 60_000 });
@@ -95,7 +97,7 @@ export async function makeTestDb(opts: MakeTestDbOptions = {}): Promise<TestCtx>
   const presenceRoom = makePresenceRoom();
   const server = buildServer({
     users, ledger, inventory, rounds, tradeHistory, feed,
-    upgrades, entitlements, earnLimit,
+    upgrades, crateOpen, entitlements, earnLimit,
     stakeAsset,
     devEndpoints: true,
     signupFaucet: opts.signupFaucet ?? false,

@@ -38,6 +38,7 @@ export const IDENTITY_KEYS: readonly string[] = [
   "redline.levels.v1",  // level-skin inventory (core/inventory.ts via main.ts)
   "raider.welcome.v1",  // welcome-gift claim — a fresh guest re-earns the gift by design (core/welcome.ts)
   "raider.raceSkin",    // selected world skin (render/world-themes.ts)
+  "redline.pity.v1",    // crate pity counters (core/pity.ts)
 ];
 
 const vaultKey = (ns: string, key: string) => `vault:${ns}:${key}`;

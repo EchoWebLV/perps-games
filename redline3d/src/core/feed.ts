@@ -292,9 +292,12 @@ export function connectFeed(opts: FeedOpts): FeedHandle {
   }, 250);
 
   // ---------- start ----------
+  // Lazer is low-latency when the token is entitled. Always start Hermes too so
+  // /v1/prices + REST ticks mark LIVE in the first second instead of waiting out
+  // a multi-endpoint Lazer fail ladder (which left the HUD on CONNECTING / SIM).
   if (TOKEN || RELAY) openLazer();
-  else if (HERMES_FALLBACK) startHermes();
-  else { state.label = "no feed configured"; }
+  if (HERMES_FALLBACK) startHermes();
+  if (!TOKEN && !RELAY && !HERMES_FALLBACK) state.label = "no feed configured";
 
   return {
     state: state,

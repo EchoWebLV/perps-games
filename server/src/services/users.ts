@@ -132,6 +132,13 @@ export function makeUsers(db: any) {
       return { granted: rows.length > 0 };
     },
     /** the account's redeemed access-code ids (normalized), or [] for a fresh account. */
+    async cratePity(id: string): Promise<string> {
+      const rows = await db.select({ cratePity: users.cratePity }).from(users).where(eq(users.id, id)).limit(1);
+      return rows[0]?.cratePity ?? "{}";
+    },
+    async setCratePity(id: string, json: string): Promise<void> {
+      await db.update(users).set({ cratePity: json }).where(eq(users.id, id));
+    },
     async accessCodes(id: string): Promise<string[]> {
       const rows = await db
         .select({ accessCodes: users.accessCodes })

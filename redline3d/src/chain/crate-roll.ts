@@ -19,24 +19,40 @@ export interface CrateRollIo {
   now?(): number;
 }
 
-/** Returns a draws(n) function: one VRF request per call, resolved to n uniform [0,1) draws. */
-export function createCrateRollDraws(io: CrateRollIo, opts: { timeoutMs?: number; pollMs?: number } = {}) {
+export function bytesToHex(bytes: Uint8Array): string {
+  return [...bytes].map((b) => b.toString(16).padStart(2, "0")).join("");
+}
+
+/** One VRF request; returns the fulfilled 32-byte randomness. */
+export function requestCrateRandomness(io: CrateRollIo, opts: { timeoutMs?: number; pollMs?: number } = {}) {
   const timeoutMs = opts.timeoutMs ?? 10_000, pollMs = opts.pollMs ?? 500;
   const now = io.now ?? Date.now;
-  return async (n: number): Promise<number[]> => {
+  return async (): Promise<Uint8Array> => {
     const before = await io.fetchSlot();
     const expect = (before?.nonce ?? 0) + 1;
     await io.request();
     const t0 = now();
     for (;;) {
       const s = await io.fetchSlot();
-      // only OUR request satisfies: a stale fulfillment (lower nonce) is ignored; a HIGHER nonce
-      // means something superseded us mid-flight (shouldn't happen single-client) — keep waiting
-      // until timeout rather than consume randomness we didn't request.
-      if (s && s.fulfilled && s.nonce === expect) return bytesToDraws(s.randomness, n);
+      if (s && s.fulfilled && s.nonce === expect) return s.randomness;
       if (now() - t0 > timeoutMs) throw new Error("vrf_timeout");
       await io.sleep(pollMs);
     }
+  };
+}
+
+/** Returns a draws(n) function: one VRF request per call, resolved to n uniform [0,1) draws. */
+export function createCrateRollDraws(io: CrateRollIo, opts: { timeoutMs?: number; pollMs?: number } = {}) {
+  const roll = requestCrateRandomness(io, opts);
+  return async (n: number): Promise<number[]> => bytesToDraws(await roll(), n);
+}
+
+/** VRF request that also returns the raw bytes (for the server-verified open). */
+export function createCrateRoll(io: CrateRollIo, opts: { timeoutMs?: number; pollMs?: number } = {}) {
+  const roll = requestCrateRandomness(io, opts);
+  return async (n: number): Promise<{ draws: number[]; bytesHex: string }> => {
+    const bytes = await roll();
+    return { draws: bytesToDraws(bytes, n), bytesHex: bytesToHex(bytes) };
   };
 }
 
