@@ -36,6 +36,15 @@ describe("crate shop odds disclosure", () => {
     });
   });
 
+  test("each crate discloses pity toward its top tier", () => {
+    const parent = document.createElement("div");
+    createCrateBox(parent, stubDeps());
+    const lines = [...parent.querySelectorAll("[data-pity]")].map((el) => el.textContent);
+    expect(lines[0]).toMatch(/Pity 0\/12 → RARE/);
+    expect(lines[1]).toMatch(/Pity 0\/20 → LEGENDARY/);
+    expect(lines[2]).toMatch(/Pity 0\/8 → LEGENDARY/);
+  });
+
   test("the Gold crate discloses its 25% Legendary chance", () => {
     const parent = document.createElement("div");
     createCrateBox(parent, stubDeps());

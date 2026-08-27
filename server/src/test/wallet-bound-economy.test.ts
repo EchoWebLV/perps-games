@@ -28,6 +28,7 @@ const MUTATING: Array<{ url: string; payload: Record<string, unknown> }> = [
   { url: "/v1/scrap/earn", payload: { amount: 10, ref: "se1" } },
   { url: "/v1/scrap/spend", payload: { amount: 10, ref: "ss1" } },
   { url: "/v1/inventory/grant", payload: { carId: "orion" } },
+  { url: "/v1/crates/open", payload: { crateKey: "wooden", payment: "coins", vrfBytes: "0".repeat(64) } },
   { url: "/v1/inventory/melt", payload: { carId: "orion" } },
   { url: "/v1/migrate", payload: { coins: 10, scrap: 0, cars: {} } },
 ];

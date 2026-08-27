@@ -74,6 +74,21 @@ export interface Api {
    *  The client must never also post a coinsSpend for the same purchase (double debit). */
   upgradesBuy(p: { track: "turbo" | "tank" | "suspension" }): Promise<{ track: string; level: number; coins: number }>;
   /** Read welcome eligibility without consuming the once-per-account claim. */
+  openCrate(p: {
+    crateKey: "wooden" | "silver" | "gold";
+    payment: "coins" | "sol" | "gift";
+    vrfBytes: string;
+    solSignature?: string;
+  }): Promise<{
+    carId: string;
+    isNew: boolean;
+    count: number;
+    scrap: number;
+    scrapTotal: number;
+    coins: number;
+    levelKey: string | null;
+    pity: { wooden: number; silver: number; gold: number };
+  }>;
   welcomeStatus(): Promise<{ pending: boolean }>;
   /** claim the first-login welcome crate ONCE PER ACCOUNT (server-side). granted=true only the first time. */
   claimWelcome(): Promise<{ granted: boolean }>;
@@ -190,6 +205,7 @@ export function createApi(opts: ApiOpts = {}): Api {
     inventoryMelt: (p) => call("POST", "/v1/inventory/melt", p),
     migrate: (p) => call("POST", "/v1/migrate", p),
     upgradesBuy: (p) => call("POST", "/v1/upgrades/buy", p),
+    openCrate: (p) => call("POST", "/v1/crates/open", p),
     welcomeStatus: () => call("GET", "/v1/welcome/status"),
     // send an empty {} body: `call` always sets content-type:application/json, and Fastify 400s an
     // empty body under that content-type. The server ignores the body.

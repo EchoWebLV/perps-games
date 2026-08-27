@@ -37,6 +37,7 @@ import { CART_COIN_RATE, createPickups } from "./render/pickups";
 import { createFireTrail } from "./render/firetrail";
 import { createCarPicker, type CarAbility, type CarOption, type Garage } from "./ui/carpicker";
 import { createCrateBox } from "./ui/cratebox";
+import { loadPity, savePity } from "./core/pity";
 import { createHome } from "./ui/home";
 import { createHowTo, howToSeen, markHowToSeen } from "./ui/howto";
 import { createTradeHistory } from "./ui/trade-history";
@@ -102,7 +103,7 @@ import { CHAIN } from "./chain/config";
 import { createGameSession } from "./chain/game-session";
 import { HIGHWAY_DURATION_SENTINEL, isHighwayRound, roundKey, type RoundSnap } from "./chain/chain-round";
 import { selectChainWalletPort } from "./chain/wallet-select";
-import { createCrateRollDraws, makeCrateRollIo } from "./chain/crate-roll";
+import { createCrateRoll, createCrateRollDraws, makeCrateRollIo } from "./chain/crate-roll";
 import { payDevnetSol } from "./chain/sol-payment";
 import {
   createHighwayRoundReader,
@@ -520,7 +521,7 @@ const upgrades = createUpgrades(hudRoot, {
   onApply: () => tach.rebuild(effRmax()),
   leverageValue: (upgradedRmax) => effRmax(upgradedRmax),
   economicEffects: true,
-  onClose: () => { if (mode === "lobby") lobbyHud.show(); }, // returning to the lobby town → restore the back button
+  onClose: () => { if (mode === "lobby") lobbyHud.show(); else if (mode === "home") home.show(); },
   onMutate: (ev) => {
     if (ev.kind === "coinsEarn") accountSync.coinsEarned(ev.amount);
     else if (ev.kind === "coinsSpend") accountSync.coinsSpent(ev.amount);
@@ -726,6 +727,7 @@ const garage = createCarPicker(hudRoot, CAR_DEFS, (c) => equipCar(c), () => upgr
 }, (reason?: "dismiss" | "chain") => {
   // closed from the strip's Garage building → restore the door prompts (the hamburger stays —
   // it's part of the strip's chrome now that the full HUD lives over the lobby world)
+  if (mode === "home") { home.show(); return; }
   if (mode === "lobby") { lobbyHud.show(); return; }
   // showroom: ✕ / Esc / backdrop DISMISS leaves the garage; opening Upgrades/Logout ("chain")
   // keeps the room standing behind that panel
@@ -795,7 +797,22 @@ const crateBox = createCrateBox(hudRoot, {
     if (!w) return null;
     return createCrateRollDraws(makeCrateRollIo(w));
   },
+  vrfRoll: () => {
+    if (!identity || identity.mode !== "privy") return null;
+    const w = session.anchorWallet();
+    if (!w) return null;
+    return createCrateRoll(makeCrateRollIo(w));
+  },
   vrfRequired: () => identity?.mode === "privy",
+  pity: () => loadPity(),
+  recordPity: (s) => savePity(s),
+  openVerified: (p) => api.openCrate(p),
+  applyVerified: (r) => {
+    inventory.hydrate({ ...inventory.snapshot(), [r.carId]: r.count });
+    upgrades.hydrate({ coins: r.coins, scrap: r.scrapTotal });
+    if (r.isNew) garage.grant(r.carId);
+    if (r.levelKey) levels.grant(r.levelKey);
+  },
   completeGift: async () => {
     try {
       return (await api.claimWelcome()).granted;
@@ -818,14 +835,12 @@ hudRoot.addEventListener("raider:howto", () => howto.open());
 // ── home: the Slopwheels collection screen — the game's boot surface. Booting here (instead of the
 // 3D strip) makes your card collection the front door; the lobby/race are reached FROM it. ──
 const home = createHome(hudRoot, {
-  cars: () => CAR_DEFS,
-  owns: (n) => inventory.owns(n),
-  equippedName: () => equippedCar.name,
-  onDriveLobby: (carName) => { equipByName(carName); exitHomeToLobby(); },
-  // Enter the in-app race: with the tapped card's car, or null (spectate) for Watch & bet.
-  onEnterRace: (carName) => enterGrandprix(carName),
-  onWatchAndBet: () => enterGrandprix(null),
-  onOpenStore: () => crateBox.open(),
+  onRace: () => enterRaceFromHub(),
+  onCars: () => garage.openGarage(),
+  onCrates: () => crateBox.open(),
+  onUpgrades: () => upgrades.open(),
+  onLobby: () => exitHomeToLobby(),
+  onConnectWallet: () => showIdentityGate(),
 });
 
 // ── lobby town · strip dressing · lobby cam · highway oval: ALL DEFERRED behind ensureWorlds() ──
@@ -1012,10 +1027,22 @@ function enterLobby() {
   lobby!.show();
   // cruise chrome: the world is the UI — balance + hamburger, nothing else
   setChrome("cruise");
-  mapBtn.setVisible(true); // the map pin backs the strip out to the Slopwheels collection (home)
+  mapBtn.setVisible(true); // the map pin backs the strip out to the Slopwheels hub
   lobbyHud.show();
   syncPresenceLifecycle();
   audio.resume(); radio.resume();
+}
+
+function enterRaceFromHub() {
+  if (modeSwitchBlocked({ opening, phase: engine.getPhase() })) return;
+  home.setBusy(true);
+  try {
+    home.hide();
+    exitFrom = "track";
+    exitLobby(); // same 3D handoff as the lobby TRACK door
+  } finally {
+    home.setBusy(false);
+  }
 }
 
 function exitLobby() {
@@ -1207,8 +1234,24 @@ function enterHome(): void {
   if (modeSwitchBlocked({ opening, phase: engine.getPhase() })) return;
   mode = "home";
   syncPresenceLifecycle(); // home carries no presence — drop the lobby ghost on the lobby→home back-out
-  lobbyHud.hide(); home.show();
+  highwayControls.hide();
+  lobbyHud.hide();
+  hud.setMinimal(true);
+  coins.setVisible(true);
+  scrap.setVisible(true);
+  mapBtn.setVisible(false);
+  home.show();
   (window as Window & { hideSplash?: () => void }).hideSplash?.(); // home-ready IS boot-ready
+}
+
+function returnToHub() {
+  if (modeSwitchBlocked({ opening, phase: engine.getPhase(), roundActive })) return;
+  unwindGrandprix();
+  oval?.hide();
+  highwayControls.hide();
+  garage.setShowroom(false);
+  garageRoom?.hide();
+  enterHome();
 }
 function exitHomeToLobby(): void { home.hide(); ensureWorlds(); enterLobby(); }
 
@@ -1317,10 +1360,8 @@ function triggerBuilding(kind: BuildingKind) {
 }
 
 const mapBtn = createMapButton(hudRoot, () => {
-  if (mode === "race") enterLobby();
-  else if (mode === "highway") exitHighwayToLobby();
-  else if (mode === "garage") exitGarageToLobby();
-  else if (mode === "lobby") enterHome(); // the strip is no longer root — back it out to the collection
+  if (mode === "lobby") enterHome();
+  else returnToHub(); // race / highway / garage → hub (Grand Prix stays hidden)
 });
 const lobbyHud = createLobbyHud(hudRoot);
 let presence: PresenceClient | null = null;
@@ -2014,7 +2055,11 @@ function frame(now: number) {
   const dt = Math.min(0.05, ctx.clock.getDelta()); // clamp so a frame hitch can't teleport the world
   updateEmoteVisual(localEmoteVisual, dt);
 
-  if (mode === "home") { requestAnimationFrame(frame); return; } // no 3D render while home is up
+  if (mode === "home") {
+    samplePrice(); // keep the HUD chip live on the collection screen (no 3D work)
+    requestAnimationFrame(frame);
+    return;
+  }
 
   if (mode === "grandprix") {
     raceGame?.update(dt); // the race owns its sim; a no-op once disposed (guards the trailing frame)
@@ -2488,9 +2533,7 @@ function showIdentityGate() {
       reconnectPresenceForIdentity();
       syncOnchainBalance(); // renders the "practice" chip
       gateUp = false;
-      // GUEST: the access wall (LOCAL) stands between the gate and the world; the welcome gift stays
-      // local and fires only once the wall clears.
-      guestAccessThenEnter(() => { maybeShowHowTo(() => maybeWelcomeGift()); });
+      maybeWelcomeGift();
     },
     async onSignIn(name) {
       // fresh = the account picker ALWAYS opens (a lingering Privy session is signed out
@@ -2534,9 +2577,7 @@ function showIdentityGate() {
         // accountSync.accessCodes() is populated — the wall shows only if THIS account hasn't redeemed.
         // The welcome crate (ONCE PER ACCOUNT, server-side) fires AFTER the wall clears so its reveal
         // isn't drawn behind the wall.
-        accountAccessThenEnter(() => {
-          maybeShowHowTo(() => { void offerWelcomeAccount(); }, session.address());
-        });
+        void offerWelcomeAccount();
       }
       return ok;
     },
@@ -2546,18 +2587,16 @@ function showIdentityGate() {
 // The access wall now lives INSIDE the identity paths (guest/accountAccessThenEnter), so it appears
 // AFTER the player picks Guest or Sign in — never before the identity choice.
 function bootIdentity() {
-  if (!identity) { showIdentityGate(); return; } // fresh boot → the gate is the front door
-  if (identity.mode === "guest") {
-    syncOnchainBalance(); // returning guest → "practice" chip, NO wallet
-    // returning guests already hold the local flag → the wall is skipped (onDone is a no-op: they're
-    // already in-world). Kept for the odd guest who somehow lacks the flag — they get walled.
-    guestAccessThenEnter(() => {});
+  // Hub is the front door. Auto-guest so local cars/coins work; wallet only on GO / paid crates.
+  if (!identity) {
+    identity = { name: "guest", mode: "guest" };
+    saveIdentity(identity);
   }
-  // returning PRIVY users: their account access set only arrives with hydrate → walled in the
-  // reconnect block below (NOT here — accountSync.accessCodes() is empty until hydrate lands).
+  if (identity.mode === "guest") syncOnchainBalance();
 }
 // Boot ALWAYS resumes the identity flow now; the wall is deferred into whichever path the player picks.
 bootIdentity();
+if (freshVisitor) maybeWelcomeGift();
 (window as Window & { setSplashProgress?: (pct: number) => void }).setSplashProgress?.(90); // boot milestone: identity resolved
 // Boot-order invariant: the enterHome()/enterLobby() in the boot tail above MUST run before this kick —
 // the first frame() dispatches on `mode`, and only home mode renders nothing (the 3D branches deref the
@@ -2578,9 +2617,7 @@ if (identity?.mode === "privy") {
     reconnectPresenceForIdentity();
     // A guest-to-account save swap reloads before its post-wall flow can run, so the boot
     // reconnect completes it. Fresh account sign-ins continue in place on the warmed scene.
-    accountAccessThenEnter(() => {
-      maybeShowHowTo(() => { void offerWelcomeAccount(); }, session.address());
-    });
+    void offerWelcomeAccount();
   }).catch(() => {});
 }
 console.log("Perps Rider render up");
@@ -2590,6 +2627,7 @@ console.log("Perps Rider render up");
 if (import.meta.env.DEV) {
   (window as any).__hw = {
     enterHighway, exitHighwayToLobby, enterLobby, exitLobby, triggerBuilding,
+    enterRaceFromHub, returnToHub,
     enterGrandprix, exitGrandprixToHome,
     // sets the persistent override the frame loop reads (a direct setRemoteCars call
     // would be wiped by the very next frame)

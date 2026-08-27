@@ -2,8 +2,15 @@
    feed.ts — Pyth Lazer (a.k.a. "Pyth Pro") low-latency price feed for the games
    ----------------------------------------------------------------------------
    Production target: ~1-50ms updates (real_time channel) straight from Pyth's
-   Lazer stream. Falls back to Pyth Hermes SSE (~2-4/s, free, no token) and then
-   to the game's own sim if everything is offline — so the games ALWAYS run.
+   Lazer stream. Falls back to Pyth Hermes (~2-4/s) then the game API's
+   /v1/prices, then the local sim if everything is offline — so games ALWAYS run.
+
+   Hermes has required a Pyth API key since the 2026-08-26 Core upgrade. Without
+   one the HUD stays on SIM (no real tick in 2.5s). Get a key at
+   https://docs.pyth.network/home/oracle#get-a-pyth-api-key (Pyth Terminal),
+   then either:
+     • set PYTH_API_KEY on the server (preferred — the client polls /v1/prices)
+     • or open with ?hermes=YOUR_KEY / set VITE_PYTH_API_KEY (browser Hermes)
 
    ── HOW TO TEST WITH LAZER (pick ONE) ───────────────────────────────────────
    A) Quickest: get a Lazer access token from https://pyth.network/lazer
@@ -35,7 +42,9 @@ export interface FeedHandle { state: FeedStatus; stop: () => void; }
 // ---- paste-here config (URL params override these) ------------------------
 // SECURITY: burner token, ships in the bundle (parity with prototype). Before any
 // public release move it server-side via the relay (see spec §7 / lazer-relay.mjs).
-const LAZER_TOKEN = "";   // burner token got de-entitled from the crypto feeds → default to the free, no-token Hermes feed (still real Pyth). Re-add a valid token here, or use ?lazer=… / the relay, for low-latency Lazer.
+// Pyth Terminal Pro key — same credential unlocks Lazer + Hermes after the 2026-08-26 cutover.
+// Ships in the bundle so the play client can mark LIVE without waiting on a server redeploy.
+const LAZER_TOKEN = "H3BPYYS846YhVh2UmSpBJ2iueFt6hZQzBBj1WJ1XhjPk";
 const LAZER_RELAY = "";   // <-- or a relay ws url (token stays server-side)
 const DEFAULT_CHANNEL = "real_time";
 const HERMES_FALLBACK = true;
@@ -55,6 +64,50 @@ if (urlTok) { try { localStorage.setItem("lazer_token", urlTok); } catch (e) {} 
 const TOKEN = urlTok || (function () { try { return localStorage.getItem("lazer_token") || ""; } catch (e) { return ""; } })() || LAZER_TOKEN;
 const RELAY = qp("relay") || LAZER_RELAY;
 const CHANNEL = qp("ch") || DEFAULT_CHANNEL;
+
+export interface HermesAuthInput {
+  search?: string;
+  storage?: { getItem(k: string): string | null; setItem(k: string, v: string): void } | null;
+  envToken?: string;
+}
+
+/** Pyth Terminal key: ?hermes= / ?pyth= (remembered), then localStorage, then VITE_PYTH_API_KEY. */
+export function resolveHermesToken(input: HermesAuthInput = {}): string {
+  const params = new URLSearchParams(input.search ?? "");
+  const fromUrl = params.get("hermes") || params.get("pyth") || "";
+  if (fromUrl && input.storage) {
+    try { input.storage.setItem("hermes_token", fromUrl); } catch { /* quota / private mode */ }
+  }
+  let fromStore = "";
+  try { fromStore = input.storage?.getItem("hermes_token") || ""; } catch { fromStore = ""; }
+  return fromUrl || fromStore || input.envToken || "";
+}
+
+/** HermesClient-compatible auth: Bearer header + ACCESS_TOKEN query (EventSource cannot set headers). */
+export function authorizeHermes(url: string, token: string): { url: string; headers: Record<string, string> } {
+  if (!token) return { url, headers: {} };
+  const sep = url.includes("?") ? "&" : "?";
+  return {
+    url: `${url}${sep}ACCESS_TOKEN=${encodeURIComponent(token)}`,
+    headers: { Authorization: `Bearer ${token}` },
+  };
+}
+
+function vitePythKey(): string {
+  try { return (import.meta.env.VITE_PYTH_API_KEY as string | undefined) || ""; } catch { return ""; }
+}
+
+function viteApiPricesUrl(): string {
+  let base = "http://localhost:8080";
+  try { base = (import.meta.env.VITE_API_BASE as string | undefined) || base; } catch { /* non-vite */ }
+  return base.replace(/\/$/, "") + "/v1/prices";
+}
+
+const HERMES_TOKEN = resolveHermesToken({
+  search: (() => { try { return location.search; } catch { return ""; } })(),
+  storage: typeof localStorage !== "undefined" ? localStorage : null,
+  envToken: vitePythKey(),
+}) || LAZER_TOKEN;
 
 // ---- per-connection state -------------------------------------------------
 export function connectFeed(opts: FeedOpts): FeedHandle {
@@ -122,7 +175,7 @@ export function connectFeed(opts: FeedOpts): FeedHandle {
       if (d.type === "subscriptionError") {                 // every feed in this sub unsupported at its channel
         const err = String(d.error || "");
         // An ENTITLEMENT failure (the token can't access these feeds — e.g. an expired/downgraded
-        // burner) won't be fixed by a slower channel. Drop straight to the free Hermes feed instead
+        // burner) won't be fixed by a slower channel. Drop straight to Hermes instead
         // of looping on the dead Lazer subscription, which would otherwise strand the game on its sim.
         const entitlement = /insufficient access|not entitled|not accessible|allowed types/i.test(err);
         const sids = subFeeds[d.subscriptionId] || [], slower2 = nextSlower(subChannel[d.subscriptionId] || CHANNEL);
@@ -154,18 +207,18 @@ export function connectFeed(opts: FeedOpts): FeedHandle {
     setTimeout(openLazer, Math.min(4000, 400 * lazerFails));
   }
 
-  // ---------- HERMES (free, no token — the STABLE default) -----------------
-  // Hardened against pythdata.app/Lazer being unavailable:
-  //   1) ONE multiplexed SSE for all feeds (not one connection per feed)
-  //   2) a REST-poll backstop that fires only when the stream goes quiet
+  // ---------- HERMES (needs a Pyth API key since 2026-08-26) -----------------
+  // Hardened against Lazer being unavailable:
+  //   1) ONE multiplexed SSE for all feeds (ACCESS_TOKEN query — EventSource has no headers)
+  //   2) a REST-poll backstop (Bearer + ACCESS_TOKEN) when the stream goes quiet
   //   3) a stall watchdog that force-reconnects a stream that's open-but-silent
-  // Net effect: prices keep flowing on real Pyth even if SSE stalls/blocks,
-  // so the games stay live instead of dropping to their internal sim.
+  //   4) GET /v1/prices on our API — server holds PYTH_API_KEY, browser does not
+  // Without a key on Hermes AND a live server feed, priceSource falls through to sim.
   const byHx: Record<string, FeedSpec> = {};
   function normHx(s: string) { s = String(s || "").toLowerCase(); return s.indexOf("0x") === 0 ? s.slice(2) : s; }
   feeds.forEach(function (f) { if (f.hx) byHx[normHx(f.hx)] = f; });
   function hxQuery() { return feeds.filter(function (f) { return f.hx; }).map(function (f) { return "ids[]=" + f.hx; }).join("&"); }
-  let lastHermesMsg = 0, hermesEs: EventSource | null = null, hermesPoll: ReturnType<typeof setInterval> | null = null, hermesWatch: ReturnType<typeof setInterval> | null = null;
+  let lastHermesMsg = 0, hermesEs: EventSource | null = null, hermesPoll: ReturnType<typeof setInterval> | null = null, hermesWatch: ReturnType<typeof setInterval> | null = null, apiPoll: ReturnType<typeof setInterval> | null = null;
   function emitParsed(arr: any[]) {
     if (!arr || !arr.length) return;
     for (let i = 0; i < arr.length; i++) {
@@ -180,7 +233,7 @@ export function connectFeed(opts: FeedOpts): FeedHandle {
     if (killed) return;
     try { if (hermesEs) hermesEs.close(); } catch (e) {}
     try {
-      hermesEs = new EventSource(HERMES_SSE + "?" + hxQuery() + "&parsed=true");
+      hermesEs = new EventSource(authorizeHermes(HERMES_SSE + "?" + hxQuery() + "&parsed=true", HERMES_TOKEN).url);
       hermesEs.onmessage = function (e: MessageEvent) { try { emitParsed(JSON.parse(e.data).parsed); } catch (_) {} };
       hermesEs.onerror = function () {};   // browser auto-reconnects; watchdog covers silent stalls
     } catch (e) {}
@@ -188,17 +241,36 @@ export function connectFeed(opts: FeedOpts): FeedHandle {
   function hermesPollOnce() {
     if (killed || now() - lastHermesMsg < 1200) return;   // stream healthy → don't poll
     try {
-      fetch(HERMES_REST + "?" + hxQuery() + "&parsed=true")
+      const req = authorizeHermes(HERMES_REST + "?" + hxQuery() + "&parsed=true", HERMES_TOKEN);
+      fetch(req.url, { headers: req.headers })
         .then(function (r) { return r.ok ? r.json() : null; })
         .then(function (d) { if (d && d.parsed) emitParsed(d.parsed); })
         .catch(function () {});
     } catch (e) {}
   }
+  function apiPollOnce() {
+    if (killed || now() - lastHermesMsg < 1200) return;
+    try {
+      fetch(viteApiPricesUrl())
+        .then(function (r) { return r.ok ? r.json() : null; })
+        .then(function (d) {
+          const prices = d && d.prices;
+          if (!prices) return;
+          for (let i = 0; i < feeds.length; i++) {
+            const f = feeds[i], v = Number(prices[f.key]);
+            if (v > 0) { lastHermesMsg = now(); emit(f.key, v); }
+          }
+        })
+        .catch(function () {});
+    } catch (e) {}
+  }
   function startHermes() {
     if (killed || usingHermes) return;
-    usingHermes = true; state.source = "hermes"; state.label = "Pyth Hermes (no token)";
+    usingHermes = true; state.source = "hermes";
+    state.label = HERMES_TOKEN ? "Pyth Hermes" : "Pyth Hermes (key required)";
     openHermesSSE();
     hermesPoll  = setInterval(hermesPollOnce, 600);
+    apiPoll     = setInterval(apiPollOnce, 600);
     hermesWatch = setInterval(function () { if (!killed && now() - lastHermesMsg > 6000) openHermesSSE(); }, 3000);
   }
 
@@ -220,18 +292,21 @@ export function connectFeed(opts: FeedOpts): FeedHandle {
   }, 250);
 
   // ---------- start ----------
+  // Lazer is low-latency when the token is entitled. Always start Hermes too so
+  // /v1/prices + REST ticks mark LIVE in the first second instead of waiting out
+  // a multi-endpoint Lazer fail ladder (which left the HUD on CONNECTING / SIM).
   if (TOKEN || RELAY) openLazer();
-  else if (HERMES_FALLBACK) startHermes();
-  else { state.label = "no feed configured"; }
+  if (HERMES_FALLBACK) startHermes();
+  if (!TOKEN && !RELAY && !HERMES_FALLBACK) state.label = "no feed configured";
 
   return {
     state: state,
     stop: function () {
-      killed = true; clearInterval(statusTimer); clearInterval(hermesPoll!); clearInterval(hermesWatch!);
+      killed = true; clearInterval(statusTimer); clearInterval(hermesPoll!); clearInterval(hermesWatch!); clearInterval(apiPoll!);
       try { if (ws) ws.close(); } catch (e) {}
       try { if (hermesEs) hermesEs.close(); } catch (e) {}
     }
   };
 }
 
-export function config() { return { hasToken: !!TOKEN, hasRelay: !!RELAY, channel: CHANNEL }; }
+export function config() { return { hasToken: !!TOKEN, hasRelay: !!RELAY, hasHermesToken: !!HERMES_TOKEN, channel: CHANNEL }; }

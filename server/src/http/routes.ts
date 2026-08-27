@@ -36,6 +36,7 @@ export interface RouteDeps {
   /** operator secret guarding the admin withdrawal-approval endpoint; null disables that surface. */
   adminSecret: string | null;
   upgrades: import("../services/upgrades.js").Upgrades;
+  crateOpen: import("../services/crate-open.js").CrateOpen;
   /** not consumed by any Phase 1 route — the seam Phase 2's /authorize validates against */
   entitlements: import("../services/entitlements.js").Entitlements;
   earnLimit: import("../services/earn-limit.js").EarnLimit;
@@ -43,6 +44,12 @@ export interface RouteDeps {
 
 const GrantCoins = z.object({ amount: z.number().int().positive() });
 const CoinDelta = z.object({ amount: z.number().int().positive().max(1_000_000_000), ref: z.string().min(1).max(200) });
+const OpenCrate = z.object({
+  crateKey: z.enum(["wooden", "silver", "gold"]),
+  payment: z.enum(["coins", "sol", "gift"]),
+  vrfBytes: z.string().min(64).max(66),
+  solSignature: z.string().min(32).max(128).optional(),
+});
 const GrantCar = z.object({ carId: z.string().min(1) });
 const CarRef = z.object({ carId: z.string().min(1) });
 const RedeemAccess = z.object({ code: z.string().trim().min(1).max(24) });
@@ -116,6 +123,21 @@ export function registerRoutes(server: FastifyInstance, deps: RouteDeps): void {
   const requireAdmin = makeRequireAdmin(deps.adminSecret);
 
   server.post("/v1/session", async () => deps.sessionAuth.issueAnonymous());
+
+  // Public mark for the HUD: same ticks the server settles against. No auth — prices aren't secret,
+  // and the browser cannot send a Hermes API key on EventSource. Empty/unhealthy assets are omitted.
+  server.get("/v1/prices", async () => {
+    const assets = ["BTC", "ETH", "SOL"] as const;
+    const prices: Record<string, number> = {};
+    const live: Record<string, boolean> = {};
+    for (const asset of assets) {
+      const ok = deps.feed.healthy(asset);
+      live[asset] = ok;
+      if (!ok) continue;
+      try { prices[asset] = deps.feed.current(asset).price; } catch { live[asset] = false; }
+    }
+    return { prices, live };
+  });
 
   server.get("/v1/balance", { preHandler: requireUser }, async (req) => {
     return { balance: await deps.ledger.balance(req.userId!, deps.stakeAsset) };
@@ -207,6 +229,23 @@ export function registerRoutes(server: FastifyInstance, deps: RouteDeps): void {
     const p = RedeemAccess.safeParse(req.body);
     if (!p.success) return reply.code(400).send({ error: "bad_request" });
     return deps.users.redeemAccess(req.userId!, p.data.code);
+  });
+
+  server.post("/v1/crates/open", { preHandler: requireWalletBoundUser }, async (req, reply) => {
+    const p = OpenCrate.safeParse(req.body);
+    if (!p.success) return reply.code(400).send({ error: "bad_request" });
+    try {
+      return await deps.crateOpen.open(req.userId!, p.data);
+    } catch (e: any) {
+      const msg = String(e?.message ?? e);
+      if (msg === "insufficient balance") return reply.code(402).send({ error: "insufficient_balance" });
+      if (msg === "welcome_already_claimed") return reply.code(409).send({ error: "welcome_already_claimed" });
+      if (msg === "bad_vrf_bytes" || msg === "sol_signature_required" || msg === "bad_crate" || msg === "bad_payment") {
+        return reply.code(400).send({ error: msg });
+      }
+      if (msg === "crate_replay") return reply.code(409).send({ error: "crate_replay" });
+      throw e;
+    }
   });
 
   server.post("/v1/inventory/grant", { preHandler: requireWalletBoundUser }, async (req, reply) => {

@@ -11,3 +11,7 @@ dist/
 
 # Release APKs are staged locally for Railway uploads, never committed.
 redline3d/public/downloads/*.apk
+
+# Spike build output (sources live on their own branches; e.g. vrf-signer-probe on onboarding-road)
+spikes/**/target/
+spikes/**/.anchor/

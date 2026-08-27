@@ -2,10 +2,12 @@ import * as THREE from "three";
 import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader.js";
 import { RoomEnvironment } from "three/examples/jsm/environments/RoomEnvironment.js";
 import { tierOf } from "../core/rarity";
-import { rollCrate, dupeScrap, pickLevel, clientRandom, CRATES, crateByKey, type CrateType, type CrateCar, type RandomnessProvider } from "../core/crate";
+import { dupeScrap, pickLevel, clientRandom, CRATES, crateByKey, type CrateType, type CrateCar, type RandomnessProvider } from "../core/crate";
+import { PITY, emptyPity, hitTopTier, nextPity, rollCrateWithPity, type CrateKey, type PityState } from "../core/pity";
 import { createRevealCar } from "./reveal-car";
 import { scrapPileHtml, levelPosterHtml, type LevelPoster } from "./reveal-bits";
 import { toonify, reclaimToonVariants } from "../render/toon";
+import { createCrateCinematic } from "./crate-cinematic";
 
 // The Crate Shop: pick one of three crates (Wooden / Silver / Gold), buy with coins → roll a car by
 // that crate's rarity odds + bank the crate's scrap → reveal. A NEW car unlocks in the garage; a
@@ -38,6 +40,28 @@ export interface CrateBoxDeps {
   settleHold?: (n: number, commit: boolean) => void;
   /** surface a VRF failure to the player (toast) */
   onVrfFail?: (msg: string) => void;
+  pity?: () => PityState;
+  recordPity?: (next: PityState) => void;
+  /** signed-in verified open: server debits, rolls from VRF bytes, grants. */
+  vrfRoll?: () => (null | (() => Promise<{ draws: number[]; bytesHex: string }>));
+  openVerified?: (p: {
+    crateKey: CrateKey;
+    payment: "coins" | "sol" | "gift";
+    vrfBytes: string;
+    solSignature?: string;
+  }) => Promise<VerifiedCrateOpen>;
+  applyVerified?: (result: VerifiedCrateOpen) => void;
+}
+
+export interface VerifiedCrateOpen {
+  carId: string;
+  isNew: boolean;
+  count: number;
+  scrap: number;
+  scrapTotal: number;
+  coins: number;
+  levelKey: string | null;
+  pity: PityState;
 }
 export interface CrateBox {
   open(): void;
@@ -146,6 +170,7 @@ function injectStyles() {
       filter:drop-shadow(0 4px 10px color-mix(in srgb,var(--cc) 60%,transparent));animation:cbBob 3.4s ease-in-out infinite}
     .cb-col-nm{position:relative;font:800 15px/1 'Chakra Petch',ui-monospace,monospace;color:#fff;letter-spacing:.04em;text-shadow:0 0 10px color-mix(in srgb,var(--cc) 75%,transparent)}
     .cb-col-odds{display:flex;flex-wrap:wrap;justify-content:center;align-content:center;gap:3px 8px;min-height:21px}
+    .cb-col-pity{font:700 9px/1.2 'Chakra Petch',ui-monospace,monospace;letter-spacing:.08em;color:#9aa4b2;text-transform:uppercase}
     .cb-col-od{display:inline-flex;align-items:center;gap:3px;font:700 9px/1 'Chakra Petch',ui-monospace,monospace;color:rgba(226,230,255,.82)}
     .cb-col-od i{width:6px;height:6px;border-radius:50%;background:var(--tc);box-shadow:0 0 5px var(--tc);flex:none}
     .cb-col-scrap{font:700 11px/1 'Chakra Petch',ui-monospace,monospace;color:#c2cad6}
@@ -231,6 +256,7 @@ export function createCrateBox(parent: HTMLElement, deps: CrateBoxDeps): CrateBo
       <div class="cb-col-crate" data-ico="${c.key}"></div>
       <div class="cb-col-nm">${c.name.replace(" Crate", "")}</div>
       <div class="cb-col-odds">${oddsLine(c)}</div>
+      <div class="cb-col-pity" data-pity="${c.key}"></div>
       <div class="cb-col-scrap">+${c.scrap} scrap</div>
       <div class="cb-col-buy">
         <button class="cb-coin" data-open="${c.key}">${c.priceCoins} ◈</button>
@@ -238,7 +264,7 @@ export function createCrateBox(parent: HTMLElement, deps: CrateBoxDeps): CrateBo
       </div>
     </div>`).join("");
   panel.innerHTML =
-    `<div class="cb-head"><span class="lbl">crate shop · devnet</span><span class="cb-coins">◈ <span data-cb="coins">0</span></span><button class="cb-x" data-cb="close" aria-label="Close">✕</button></div>` +
+    `<div class="cb-head"><span class="lbl" data-cb="shop-lbl">crate shop · practice</span><span class="cb-coins">◈ <span data-cb="coins">0</span></span><button class="cb-x" data-cb="close" aria-label="Close">✕</button></div>` +
     `<div class="cb-cols" data-cb="rows">${rowsHtml}</div>` +
     `<div class="cb-stage" data-cb="stage"></div>` +
     `<div class="cb-btns" data-cb="btns" style="display:none"></div>`;
@@ -247,6 +273,7 @@ export function createCrateBox(parent: HTMLElement, deps: CrateBoxDeps): CrateBo
 
   const q = (k: string) => panel.querySelector(`[data-cb="${k}"]`) as HTMLElement;
   const coinsEl = q("coins"), rows = q("rows"), stage = q("stage"), btns = q("btns");
+  const cinematic = createCrateCinematic(stage);
   const revealCar = createRevealCar({ lowTier: deps.lowTier });
   let opening = false, giftMode = false; // giftMode: the free welcome open → its reveal "Done" closes to the strip
   let pendingSol: { crateKey: string; signature: string } | null = null;
@@ -293,13 +320,32 @@ export function createCrateBox(parent: HTMLElement, deps: CrateBoxDeps): CrateBo
     next();
   };
 
+  const syncPity = () => {
+    const state = deps.pity?.() ?? emptyPity();
+    panel.querySelectorAll<HTMLElement>("[data-pity]").forEach((el) => {
+      const key = el.dataset.pity as CrateKey;
+      const rule = PITY[key];
+      el.textContent = `Pity ${state[key]}/${rule.hard} → ${tierOf(rule.topTier).name}`;
+    });
+  };
+
+  const bumpPity = (key: CrateKey, car: CrateCar | null) => {
+    const state = { ...(deps.pity?.() ?? emptyPity()) };
+    state[key] = nextPity(key, state[key], hitTopTier(car, key));
+    deps.recordPity?.(state);
+  };
+
   const syncCoins = () => {
     coinsEl.textContent = String(deps.coins());
     panel.querySelectorAll<HTMLButtonElement>("[data-open]").forEach((b) => {
       const c = CRATES.find((x) => x.key === b.dataset.open)!;
       b.disabled = deps.coins() < c.priceCoins;
     });
+    syncPity();
+    const lbl = panel.querySelector("[data-cb=shop-lbl]");
+    if (lbl) lbl.textContent = deps.vrfRequired?.() ? "crate shop · vrf" : "crate shop · practice";
   };
+  syncCoins();
 
   const showShop = () => {
     opening = false;
@@ -362,7 +408,8 @@ export function createCrateBox(parent: HTMLElement, deps: CrateBoxDeps): CrateBo
   // Map the resolved draws → car/scrap/level grants → reveal. false if nothing droppable (never happens
   // with the full roster, but keeps both paths honest about not charging for an empty pull).
   const resolveAndReveal = (crate: CrateType, draws: number[], vrf: boolean): boolean => {
-    const car = rollCrate(deps.cars(), crate.tierWeights, draws[0], draws[1]);
+    const misses = (deps.pity?.() ?? emptyPity())[crate.key];
+    const car = rollCrateWithPity(deps.cars(), crate.key, crate.tierWeights, misses, draws[0], draws[1]);
     if (!car) return false; // nothing droppable
     const isNew = deps.grantCar(car.name);
     let scrap = crate.scrap;
@@ -371,6 +418,7 @@ export function createCrateBox(parent: HTMLElement, deps: CrateBoxDeps): CrateBo
     deps.addScrap(scrap);
     const lvlKey = pickLevel(deps.lockedLevels(), crate.levelChance, draws[2], draws[3]); // additive level roll
     if (lvlKey) deps.grantLevel(lvlKey);
+    bumpPity(crate.key, car);
     burstToReveal(crate, car, isNew, scrap, lvlKey, vrf);
     return true;
   };
@@ -411,11 +459,27 @@ export function createCrateBox(parent: HTMLElement, deps: CrateBoxDeps): CrateBo
           const signature = await deps.buyWithSol!(crate.key, crate.priceSol!);
           pendingSol = { crateKey: crate.key, signature };
         }
-        const draws = await vrfProvider(4);
-        const revealed = resolveAndReveal(crate, draws, true);
-        if (revealed) {
-          pendingSol = null;
-          return;
+        const roller = deps.vrfRoll?.();
+        if (deps.openVerified && roller) {
+          const { bytesHex } = await roller();
+          const result = await deps.openVerified({
+            crateKey: crate.key, payment: "sol", vrfBytes: bytesHex, solSignature: pendingSol.signature,
+          });
+          deps.applyVerified?.(result);
+          deps.recordPity?.(result.pity);
+          const car = deps.cars().find((c) => c.name === result.carId);
+          if (car) {
+            pendingSol = null;
+            showReveal(crate, car, result.isNew, result.scrap, result.levelKey, true);
+            return;
+          }
+        } else {
+          const draws = await vrfProvider(4);
+          const revealed = resolveAndReveal(crate, draws, true);
+          if (revealed) {
+            pendingSol = null;
+            return;
+          }
         }
         opening = false;
         showShop();
@@ -434,30 +498,65 @@ export function createCrateBox(parent: HTMLElement, deps: CrateBoxDeps): CrateBo
     }
 
     if (!vrfProvider) {
-      // ── guest / not connected: the existing sync client-RNG path, verbatim behavior ──
+      // ── guest / not connected: client RNG + local pity (practice) ──
       if (!free && deps.coins() < crate.priceCoins) { syncCoins(); return; }
       const draws = [rng.next(), rng.next(), rng.next(), rng.next()];
-      const car = rollCrate(deps.cars(), crate.tierWeights, draws[0], draws[1]);
+      const misses = (deps.pity?.() ?? emptyPity())[crate.key];
+      const car = rollCrateWithPity(deps.cars(), crate.key, crate.tierWeights, misses, draws[0], draws[1]);
       if (!car) { if (free) { giftMode = false; close(); } return; } // nothing droppable — never charge
       if (!free && !deps.spend(crate.priceCoins)) return;
       opening = true;
-      syncCoins(); // reflect the debit in the shop header right away (rows are hidden during the reveal)
-      showCrateAnim(crate, false);
-      window.setTimeout(() => {
-        // the sync draws already fixed the outcome — resolve grants + reveal (no chip on the guest path)
+      syncCoins();
+      rows.style.display = "none";
+      stage.classList.add("on");
+      void cinematic.play({
+        color: crate.color,
+        rarity: car.rarity ?? 1,
+        cratePng: cratePng[crate.key],
+      }).then(() => {
         const isNew = deps.grantCar(car.name);
         let scrap = crate.scrap;
         if (isNew) deps.unlockUI(car.name); else scrap += dupeScrap(car.rarity);
         deps.addScrap(scrap);
         const lvlKey = pickLevel(deps.lockedLevels(), crate.levelChance, draws[2], draws[3]);
         if (lvlKey) deps.grantLevel(lvlKey);
-        burstToReveal(crate, car, isNew, scrap, lvlKey, false);
-      }, 500);
+        bumpPity(crate.key, car);
+        showReveal(crate, car, isNew, scrap, lvlKey, false);
+      });
       return;
     }
 
     // ── signed-in: MagicBlock VRF. Debit FIRST (the mapping is public — randomness must never
     // be knowable before payment), request, shake while the oracle answers, fail closed. ──
+    const roller = deps.vrfRoll?.();
+    if (deps.openVerified && roller) {
+      opening = true;
+      syncCoins();
+      showCrateAnim(crate, true);
+      void (async () => {
+        const { bytesHex } = await roller();
+        const result = await deps.openVerified!({
+          crateKey: crate.key,
+          payment: free ? "gift" : "coins",
+          vrfBytes: bytesHex,
+        });
+        if (free) {
+          const claimed = await completeVrfReward(true, deps.completeGift, () => true);
+          if (!claimed) throw new Error("welcome_already_claimed");
+        }
+        deps.applyVerified?.(result);
+        deps.recordPity?.(result.pity);
+        const car = deps.cars().find((c) => c.name === result.carId);
+        if (!car) throw new Error("crate_car_missing");
+        showReveal(crate, car, result.isNew, result.scrap, result.levelKey, true);
+      })().catch((error) => {
+        opening = false;
+        console.warn("[crate] verified open failed:", error);
+        deps.onVrfFail?.(vrfFailureMessage(error, !free));
+        if (giftMode) { giftMode = false; close(); } else showShop();
+      });
+      return;
+    }
     if (!free) {
       if (!deps.holdCoins || !deps.settleHold) { deps.onVrfFail?.("VRF wiring missing"); return; }
       if (!deps.holdCoins(crate.priceCoins)) { syncCoins(); return; }

@@ -175,15 +175,22 @@
         var fill = document.getElementById("splashfill"),
           pct = document.getElementById("splashpct"),
           splash = document.getElementById("splash");
-        var current = 0, target = 10, done = false, t0 = Date.now();
+        var current = 0, target = 6, done = false, t0 = Date.now(), gotMilestone = false;
         // milestones drive the target (monotonic, capped at 99 — hideSplash owns 100).
         // Once hidden (done), the contract is closed: late milestones are ignored.
+        // The main module graph is huge (Three + Solana + Privy). Until it reports a
+        // real beat, creep the bar so it does not sit on 10% for the whole download.
         window.setSplashProgress = function (p) {
           if (done) return;
+          gotMilestone = true;
           target = Math.max(target, Math.min(p, 99));
         };
         (function tick() {
           if (done) return;
+          if (!gotMilestone) {
+            var creep = Math.min(26, 6 + (Date.now() - t0) / 350);
+            if (creep > target) target = creep;
+          }
           current += (target - current) * 0.04 + 0.35;
           if (current > target) current = target;
           fill.style.width = current.toFixed(1) + "%";

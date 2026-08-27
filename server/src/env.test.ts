@@ -13,6 +13,12 @@ describe("env withdraw send-leg vars", () => {
     const e = parseEnv({});
     expect(e.WITHDRAW_POLL_MS).toBe(4000);
     expect(e.TREASURY_SECRET).toBeUndefined();
+    expect(e.PYTH_API_KEY).toBeUndefined();
+  });
+
+  it("accepts PYTH_API_KEY for authenticated Hermes", () => {
+    const e = parseEnv({ PYTH_API_KEY: "pyth-test-key" });
+    expect(e.PYTH_API_KEY).toBe("pyth-test-key");
   });
 
   it("accepts a provided TREASURY_SECRET and WITHDRAW_POLL_MS", () => {

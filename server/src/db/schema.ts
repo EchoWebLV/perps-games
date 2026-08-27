@@ -31,6 +31,8 @@ export const users = pgTable(
     welcomeClaimed: boolean("welcome_claimed").notNull().default(false),
     /** redeemed access-code ids (trimmed+lowercased) — each grants its reward ONCE per account (see users.redeemAccess). */
     accessCodes: text("access_codes").array().notNull().default(sql`'{}'::text[]`),
+    /** crate pity counters JSON: { wooden, silver, gold } */
+    cratePity: text("crate_pity").notNull().default("{}"),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => ({

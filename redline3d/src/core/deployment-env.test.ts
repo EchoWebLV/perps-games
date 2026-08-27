@@ -82,7 +82,9 @@ describe("Railway-only API configuration", () => {
     expect(dockerfile).toContain("ARG VITE_PRIVY_APP_ID");
     expect(dockerfile).toContain("ARG VITE_WALLET");
     expect(dockerfile).toContain("ARG VITE_SOLANA_CLUSTER");
+    expect(dockerfile).toContain("ARG VITE_PYTH_API_KEY");
     expect(dockerfile.indexOf("ARG VITE_PRIVY_APP_ID")).toBeLessThan(dockerfile.indexOf("RUN npm run build"));
+    expect(dockerfile.indexOf("ARG VITE_PYTH_API_KEY")).toBeLessThan(dockerfile.indexOf("RUN npm run build"));
   });
 
   it("refuses to build a native APK without auth and a WebView-safe Solana RPC", () => {

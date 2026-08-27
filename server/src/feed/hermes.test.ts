@@ -58,6 +58,18 @@ describe("makeHermesFeed health (advance-based, not absolute-age)", () => {
     feed.stop();
   });
 
+  it("sends the Pyth API key as Bearer + ACCESS_TOKEN", async () => {
+    const seen: { url: string; headers: HeadersInit | undefined }[] = [];
+    const fetchImpl = (async (url: any, init?: RequestInit) => {
+      seen.push({ url: String(url), headers: init?.headers });
+      return new Response(JSON.stringify({ parsed: [] }), { status: 200 });
+    }) as unknown as typeof fetch;
+    const feed = makeHermesFeed({ assets: ["SOL"], accessToken: "pyth-secret", fetchImpl, now: () => 1 });
+    await feed.poll();
+    expect(seen[0].url).toContain("ACCESS_TOKEN=pyth-secret");
+    expect(seen[0].headers).toMatchObject({ Authorization: "Bearer pyth-secret" });
+  });
+
   it("HALTs when publish_time stops advancing for longer than staleMs (a genuinely frozen feed)", async () => {
     let nowMs = 1_000_000;
     const frozenPub = Math.floor(nowMs / 1000) - 2;
