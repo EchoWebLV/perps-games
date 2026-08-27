@@ -21,6 +21,8 @@ export interface HermesOpts {
   reconnectMs?: number;   // SSE reconnect backoff, default 1000
   fetchImpl?: typeof fetch; // injectable for tests
   now?: () => number;       // injectable wall clock (ms) for tests
+  /** Pyth Terminal key. Omit to read PYTH_API_KEY. Pass "" to force unauthenticated (tests). */
+  accessToken?: string;
 }
 
 /**
@@ -38,6 +40,16 @@ export function makeHermesFeed(opts: HermesOpts): PriceFeed & { poll(): Promise<
   const reconnectMs = opts.reconnectMs ?? 1000;
   const doFetch = opts.fetchImpl ?? globalThis.fetch.bind(globalThis);
   const now = opts.now ?? (() => Date.now());
+  const accessToken = opts.accessToken !== undefined ? opts.accessToken : (process.env.PYTH_API_KEY ?? "");
+
+  function authorize(url: string): { url: string; headers: Record<string, string> } {
+    if (!accessToken) return { url, headers: {} };
+    const sep = url.includes("?") ? "&" : "?";
+    return {
+      url: `${url}${sep}ACCESS_TOKEN=${encodeURIComponent(accessToken)}`,
+      headers: { Authorization: `Bearer ${accessToken}` },
+    };
+  }
 
   const last: Record<string, PriceTick> = {};
   const lastAdvanceMs: Record<string, number> = {}; // wall time we last saw a NEWER publish_time
@@ -66,7 +78,8 @@ export function makeHermesFeed(opts: HermesOpts): PriceFeed & { poll(): Promise<
   }
 
   async function tickOnce(): Promise<void> {
-    const res = await doFetch(`${HERMES_LATEST}?${query()}&parsed=true`);
+    const req = authorize(`${HERMES_LATEST}?${query()}&parsed=true`);
+    const res = await doFetch(req.url, { headers: req.headers });
     if (!res.ok) return;
     const json = (await res.json()) as { parsed?: Parsed[] };
     ingest(json.parsed);
@@ -76,9 +89,10 @@ export function makeHermesFeed(opts: HermesOpts): PriceFeed & { poll(): Promise<
     while (running) {
       try {
         abort = new AbortController();
-        const res = await doFetch(`${HERMES_STREAM}?${query()}&parsed=true`, {
+        const req = authorize(`${HERMES_STREAM}?${query()}&parsed=true`);
+        const res = await doFetch(req.url, {
           signal: abort.signal,
-          headers: { accept: "text/event-stream" },
+          headers: { accept: "text/event-stream", ...req.headers },
         });
         if (!res.ok || !res.body) throw new Error(`stream ${res.status}`);
         const reader = (res.body as ReadableStream<Uint8Array>).getReader();

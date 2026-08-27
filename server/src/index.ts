@@ -151,6 +151,7 @@ async function main(): Promise<void> {
     assets: ["BTC", "ETH", "SOL"],
     pollMs: Number(process.env.FEED_POLL_MS) || undefined,
     staleMs: Number(process.env.FEED_STALE_MS) || undefined,
+    accessToken: env.PYTH_API_KEY,
   });
   feed.start();
   const rounds = makeRounds({ db, ledger, feed, stakeAsset, houseUserId });

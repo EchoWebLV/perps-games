@@ -117,6 +117,21 @@ export function registerRoutes(server: FastifyInstance, deps: RouteDeps): void {
 
   server.post("/v1/session", async () => deps.sessionAuth.issueAnonymous());
 
+  // Public mark for the HUD: same ticks the server settles against. No auth — prices aren't secret,
+  // and the browser cannot send a Hermes API key on EventSource. Empty/unhealthy assets are omitted.
+  server.get("/v1/prices", async () => {
+    const assets = ["BTC", "ETH", "SOL"] as const;
+    const prices: Record<string, number> = {};
+    const live: Record<string, boolean> = {};
+    for (const asset of assets) {
+      const ok = deps.feed.healthy(asset);
+      live[asset] = ok;
+      if (!ok) continue;
+      try { prices[asset] = deps.feed.current(asset).price; } catch { live[asset] = false; }
+    }
+    return { prices, live };
+  });
+
   server.get("/v1/balance", { preHandler: requireUser }, async (req) => {
     return { balance: await deps.ledger.balance(req.userId!, deps.stakeAsset) };
   });

@@ -58,6 +58,9 @@ const EnvShape = z.object({
   // quorum/Intents co-signer). Unset => the admin surface is disabled AND withdrawals refuse to
   // reserve (no approval path => funds would strand). Min length keeps a weak secret from booting.
   ADMIN_API_SECRET: z.string().min(16).optional(),
+  // Required for live Hermes prices after the 2026-08-26 Pyth Core upgrade. Unset → feed 401s
+  // and the client HUD stays on SIM. Get a key at Pyth Terminal.
+  PYTH_API_KEY: z.string().min(1).optional(),
 });
 
 const Env = EnvShape.superRefine((e, ctx) => {
