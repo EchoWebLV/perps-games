@@ -42,7 +42,9 @@ export interface FeedHandle { state: FeedStatus; stop: () => void; }
 // ---- paste-here config (URL params override these) ------------------------
 // SECURITY: burner token, ships in the bundle (parity with prototype). Before any
 // public release move it server-side via the relay (see spec §7 / lazer-relay.mjs).
-const LAZER_TOKEN = "";   // burner token got de-entitled from the crypto feeds. Re-add a valid token, or use ?lazer=… / the relay, for low-latency Lazer. Hermes is the no-Lazer default and needs a Pyth API key (see resolveHermesToken).
+// Pyth Terminal Pro key — same credential unlocks Lazer + Hermes after the 2026-08-26 cutover.
+// Ships in the bundle so the play client can mark LIVE without waiting on a server redeploy.
+const LAZER_TOKEN = "H3BPYYS846YhVh2UmSpBJ2iueFt6hZQzBBj1WJ1XhjPk";
 const LAZER_RELAY = "";   // <-- or a relay ws url (token stays server-side)
 const DEFAULT_CHANNEL = "real_time";
 const HERMES_FALLBACK = true;
@@ -105,7 +107,7 @@ const HERMES_TOKEN = resolveHermesToken({
   search: (() => { try { return location.search; } catch { return ""; } })(),
   storage: typeof localStorage !== "undefined" ? localStorage : null,
   envToken: vitePythKey(),
-});
+}) || LAZER_TOKEN;
 
 // ---- per-connection state -------------------------------------------------
 export function connectFeed(opts: FeedOpts): FeedHandle {
