@@ -1,5 +1,5 @@
-import { describe, expect, it } from "vitest";
-import { connectFeed, feedWsUrl } from "./feed";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { connectFeed, feedWsUrl, type FeedFetch } from "./feed";
 import feedSource from "./feed.ts?raw";
 
 /** Minimal stand-in for the browser WebSocket: records itself so a test can push frames. */
@@ -21,6 +21,26 @@ function fakeWsCtor(sockets: FakeWs[]) {
   } as unknown as typeof WebSocket;
 }
 
+function tick(symbol: string, price: number, tsUs = 1) {
+  return { data: JSON.stringify({ type: "tick", symbol, price, tsUs }) };
+}
+
+/** A /v1/prices stand-in that always answers with the same payload, counting calls. */
+function fakePrices(payload: unknown) {
+  const calls: string[] = [];
+  const impl: FeedFetch = (url) => { calls.push(url); return Promise.resolve({ ok: true, json: () => Promise.resolve(payload) }); };
+  return { impl, calls };
+}
+
+/** A fetch that never settles — models a server slower than the poll interval. */
+function hangingFetch() {
+  const calls: string[] = [];
+  const impl: FeedFetch = (url) => { calls.push(url); return new Promise(() => {}); };
+  return { impl, calls };
+}
+
+afterEach(() => { vi.useRealTimers(); });
+
 describe("feedWsUrl", () => {
   it("derives ws(s) from the API base", () => {
     expect(feedWsUrl("https://api.example.com")).toBe("wss://api.example.com/v1/feed");
@@ -37,9 +57,10 @@ describe("connectFeed", () => {
       onPrice: (k, v) => prices.push([k, v]),
       wsCtor: fakeWsCtor(sockets),
       apiBase: "http://x",
+      fetchImpl: hangingFetch().impl,
     });
     expect(sockets[0].url).toBe("ws://x/v1/feed");
-    sockets[0].onmessage!({ data: JSON.stringify({ type: "tick", symbol: "BTC", price: 50000, tsUs: 1 }) });
+    sockets[0].onmessage!(tick("BTC", 50000));
     expect(prices).toEqual([["BTC", 50000]]);
     h.stop();
   });
@@ -52,8 +73,9 @@ describe("connectFeed", () => {
       onPrice: (k, v) => prices.push([k, v]),
       wsCtor: fakeWsCtor(sockets),
       apiBase: "http://x",
+      fetchImpl: hangingFetch().impl,
     });
-    sockets[0].onmessage!({ data: JSON.stringify({ type: "tick", symbol: "DOGE", price: 1, tsUs: 2 }) });
+    sockets[0].onmessage!(tick("DOGE", 1, 2));
     expect(prices).toEqual([]);
     h.stop();
   });
@@ -65,8 +87,9 @@ describe("connectFeed", () => {
       onPrice: () => {},
       wsCtor: fakeWsCtor(sockets),
       apiBase: "http://x",
+      fetchImpl: hangingFetch().impl,
     });
-    sockets[0].onmessage!({ data: JSON.stringify({ type: "tick", symbol: "BTC", price: 50000, tsUs: 1 }) });
+    sockets[0].onmessage!(tick("BTC", 50000));
     expect(h.state.live).toBe(true);
     sockets[0].onmessage!({ data: JSON.stringify({ type: "stale", symbol: "BTC" }) });
     expect(h.state.live).toBe(false);
@@ -80,6 +103,7 @@ describe("connectFeed", () => {
       onPrice: () => {},
       wsCtor: fakeWsCtor(sockets),
       apiBase: "http://x",
+      fetchImpl: hangingFetch().impl,
     });
     h.stop();
     expect(sockets[0].closed).toBe(true);
@@ -87,7 +111,134 @@ describe("connectFeed", () => {
     expect(sockets.length).toBe(1);
   });
 
+  it("reconnects after the socket closes and resumes ticks", () => {
+    vi.useFakeTimers();
+    const sockets: FakeWs[] = [];
+    const prices: Array<[string, number]> = [];
+    const h = connectFeed({
+      feeds: [{ key: "BTC" }],
+      onPrice: (k, v) => prices.push([k, v]),
+      wsCtor: fakeWsCtor(sockets),
+      apiBase: "http://x",
+      fetchImpl: hangingFetch().impl,
+    });
+    sockets[0].onmessage!(tick("BTC", 50000));
+    sockets[0].onclose!();
+    expect(sockets.length).toBe(1);          // backoff not elapsed yet
+
+    vi.advanceTimersByTime(400);             // first retry: 400ms
+    expect(sockets.length).toBe(2);
+    expect(sockets[1].url).toBe("ws://x/v1/feed");
+
+    sockets[1].onmessage!(tick("BTC", 51000, 2));
+    expect(prices).toEqual([["BTC", 50000], ["BTC", 51000]]);
+    h.stop();
+  });
+
   it("contains no Pyth endpoints or tokens", () => {
     expect(feedSource).not.toMatch(/dourolabs|hermes\.pyth|LAZER|ACCESS_TOKEN|H3BPYYS/);
+  });
+});
+
+describe("connectFeed /v1/prices fallback", () => {
+  it("polls the API once the WS has been silent past the grace window", async () => {
+    vi.useFakeTimers();
+    const sockets: FakeWs[] = [];
+    const prices: Array<[string, number]> = [];
+    const server = fakePrices({ prices: { BTC: 50000 }, live: { BTC: true } });
+    const h = connectFeed({
+      feeds: [{ key: "BTC" }],
+      onPrice: (k, v) => prices.push([k, v]),
+      wsCtor: fakeWsCtor(sockets),
+      apiBase: "http://x",
+      fetchImpl: server.impl,
+    });
+
+    await vi.advanceTimersByTimeAsync(600);
+    expect(server.calls).toEqual(["http://x/v1/prices"]);
+    expect(prices).toEqual([["BTC", 50000]]);
+    expect(h.state.live).toBe(true);
+    h.stop();
+  });
+
+  it("skips assets the server omits as unhealthy", async () => {
+    vi.useFakeTimers();
+    const sockets: FakeWs[] = [];
+    const prices: Array<[string, number]> = [];
+    const server = fakePrices({ prices: { BTC: 50000 }, live: { BTC: true, ETH: false } });
+    const h = connectFeed({
+      feeds: [{ key: "BTC" }, { key: "ETH" }],
+      onPrice: (k, v) => prices.push([k, v]),
+      wsCtor: fakeWsCtor(sockets),
+      apiBase: "http://x",
+      fetchImpl: server.impl,
+    });
+
+    await vi.advanceTimersByTimeAsync(600);
+    expect(prices).toEqual([["BTC", 50000]]);   // ETH absent from `prices`, no throw
+    h.stop();
+  });
+
+  // The poll's own delivery must not re-arm the WS-silence guard, or the effective
+  // cadence doubles to ~1200ms exactly when the WS rail is down and the poll is all we have.
+  it("keeps delivering every 600ms while the WS stays down", async () => {
+    vi.useFakeTimers();
+    const sockets: FakeWs[] = [];
+    const prices: Array<[string, number]> = [];
+    const server = fakePrices({ prices: { BTC: 50000 }, live: { BTC: true } });
+    const h = connectFeed({
+      feeds: [{ key: "BTC" }],
+      onPrice: (k, v) => prices.push([k, v]),
+      wsCtor: fakeWsCtor(sockets),
+      apiBase: "http://x",
+      fetchImpl: server.impl,
+    });
+
+    await vi.advanceTimersByTimeAsync(600);
+    expect(prices.length).toBe(1);
+    await vi.advanceTimersByTimeAsync(600);
+    expect(prices.length).toBe(2);             // 600ms later, not 1200ms
+    await vi.advanceTimersByTimeAsync(600);
+    expect(prices.length).toBe(3);
+    h.stop();
+  });
+
+  it("stays quiet while the WS is delivering, and takes over when it goes silent", async () => {
+    vi.useFakeTimers();
+    const sockets: FakeWs[] = [];
+    const prices: Array<[string, number]> = [];
+    const server = fakePrices({ prices: { BTC: 50000 }, live: { BTC: true } });
+    const h = connectFeed({
+      feeds: [{ key: "BTC" }],
+      onPrice: (k, v) => prices.push([k, v]),
+      wsCtor: fakeWsCtor(sockets),
+      apiBase: "http://x",
+      fetchImpl: server.impl,
+    });
+
+    sockets[0].onmessage!(tick("BTC", 49000));
+    await vi.advanceTimersByTimeAsync(600);
+    expect(server.calls).toEqual([]);          // WS is fresh — no poll
+
+    await vi.advanceTimersByTimeAsync(1200);   // 1800ms of WS silence
+    expect(server.calls.length).toBeGreaterThan(0);
+    h.stop();
+  });
+
+  it("does not stack requests when a poll outlives the interval", async () => {
+    vi.useFakeTimers();
+    const sockets: FakeWs[] = [];
+    const server = hangingFetch();
+    const h = connectFeed({
+      feeds: [{ key: "BTC" }],
+      onPrice: () => {},
+      wsCtor: fakeWsCtor(sockets),
+      apiBase: "http://x",
+      fetchImpl: server.impl,
+    });
+
+    await vi.advanceTimersByTimeAsync(1800);   // three interval ticks
+    expect(server.calls.length).toBe(1);       // single-flight: the first is still open
+    h.stop();
   });
 });

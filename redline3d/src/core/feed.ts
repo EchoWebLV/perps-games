@@ -16,6 +16,8 @@
 
 export interface FeedSpec { key: string; }
 export interface FeedStatus { source: string; live: boolean; rate: number; label: string; }
+/** The slice of `fetch` the backstop poll uses — narrow enough for a test to stand in for. */
+export type FeedFetch = (url: string) => Promise<{ ok: boolean; json: () => Promise<unknown> }>;
 export interface FeedOpts {
   feeds: FeedSpec[];
   onPrice: (key: string, price: number, tsUs?: number) => void;
@@ -24,6 +26,8 @@ export interface FeedOpts {
   wsCtor?: typeof WebSocket;
   /** Test seam: override the API origin (defaults to VITE_API_BASE). */
   apiBase?: string;
+  /** Test seam: the fetch the /v1/prices backstop uses (defaults to the global). */
+  fetchImpl?: FeedFetch;
 }
 export interface FeedHandle { state: FeedStatus; stop: () => void; }
 
@@ -47,18 +51,25 @@ export function connectFeed(opts: FeedOpts): FeedHandle {
   const feeds = opts.feeds || [];
   const onPrice = opts.onPrice || function () {};
   const onStatus = opts.onStatus || function () {};
-  const byKey: Record<string, FeedSpec> = {};
+  // null-prototype: a symbol named "constructor"/"toString" would otherwise hit Object.prototype
+  // and read as subscribed.
+  const byKey: Record<string, FeedSpec> = Object.create(null);
   feeds.forEach(function (f) { byKey[f.key] = f; });
 
   const apiBase = (opts.apiBase || viteApiBase()).replace(/\/$/, "");
   const pricesUrl = apiBase + "/v1/prices";
   const WsCtor: typeof WebSocket | null =
     opts.wsCtor || (typeof WebSocket !== "undefined" ? WebSocket : null);
+  const doFetch: FeedFetch | null =
+    opts.fetchImpl || (typeof fetch !== "undefined" ? function (u: string) { return fetch(u); } : null);
 
   const state: FeedStatus = { source: "server", live: false, rate: 0, label: "connecting…" };
   const ticks: number[] = [];                                // timestamps of recent updates (for rate)
   let ws: WebSocket | null = null, fails = 0, killed = false, stale = false;
-  let lastMsg = 0;                                           // last WS frame OR poll tick
+  // WS liveness ONLY — the poll must never re-arm this, or its own delivery would gate the
+  // next one and the backstop's effective cadence would double (POLL_MS + SILENCE_MS).
+  let wsLastMsg = 0;                                         // 0 = no WS frame yet this connection
+  let pollInFlight = false;
 
   function now() { return Date.now(); }
   function bump() {
@@ -80,19 +91,19 @@ export function connectFeed(opts: FeedOpts): FeedHandle {
     ws.onopen = function () { fails = 0; };
     ws.onmessage = function (ev: MessageEvent) {
       let d: any; try { d = JSON.parse(ev.data); } catch (e) { return; }
-      lastMsg = now();
+      wsLastMsg = now();
       const key = String(d && d.symbol || "");
       if (!byKey[key]) return;                               // a symbol this caller didn't ask for
       if (d.type === "stale") { stale = true; state.live = false; return; }
       if (d.type !== "tick") return;
-      emit(key, Number(d.price), d.tsUs);
+      emit(key, Number(d.price), d.tsUs == null ? undefined : Number(d.tsUs));
     };
     ws.onerror = function () { /* close fires next */ };
     ws.onclose = function () { ws = null; onWsDown(); };
   }
   function onWsDown() {
     if (killed) return;
-    ws = null; fails++;
+    ws = null; fails++; wsLastMsg = 0;                       // the rail is gone: stop gating the poll
     state.live = false; state.label = "reconnecting…";
     setTimeout(openWs, Math.min(RECONNECT_MAX_MS, RECONNECT_MIN_MS * fails));
   }
@@ -100,21 +111,29 @@ export function connectFeed(opts: FeedOpts): FeedHandle {
   // ---------- GET /v1/prices (backstop) ----------
   // Only fires while the WS has been quiet; the server holds the oracle key, so
   // this is the same price by a slower road — never a third-party endpoint.
+  function wsQuiet() { return wsLastMsg === 0 || now() - wsLastMsg >= SILENCE_MS; }
   function apiPollOnce() {
-    if (killed || now() - lastMsg < SILENCE_MS) return;
+    // Single-flight: a server slow enough to outlast the interval would otherwise
+    // get a growing pile of concurrent requests from a client it is already failing.
+    if (killed || !doFetch || pollInFlight || !wsQuiet()) return;
+    pollInFlight = true;
+    const done = function () { pollInFlight = false; };
     try {
-      fetch(pricesUrl)
+      doFetch(pricesUrl)
         .then(function (r) { return r.ok ? r.json() : null; })
-        .then(function (d) {
+        .then(function (raw) {
+          const d = raw as { prices?: Record<string, number> } | null;
           const prices = d && d.prices;
           if (!prices) return;
           for (let i = 0; i < feeds.length; i++) {
+            // An asset the server judged unhealthy is simply absent from `prices`.
             const f = feeds[i], v = Number(prices[f.key]);
-            if (v > 0) { lastMsg = now(); emit(f.key, v); }
+            if (v > 0) emit(f.key, v);
           }
         })
-        .catch(function () {});
-    } catch (e) {}
+        .catch(function () {})
+        .then(done, done);
+    } catch (e) { done(); }
   }
   const apiPoll: ReturnType<typeof setInterval> = setInterval(apiPollOnce, POLL_MS);
 
