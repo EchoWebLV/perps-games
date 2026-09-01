@@ -25,7 +25,7 @@ import type { Snapshot } from "./core/types";
 import { usd } from "./core/money";
 import { SOL_STAKE_CURRENCY, baseToUnits, unitsToBase } from "./core/stake-currency";
 import { createServerSession, type SettledInfo } from "./core/server-session";
-import { selectEvmWalletPort } from "./evm/rail";
+import { currentChainRail, selectEvmWalletPort } from "./evm/rail";
 import { connectAndBindEvmWallet } from "./core/wallet-binding";
 import { applyConfirmedWalletSpend } from "./core/wallet-balance-model";
 import { clampInt } from "./core/round-sync";
@@ -101,14 +101,7 @@ import { buildGrid } from "./core/race-grid";
 import { elevationAt } from "./core/track";
 import { HIGHWAY_MAX_LEV, highwayPose, seedHighwayMotion, speedForLeverage, stepHighwayMotion, synchronizedHighwayMotion, type HighwayMotion } from "./core/highway-auto";
 import type { AnchorWalletLike } from "./chain/anchor-wallet";
-import { createCrateRoll, createCrateRollDraws, makeCrateRollIo } from "./chain/crate-roll";
-import { payDevnetSol } from "./chain/sol-payment";
-import {
-  createHighwayRoundReader,
-  deriveHighwayRoundPda,
-  selectRemoteHighwayPlayers,
-  verifyHighwayPresence,
-} from "./chain/highway-verifier";
+import type { HighwayRoundReader } from "./chain/highway-verifier";
 
 const canvas = document.getElementById("gl") as HTMLCanvasElement;
 const hudRoot = document.getElementById("hud") as HTMLElement;
@@ -791,6 +784,9 @@ const crateBox = createCrateBox(hudRoot, {
     if (identity?.mode !== "privy") throw new Error("sol_payment_requires_sign_in");
     const wallet = parkedSolanaCrateWallet();
     if (!wallet) throw new Error("sol_payment_wallet_unavailable");
+    // Past the parked-wallet throw ⇒ the solana rail. Only here does @solana/web3.js get fetched;
+    // a static import would sit in the eager play chunk the EVM rail downloads on every boot.
+    const { payDevnetSol } = await import("./chain/sol-payment");
     const signature = await payDevnetSol(wallet, CRATE_TREASURY, priceSol);
     walletSolUnits = applyConfirmedWalletSpend(
       walletSolUnits,
@@ -802,11 +798,17 @@ const crateBox = createCrateBox(hudRoot, {
   },
   // MagicBlock VRF (signed-in only): one randomness request per pull, signed by the same
   // session wallet as rounds. Guests fall through to client RNG (practice parity).
+  // Both hooks stay SYNC (cratebox probes them for availability); the parked-wallet null is the
+  // EVM rail's exit, so the crate-roll module — and @solana/web3.js with it — is only ever
+  // imported from inside the async draw the solana rail would actually await.
   vrfDraws: () => {
     if (!identity || identity.mode !== "privy") return null;
     const w = parkedSolanaCrateWallet();
     if (!w) return null;
-    return createCrateRollDraws(makeCrateRollIo(w));
+    return async (n: number) => {
+      const { createCrateRollDraws, makeCrateRollIo } = await import("./chain/crate-roll");
+      return createCrateRollDraws(makeCrateRollIo(w))(n);
+    };
   },
   vrfRoll: () => {
     if (!identity || identity.mode !== "privy") return null;
@@ -814,8 +816,10 @@ const crateBox = createCrateBox(hudRoot, {
     if (!w) return null;
     // The verified path ships only the raw bytes — the SERVER rolls the outcome from them — so ask
     // the roller for 0 client-side draws. (cratebox calls this zero-arg and reads only `bytesHex`.)
-    const roll = createCrateRoll(makeCrateRollIo(w));
-    return () => roll(0);
+    return async () => {
+      const { createCrateRoll, makeCrateRollIo } = await import("./chain/crate-roll");
+      return createCrateRoll(makeCrateRollIo(w))(0);
+    };
   },
   vrfRequired: () => identity?.mode === "privy",
   pity: () => loadPity(),
@@ -1384,7 +1388,24 @@ const mapBtn = createMapButton(hudRoot, () => {
 const lobbyHud = createLobbyHud(hudRoot);
 let presence: PresenceClient | null = null;
 const presenceHud = createPresenceHud(hudRoot, (kind) => presence?.emote(kind));
-const highwayRoundReader = createHighwayRoundReader();
+/**
+ * chain/highway-verifier — the PARKED solana rail's ghost verifier — loaded on demand. It pulls
+ * @coral-xyz/anchor and @solana/web3.js through chain/config.ts, so a static import parks all of
+ * that in the eager play chunk that the live Robinhood Chain rail downloads on every boot and
+ * never runs. The rail gate (not a null-branch) is the seam here: highway ghosts are only ever
+ * advertised or verified on the solana rail, where `deriveHighwayRoundPda` can parse the base58
+ * wallet at all — it already returns null for every `0x…` address.
+ */
+type SolanaHighway = typeof import("./chain/highway-verifier");
+let solanaHighwayLoad: Promise<SolanaHighway> | null = null;
+function loadSolanaHighway(): Promise<SolanaHighway | null> {
+  if (currentChainRail() !== "solana") return Promise.resolve(null);
+  solanaHighwayLoad ??= import("./chain/highway-verifier");
+  return solanaHighwayLoad;
+}
+// One reader (one RPC Connection) for the whole session, built on first verification instead of
+// at boot — the constructor is inert until a read, so nothing observable moved.
+let highwayRoundReader: HighwayRoundReader | null = null;
 let highwayPresenceGeneration = 0;
 let verifiedHighwayCars: Array<{
   id: string;
@@ -1396,7 +1417,13 @@ let verifiedHighwayCars: Array<{
 const highwayVerificationCache = new Map<string, { signature: string; expires: number; valid: boolean }>();
 const highwayVerificationInflight = new Map<string, Promise<PresenceHighway | null>>();
 
-async function verifyCachedHighway(advertised: PresenceHighway): Promise<PresenceHighway | null> {
+// `chain` is the already-resolved module — passed in rather than awaited here so the cache and
+// in-flight checks below stay on the caller's synchronous tick (an await before them would let two
+// concurrent snapshots both miss the in-flight map and double-verify).
+async function verifyCachedHighway(
+  chain: SolanaHighway,
+  advertised: PresenceHighway,
+): Promise<PresenceHighway | null> {
   const signature = `${advertised.wallet}:${advertised.asset}:${advertised.dir}:${advertised.lev}`;
   const cached = highwayVerificationCache.get(advertised.roundPda);
   if (cached && cached.signature === signature && cached.expires > Date.now()) {
@@ -1405,7 +1432,8 @@ async function verifyCachedHighway(advertised: PresenceHighway): Promise<Presenc
   const inflightKey = `${advertised.roundPda}:${signature}`;
   const existing = highwayVerificationInflight.get(inflightKey);
   if (existing) return existing;
-  const verification = verifyHighwayPresence(advertised, highwayRoundReader).then((verified) => {
+  highwayRoundReader ??= chain.createHighwayRoundReader();
+  const verification = chain.verifyHighwayPresence(advertised, highwayRoundReader).then((verified) => {
     highwayVerificationCache.set(advertised.roundPda, {
       signature,
       expires: Date.now() + 2_000,
@@ -1419,10 +1447,16 @@ async function verifyCachedHighway(advertised: PresenceHighway): Promise<Presenc
 
 async function updateVerifiedHighway(players: PresencePlayer[]): Promise<void> {
   const generation = ++highwayPresenceGeneration;
-  const candidates = selectRemoteHighwayPlayers(players, session.address(), asset);
+  // Off the solana rail there are no candidates to begin with — nobody can advertise a highway
+  // without a base58 round PDA — so an empty list is exactly what the selector already returned.
+  // The rest of the body still runs, which is what keeps the sentiment readout in sync.
+  const chain = await loadSolanaHighway();
+  const candidates = chain === null
+    ? []
+    : chain.selectRemoteHighwayPlayers(players, session.address(), asset);
   const checked = await Promise.all(candidates.map(async (player) => ({
     id: player.id,
-    state: await verifyCachedHighway(player.highway!),
+    state: await verifyCachedHighway(chain!, player.highway!),
   })));
   if (generation !== highwayPresenceGeneration || mode !== "highway") return;
 
@@ -1573,10 +1607,16 @@ addEventListener("pointermove", (e) => {
 
 function advertiseHighwayPosition(dir: 1 | -1, lev: number): void {
   if (mode !== "highway" || identity?.mode !== "privy" || !signedIn || simRound || !roundActive) return;
-  const roundPda = deriveHighwayRoundPda(session.address());
-  if (!roundPda) return;
-  const laneSeed = seedHighwayMotion(roundPda, dir).lane;
-  presence?.advertiseHighway({ asset, roundPda, dir, lev, laneSeed, carId: equippedCar.name });
+  // The EVM rail returns HERE, before any load: `deriveHighwayRoundPda` already rejected every
+  // `0x…` address (it cannot be a base58 PublicKey), so this advertise was always a no-op there.
+  if (currentChainRail() !== "solana") return;
+  void loadSolanaHighway().then((chain) => {
+    if (chain === null) return;
+    const roundPda = chain.deriveHighwayRoundPda(session.address());
+    if (!roundPda) return;
+    const laneSeed = seedHighwayMotion(roundPda, dir).lane;
+    presence?.advertiseHighway({ asset, roundPda, dir, lev, laneSeed, carId: equippedCar.name });
+  });
 }
 
 /**
