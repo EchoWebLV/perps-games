@@ -127,6 +127,53 @@ describe("lazy privy EVM port", () => {
     expect(inner.disconnect).toHaveBeenCalledTimes(1);
   });
 
+  it("does NOT memoize a failed mount — the next call retries and can succeed", async () => {
+    const inner = fakeInnerPort();
+    const load = vi
+      .fn<() => Promise<EvmWalletPort>>()
+      .mockRejectedValueOnce(new Error("privy_unreachable"))
+      .mockResolvedValueOnce(inner);
+    const lazy = createLazyPrivyEvmPort({ load, hasPersistedSession: () => false });
+
+    await expect(lazy.connect()).rejects.toThrow("privy_unreachable");
+    // a cached REJECTED promise would replay the same error here and brick sign-in for the session
+    await expect(lazy.connect()).resolves.toEqual({ address: "0xlazy" });
+    expect(load).toHaveBeenCalledTimes(2);
+  });
+
+  it("a failed disconnect does not poison the later sign-in", async () => {
+    // disconnect() always mounts. On a slow network that rejection used to be cached forever, so
+    // every later Sign-in tap replayed it — the worst version of the same bug.
+    const inner = fakeInnerPort();
+    const load = vi
+      .fn<() => Promise<EvmWalletPort>>()
+      .mockRejectedValueOnce(new Error("privy_unreachable"))
+      .mockResolvedValueOnce(inner);
+    const lazy = createLazyPrivyEvmPort({ load, hasPersistedSession: () => false });
+
+    await expect(lazy.disconnect()).rejects.toThrow("privy_unreachable");
+    await expect(lazy.connect()).resolves.toEqual({ address: "0xlazy" });
+  });
+
+  it("concurrent callers still share ONE mount while it is in flight", async () => {
+    const inner = fakeInnerPort();
+    let release: (() => void) | null = null;
+    const load = vi.fn(async () => {
+      await new Promise<void>((r) => {
+        release = r;
+      });
+      return inner;
+    });
+    const lazy = createLazyPrivyEvmPort({ load, hasPersistedSession: () => false });
+
+    const a = lazy.connect();
+    const b = lazy.signMessage("m");
+    expect(load).toHaveBeenCalledTimes(1); // de-duped, not one mount per caller
+    release!();
+    await Promise.all([a, b]);
+    expect(load).toHaveBeenCalledTimes(1);
+  });
+
   it("usdcBalance stays null (no mount) until a wallet exists", async () => {
     const inner = fakeInnerPort();
     const load = vi.fn(async () => inner);

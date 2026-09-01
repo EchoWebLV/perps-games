@@ -114,18 +114,28 @@ export function createLazyPrivyEvmPort(
   const load =
     deps.load ??
     (async () => {
-      const [{ mountPrivyEvmIsland }, { createPrivyEvmPort: create }] = await Promise.all([
-        import("./privy-evm-island"),
-        import("./privy-evm-port"),
-      ]);
-      return create({ island: await mountPrivyEvmIsland() });
+      // Only the ISLAND import is dynamic — that is the one carrying react + @privy-io, and
+      // keeping it out of the default chunk is the entire point. createPrivyEvmPort is right
+      // here in lexical scope, so it is called directly.
+      const { mountPrivyEvmIsland } = await import("./privy-evm-island");
+      return createPrivyEvmPort({ island: await mountPrivyEvmIsland() });
     });
   const hasPersistedSession = deps.hasPersistedSession ?? hasPrivySession;
   const ensure = (): Promise<EvmWalletPort> => {
     if (inner) return Promise.resolve(inner);
+    // Memoize the mount so concurrent callers share one island — but ONLY a successful one. A
+    // cached REJECTED promise would outlive the island's own 25s-timeout retry reset and replay
+    // the same failure for the rest of the session; since disconnect() always mounts, one slow
+    // network could brick every later Sign-in tap. Clearing on rejection makes the next call retry.
     loading ??= (async () => {
-      inner = await load();
-      return inner;
+      try {
+        inner = await load();
+        return inner;
+      } catch (err) {
+        inner = null;
+        loading = null;
+        throw err;
+      }
     })();
     return loading;
   };

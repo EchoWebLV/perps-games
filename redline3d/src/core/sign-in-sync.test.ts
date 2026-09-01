@@ -1,12 +1,22 @@
 import { describe, it, expect, vi } from "vitest";
 import { bindAndHydrate } from "./sign-in-sync";
 
+/**
+ * A server-shaped binding challenge (see `messageFor()` in server/src/auth/wallet-binding.ts).
+ * The client refuses to sign anything that is not this shape, so the stubs must produce it.
+ */
+const bindMessage = (wallet: string) => `Perps Rider wallet binding
+Wallet: ${wallet}
+Session: user-1
+Nonce: n1
+Expires: 2026-09-01T00:00:00.000Z`;
+
 describe("bindAndHydrate", () => {
   it("binds the wallet, adopts the session, then hydrates", async () => {
     const adoptSession = vi.fn();
     const hydrate = vi.fn(async () => "seeded" as const);
     const api = {
-      bindWalletChallenge: vi.fn(async (wallet: string) => ({ challenge: "c", message: "sign me", wallet, expiresAt: "t" })),
+      bindWalletChallenge: vi.fn(async (wallet: string) => ({ challenge: "c", message: bindMessage(wallet), wallet, expiresAt: "t" })),
       bindWallet: vi.fn(async () => ({ wallet: "Addr", token: "tok", userId: "uid" })),
     };
     const port = {
@@ -31,7 +41,7 @@ describe("bindAndHydrate", () => {
     const adoptSession = vi.fn();
     const hydrate = vi.fn(async () => "server" as const);
     const api = {
-      bindWalletChallenge: vi.fn(async (wallet: string) => ({ challenge: "c", message: "m", wallet, expiresAt: "t" })),
+      bindWalletChallenge: vi.fn(async (wallet: string) => ({ challenge: "c", message: bindMessage(wallet), wallet, expiresAt: "t" })),
       bindWallet: vi.fn(async () => ({ wallet: "Addr" })), // no token/userId
     };
     const port = { connect: vi.fn(async () => ({ address: "Addr" })), signMessage: vi.fn(async () => new Uint8Array([1])) };
@@ -46,7 +56,7 @@ describe("bindAndHydrate", () => {
 
   it("does not complete a fresh sign-in when the account cannot be hydrated", async () => {
     const api = {
-      bindWalletChallenge: vi.fn(async (wallet: string) => ({ challenge: "c", message: "m", wallet, expiresAt: "t" })),
+      bindWalletChallenge: vi.fn(async (wallet: string) => ({ challenge: "c", message: bindMessage(wallet), wallet, expiresAt: "t" })),
       bindWallet: vi.fn(async () => ({ wallet: "Addr", token: "tok", userId: "uid" })),
     };
     const port = {

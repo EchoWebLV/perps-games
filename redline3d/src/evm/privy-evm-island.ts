@@ -16,8 +16,8 @@ import {
   type ConnectedWallet,
   type PrivyClientConfig,
 } from "@privy-io/react-auth";
-import { encodeFunctionData, erc20Abi } from "viem";
 import { EVM_CHAIN, EVM_USDC } from "./chain";
+import { buildPersonalSignParams, buildUsdcTransferTx, ensureChain } from "./eip1193";
 
 /** The imperative surface the Privy EVM port consumes (see privy-evm-port.ts). */
 export interface PrivyEvmIsland {
@@ -35,33 +35,9 @@ export interface PrivyEvmIsland {
   logout(): Promise<void>;
 }
 
-/** UTF-8 → 0x-hex. `personal_sign` takes hex data; TextEncoder + a manual nibble loop keeps this
- *  Buffer-free (there is no node Buffer in the browser bundle). */
-function utf8ToHex(message: string): `0x${string}` {
-  let out = "";
-  for (const byte of new TextEncoder().encode(message)) out += byte.toString(16).padStart(2, "0");
-  return `0x${out}`;
-}
-
-const CHAIN_ID_HEX = `0x${EVM_CHAIN.id.toString(16)}` as const;
-
-/**
- * Pin the provider to {@link EVM_CHAIN} before value moves. `supportedChains`/`defaultChain` on
- * the provider config already put the embedded wallet here, so the common path is the cheap
- * `eth_chainId` read; the switch is the fallback, and a still-wrong chain after it is a hard
- * failure rather than a transfer broadcast on the wrong network.
- */
-async function ensureChain(provider: { request: (r: { method: string; params?: unknown[] }) => Promise<unknown> }) {
-  const on = async () => {
-    const id = (await provider.request({ method: "eth_chainId" })) as string;
-    return typeof id === "string" && Number.parseInt(id, 16) === EVM_CHAIN.id;
-  };
-  if (await on()) return;
-  await provider
-    .request({ method: "wallet_switchEthereumChain", params: [{ chainId: CHAIN_ID_HEX }] })
-    .catch(() => { /* re-checked below — some providers reject an already-correct switch */ });
-  if (!(await on())) throw new Error("evm_wrong_chain");
-}
+// `utf8ToHex`, `ensureChain` and the two payload builders live in ./eip1193 — this module's
+// top-level react/@privy-io imports make it unimportable from a test process, and the bytes that
+// decide where a player's money goes must be covered by tests. Nothing money-shaped is built here.
 
 // Latest live Privy state, kept fresh by the React bridge's effect; the imperative facade reads it.
 interface Live {
@@ -99,13 +75,13 @@ function Bridge() {
   });
   const { wallets } = useWallets();
   const { createWallet } = useCreateWallet();
-  // Pick the EMBEDDED wallet explicitly — index 0 is Privy-first only by implementation
-  // accident, and would become an external wallet if connectors are ever enabled.
+  // EMBEDDED OR NOTHING. There is deliberately no `wallets[0]` fallback: any wallet that both of
+  // these probes miss is by definition not the Privy embedded one (a linked MetaMask, say), and
+  // accepting it would publish an external address that connect()'s `!!live.address` wait then
+  // treats as success — the createWallet() provisioning branch never fires, and the player binds
+  // and funds a wallet this app cannot sign for. Null instead lets connect() provision properly.
   const wallet: ConnectedWallet | null =
-    getEmbeddedConnectedWallet(wallets) ??
-    wallets.find((w) => w.walletClientType === "privy") ??
-    wallets[0] ??
-    null;
+    getEmbeddedConnectedWallet(wallets) ?? wallets.find((w) => w.walletClientType === "privy") ?? null;
   useEffect(() => {
     live = {
       ready: p.ready,
@@ -119,28 +95,26 @@ function Bridge() {
             const provider = await wallet.getEthereumProvider();
             return (await provider.request({
               method: "personal_sign",
-              params: [utf8ToHex(message), wallet.address],
+              params: buildPersonalSignParams(message, wallet.address),
             })) as string;
           }
         : null,
       sendUsdc: wallet
         ? async (to: string, amountBaseUnits: bigint) => {
-            if (!EVM_USDC) throw new Error("evm_usdc_address_unset");
+            // Built (and guarded: lowercased recipient, no burn to 0x0, chainId pinned into the
+            // payload) before the provider is even touched — see ./eip1193.
+            const tx = buildUsdcTransferTx({
+              from: wallet.address,
+              to,
+              usdc: EVM_USDC,
+              amountBaseUnits,
+              chainId: EVM_CHAIN.id,
+            });
             const provider = await wallet.getEthereumProvider();
-            await ensureChain(provider);
+            await ensureChain(provider, EVM_CHAIN.id);
             return (await provider.request({
               method: "eth_sendTransaction",
-              params: [
-                {
-                  from: wallet.address,
-                  to: EVM_USDC,
-                  data: encodeFunctionData({
-                    abi: erc20Abi,
-                    functionName: "transfer",
-                    args: [to as `0x${string}`, amountBaseUnits],
-                  }),
-                },
-              ],
+              params: [tx],
             })) as string;
           }
         : null,

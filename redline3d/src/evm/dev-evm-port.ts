@@ -48,22 +48,33 @@ export interface DevEvmPortDeps {
  *
  * Unlike the Solana twin this never GENERATES a key when none is configured — a fresh EVM key on a
  * mainnet L2 holds no funds and there is no airdrop, so a missing secret is a loud failure instead
- * of a silently useless wallet.
+ * of a silently useless wallet. That failure is raised at first USE, never at construction: the
+ * wallet kind resolves to "dev" whenever no Privy app id is configured, so a production build that
+ * lost VITE_PRIVY_APP_ID would otherwise throw during boot and take guest play — which needs no
+ * wallet at all — down with it.
  */
 export function createDevEvmPort(privateKey?: `0x${string}`, deps: DevEvmPortDeps = {}): EvmWalletPort {
   const key = privateKey ?? devSecretFromEnv();
-  if (!key) throw new Error("dev_evm_secret_missing");
 
-  const account = privateKeyToAccount(key);
   // Everything address-shaped is lowercased on the way in. viem 2.x validates EIP-55: a
   // mixed-case address whose checksum does not match throws InvalidAddressError at ENCODE
   // time, so an all-caps or non-checksummed treasury address from the server would fail
   // every transfer. All-lowercase is always accepted, and it keeps comparisons upstream off
   // checksum casing too.
-  const address = account.address.toLowerCase() as `0x${string}`;
+  let signer: { account: ReturnType<typeof privateKeyToAccount>; address: `0x${string}` } | null = null;
+  /** Derive (once) the account the key implies — the deferred `dev_evm_secret_missing` throw. */
+  const requireSigner = () => {
+    if (!key) throw new Error("dev_evm_secret_missing");
+    if (!signer) {
+      const account = privateKeyToAccount(key);
+      signer = { account, address: account.address.toLowerCase() as `0x${string}` };
+    }
+    return signer;
+  };
   const usdc = (deps.usdcAddress ?? EVM_USDC).toLowerCase() as `0x${string}`;
 
-  const makeWallet = () => createWalletClient({ account, chain: EVM_CHAIN, transport: http() });
+  const makeWallet = () =>
+    createWalletClient({ account: requireSigner().account, chain: EVM_CHAIN, transport: http() });
   const makePublic = () => createPublicClient({ chain: EVM_CHAIN, transport: http() });
   let wallet: ReturnType<typeof makeWallet> | null = null;
   let publicClient: ReturnType<typeof makePublic> | null = null;
@@ -76,26 +87,27 @@ export function createDevEvmPort(privateKey?: `0x${string}`, deps: DevEvmPortDep
   return {
     kind: "dev-evm",
     async connect() {
-      return { address };
+      return { address: requireSigner().address };
     },
     // the key is local — restoring is always silent and always succeeds
     async reconnect() {
-      return { address };
+      return { address: requireSigner().address };
     },
     async disconnect() {
       /* no-op */
     },
     currentAddress() {
-      return address;
+      return key ? requireSigner().address : null; // no secret configured — nothing to report
     },
     async signMessage(message: string) {
-      return account.signMessage({ message });
+      return requireSigner().account.signMessage({ message });
     },
     async sendUsdcTransfer(to: string, amountBaseUnits: bigint) {
       // Validate the caller's argument before the build's config: a bad recipient is the
       // more actionable error, and viem would happily encode a transfer to 0x0 as a burn.
       const recipient = to.toLowerCase() as `0x${string}`;
       if (recipient === zeroAddress) throw new Error("evm_transfer_to_zero");
+      requireSigner(); // no key = no port at all; a deeper failure than an unset token address
       if (!usdc) throw new Error("evm_usdc_address_unset");
       return writeContract({
         address: usdc,
@@ -105,13 +117,13 @@ export function createDevEvmPort(privateKey?: `0x${string}`, deps: DevEvmPortDep
       });
     },
     async usdcBalance() {
-      if (!usdc) return null;
+      if (!usdc || !key) return null; // no contract or no signer — the cashier shows "—"
       try {
         return await readContract({
           address: usdc,
           abi: erc20Abi,
           functionName: "balanceOf",
-          args: [address],
+          args: [requireSigner().address],
         });
       } catch {
         return null; // RPC down / contract missing — the cashier shows "—" rather than crashing

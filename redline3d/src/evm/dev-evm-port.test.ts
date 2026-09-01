@@ -24,10 +24,42 @@ describe("createDevEvmPort", () => {
     expect(sig).toMatch(/^0x[0-9a-fA-F]{130}$/);
   });
 
-  it("throws when no key is passed and none is configured in the env", () => {
-    vi.stubEnv("VITE_DEV_EVM_SECRET", "");
-    expect(() => createDevEvmPort()).toThrow("dev_evm_secret_missing");
-    vi.unstubAllEnvs();
+  describe("with no key passed and none configured in the env", () => {
+    // Construction must NEVER throw: a production build that loses VITE_PRIVY_APP_ID resolves the
+    // wallet kind to "dev", and a throw at construction kills boot — including guest play, which
+    // needs no wallet at all. The failure belongs at first USE.
+    const bare = () => {
+      vi.stubEnv("VITE_DEV_EVM_SECRET", "");
+      try {
+        return createDevEvmPort();
+      } finally {
+        vi.unstubAllEnvs();
+      }
+    };
+
+    it("constructs without throwing, so boot survives", () => {
+      expect(() => bare()).not.toThrow();
+      expect(bare().kind).toBe("dev-evm");
+    });
+
+    it("has no address to report", () => {
+      expect(bare().currentAddress()).toBeNull();
+    });
+
+    it("throws dev_evm_secret_missing on every action that needs the key", async () => {
+      await expect(bare().connect()).rejects.toThrow("dev_evm_secret_missing");
+      await expect(bare().reconnect()).rejects.toThrow("dev_evm_secret_missing");
+      await expect(bare().signMessage("hi")).rejects.toThrow("dev_evm_secret_missing");
+      await expect(bare().sendUsdcTransfer(TO_LOWER, 1n)).rejects.toThrow("dev_evm_secret_missing");
+    });
+
+    it("reports a null balance rather than throwing (the cashier shows a dash)", async () => {
+      await expect(bare().usdcBalance()).resolves.toBeNull();
+    });
+
+    it("disconnect stays a no-op", async () => {
+      await expect(bare().disconnect()).resolves.toBeUndefined();
+    });
   });
 
   describe("sendUsdcTransfer", () => {
