@@ -39,7 +39,7 @@ function finalizeSettled(o: { outcome: number; outcomeName: string; payout: bigi
 // BTC feed only (the on-chain program is BTC). priceSource.price() is a human float.
 const priceSource = createPriceSource({
   connect: (onPrice) => {
-    const h = connectFeed({ feeds: [{ key: "BTC", lz: 1, hx: "e62df6c8b4a85fe1a67db44dc12de5db330f7ac66b72dc658afedf0f4a415b43", expo: -8 }], onPrice: (k, v) => { if (k === "BTC") onPrice(v); } });
+    const h = connectFeed({ feeds: [{ key: "BTC" }], onPrice: (k, v) => { if (k === "BTC") onPrice(v); } });
     return () => h.stop();
   },
 });

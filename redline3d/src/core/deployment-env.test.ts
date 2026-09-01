@@ -82,9 +82,16 @@ describe("Railway-only API configuration", () => {
     expect(dockerfile).toContain("ARG VITE_PRIVY_APP_ID");
     expect(dockerfile).toContain("ARG VITE_WALLET");
     expect(dockerfile).toContain("ARG VITE_SOLANA_CLUSTER");
-    expect(dockerfile).toContain("ARG VITE_PYTH_API_KEY");
     expect(dockerfile.indexOf("ARG VITE_PRIVY_APP_ID")).toBeLessThan(dockerfile.indexOf("RUN npm run build"));
-    expect(dockerfile.indexOf("ARG VITE_PYTH_API_KEY")).toBeLessThan(dockerfile.indexOf("RUN npm run build"));
+  });
+
+  // The server is the only price source and the only holder of the oracle credential.
+  // A VITE_ var is baked into the bundle, so any Pyth key here would ship to every browser.
+  it("bakes no Pyth credential into the client build", () => {
+    expect(dockerfile).not.toContain("VITE_PYTH_API_KEY");
+    expect(developmentEnv).not.toContain("VITE_PYTH_API_KEY");
+    expect(productionEnv).not.toContain("VITE_PYTH_API_KEY");
+    expect(apkBuildScript).not.toContain("VITE_PYTH_API_KEY");
   });
 
   it("refuses to build a native APK without auth and a WebView-safe Solana RPC", () => {

@@ -334,11 +334,11 @@ async function syncAccount(required = false, snapshotOverride?: AccountSnapshot)
 
 // price feeds — BTC / ETH / SOL (subscribe to all; the active one drives the game)
 const ASSETS = [
-  { key: "BTC", lz: 1, hx: "e62df6c8b4a85fe1a67db44dc12de5db330f7ac66b72dc658afedf0f4a415b43", expo: -8 },
-  { key: "ETH", lz: 2, hx: "ff61491a931112ddf1bd8147cd1b641375f79f5825126d665480874634fd0ace", expo: -8 },
-  { key: "SOL", lz: 6, hx: "ef0d8b6fda2ceba41da15d4095d1da392a0d2f8ed0c6c7bc0f4cfac8c280b56d", expo: -8 },
+  { key: "BTC" },
+  { key: "ETH" },
+  { key: "SOL" },
 ];
-let asset: "BTC" | "ETH" | "SOL" = "SOL"; // the active tab; open() binds the round to this asset's registered Lazer feed
+let asset: "BTC" | "ETH" | "SOL" = "SOL"; // the active tab; open() binds the round to this asset's server feed
 const latestAssetPrices = new Map<"BTC" | "ETH" | "SOL", number>();
 const priceSource = createPriceSource({
   connect: (onPrice) => {
