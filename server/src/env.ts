@@ -45,6 +45,13 @@ const EnvShape = z.object({
     (v) => (v === "" ? undefined : v),
     z.coerce.number().int().nonnegative().default(12),
   ),
+  // Widest block span a single `eth_getLogs` deposit scan may cover. Most RPCs cap this; set it
+  // BELOW the provider's limit or every scan errors and the deposit cursor freezes. Positive-only
+  // (a zero span would end each scan before it began), and a blank var falls back to the default.
+  EVM_MAX_BLOCK_RANGE: z.preprocess(
+    (v) => (v === "" ? undefined : v),
+    z.coerce.number().int().positive().default(10_000),
+  ),
   HIGHWAY_INDEXER_ENABLED: z.string().optional().default("true").transform((v) => v !== "false"),
   HIGHWAY_INDEXER_RPC: z.string().url().default("https://devnet.magicblock.app"),
   HIGHWAY_INDEXER_POLL_MS: z.coerce.number().int().positive().default(2000),

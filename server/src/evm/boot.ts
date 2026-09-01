@@ -50,7 +50,12 @@ export async function bootEvmRail(env: Env, deps: { db: any; ledger: Ledger }): 
   const treasury = env.EVM_TREASURY_ADDRESS!.toLowerCase();
 
   const pub = makePublicClient({ chainId, rpcUrl, rpcUrlFallback: env.EVM_RPC_URL_FALLBACK });
-  const source = makeEvmDepositSource(pub, { usdc, treasury, confirmations: env.EVM_CONFIRMATIONS });
+  const source = makeEvmDepositSource(pub, {
+    usdc,
+    treasury,
+    confirmations: env.EVM_CONFIRMATIONS,
+    maxBlockRange: BigInt(env.EVM_MAX_BLOCK_RANGE),
+  });
 
   // The whole money path converts base units ⇄ cents at a fixed 10^6 scale. A token with any other
   // decimals would silently credit 10^n times the real amount, so this is checked before anything
@@ -64,7 +69,14 @@ export async function bootEvmRail(env: Env, deps: { db: any; ledger: Ledger }): 
 
   // Where a fresh deploy (no persisted cursor) starts scanning, so the first tick is not a walk from
   // genesis. Read once, at boot: later ticks resume from the durable cursor instead.
-  const startBlock = await pub.getBlockNumber();
+  //
+  // Backs off by the confirmation depth rather than starting at the head: the source only scans up to
+  // `head - confirmations`, so a transfer broadcast just before boot — mined, but not yet that deep —
+  // sits BELOW the head and would never be scanned if we started there. That whole tail is re-covered
+  // here; `recordInbound` is idempotent on txSig, so rescanning already-seen blocks cannot double-credit.
+  const head = await pub.getBlockNumber();
+  const confirmationDepth = BigInt(env.EVM_CONFIRMATIONS);
+  const startBlock = head > confirmationDepth ? head - confirmationDepth : 0n;
 
   const deposits = makeDeposits(deps.db, deps.ledger, {
     usdcMint: usdc,

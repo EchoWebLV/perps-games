@@ -156,11 +156,11 @@ describe("bootEvmRail — components", () => {
     expect(h.walletCfg).toEqual({ chainId: 4663, rpcUrl: "https://rpc.example/robinhood", secret: SECRET });
   });
 
-  it("starts the confirmer's first scan at the head read AT BOOT", async () => {
+  it("starts a fresh scan at the boot head MINUS the confirmation depth, covering the pre-boot tail", async () => {
     let reads = 0;
-    // 400 at boot (the startBlock), then a far-ahead head so the safe window covers it.
+    // 400 at boot, then a far-ahead head so the safe window covers whatever we start from.
     h.pub = stubClient({ head: () => (reads++ === 0 ? 400n : 5_000n) });
-    const rail = await bootEvmRail(evmEnv(), { db: {} as any, ledger: {} as any });
+    const rail = await bootEvmRail(evmEnv({ EVM_CONFIRMATIONS: "20" }), { db: {} as any, ledger: {} as any });
     const store = new Map<string, string>();
     const confirmer = rail.makeConfirmer({
       get: async (k) => store.get(k),
@@ -168,9 +168,35 @@ describe("bootEvmRail — components", () => {
     });
     await confirmer.tick();
     const scan = h.pub.calls.find((c: Call) => c.kind === "getLogs");
-    expect(scan.fromBlock).toBe(400n);
+    // 400 - 20: a transfer mined at block 385 was below the safe head at boot and is still scanned.
+    expect(scan.fromBlock).toBe(380n);
     // and the cursor is keyed by the lowercased treasury address
     expect([...store.keys()]).toEqual([TREASURY]);
+  });
+
+  it("floors the fresh-scan start at block 0 on a chain younger than the confirmation depth", async () => {
+    let reads = 0;
+    h.pub = stubClient({ head: () => (reads++ === 0 ? 5n : 5_000n) });
+    const rail = await bootEvmRail(evmEnv({ EVM_CONFIRMATIONS: "12" }), { db: {} as any, ledger: {} as any });
+    const confirmer = rail.makeConfirmer({ get: async () => undefined, set: async () => {} });
+    await confirmer.tick();
+    const scan = h.pub.calls.find((c: Call) => c.kind === "getLogs");
+    expect(scan.fromBlock).toBe(0n); // never negative
+  });
+
+  it("caps one scan at the configured EVM_MAX_BLOCK_RANGE", async () => {
+    let reads = 0;
+    h.pub = stubClient({ head: () => (reads++ === 0 ? 1_000n : 500_000n) });
+    const rail = await bootEvmRail(evmEnv({ EVM_CONFIRMATIONS: "20", EVM_MAX_BLOCK_RANGE: "100" }), {
+      db: {} as any,
+      ledger: {} as any,
+    });
+    const confirmer = rail.makeConfirmer({ get: async () => undefined, set: async () => {} });
+    await confirmer.tick();
+    const scan = h.pub.calls.find((c: Call) => c.kind === "getLogs");
+    // starts at 1000 - 20 = 980 and covers exactly 100 blocks, far short of the safe head
+    expect(scan.fromBlock).toBe(980n);
+    expect(scan.toBlock).toBe(1_079n);
   });
 
   it("reads the treasury balance in base units for the withdraw solvency precheck", async () => {
