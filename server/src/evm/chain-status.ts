@@ -28,6 +28,9 @@ export function makeEvmChainStatusReader(client: PublicClient, confirmations: nu
     } catch {
       return "unknown";
     }
+    // Only read the head once there IS a receipt to measure depth against — a missing receipt is
+    // already `unknown`, so fetching the block number for it would be a wasted RPC round trip.
+    if (!receipt) return "unknown";
     return mapReceiptStatus(receipt, await client.getBlockNumber(), confirmations);
   };
 }

@@ -11,11 +11,12 @@ describe("inboundFromLog", () => {
       address: USDC,
       transactionHash: "0x" + "1".repeat(64),
       blockNumber: 100n,
+      logIndex: 0,
       args: { from: FROM.toUpperCase().replace("0X", "0x"), to: TREASURY, value: 5_000_000n },
     };
     const t = inboundFromLog(log as never, { usdc: USDC, treasury: TREASURY });
     expect(t).toEqual({
-      txSig: log.transactionHash,
+      txSig: `${log.transactionHash}:0`,
       slot: 100,
       finalized: true,
       mint: USDC,
@@ -31,6 +32,7 @@ describe("inboundFromLog", () => {
       address: USDC.toUpperCase(),
       transactionHash: "0x" + "2".repeat(64),
       blockNumber: 7n,
+      logIndex: 0,
       args: { from: FROM, to: TREASURY.toUpperCase(), value: 1n },
     };
     const t = inboundFromLog(log as never, { usdc: USDC.toUpperCase(), treasury: TREASURY.toUpperCase() });
@@ -44,6 +46,7 @@ describe("inboundFromLog", () => {
       address: other,
       transactionHash: "0x" + "3".repeat(64),
       blockNumber: 8n,
+      logIndex: 0,
       args: { from: FROM, to: TREASURY, value: 1_000_000n },
     };
     // An RPC that ignores the address filter must not have its log relabelled as the configured USDC:
@@ -59,11 +62,36 @@ describe("inboundFromLog", () => {
       address: USDC,
       transactionHash: "0x" + "4".repeat(64),
       blockNumber: 9n,
+      logIndex: 0,
       args: { from: FROM, to: other, value: 1_000_000n },
     };
     const t = inboundFromLog(log as never, { usdc: USDC, treasury: TREASURY });
     expect(t.destAta).toBe(other);
     expect(t.destAta).not.toBe(TREASURY);
+  });
+
+  it("gives two logs in ONE transaction distinct ids so a batched send credits both", () => {
+    // A batched smart-wallet / EIP-7702 tx can credit the treasury more than once in a single tx.
+    // Keyed on transactionHash alone the second insert would hit the tx_sig unique index, return
+    // {status:"duplicate"} and be silently swallowed — money received on-chain, never credited.
+    const hash = "0x" + "5".repeat(64);
+    const mk = (logIndex: number, from: string) => ({
+      address: USDC,
+      transactionHash: hash,
+      blockNumber: 10n,
+      logIndex,
+      args: { from, to: TREASURY, value: 1_000_000n },
+    });
+    const a = inboundFromLog(mk(1, FROM) as never, { usdc: USDC, treasury: TREASURY });
+    const b = inboundFromLog(mk(2, "0x" + "9".repeat(40)) as never, { usdc: USDC, treasury: TREASURY });
+    expect(a.txSig).toBe(`${hash}:1`);
+    expect(b.txSig).toBe(`${hash}:2`);
+    expect(a.txSig).not.toBe(b.txSig);
+    // Distinct senders is exactly why these are not aggregated into one transfer: each log is
+    // attributed to its own sender, so each credits the right account.
+    expect(a.sourceOwner).not.toBe(b.sourceOwner);
+    // The explorer link is the part before ':'.
+    expect(a.txSig.split(":")[0]).toBe(hash);
   });
 });
 
@@ -105,6 +133,7 @@ describe("makeEvmDepositSource", () => {
       address: USDC,
       transactionHash: hash,
       blockNumber: n,
+      logIndex: 0,
       removed,
       args: { from: FROM, to: TREASURY, value: 2_000_000n },
     });
@@ -115,8 +144,34 @@ describe("makeEvmDepositSource", () => {
     };
     const src = makeEvmDepositSource(pub as never, { usdc: USDC, treasury: TREASURY, confirmations: 20 });
     const page = await src.fetchInboundRange({ fromBlock: 90n });
-    expect(page.transfers.map((t) => t.txSig)).toEqual(["0x" + "1".repeat(64)]);
+    expect(page.transfers.map((t) => t.txSig)).toEqual(["0x" + "1".repeat(64) + ":0"]);
     expect(page.transfers[0].amountBaseUnits).toBe(2_000_000n);
+  });
+
+  it("carries the real log's logIndex through into the deposit id", async () => {
+    const hash = "0x" + "7".repeat(64);
+    const pub = {
+      getBlockNumber: async () => 120n,
+      getLogs: async () => [
+        { address: USDC, transactionHash: hash, blockNumber: 95n, logIndex: 3, args: { from: FROM, to: TREASURY, value: 1n } },
+        { address: USDC, transactionHash: hash, blockNumber: 95n, logIndex: 4, args: { from: FROM, to: TREASURY, value: 1n } },
+      ],
+      readContract: async () => 6,
+    };
+    const src = makeEvmDepositSource(pub as never, { usdc: USDC, treasury: TREASURY, confirmations: 20 });
+    const page = await src.fetchInboundRange({ fromBlock: 90n });
+    expect(page.transfers.map((t) => t.txSig)).toEqual([`${hash}:3`, `${hash}:4`]);
+  });
+
+  it("refuses a non-positive maxBlockRange at construction", () => {
+    const pub = { getBlockNumber: async () => 120n, getLogs: async () => [], readContract: async () => 6 };
+    // A 0n cap makes every scan end before it began, freezing the cursor and halting deposits silently.
+    expect(() =>
+      makeEvmDepositSource(pub as never, { usdc: USDC, treasury: TREASURY, confirmations: 20, maxBlockRange: 0n }),
+    ).toThrow("maxBlockRange must be positive");
+    expect(() =>
+      makeEvmDepositSource(pub as never, { usdc: USDC, treasury: TREASURY, confirmations: 20, maxBlockRange: -1n }),
+    ).toThrow("maxBlockRange must be positive");
   });
 
   it("queries only the configured token, the Transfer event, and to=treasury (all lowercased)", async () => {

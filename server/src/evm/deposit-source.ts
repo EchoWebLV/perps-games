@@ -31,6 +31,8 @@ type TransferLog = {
   address: string;
   transactionHash: string;
   blockNumber: bigint;
+  /** viem types this `number` on a mined log (null only while pending, which we never scan). */
+  logIndex: number;
   args: { from: string; to: string; value: bigint };
 };
 
@@ -47,7 +49,9 @@ type TransferLog = {
 export function inboundFromLog(log: TransferLog, cfg: { usdc: string; treasury: string }): InboundTransfer {
   void cfg;
   return {
-    txSig: log.transactionHash,
+    // composite id: one deposit row per log — a batched tx crediting the treasury twice must credit
+    // twice; tx_sig unique index then dedupes per log, and the explorer link is the part before ':'.
+    txSig: `${log.transactionHash}:${log.logIndex}`,
     slot: Number(log.blockNumber), // EVM block heights are far below 2^53
     finalized: true, // the source only scans up to `latest - confirmations`
     mint: log.address.toLowerCase(),
@@ -68,6 +72,9 @@ export function makeEvmDepositSource(
   const usdc = cfg.usdc.toLowerCase() as `0x${string}`;
   const treasury = cfg.treasury.toLowerCase() as `0x${string}`;
   const maxBlockRange = cfg.maxBlockRange ?? DEFAULT_MAX_BLOCK_RANGE;
+  // A non-positive cap would make every scan end before it began, freezing the cursor forever and
+  // silently halting deposits. Fail at construction, not at the first missed deposit.
+  if (maxBlockRange <= 0n) throw new Error("maxBlockRange must be positive");
 
   return {
     async fetchInboundRange({ fromBlock }) {

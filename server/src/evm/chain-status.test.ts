@@ -22,15 +22,21 @@ describe("mapReceiptStatus", () => {
 });
 
 describe("makeEvmChainStatusReader", () => {
-  it("treats a not-found receipt as unknown (still pending)", async () => {
+  it("treats a not-found receipt as unknown (still pending) without reading the head", async () => {
+    let heads = 0;
     const pub = {
       getTransactionReceipt: async () => {
         throw new Error("TransactionReceiptNotFoundError");
       },
-      getBlockNumber: async () => 1n,
+      getBlockNumber: async () => {
+        heads += 1;
+        return 1n;
+      },
     };
     const read = makeEvmChainStatusReader(pub as never, 12);
     expect(await read(TX)).toBe("unknown");
+    // No receipt means no depth to measure — the head read would be a wasted RPC round trip.
+    expect(heads).toBe(0);
   });
 
   it("reports finalized for a deep successful receipt", async () => {

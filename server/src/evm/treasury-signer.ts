@@ -1,6 +1,7 @@
-import { erc20Abi, type WalletClient } from "viem";
+import { erc20Abi } from "viem";
 import { centsToBaseUnits } from "../money/usdc.js";
 import type { WithdrawSigner } from "../services/withdraw-worker.js";
+import type { TreasuryWalletClient } from "./client.js";
 
 /**
  * EVM treasury withdraw signer: one ERC-20 `transfer(dest, amount)` from the treasury account.
@@ -11,11 +12,16 @@ import type { WithdrawSigner } from "../services/withdraw-worker.js";
  * here (an EVM transfer carries no memo/idempotency field).
  *
  * Amount conversion is BigInt-only via {@link centsToBaseUnits} — the ledger's integer cents map
- * exactly onto 6-decimal base units, and no float ever touches the amount.
+ * exactly onto 6-decimal base units, and no float ever touches the amount. A non-integer cents value
+ * throws out of `BigInt()` rather than rounding: on this path a wrong amount must fail loudly.
+ *
+ * Takes the account-and-chain-bound {@link TreasuryWalletClient} (not a bare `WalletClient`, which
+ * erases both), so the signing account and chain come from the client instead of being restated on
+ * every write and risking drift from the configured treasury.
  *
  * Nonces: viem's wallet client fills them from the node; the withdraw worker sends serially.
  */
-export function makeEvmTreasurySigner(wallet: WalletClient, cfg: { usdc: string }): WithdrawSigner {
+export function makeEvmTreasurySigner(wallet: TreasuryWalletClient, cfg: { usdc: string }): WithdrawSigner {
   const usdc = cfg.usdc.toLowerCase() as `0x${string}`;
   return {
     async signAndSend({ destWallet, amountCents }) {
@@ -24,8 +30,6 @@ export function makeEvmTreasurySigner(wallet: WalletClient, cfg: { usdc: string 
         abi: erc20Abi,
         functionName: "transfer",
         args: [destWallet as `0x${string}`, centsToBaseUnits(BigInt(amountCents))],
-        chain: wallet.chain,
-        account: wallet.account!,
       });
       // No third-party provider on this rail: the tx hash is the whole receipt.
       return { txSig, providerTxId: null };
