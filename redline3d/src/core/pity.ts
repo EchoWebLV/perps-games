@@ -48,8 +48,9 @@ export function hardPityDue(key: CrateKey, misses: number): boolean {
   return misses + 1 >= PITY[key].hard;
 }
 
-/** misses after this open. Hit the crate's top tier → reset to 0. */
-export function nextPity(key: CrateKey, misses: number, hitTop: boolean): number {
+/** misses after this open. Hit the crate's top tier → reset to 0. (`_key` keeps the per-crate call
+ *  shape of its siblings even though the reset rule is the same for every tier.) */
+export function nextPity(_key: CrateKey, misses: number, hitTop: boolean): number {
   return hitTop ? 0 : misses + 1;
 }
 

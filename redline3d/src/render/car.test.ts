@@ -2,7 +2,7 @@ import * as THREE from "three";
 import { GLTFLoader, type GLTF } from "three/examples/jsm/loaders/GLTFLoader.js";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createCar } from "./car";
-import { setToonEnabled } from "./toon";
+import { TOON_DEFAULT, setToonEnabled } from "./toon";
 
 interface PendingLoad {
   url: string;
@@ -140,27 +140,29 @@ describe("createCar GLTF lifecycle", () => {
     expect(placeholder.children.length).toBeGreaterThan(0); // the wedge exists pre-GLB
     const body = placeholder.children[0] as THREE.Mesh;
 
-    // toon is the boot default: the attached body material is the cel variant, which carries the
-    // wedge's color + emissive (MeshToonMaterial has no metalness/roughness — those are dropped).
-    const toon = body.material as THREE.MeshToonMaterial;
-    expect(toon.isMeshToonMaterial).toBe(true);
-    expect(toon.color.getHexString()).toBe("b5bbc4");
-    expect(toon.emissive.getHexString()).toBe("59616d");
-    expect(toon.emissiveIntensity).toBe(0.32);
+    // CLASSIC is the boot default (toon.ts TOON_DEFAULT = false), so toonify registers the cel
+    // variant but leaves the ORIGINAL attached: the neutral rough-metal PBR values the lobby's pink
+    // directional light reads off the fallback.
+    expect(TOON_DEFAULT).toBe(false); // the style this test's boot-default half is pinned to
+    const classic = body.material as THREE.MeshStandardMaterial;
+    expect(classic.isMeshStandardMaterial).toBe(true);
+    expect(classic.color.getHexString()).toBe("b5bbc4");
+    expect(classic.metalness).toBe(0.4);
+    expect(classic.roughness).toBe(0.76);
+    expect(classic.emissive.getHexString()).toBe("59616d");
+    expect(classic.emissiveIntensity).toBe(0.32);
 
-    // flipping to classic swaps in the registered original, which keeps the neutral rough-metal
-    // PBR values the lobby's pink directional light reads off the fallback.
-    setToonEnabled(false);
+    // flipping to toon swaps in the registered cel variant, which carries the wedge's color +
+    // emissive (MeshToonMaterial has no metalness/roughness — those are dropped).
+    setToonEnabled(true);
     try {
-      const classic = body.material as THREE.MeshStandardMaterial;
-      expect(classic.isMeshStandardMaterial).toBe(true);
-      expect(classic.color.getHexString()).toBe("b5bbc4");
-      expect(classic.metalness).toBe(0.4);
-      expect(classic.roughness).toBe(0.76);
-      expect(classic.emissive.getHexString()).toBe("59616d");
-      expect(classic.emissiveIntensity).toBe(0.32);
+      const toon = body.material as THREE.MeshToonMaterial;
+      expect(toon.isMeshToonMaterial).toBe(true);
+      expect(toon.color.getHexString()).toBe("b5bbc4");
+      expect(toon.emissive.getHexString()).toBe("59616d");
+      expect(toon.emissiveIntensity).toBe(0.32);
     } finally {
-      setToonEnabled(true); // restore the boot default for the rest of the suite
+      setToonEnabled(TOON_DEFAULT); // restore the boot default for the rest of the suite
     }
   });
 });

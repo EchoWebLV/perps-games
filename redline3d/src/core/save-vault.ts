@@ -6,7 +6,7 @@
 // IDENTITY_KEYS is the single source of truth for what is player progress. Everything else is
 // deliberately out of scope:
 //   device-global (never touched): raider.howto.v1, raider.access.*.v1 (entry gates), raider.vol.*,
-//     raider.bgOpacity, lazer_token — device prefs, not progress.
+//     raider.bgOpacity — device prefs, not progress.
 //   auth/session (owned by the auth flows): raider.identity, redline.session:*, redline.chain.devkey.v1,
 //     redline.devuser.v1, redline.round.v1 (round crash-recovery), privy:* (Privy SDK),
 //     redline.trade-history.outbox.v1:* (server-sync queue with its own flush lifecycle).

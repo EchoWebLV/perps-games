@@ -14,6 +14,7 @@ import { assertRoundSettlerForStake, type RoundSettler } from "./services/round-
 import { makeRoundSettler } from "./services/round-settler.js";
 import { ensureHouseUserId } from "./services/house.js";
 import { makeHermesFeed } from "./feed/hermes.js";
+import { feedAssetKeys } from "./feed/symbols.js";
 import { makeSessionAuth } from "./auth/session.js";
 import { createWalletBinding } from "./auth/wallet-binding.js";
 import { makeDepositTxBuilder, makeRpcBlockhash, type DepositTxBuilder } from "./services/deposit-tx.js";
@@ -201,7 +202,7 @@ async function main(): Promise<void> {
   // poll rate + HALT tolerance are tunable: the public Hermes REST endpoint can
   // rate-limit a tight 500ms poll, so a too-small stale window flaps into feed_halt.
   const feed = makeHermesFeed({
-    assets: ["BTC", "ETH", "SOL"],
+    assets: feedAssetKeys(),
     pollMs: Number(process.env.FEED_POLL_MS) || undefined,
     staleMs: Number(process.env.FEED_STALE_MS) || undefined,
     accessToken: env.PYTH_API_KEY,

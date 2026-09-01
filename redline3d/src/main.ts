@@ -682,6 +682,10 @@ function equipByName(name: string): void {
   if (!c || c.locked || c.comingSoon) return;
   equipCar(c);
 }
+// PARKED by the hub-boot rework: home's [Drive lobby] seam (`onDriveLobby`) was dropped when the
+// front door became Race-first, so nothing calls this today. Kept intact — re-wiring home is a
+// one-liner — and referenced here only so `noUnusedLocals` doesn't fail the build on parked code.
+void equipByName;
 const garage = createCarPicker(hudRoot, CAR_DEFS, (c) => equipCar(c), () => upgrades.open(), [
   { label: "Music", sub: "synthwave radio", glyph: "♫", get: () => radio.getVolume(), set: (v) => { radio.setVolume(v); writeVolume(MUSIC_VOL_KEY, v); } },
   { label: "SFX", sub: "engine & coins", glyph: "🔊", get: () => audio.getVolume(), set: (v) => { audio.setVolume(v); writeVolume(SFX_VOL_KEY, v); } },
@@ -801,7 +805,10 @@ const crateBox = createCrateBox(hudRoot, {
     if (!identity || identity.mode !== "privy") return null;
     const w = session.anchorWallet();
     if (!w) return null;
-    return createCrateRoll(makeCrateRollIo(w));
+    // The verified path ships only the raw bytes — the SERVER rolls the outcome from them — so ask
+    // the roller for 0 client-side draws. (cratebox calls this zero-arg and reads only `bytesHex`.)
+    const roll = createCrateRoll(makeCrateRollIo(w));
+    return () => roll(0);
   },
   vrfRequired: () => identity?.mode === "privy",
   pity: () => loadPity(),
@@ -2507,6 +2514,11 @@ function accountAccessThenEnter(onDone: () => void) {
     onUnlocked: () => location.reload(),
   });
 }
+// PARKED by the hub-boot rework: boot now auto-guests straight into the Race-first hub, so neither
+// entry wall nor the how-to walkthrough has a boot caller. The wall is still reachable on demand via
+// the garage menu (openAccessCodeDialog) and the how-to via the `raider:howto` event. Kept intact for
+// a re-wire, and referenced here only so `noUnusedLocals` doesn't fail the build on parked code.
+void maybeShowHowTo; void guestAccessThenEnter; void accountAccessThenEnter;
 // Check the signed-in welcome without consuming it. The atomic claim runs only after VRF returns,
 // immediately before the crate reward is applied.
 async function offerWelcomeAccount() {
