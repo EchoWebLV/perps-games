@@ -83,4 +83,20 @@ describe("deposits.recordInbound", () => {
     const r = await deposits.recordInbound(transfer({ txSig: "nf", finalized: false }));
     expect(r).toEqual({ status: "quarantine", reason: "not_finalized" });
   });
+
+  // The token-program check is a chain-agnostic label match: the EVM rail labels ERC-20
+  // transfers "erc20" while the Solana rail keeps the legacy SPL program id by default.
+  it("accepts a transfer whose tokenProgram matches a configured expected label", async () => {
+    const svc = makeDeposits(ctx.db, ctx.ledger, { ...cfg, expectedTokenProgram: "erc20" });
+    const r = await svc.recordInbound(transfer({ txSig: "evm", tokenProgram: "erc20" }));
+    expect(r).toEqual({ status: "credited", userId, amountCents: 200 });
+    expect(await ctx.ledger.balance(userId, "cash")).toBe(200);
+  });
+
+  it("quarantines the legacy Solana program id when an EVM label is configured", async () => {
+    const svc = makeDeposits(ctx.db, ctx.ledger, { ...cfg, expectedTokenProgram: "erc20" });
+    const r = await svc.recordInbound(transfer({ txSig: "spl-on-evm", tokenProgram: LEGACY_TOKEN_PROGRAM }));
+    expect(r).toEqual({ status: "quarantine", reason: "wrong_program" });
+    expect(await ctx.ledger.balance(userId, "cash")).toBe(0);
+  });
 });
