@@ -125,3 +125,47 @@ describe("Railway-only API configuration", () => {
     expect(buildInvoked).toBe(true);
   });
 });
+
+// The EVM rail's build-time truth lives in three places that must agree: the two .env files vite
+// reads at build, and the Dockerfile ARG/ENV pair a deploy overrides them with. A var declared in
+// only some of them is the failure mode this guards — the build stays green while the client
+// silently falls back to a default network, which for VITE_EVM_CHAIN means real money.
+describe("Robinhood Chain rail configuration", () => {
+  const RAIL_VARS = ["VITE_CHAIN_RAIL", "VITE_EVM_CHAIN", "VITE_EVM_USDC_ADDRESS"] as const;
+
+  // Anchored to the start of a line so a commented-out `# VITE_x=` can never satisfy a check.
+  function value(env: string, key: string): string | undefined {
+    return env.match(new RegExp(`^${key}=(.*)$`, "m"))?.[1]?.trim();
+  }
+
+  it.each(RAIL_VARS)("declares %s in both client env files", (key) => {
+    expect(value(developmentEnv, key)).toBeDefined();
+    expect(value(productionEnv, key)).toBeDefined();
+  });
+
+  // evm/rail.ts treats anything other than "solana" as evm, but pin it so the rail is readable
+  // from the env file rather than inferred from a default that could later flip.
+  it("pins both builds to the evm rail", () => {
+    expect(value(developmentEnv, "VITE_CHAIN_RAIL")).toBe("evm");
+    expect(value(productionEnv, "VITE_CHAIN_RAIL")).toBe("evm");
+  });
+
+  // evm/chain.ts maps these to chain ids 46630 (testnet) and 4663 (mainnet).
+  it("points development at the testnet and production at the mainnet", () => {
+    expect(value(developmentEnv, "VITE_EVM_CHAIN")).toBe("testnet");
+    expect(value(productionEnv, "VITE_EVM_CHAIN")).toBe("mainnet");
+  });
+
+  // The USDC contract is deploy-time truth. A committed address would be a guess, and a wrong
+  // token address sends deposits nowhere — so the var is declared but deliberately blank.
+  it("declares the USDC address without guessing one", () => {
+    expect(value(developmentEnv, "VITE_EVM_USDC_ADDRESS")).toBe("");
+    expect(value(productionEnv, "VITE_EVM_USDC_ADDRESS")).toBe("");
+  });
+
+  it.each(RAIL_VARS)("threads %s through the Docker production build", (key) => {
+    expect(dockerfile).toMatch(new RegExp(`^\\s*ARG ${key}$`, "m"));
+    expect(dockerfile).toMatch(new RegExp(`${key}=\\$${key}`));
+    expect(dockerfile.indexOf(`ARG ${key}`)).toBeLessThan(dockerfile.indexOf("RUN npm run build"));
+  });
+});
