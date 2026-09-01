@@ -26,16 +26,44 @@ describe("inboundFromLog", () => {
     });
   });
 
-  it("lowercases a mixed-case configured usdc/treasury too", () => {
+  it("lowercases a mixed-case log address and recipient", () => {
     const log = {
       address: USDC.toUpperCase(),
       transactionHash: "0x" + "2".repeat(64),
       blockNumber: 7n,
-      args: { from: FROM, to: TREASURY, value: 1n },
+      args: { from: FROM, to: TREASURY.toUpperCase(), value: 1n },
     };
     const t = inboundFromLog(log as never, { usdc: USDC.toUpperCase(), treasury: TREASURY.toUpperCase() });
     expect(t.mint).toBe(USDC);
     expect(t.destAta).toBe(TREASURY);
+  });
+
+  it("reports the LOG's own token, not the configured one, so wrong_mint can actually fire", () => {
+    const other = "0x" + "e".repeat(40);
+    const log = {
+      address: other,
+      transactionHash: "0x" + "3".repeat(64),
+      blockNumber: 8n,
+      args: { from: FROM, to: TREASURY, value: 1_000_000n },
+    };
+    // An RPC that ignores the address filter must not have its log relabelled as the configured USDC:
+    // the mint travels through verbatim, so Deposits quarantines it downstream as wrong_mint.
+    const t = inboundFromLog(log as never, { usdc: USDC, treasury: TREASURY });
+    expect(t.mint).toBe(other);
+    expect(t.mint).not.toBe(USDC);
+  });
+
+  it("reports the LOG's own recipient, not the configured treasury, so wrong_dest can actually fire", () => {
+    const other = "0x" + "f".repeat(40);
+    const log = {
+      address: USDC,
+      transactionHash: "0x" + "4".repeat(64),
+      blockNumber: 9n,
+      args: { from: FROM, to: other, value: 1_000_000n },
+    };
+    const t = inboundFromLog(log as never, { usdc: USDC, treasury: TREASURY });
+    expect(t.destAta).toBe(other);
+    expect(t.destAta).not.toBe(TREASURY);
   });
 });
 
@@ -110,6 +138,72 @@ describe("makeEvmDepositSource", () => {
     expect(calls[0].address).toBe(USDC);
     expect((calls[0].args as { to: string }).to).toBe(TREASURY);
     expect((calls[0].event as { name: string }).name).toBe("Transfer");
+  });
+
+  it("caps a backlog wider than the default range and advances only to the cap", async () => {
+    const calls: Array<Record<string, unknown>> = [];
+    const pub = {
+      getBlockNumber: async () => 100_000n,
+      getLogs: async (q: Record<string, unknown>) => {
+        calls.push(q);
+        return [];
+      },
+      readContract: async () => 6,
+    };
+    const src = makeEvmDepositSource(pub as never, { usdc: USDC, treasury: TREASURY, confirmations: 20 });
+    const page = await src.fetchInboundRange({ fromBlock: 1n });
+    // safe head is 99_980, but the default 10_000-block cap stops the scan at 1 + 10_000 - 1.
+    expect(page.toBlock).toBe(10_000n);
+    expect(calls[0].fromBlock).toBe(1n);
+    expect(calls[0].toBlock).toBe(10_000n);
+  });
+
+  it("honours an explicit maxBlockRange and drains a backlog across ticks", async () => {
+    const spans: Array<[bigint, bigint]> = [];
+    const pub = {
+      getBlockNumber: async () => 1_000n,
+      getLogs: async (q: { fromBlock: bigint; toBlock: bigint }) => {
+        spans.push([q.fromBlock, q.toBlock]);
+        return [];
+      },
+      readContract: async () => 6,
+    };
+    const src = makeEvmDepositSource(pub as never, {
+      usdc: USDC,
+      treasury: TREASURY,
+      confirmations: 20,
+      maxBlockRange: 100n,
+    });
+    // safe head is 980. Each call advances by at most the cap, exactly as successive confirmer ticks would.
+    const first = await src.fetchInboundRange({ fromBlock: 1n });
+    expect(first.toBlock).toBe(100n);
+    const second = await src.fetchInboundRange({ fromBlock: first.toBlock + 1n });
+    expect(second.toBlock).toBe(200n);
+    expect(spans).toEqual([
+      [1n, 100n],
+      [101n, 200n],
+    ]);
+  });
+
+  it("does not cap when the safe head is nearer than the range limit", async () => {
+    const calls: Array<Record<string, unknown>> = [];
+    const pub = {
+      getBlockNumber: async () => 120n,
+      getLogs: async (q: Record<string, unknown>) => {
+        calls.push(q);
+        return [];
+      },
+      readContract: async () => 6,
+    };
+    const src = makeEvmDepositSource(pub as never, {
+      usdc: USDC,
+      treasury: TREASURY,
+      confirmations: 20,
+      maxBlockRange: 10_000n,
+    });
+    const page = await src.fetchInboundRange({ fromBlock: 90n });
+    expect(page.toBlock).toBe(100n); // safe head, not fromBlock + cap - 1
+    expect(calls[0].toBlock).toBe(100n);
   });
 
   it("reads the treasury balance in base units", async () => {
