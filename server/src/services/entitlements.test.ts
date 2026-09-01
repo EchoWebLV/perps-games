@@ -27,7 +27,8 @@ describe("makeEntitlements (perk-envelope oracle)", () => {
 
   it("returns the envelope for an owned car at the user's levels", async () => {
     await inventory.grant(userId, "Orion");
-    await ctx.ledger.credit(userId, "coin", 100000, "dev_grant", `seed:${userId}`);
+    await ctx.ledger.credit(userId, "coin", 100000, "dev_grant", `seed-coin:${userId}`);
+    await ctx.ledger.credit(userId, "scrap", 100000, "dev_grant", `seed:${userId}`);
     for (let i = 0; i < 10; i++) await upgrades.buy(userId, "turbo");
     expect((await svc.entitlementsFor(userId, "Orion")).maxLev).toBe(3000); // nitro at maxed turbo: 1500*2
   });
