@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { createHmac } from "node:crypto";
 import bs58 from "bs58";
 import * as ed from "@noble/ed25519";
 import { privateKeyToAccount } from "viem/accounts";
@@ -63,6 +64,65 @@ describe("createWalletBinding", () => {
 
     await expect(binding.verifyChallenge({ challenge: challenge.challenge })).resolves.toBeNull();
   });
+
+  // Domain separation: three token systems (session, deposit intents, wallet binding) share
+  // SESSION_SECRET and the same `v1.<b64url>.<hmac>` envelope. A binding MAC is computed over a
+  // tagged payload, so a token MAC'd the old (untagged) way must not verify here.
+  it("rejects a challenge whose MAC omits the wallet-bind domain tag", async () => {
+    const secretKey = ed.utils.randomSecretKey();
+    const secret = "b".repeat(32);
+    const wallet = bs58.encode(await ed.getPublicKeyAsync(secretKey));
+    const binding = createWalletBinding({ secret, now: () => 1000 });
+    const challenge = binding.createChallenge({ userId: "user-1", wallet });
+    const payload = challenge.challenge.split(".")[1];
+    const untagged = `v1.${payload}.${createHmac("sha256", secret).update(payload).digest("base64url")}`;
+    const signatureBase58 = bs58.encode(
+      await ed.signAsync(new TextEncoder().encode(challenge.message), secretKey),
+    );
+
+    await expect(
+      binding.verifyChallenge({ challenge: untagged, signatureBase58 }),
+    ).resolves.toBeNull();
+  });
+
+  it("consumes the challenge nonce so a harvested signature cannot be replayed", async () => {
+    const secretKey = ed.utils.randomSecretKey();
+    const wallet = bs58.encode(await ed.getPublicKeyAsync(secretKey));
+    const binding = createWalletBinding({ secret: "b".repeat(32), now: () => 1000 });
+    const challenge = binding.createChallenge({ userId: "user-1", wallet });
+    const signatureBase58 = bs58.encode(
+      await ed.signAsync(new TextEncoder().encode(challenge.message), secretKey),
+    );
+
+    await expect(
+      binding.verifyChallenge({ challenge: challenge.challenge, signatureBase58 }),
+    ).resolves.toEqual({ userId: "user-1", wallet });
+    await expect(
+      binding.verifyChallenge({ challenge: challenge.challenge, signatureBase58 }),
+    ).resolves.toBeNull();
+  });
+
+  it("does not burn the challenge on a failed verification", async () => {
+    const secretKey = ed.utils.randomSecretKey();
+    const otherKey = ed.utils.randomSecretKey();
+    const wallet = bs58.encode(await ed.getPublicKeyAsync(secretKey));
+    const binding = createWalletBinding({ secret: "b".repeat(32), now: () => 1000 });
+    const challenge = binding.createChallenge({ userId: "user-1", wallet });
+    const message = new TextEncoder().encode(challenge.message);
+
+    await expect(
+      binding.verifyChallenge({
+        challenge: challenge.challenge,
+        signatureBase58: bs58.encode(await ed.signAsync(message, otherKey)),
+      }),
+    ).resolves.toBeNull();
+    await expect(
+      binding.verifyChallenge({
+        challenge: challenge.challenge,
+        signatureBase58: bs58.encode(await ed.signAsync(message, secretKey)),
+      }),
+    ).resolves.toEqual({ userId: "user-1", wallet });
+  });
 });
 
 describe("createWalletBinding — evm family", () => {
@@ -115,5 +175,34 @@ describe("createWalletBinding — evm family", () => {
     expect(() => solana.createChallenge({ userId: "u1", wallet: account.address })).toThrow(
       "invalid_wallet_address",
     );
+  });
+
+  it("consumes the challenge nonce so an evm signature cannot be replayed", async () => {
+    const c = binding.createChallenge({ userId: "u1", wallet: account.address });
+    const signature = await account.signMessage({ message: c.message });
+
+    expect(await binding.verifyChallenge({ challenge: c.challenge, signature })).toEqual({
+      userId: "u1",
+      wallet: account.address.toLowerCase(),
+    });
+    expect(await binding.verifyChallenge({ challenge: c.challenge, signature })).toBeNull();
+  });
+
+  it("does not burn an evm challenge on a failed verification", async () => {
+    const other = privateKeyToAccount(("0x" + "9".repeat(64)) as `0x${string}`);
+    const c = binding.createChallenge({ userId: "u1", wallet: account.address });
+
+    expect(
+      await binding.verifyChallenge({
+        challenge: c.challenge,
+        signature: await other.signMessage({ message: c.message }),
+      }),
+    ).toBeNull();
+    expect(
+      await binding.verifyChallenge({
+        challenge: c.challenge,
+        signature: await account.signMessage({ message: c.message }),
+      }),
+    ).toEqual({ userId: "u1", wallet: account.address.toLowerCase() });
   });
 });

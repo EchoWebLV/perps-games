@@ -4,11 +4,10 @@
 import "dotenv/config";
 import { createDb } from "../db/client.js";
 import { makeUsers } from "../services/users.js";
-
-// Address shapes per chain family — mirrors auth/wallet-binding.ts. EVM addresses are stored
-// lowercased so bound-wallet == deposit-source `from` compares exactly.
-const SOLANA_ADDRESS_RE = /^[1-9A-HJ-NP-Za-km-z]{32,44}$/;
-const EVM_ADDRESS_RE = /^0x[0-9a-fA-F]{40}$/;
+// Address shapes per chain family come straight from the binding module, so this script can never
+// drift from what /v1/wallet/bind accepts. EVM addresses are stored lowercased so bound-wallet ==
+// deposit-source `from` compares exactly.
+import { EVM_ADDRESS_RE, SOLANA_ADDRESS_RE } from "../auth/wallet-binding.js";
 
 async function main(): Promise<void> {
   const [externalId, rawWallet] = process.argv.slice(2);

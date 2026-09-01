@@ -12,7 +12,7 @@ import { ensureHouseUserId } from "../services/house.js";
 import { makeStubFeed, type StubFeed } from "../feed/stub.js";
 import { buildServer } from "../http/server.js";
 import { makeSessionAuth, type SessionAuth } from "../auth/session.js";
-import { createWalletBinding, type WalletBinding } from "../auth/wallet-binding.js";
+import { createWalletBinding, type ChainFamily, type WalletBinding } from "../auth/wallet-binding.js";
 import { makeDepositIntents, type DepositIntents } from "../services/deposit-intents.js";
 import type { SignedTxBroadcaster } from "../services/signed-tx-broadcaster.js";
 import type { Withdrawals } from "../services/withdrawals.js";
@@ -45,6 +45,8 @@ interface MakeTestDbOptions {
   devAuth?: boolean;
   sessionAuth?: SessionAuth;
   walletBinding?: WalletBinding;
+  /** chain family for the default wallet binding; unset keeps the historical "solana" default. */
+  walletBindingFamily?: ChainFamily;
   realMoney?: { enabled: boolean; treasuryUsdcAta: string | null };
   depositTxBuilder?: import("../services/deposit-tx.js").DepositTxBuilder | null;
   walletBalanceReader?: import("../services/wallet-balance.js").WalletBalanceReader | null;
@@ -109,6 +111,7 @@ export async function makeTestDb(opts: MakeTestDbOptions = {}): Promise<TestCtx>
     presenceSocketOptions: opts.presenceSocketOptions,
     walletBinding: opts.walletBinding ?? createWalletBinding({
       secret: "test-wallet-binding-secret-32-chars",
+      family: opts.walletBindingFamily,
     }),
     realMoney: opts.realMoney ?? { enabled: false, treasuryUsdcAta: null },
     depositTxBuilder: opts.depositTxBuilder ?? null,

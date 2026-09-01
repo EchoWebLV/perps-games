@@ -1,16 +1,33 @@
 import { createHmac, randomBytes, timingSafeEqual } from "node:crypto";
 import bs58 from "bs58";
 import { verifyAsync } from "@noble/ed25519";
+import { verifyMessage } from "viem";
 
 const enc = new TextEncoder();
 const b64url = (buf: Uint8Array | string) =>
   Buffer.from(typeof buf === "string" ? enc.encode(buf) : buf).toString("base64url");
 const fromB64url = (s: string) => Buffer.from(s, "base64url").toString("utf8");
-const SOLANA_ADDRESS_RE = /^[1-9A-HJ-NP-Za-km-z]{32,44}$/;
-const EVM_ADDRESS_RE = /^0x[0-9a-fA-F]{40}$/;
+/** Single source of truth for the address shapes — scripts import these instead of re-declaring. */
+export const SOLANA_ADDRESS_RE = /^[1-9A-HJ-NP-Za-km-z]{32,44}$/;
+export const EVM_ADDRESS_RE = /^0x[0-9a-fA-F]{40}$/;
 const EVM_SIGNATURE_RE = /^0x[0-9a-fA-F]{130}$/;
+/**
+ * Domain tag mixed into the binding MAC. SESSION_SECRET also backs auth/session.ts and
+ * services/deposit-intents.ts, which use an identical `v1.<b64url>.<hmac>` envelope; tagging makes
+ * a binding challenge structurally un-forgeable from either of those token families.
+ */
+const MAC_DOMAIN = "wallet-bind.v1|";
 
 export type ChainFamily = "solana" | "evm";
+
+/**
+ * Case-fold EVM-shaped wallet values before comparing them. EVM addresses are stored lowercased,
+ * but clients (viem) hand back the EIP-55 checksummed form; base58 Solana addresses are
+ * case-SIGNIFICANT and must be compared verbatim.
+ */
+export function normalizeWalletForCompare(wallet: string): string {
+  return EVM_ADDRESS_RE.test(wallet) ? wallet.toLowerCase() : wallet;
+}
 
 export interface WalletBinding {
   createChallenge(input: {
@@ -43,7 +60,18 @@ export function createWalletBinding(deps: {
   const addressOk = (wallet: string) =>
     family === "evm" ? EVM_ADDRESS_RE.test(wallet) : SOLANA_ADDRESS_RE.test(wallet);
   const sign = (payload: string) =>
-    createHmac("sha256", deps.secret).update(payload).digest("base64url");
+    createHmac("sha256", deps.secret).update(MAC_DOMAIN + payload).digest("base64url");
+  // Single-use challenges: nonce → challenge exp. In-process by design — the deployment is a single
+  // server process, a restart forgives outstanding nonces, and the 5-min TTL bounds the exposure.
+  const usedNonces = new Map<string, number>();
+  /** true when the nonce was fresh (and is now spent); false when it was already consumed. */
+  const consumeNonce = (nonce: string, exp: number): boolean => {
+    if (usedNonces.has(nonce)) return false;
+    const t = now();
+    for (const [k, e] of usedNonces) if (e <= t) usedNonces.delete(k); // opportunistic sweep
+    usedNonces.set(nonce, exp);
+    return true;
+  };
   const messageFor = (p: {
     userId: string;
     wallet: string;
@@ -87,21 +115,36 @@ export function createWalletBinding(deps: {
       const b = Buffer.from(expected);
       if (a.length !== b.length || !timingSafeEqual(a, b)) return null;
 
-      let payload: { userId?: string; wallet?: string; exp?: number; message?: string };
+      let payload: {
+        userId?: string;
+        wallet?: string;
+        exp?: number;
+        message?: string;
+        nonce?: string;
+      };
       try {
         payload = JSON.parse(fromB64url(parts[1]));
       } catch {
         return null;
       }
-      if (!payload.userId || !payload.wallet || !payload.message || typeof payload.exp !== "number") {
+      if (
+        !payload.userId ||
+        !payload.wallet ||
+        !payload.message ||
+        !payload.nonce ||
+        typeof payload.exp !== "number"
+      ) {
         return null;
       }
       if (payload.exp <= now() || !addressOk(payload.wallet)) return null;
+      // A spent nonce is checked BEFORE the signature so a replay can never re-issue a session; the
+      // nonce is only marked spent once the signature actually verifies (a typo must not burn it).
+      if (usedNonces.has(payload.nonce)) return null;
+      const { nonce, exp } = payload as { nonce: string; exp: number };
 
       if (family === "evm") {
         const sig = signatureHex ?? "";
         if (!EVM_SIGNATURE_RE.test(sig)) return null;
-        const { verifyMessage } = await import("viem");
         const wallet = payload.wallet.toLowerCase();
         let ok: boolean;
         try {
@@ -113,7 +156,8 @@ export function createWalletBinding(deps: {
         } catch {
           return null;
         }
-        return ok ? { userId: payload.userId, wallet } : null;
+        if (!ok || !consumeNonce(nonce, exp)) return null;
+        return { userId: payload.userId, wallet };
       }
 
       let signature: Uint8Array;
@@ -127,7 +171,8 @@ export function createWalletBinding(deps: {
       if (signature.length !== 64 || publicKey.length !== 32) return null;
 
       const ok = await verifyAsync(signature, enc.encode(payload.message), publicKey);
-      return ok ? { userId: payload.userId, wallet: payload.wallet } : null;
+      if (!ok || !consumeNonce(nonce, exp)) return null;
+      return { userId: payload.userId, wallet: payload.wallet };
     },
   };
 }

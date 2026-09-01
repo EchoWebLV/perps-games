@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it } from "vitest";
 import bs58 from "bs58";
 import * as ed from "@noble/ed25519";
+import { privateKeyToAccount } from "viem/accounts";
 import { makeTestDb, type TestCtx } from "./harness.js";
 
 const H = { "x-dev-user": "mallory", "content-type": "application/json" };
@@ -535,6 +536,127 @@ describe("POST /v1/wallet/bind*", () => {
     });
     expect(recoveredMe.statusCode).toBe(200);
     expect(recoveredMe.json().userId).toBe(aliceMe.json().userId);
+  });
+
+  it("rejects a bind with neither signature field", async () => {
+    ctx = await makeTestDb();
+
+    const res = await ctx.server.inject({
+      method: "POST",
+      url: "/v1/wallet/bind",
+      headers: { "x-dev-user": "alice" },
+      payload: { challenge: "v1.whatever.mac" },
+    });
+
+    expect(res.statusCode).toBe(400);
+    expect(res.json()).toEqual({ error: "bad_request" });
+  });
+});
+
+describe("POST /v1/wallet/bind* — evm family", () => {
+  const account = privateKeyToAccount(("0x" + "3".repeat(64)) as `0x${string}`);
+  let ctx: TestCtx;
+
+  afterEach(async () => {
+    await ctx?.close();
+  });
+
+  it("binds an evm wallet via EIP-191 and stores it lowercased", async () => {
+    ctx = await makeTestDb({ walletBindingFamily: "evm" });
+
+    const headers = { "x-dev-user": "alice" };
+    const c = await ctx.server.inject({
+      method: "POST",
+      url: "/v1/wallet/bind-challenge",
+      headers,
+      payload: { wallet: account.address },
+    });
+    expect(c.statusCode).toBe(200);
+    expect(c.json().wallet).toBe(account.address.toLowerCase());
+
+    const signature = await account.signMessage({ message: c.json().message });
+    const b = await ctx.server.inject({
+      method: "POST",
+      url: "/v1/wallet/bind",
+      headers,
+      payload: { challenge: c.json().challenge, signature },
+    });
+
+    expect(b.statusCode).toBe(200);
+    expect(b.json()).toEqual({ wallet: account.address.toLowerCase() });
+    const owner = await ctx.users.getByWalletPublicKey(account.address.toLowerCase());
+    expect(owner?.walletPublicKey).toBe(account.address.toLowerCase());
+  });
+
+  it("issues the evm wallet owner's session when a second session proves ownership", async () => {
+    ctx = await makeTestDb({ walletBindingFamily: "evm" });
+
+    const bind = async (user: string) => {
+      const c = await ctx.server.inject({
+        method: "POST",
+        url: "/v1/wallet/bind-challenge",
+        headers: { "x-dev-user": user },
+        payload: { wallet: account.address },
+      });
+      expect(c.statusCode).toBe(200);
+      return ctx.server.inject({
+        method: "POST",
+        url: "/v1/wallet/bind",
+        headers: { "x-dev-user": user },
+        payload: {
+          challenge: c.json().challenge,
+          signature: await account.signMessage({ message: c.json().message }),
+        },
+      });
+    };
+
+    expect((await bind("alice")).statusCode).toBe(200);
+    const aliceMe = await ctx.server.inject({
+      method: "GET",
+      url: "/v1/me",
+      headers: { "x-dev-user": "alice" },
+    });
+    expect(aliceMe.statusCode).toBe(200);
+
+    const bobBind = await bind("bob");
+    expect(bobBind.statusCode).toBe(200);
+    expect(bobBind.json()).toMatchObject({ wallet: account.address.toLowerCase() });
+    expect(bobBind.json().token).toEqual(expect.any(String));
+
+    const recoveredMe = await ctx.server.inject({
+      method: "GET",
+      url: "/v1/me",
+      headers: { authorization: `Bearer ${bobBind.json().token}` },
+    });
+    expect(recoveredMe.statusCode).toBe(200);
+    expect(recoveredMe.json().userId).toBe(aliceMe.json().userId);
+  });
+
+  it("rejects an evm bind signed by a different key", async () => {
+    const other = privateKeyToAccount(("0x" + "4".repeat(64)) as `0x${string}`);
+    ctx = await makeTestDb({ walletBindingFamily: "evm" });
+
+    const headers = { "x-dev-user": "alice" };
+    const c = await ctx.server.inject({
+      method: "POST",
+      url: "/v1/wallet/bind-challenge",
+      headers,
+      payload: { wallet: account.address },
+    });
+    expect(c.statusCode).toBe(200);
+
+    const b = await ctx.server.inject({
+      method: "POST",
+      url: "/v1/wallet/bind",
+      headers,
+      payload: {
+        challenge: c.json().challenge,
+        signature: await other.signMessage({ message: c.json().message }),
+      },
+    });
+
+    expect(b.statusCode).toBe(401);
+    expect(b.json()).toEqual({ error: "invalid_wallet_signature" });
   });
 });
 

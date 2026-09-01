@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, it } from "vitest";
+import { privateKeyToAccount } from "viem/accounts";
 import { bindDevWallet, makeTestDb, type TestCtx } from "./harness.js";
 
 const headersFor = (name: string) => ({
@@ -130,6 +131,68 @@ describe("trade history routes", () => {
       id: body.id,
       walletPublicKey: "AliceWallet",
     });
+  });
+
+  // EVM addresses are stored lowercased, but viem clients assert the EIP-55 checksummed form in
+  // x-trade-wallet — the compare must be case-insensitive for EVM-shaped values only.
+  it("accepts a checksummed evm wallet header against the lowercase stored wallet", async () => {
+    const account = privateKeyToAccount(("0x" + "5".repeat(64)) as `0x${string}`);
+    expect(account.address).not.toBe(account.address.toLowerCase()); // genuinely checksummed
+    ctx = await makeTestDb();
+    await bindDevWallet(ctx, "evm-case", account.address.toLowerCase());
+
+    const response = await ctx.server.inject({
+      method: "POST",
+      url: "/v1/trades",
+      headers: { ...headersFor("evm-case"), "x-trade-wallet": account.address },
+      payload: body,
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(response.json()).toMatchObject({
+      id: body.id,
+      walletPublicKey: account.address.toLowerCase(),
+    });
+  });
+
+  it("still rejects a different evm wallet header", async () => {
+    const mine = privateKeyToAccount(("0x" + "5".repeat(64)) as `0x${string}`);
+    const other = privateKeyToAccount(("0x" + "6".repeat(64)) as `0x${string}`);
+    ctx = await makeTestDb();
+    await bindDevWallet(ctx, "evm-mismatch", mine.address.toLowerCase());
+
+    const response = await ctx.server.inject({
+      method: "POST",
+      url: "/v1/trades",
+      headers: { ...headersFor("evm-mismatch"), "x-trade-wallet": other.address },
+      payload: body,
+    });
+
+    expect(response.statusCode).toBe(409);
+    expect(response.json()).toEqual({ error: "trade_wallet_mismatch" });
+  });
+
+  it("keeps the solana wallet compare case-sensitive", async () => {
+    const wallet = "9xQeWvG816bUx9EPjHmaT23yvVM2ZWbrrpZb9PusVFin";
+    ctx = await makeTestDb();
+    await bindDevWallet(ctx, "sol-case", wallet);
+
+    const lowered = await ctx.server.inject({
+      method: "POST",
+      url: "/v1/trades",
+      headers: { ...headersFor("sol-case"), "x-trade-wallet": wallet.toLowerCase() },
+      payload: body,
+    });
+    const exact = await ctx.server.inject({
+      method: "POST",
+      url: "/v1/trades",
+      headers: { ...headersFor("sol-case"), "x-trade-wallet": wallet },
+      payload: body,
+    });
+
+    expect(lowered.statusCode).toBe(409);
+    expect(lowered.json()).toEqual({ error: "trade_wallet_mismatch" });
+    expect(exact.statusCode).toBe(200);
   });
 
   it.each([

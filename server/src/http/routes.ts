@@ -8,6 +8,7 @@ import type { TradeHistory } from "../services/trade-history.js";
 import type { PriceFeed } from "../feed/types.js";
 import { FeedHaltError, RoundNotFoundError, RoundClosedError, OpenRoundExistsError } from "../services/errors.js";
 import { makeRequireUser, makeRequireAdmin, makeRequireWalletBoundUser } from "./auth.js";
+import { normalizeWalletForCompare } from "../auth/wallet-binding.js";
 
 export interface RouteDeps {
   users: Users;
@@ -474,7 +475,14 @@ export function registerRoutes(server: FastifyInstance, deps: RouteDeps): void {
     const assertedWallet = Array.isArray(assertedWalletHeader) ? assertedWalletHeader[0] : assertedWalletHeader;
     if (assertedWallet !== undefined) {
       const user = await deps.users.get(req.userId!);
-      if (user?.walletPublicKey !== assertedWallet) {
+      // EVM addresses are stored lowercased while viem clients assert the EIP-55 checksummed form,
+      // so both sides are case-folded for EVM-shaped values; base58 stays case-sensitive.
+      const stored = user?.walletPublicKey;
+      if (
+        stored === null ||
+        stored === undefined ||
+        normalizeWalletForCompare(stored) !== normalizeWalletForCompare(assertedWallet)
+      ) {
         return reply.code(409).send({ error: "trade_wallet_mismatch" });
       }
     }
