@@ -11,6 +11,7 @@ import { makeEntitlements } from "./services/entitlements.js";
 import { makeEarnLimit } from "./services/earn-limit.js";
 import { makeTradeHistory } from "./services/trade-history.js";
 import { assertRoundSettlerForStake, type RoundSettler } from "./services/round-settler-guard.js";
+import { makeRoundSettler } from "./services/round-settler.js";
 import { ensureHouseUserId } from "./services/house.js";
 import { makeHermesFeed } from "./feed/hermes.js";
 import { makeSessionAuth } from "./auth/session.js";
@@ -19,7 +20,7 @@ import { makeDepositTxBuilder, makeRpcBlockhash, type DepositTxBuilder } from ".
 import { makeDepositIntents } from "./services/deposit-intents.js";
 import type { WithdrawSigner } from "./services/withdraw-worker.js";
 import { eq } from "drizzle-orm";
-import { withdrawals } from "./db/schema.js";
+import { withdrawals, rounds as roundsTable } from "./db/schema.js";
 import { makePresenceRoom } from "./presence/room.js";
 import { makeHighwayIndexer, makeRpcHighwayRoundReader } from "./presence/highway-indexer.js";
 
@@ -29,13 +30,9 @@ async function main(): Promise<void> {
     throw new Error("refusing to boot: DEV_ENDPOINTS must not be enabled in production");
 
   // Real money ON => rounds stake + pay out in real USDC-backed `cash`; OFF => soft `coin`.
+  // The autonomous settler cash requires is constructed below, once `rounds` exists — it has to
+  // share that exact instance — and assertRoundSettlerForStake runs there.
   const stakeAsset = env.REAL_MONEY_ENABLED ? ("cash" as const) : ("coin" as const);
-  // No autonomous round settler exists yet, so cash rounds fail closed here (they would otherwise be
-  // free options — the engine settles only at client-submitted marks). Wire the real settler into
-  // `roundSettler` when it lands; until then this stays null and cash cannot boot. See
-  // assertRoundSettlerForStake. Coin rounds are unaffected.
-  const roundSettler: RoundSettler | null = null;
-  assertRoundSettlerForStake({ stakeAsset, cashSettlerEnabled: env.CASH_SETTLER_ENABLED, roundSettler });
 
   const raw = createRuntimeDb({
     databaseUrl: env.DATABASE_URL,
@@ -211,6 +208,28 @@ async function main(): Promise<void> {
   });
   feed.start();
   const rounds = makeRounds({ db, ledger, feed, stakeAsset, houseUserId });
+
+  // Autonomous cash settler. It MUST be given the same `rounds` instance the routes below get:
+  // mark() primes the per-instance shown-mark cache that close() settles against, so a second
+  // instance would settle at a different price than the one the sweep just evaluated.
+  // Coin rounds never need it (nothing real is at stake), so it stays null there.
+  const roundSettler: RoundSettler | null =
+    stakeAsset === "cash"
+      ? makeRoundSettler({
+          rounds,
+          listOpen: async () =>
+            await db
+              .select({ id: roundsTable.id, userId: roundsTable.userId })
+              .from(roundsTable)
+              .where(eq(roundsTable.status, "open")),
+          pollMs: env.ROUND_SETTLE_POLL_MS,
+          // roundId is "" when listOpen itself failed (nothing was swept this tick).
+          onError: (id, e) => console.warn("[round_settle_failed]", id, e),
+        })
+      : null;
+  assertRoundSettlerForStake({ stakeAsset, cashSettlerEnabled: env.CASH_SETTLER_ENABLED, roundSettler });
+  roundSettler?.start();
+
   const sessionAuth = makeSessionAuth({
     users,
     secret: env.SESSION_SECRET ?? "development-session-secret-change-before-production",

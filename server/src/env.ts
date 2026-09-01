@@ -26,6 +26,10 @@ const EnvShape = z.object({
   // even when on, boot still fails closed until an autonomous settler is wired (see
   // assertRoundSettlerForStake). No settler exists yet, so cash rounds cannot run.
   CASH_SETTLER_ENABLED: z.string().optional().transform((v) => v === "true"),
+  // How often the autonomous settler sweeps every open round for a terminal outcome. This is the
+  // worst-case lag between a round becoming liquidated/capped/expired and it actually settling, so
+  // keep it tight; each tick is one indexed query plus a mark per open round.
+  ROUND_SETTLE_POLL_MS: z.coerce.number().int().positive().default(1000),
   // Which chain rail the money vars describe. `evm` is Robinhood Chain (the live rail); `solana`
   // keeps the parked Solana rail bootable. Money-var requirements below are scoped to this.
   CHAIN_FAMILY: z.enum(["evm", "solana"]).default("evm"),
