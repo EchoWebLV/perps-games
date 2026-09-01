@@ -1,6 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createWallet } from "./wallet";
-import { SOL_STAKE_CURRENCY } from "../core/stake-currency";
 
 class FakeClassList {
   private classes = new Set<string>();
@@ -175,11 +174,17 @@ function installFakeDom() {
   vi.stubGlobal("addEventListener", vi.fn());
 }
 
-const makeOnchain = (status = { delegated: false, playCents: 0 }) => ({
-  status: () => status,
-  cashOut: vi.fn(async () => {}),
-});
-const ADDR = "Wallet1111111111111111111111111111111111";
+const ADDR = "0x1111111111111111111111111111111111111111";
+
+function makeOpts(over: Partial<Parameters<typeof createWallet>[1]> = {}) {
+  return {
+    address: () => ADDR,
+    balance: () => 0,
+    deposit: { minCents: 100, maxCents: 500, send: vi.fn(async () => "0xhash") },
+    withdraw: { minCents: 100, maxCents: 500, request: vi.fn(async () => {}) },
+    ...over,
+  } as Parameters<typeof createWallet>[1];
+}
 
 describe("createWallet", () => {
   beforeEach(() => {
@@ -192,152 +197,158 @@ describe("createWallet", () => {
     vi.unstubAllGlobals();
   });
 
-  it("renders the deposit QR + address + copy for the session wallet (SOL framing)", () => {
+  it("renders the server cash balance in dollars", () => {
     const parent = new FakeElement("div");
-    const wallet = createWallet(parent as unknown as HTMLElement, {
-      currency: SOL_STAKE_CURRENCY,
-      address: () => ADDR,
-      balance: () => 0,
-      onchain: makeOnchain(),
-    });
+    const wallet = createWallet(parent as unknown as HTMLElement, makeOpts({ balance: () => 250 }));
 
     wallet.open();
 
     const overlay = parent.children[0];
-    const recv = overlay.querySelector<FakeElement>("#wltRecv");
-    expect(recv?.innerHTML).toContain("Send SOL to this address");
-    expect(recv?.innerHTML).toContain("Solana devnet");
-    expect(recv?.querySelector("#wltCopy")).toBeTruthy();
+    expect(overlay.querySelector<FakeElement>("#wltBal")?.textContent).toBe("2.50");
   });
 
-  it("shows a setup hint (no QR) when the wallet address is not ready yet", () => {
+  it("shows the wallet's own USDC under the hero so a deposit visibly arrives", async () => {
     const parent = new FakeElement("div");
-    const wallet = createWallet(parent as unknown as HTMLElement, {
-      address: () => "",
-      balance: () => 0,
-      onchain: makeOnchain(),
-    });
+    const wallet = createWallet(
+      parent as unknown as HTMLElement,
+      makeOpts({ fetchWalletUsdc: vi.fn(async () => 3_250_000n) }),
+    );
+
+    wallet.open();
+    await Promise.resolve(); await Promise.resolve();
+
+    const overlay = parent.children[0];
+    const sub = overlay.querySelector<FakeElement>(".wlt-hero-sub")?.textContent ?? "";
+    expect(sub).toContain("Robinhood Chain");
+    expect(sub).toContain("wallet 3.25 USDC");
+  });
+
+  it("keeps the plain network line when the wallet USDC read is unavailable", async () => {
+    const parent = new FakeElement("div");
+    const wallet = createWallet(
+      parent as unknown as HTMLElement,
+      makeOpts({ fetchWalletUsdc: vi.fn(async () => null) }),
+    );
+
+    wallet.open();
+    await Promise.resolve(); await Promise.resolve();
+
+    const overlay = parent.children[0];
+    expect(overlay.querySelector<FakeElement>(".wlt-hero-sub")?.textContent).toBe("Robinhood Chain");
+  });
+
+  it("deposits the stepper amount in CENTS through deposit.send", async () => {
+    const parent = new FakeElement("div");
+    const opts = makeOpts();
+    const wallet = createWallet(parent as unknown as HTMLElement, opts);
 
     wallet.open();
 
     const overlay = parent.children[0];
-    const recv = overlay.querySelector<FakeElement>("#wltRecv");
-    expect(recv?.innerHTML).toContain("Setting up your wallet");
-    expect(recv?.querySelector("#wltCopy")).toBeNull();
+    await overlay.querySelector<FakeElement>("#wltDepUp")?.onclick?.();       // 100 → 200
+    await overlay.querySelector<FakeElement>("#wltDepGo")?.onclick?.();
+
+    expect(opts.deposit.send).toHaveBeenCalledWith(200);
+    expect(overlay.querySelector<FakeElement>("#wltDepVal")?.textContent).toBe("$2.00");
+    expect(overlay.querySelector<FakeElement>("#wltDepStatus")?.textContent).toContain("Deposit sent");
   });
 
-  it("copies the deposit address", async () => {
+  it("clamps the deposit stepper to the configured min/max", () => {
+    const parent = new FakeElement("div");
+    const wallet = createWallet(parent as unknown as HTMLElement, makeOpts());
+
+    wallet.open();
+
+    const overlay = parent.children[0];
+    const dn = overlay.querySelector<FakeElement>("#wltDepDn");
+    const up = overlay.querySelector<FakeElement>("#wltDepUp");
+    dn?.onclick?.(); dn?.onclick?.();                                          // floor at min
+    expect(overlay.querySelector<FakeElement>("#wltDepVal")?.textContent).toBe("$1.00");
+    for (let i = 0; i < 9; i++) up?.onclick?.();                               // ceiling at max
+    expect(overlay.querySelector<FakeElement>("#wltDepVal")?.textContent).toBe("$5.00");
+  });
+
+  it("requests a withdrawal for the stepper amount and never posts an address", async () => {
+    const parent = new FakeElement("div");
+    const opts = makeOpts({ balance: () => 500 });
+    const wallet = createWallet(parent as unknown as HTMLElement, opts);
+
+    wallet.open();
+
+    const overlay = parent.children[0];
+    await overlay.querySelector<FakeElement>("#wltWdUp")?.onclick?.();        // 100 → 200
+    await overlay.querySelector<FakeElement>("#wltWdGo")?.onclick?.();
+
+    expect(opts.withdraw.request).toHaveBeenCalledWith(200);
+    expect(overlay.querySelector<FakeElement>("#wltWdStatus")?.textContent)
+      .toBe("Withdrawal requested — arrives after review.");
+  });
+
+  it("clamps the withdraw stepper to the configured min/max", () => {
+    const parent = new FakeElement("div");
+    const wallet = createWallet(
+      parent as unknown as HTMLElement,
+      makeOpts({ balance: () => 100_000, withdraw: { minCents: 100, maxCents: 300, request: vi.fn(async () => {}) } }),
+    );
+
+    wallet.open();
+
+    const overlay = parent.children[0];
+    const up = overlay.querySelector<FakeElement>("#wltWdUp");
+    for (let i = 0; i < 9; i++) up?.onclick?.();
+    expect(overlay.querySelector<FakeElement>("#wltWdVal")?.textContent).toBe("$3.00");
+  });
+
+  it("disables cash out below the withdrawal minimum", () => {
+    const parent = new FakeElement("div");
+    const wallet = createWallet(parent as unknown as HTMLElement, makeOpts({ balance: () => 99 }));
+
+    wallet.open();
+
+    const overlay = parent.children[0];
+    expect(overlay.querySelector<FakeElement>("#wltWdGo")?.attrs.disabled).toBe("");
+  });
+
+  it("renders the player's own funding address as QR + copy, labelled for Robinhood Chain", async () => {
     const parent = new FakeElement("div");
     const writeText = vi.fn(async () => {});
     vi.stubGlobal("navigator", { clipboard: { writeText } });
-
-    const wallet = createWallet(parent as unknown as HTMLElement, {
-      address: () => ADDR,
-      balance: () => 0,
-      onchain: makeOnchain(),
-    });
+    const wallet = createWallet(parent as unknown as HTMLElement, makeOpts());
 
     wallet.open();
 
     const overlay = parent.children[0];
+    const recv = overlay.querySelector<FakeElement>("#wltRecv");
+    expect(recv?.innerHTML).toContain("Fund this wallet with USDC on Robinhood Chain");
+    expect(recv?.innerHTML).toContain("plus a little ETH for gas");
+
     const copyBtn = overlay.querySelector<FakeElement>("#wltCopy");
-    expect(copyBtn).toBeTruthy();
-
     await copyBtn?.onclick?.();
-
     expect(writeText).toHaveBeenCalledWith(ADDR);
     expect(copyBtn?.innerHTML).toContain("Copied");
   });
 
-  it("shows the play balance in SOL in the hero at 3 decimals (centi-SOL units → SOL)", () => {
+  it("shows a setup hint (no QR) when the wallet address is not ready yet", () => {
     const parent = new FakeElement("div");
-    const wallet = createWallet(parent as unknown as HTMLElement, {
-      address: () => ADDR,
-      balance: () => 25, // 25 centi-SOL units = 0.25 SOL
-      onchain: makeOnchain(),
-    });
+    const wallet = createWallet(parent as unknown as HTMLElement, makeOpts({ address: () => "" }));
 
     wallet.open();
 
     const overlay = parent.children[0];
-    // 3 decimals so small SOL balances (a cash-out leaves sub-0.01 SOL) stay visible.
-    expect(overlay.querySelector<FakeElement>("#wltBal")?.textContent).toBe("0.250");
+    expect(overlay.querySelector<FakeElement>("#wltRecv")?.innerHTML).toContain("Setting up your wallet");
+    expect(overlay.querySelector("#wltCopy")).toBeNull();
   });
 
-  it("shows a single Cash out (no player-facing 'End session') that works even mid-session", async () => {
+  it("drops every trace of the ER session lifecycle from the cashier", () => {
     const parent = new FakeElement("div");
-    // delegated (a live ER session) — Cash out must still be enabled; it undelegates under the hood.
-    const onchain = { status: () => ({ delegated: true, playCents: 10 }), cashOut: vi.fn(async () => {}) };
-    const wallet = createWallet(parent as unknown as HTMLElement, { address: () => ADDR, balance: () => 10, onchain });
+    const wallet = createWallet(parent as unknown as HTMLElement, makeOpts());
 
     wallet.open();
 
     const overlay = parent.children[0];
-    expect(overlay.querySelector("#wltOcEnd")).toBeNull();                                       // no session leak
-    expect(overlay.querySelector<FakeElement>("#wltOcCash")?.attrs.disabled).toBeUndefined();    // balance → Cash out enabled
-
-    await overlay.querySelector<FakeElement>("#wltOcCash")?.onclick?.(undefined);
-    expect(onchain.cashOut).toHaveBeenCalledTimes(1);
-  });
-
-  it("disables Cash out when there is no balance to move", () => {
-    const parent = new FakeElement("div");
-    const wallet = createWallet(parent as unknown as HTMLElement, {
-      address: () => ADDR,
-      balance: () => 0,
-      onchain: makeOnchain({ delegated: false, playCents: 0 }),
-    });
-
-    wallet.open();
-
-    const overlay = parent.children[0];
-    expect(overlay.querySelector<FakeElement>("#wltOcCash")?.attrs.disabled).toBe(""); // no balance → disabled
-  });
-
-  it("shows the wallet's own SOL under the hero so a deposit visibly arrives", async () => {
-    const parent = new FakeElement("div");
-    const wallet = createWallet(parent as unknown as HTMLElement, {
-      address: () => ADDR,
-      balance: () => 0,
-      fetchWalletSol: vi.fn(async () => 0.25),
-      onchain: makeOnchain(),
-    });
-
-    wallet.open();
-    await Promise.resolve(); await Promise.resolve(); // let the async fetch land
-
-    const overlay = parent.children[0];
-    expect(overlay.querySelector<FakeElement>(".wlt-hero-sub")?.textContent).toContain("wallet 0.250");
-  });
-
-  it("keeps the plain network line when no wallet-SOL fetch is wired (dev/legacy callers)", () => {
-    const parent = new FakeElement("div");
-    const wallet = createWallet(parent as unknown as HTMLElement, {
-      address: () => ADDR,
-      balance: () => 0,
-      onchain: makeOnchain(),
-    });
-
-    wallet.open();
-
-    const overlay = parent.children[0];
-    expect(overlay.querySelector<FakeElement>(".wlt-hero-sub")?.textContent ?? "").not.toContain("wallet");
-  });
-
-  it("drops the legacy connect-wallet / USDC / add-to-play UI", () => {
-    const parent = new FakeElement("div");
-    const wallet = createWallet(parent as unknown as HTMLElement, {
-      address: () => ADDR,
-      balance: () => 0,
-      onchain: makeOnchain(),
-    });
-
-    wallet.open();
-
-    const overlay = parent.children[0];
+    expect(overlay.querySelector("#wltOcEnd")).toBeNull();
+    expect(overlay.querySelector("#wltOcCash")).toBeNull();
     expect(overlay.querySelector(".wlt-connect")).toBeNull();
     expect(overlay.querySelector("#wltAddPlay")).toBeNull();
-    expect(overlay.querySelector(".wlt-seg")).toBeNull();
-    expect(overlay.querySelector<FakeElement>("#wltRecv")?.innerHTML).not.toContain("USDC");
   });
 });

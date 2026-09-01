@@ -123,6 +123,13 @@ export interface Api {
   depositSend(input: { depositIntent: string; signedTxBase64: string }): Promise<{ txSig: string }>;
   /** on-chain USDC currently sitting in the user's connected wallet */
   walletBalance(): Promise<WalletBalanceResult>;
+  /** Where the player sends USDC to top up the server ledger, plus the wallet the server has
+   *  bound to this account (the address a withdrawal is paid to). */
+  depositAddress(): Promise<{ treasuryUsdcAta: string; boundWallet: string | null; note?: string }>;
+  /** Cash out to the BOUND wallet. The client never posts an address — the server pays the
+   *  wallet it bound, and the request only reserves (debits) the amount; the operator approval
+   *  step drives it to `sent`. */
+  withdraw(p: { amountCents: number }): Promise<{ withdrawalId: string; state: string }>;
 }
 
 export interface ApiOpts {
@@ -244,5 +251,7 @@ export function createApi(opts: ApiOpts = {}): Api {
     depositBuild: (amountCents) => call<{ txBase64: string; depositIntent: string; expiresAt: string }>("POST", "/v1/deposit/build", { amountCents }),
     depositSend: (input) => call("POST", "/v1/deposit/send", input),
     walletBalance: () => call<WalletBalanceResult>("GET", "/v1/wallet/usdc-balance"),
+    depositAddress: () => call("GET", "/v1/deposit/address"),
+    withdraw: (p) => call("POST", "/v1/withdraw", p),
   };
 }

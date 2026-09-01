@@ -209,11 +209,12 @@ describe("wallet loader", () => {
     const main = await fs.readFile(new URL("../main.ts", import.meta.url), "utf8");
 
     // The heavy wallet SDKs (legacy wallet-standard/mobile + Privy/React) must stay out of the
-    // initial bundle. main.ts only references the wallet through the `selectChainWalletPort`
-    // seam, which dynamic-imports the Privy/React island on first connect.
+    // initial bundle. main.ts only references the wallet through the `selectEvmWalletPort`
+    // seam, which dynamic-imports the Privy/React island on first connect. (The solana rail's
+    // `selectChainWalletPort` is parked with the rest of the ER money loop.)
     expect(main).not.toContain("@wallet-standard/app");
     expect(main).not.toContain("@solana-mobile/wallet-adapter-mobile");
     expect(main).not.toContain("@privy-io/react-auth");
-    expect(main).toContain("selectChainWalletPort");
+    expect(main).toContain("selectEvmWalletPort");
   });
 });

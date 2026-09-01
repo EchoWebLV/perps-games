@@ -100,6 +100,8 @@ function fakeApi(over: Partial<Api> = {}): Api {
     depositBuild: async () => ({ txBase64: "", depositIntent: "di_test", expiresAt: "2026-01-01T00:00:00.000Z" }),
     depositSend: async () => ({ txSig: "sig1" }),
     walletBalance: async () => ({ wallet: null, balance: 0 }),
+    depositAddress: async () => ({ treasuryUsdcAta: "0xtreasury", boundWallet: null }),
+    withdraw: async () => ({ withdrawalId: "w1", state: "awaiting_approval" }),
     ...over,
   };
 }

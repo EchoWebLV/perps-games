@@ -2,15 +2,18 @@ import { qrMatrix, qrSvg } from "./qr";
 import { ACTIVE_STAKE_CURRENCY, type StakeCurrency } from "../core/stake-currency";
 
 /**
- * Wallet page — a full-screen synthwave overlay opened from the balance chip.
+ * Cashier page — a full-screen synthwave overlay opened from the balance chip.
  *
- * SOL-native, on-chain only: the player funds their own wallet (the Privy embedded wallet,
- * or the dev keypair) by sending native SOL to the address shown here (QR + copy). The first
- * GO wraps that SOL into the on-chain play balance. The panel shows the play balance and the
- * End-session / Withdraw controls. There is no "connect wallet" — you're already signed in via
- * the on-chain session — and no off-chain USDC deposit.
+ * Server-ledger native, Robinhood Chain rail. The hero is the player's CASH BALANCE as the
+ * server holds it (cents); the two actions move money across the boundary:
+ *   • Add funds — an ERC-20 USDC transfer from the player's own embedded wallet to the
+ *     treasury. It lands in the ledger once the server's confirmer sees it on-chain.
+ *   • Cash out — a withdrawal request against the ledger. The server pays the wallet it
+ *     BOUND to this account, so no address is ever posted from the client.
+ * Below the deposit stepper sits the player's own address (QR + copy) — that is where USDC
+ * (and a little ETH for gas) has to arrive before a deposit can be sent at all.
  *
- * The address + balance run through callbacks so main owns auth and on-chain reads.
+ * Everything runs through callbacks so main owns auth, the chain port, and the API.
  */
 export interface Wallet {
   open(): void;
@@ -21,30 +24,26 @@ export interface Wallet {
 
 export interface WalletOpts {
   currency?: StakeCurrency;
-  /** The on-chain session wallet address — CALLED on every open (a Privy wallet only exists
-   *  after login). Returns "" before the wallet is ready (pre-login). */
+  /** the bound EVM wallet address (Privy embedded) — funding target for bridged USDC + gas.
+   *  CALLED on every open: a Privy wallet only exists after login, so "" before sign-in. */
   address: () => string;
-  /** Displayed balance in centi-SOL units (1 unit = 0.01 SOL) — the on-chain play balance. */
+  /** server ledger cash balance in cents. */
   balance: () => number;
-  /** The wallet's OWN native SOL (in SOL), read fresh on every open — so a deposit visibly
-   *  arrives before the first GO moves it into the play balance. null/absent = don't show. */
-  fetchWalletSol?: () => Promise<number | null>;
-  /**
-   * On-chain controls. `status()` is read on every open/refresh: `playCents` = the on-chain play
-   * balance in centi-SOL units; `delegated` is kept for internal bookkeeping only (NOT surfaced to
-   * the player). `cashOut()` is the single player action — it quietly undelegates any live ER
-   * session and withdraws to the wallet, so the player never sees the session lifecycle.
-   */
-  onchain: {
-    status: () => { delegated: boolean; playCents: number };
-    cashOut: () => Promise<void>;
+  /** wallet's own USDC (base units) — shows a deposit arriving before it is moved in. */
+  fetchWalletUsdc?: () => Promise<bigint | null>;
+  deposit: {
+    minCents: number; maxCents: number;
+    /** ERC-20 transfer from the embedded wallet to the treasury; resolves the tx hash. */
+    send: (amountCents: number) => Promise<string>;
   };
-  // ── legacy off-chain fields (no longer rendered; kept optional so callers compile) ──
-  walletBalance?: () => number | null;
-  onConnectWallet?: () => Promise<void>;
-  onWalletPoll?: () => Promise<number>;
-  onAddToPlay?: () => Promise<void>;
+  withdraw: { minCents: number; maxCents: number; request: (amountCents: number) => Promise<void> };
 }
+
+/** USDC is a 6-decimal token on Robinhood Chain; the ledger is cents. Only display math here. */
+const USDC_DECIMALS = 6;
+/** Both steppers move in whole dollars — the deposit/withdraw bounds are dollar-sized. */
+const STEP_CENTS = 100;
+const NETWORK_LINE = "Robinhood Chain";
 
 const ICONS = {
   copy: '<rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V5a2 2 0 0 1 2-2h10"/>',
@@ -52,12 +51,12 @@ const ICONS = {
 } as const;
 const svg = (d: string, size = 16) =>
   `<svg viewBox="0 0 24 24" width="${size}" height="${size}" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round">${d}</svg>`;
-// Solana mark — three slanted bars in the brand teal→purple gradient
-const solCoin = (size = 22) =>
-  `<svg viewBox="0 0 24 24" width="${size}" height="${size}"><defs><linearGradient id="solg" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#9945ff"/><stop offset="1" stop-color="#19fb9b"/></linearGradient></defs><circle cx="12" cy="12" r="11" fill="#0b0820"/><g fill="url(#solg)"><path d="M7 8.6c.1-.1.3-.2.4-.2h8.2c.2 0 .3.3.2.4l-1.4 1.5c-.1.1-.3.2-.4.2H6c-.2 0-.3-.3-.2-.4z"/><path d="M7 15.4c.1-.1.3-.2.4-.2h8.2c.2 0 .3.3.2.4l-1.4 1.5c-.1.1-.3.2-.4.2H6c-.2 0-.3-.3-.2-.4z" transform="translate(0,-3.4)"/><path d="M17 12.6c-.1.1-.3.2-.4.2H8.4c-.2 0-.3-.3-.2-.4l1.4-1.5c.1-.1.3-.2.4-.2h8.2c.2 0 .3.3.2.4z"/></g></svg>`;
+// USDC mark — the dollar glyph on the stablecoin's blue disc
+const usdcCoin = (size = 22) =>
+  `<svg viewBox="0 0 24 24" width="${size}" height="${size}"><circle cx="12" cy="12" r="11" fill="#2775ca"/><path d="M12 5.4v1.3m0 10.6v1.3" stroke="#fff" stroke-width="1.5" stroke-linecap="round"/><path d="M14.7 9.1c-.3-1.1-1.4-1.8-2.7-1.8-1.6 0-2.8.8-2.8 2.1 0 1.2.9 1.8 2.6 2.2l.6.1c1.7.4 2.6 1 2.6 2.2 0 1.3-1.2 2.1-2.9 2.1-1.4 0-2.5-.7-2.8-1.9" fill="none" stroke="#fff" stroke-width="1.5" stroke-linecap="round"/></svg>`;
 
 const shortAddr = (a: string) => (a.length > 12 ? `${a.slice(0, 6)}…${a.slice(-6)}` : a);
-const fmt = (n: number) => n.toLocaleString("en-US", { minimumFractionDigits: 3, maximumFractionDigits: 3 });
+const clamp = (v: number, lo: number, hi: number) => Math.max(lo, Math.min(hi, v));
 
 let stylesInjected = false;
 function injectStyles() {
@@ -84,7 +83,7 @@ function injectStyles() {
       animation:wltDrift 9s ease-in-out infinite alternate}
     @keyframes wltDrift{0%{transform:translate(0,0)}100%{transform:translate(-6%,5%)}}
     .wlt-hero-top{display:flex;align-items:center;gap:8px;margin-bottom:7px}
-    .wlt-hero-top svg{filter:drop-shadow(0 0 6px rgba(153,69,255,.7))}
+    .wlt-hero-top svg{filter:drop-shadow(0 0 6px rgba(39,231,255,.7))}
     .wlt-hero-lbl{font:700 10px/1 'Chakra Petch',ui-monospace,monospace;letter-spacing:.16em;text-transform:uppercase;color:rgba(216,222,255,.78)}
     .wlt-bal{display:flex;align-items:baseline;gap:6px;font:800 42px/1 'Chakra Petch',ui-monospace,monospace;
       color:#fff;letter-spacing:-.01em;font-variant-numeric:tabular-nums;text-shadow:0 0 22px rgba(39,231,255,.45);transform-origin:left center}
@@ -97,6 +96,21 @@ function injectStyles() {
 
     .wlt-note{font:500 10.5px/1.5 'Chakra Petch',ui-monospace,monospace;letter-spacing:.02em;color:rgba(216,222,255,.55);text-align:center}
     .wlt-note.wlt-warn{color:rgba(255,209,102,.82)}
+
+    /* money sections — Add funds / Cash out */
+    .wlt-sec{display:flex;flex-direction:column;gap:10px;padding-top:11px;border-top:1px solid rgba(132,150,224,.18)}
+    .wlt-sec-lbl{font:700 10px/1 'Chakra Petch',ui-monospace,monospace;letter-spacing:.16em;text-transform:uppercase;color:rgba(216,222,255,.7)}
+    .wlt-step{display:flex;align-items:center;gap:9px}
+    .wlt-step-btn{width:38px;flex:0 0 auto;border:1px solid rgba(132,150,224,.3);background:rgba(7,5,18,.65);color:var(--ink);
+      cursor:pointer;border-radius:9px;padding:11px 0;font:800 15px/1 'Chakra Petch',ui-monospace,monospace}
+    .wlt-step-btn:hover{background:rgba(39,231,255,.12);border-color:rgba(39,231,255,.38)}
+    .wlt-step-val{flex:1;text-align:center;font:800 20px/1 'Chakra Petch',ui-monospace,monospace;color:#fff;font-variant-numeric:tabular-nums}
+    .wlt-act{border:0;cursor:pointer;border-radius:9px;padding:12px 0;width:100%;
+      font:700 12px/1 'Chakra Petch',ui-monospace,monospace;letter-spacing:.06em;text-transform:uppercase;transition:.13s;
+      color:var(--cyan);background:rgba(39,231,255,.12);border:1px solid rgba(39,231,255,.38)}
+    .wlt-act:hover{background:rgba(39,231,255,.2)}
+    .wlt-act:disabled{opacity:.4;cursor:not-allowed}
+    .wlt-status{min-height:13px;font:500 10.5px/1.4 'Chakra Petch',ui-monospace,monospace;letter-spacing:.02em;color:rgba(46,230,166,.85);text-align:center}
 
     /* Receive — QR card + address row */
     .wlt-qr-wrap{display:flex;justify-content:center;padding:2px}
@@ -113,14 +127,6 @@ function injectStyles() {
       color:var(--cyan);background:rgba(39,231,255,.12);border:1px solid rgba(39,231,255,.38);transition:.13s}
     .wlt-copy:hover{background:rgba(39,231,255,.2)}
     .wlt-copy.done{color:#04130d;background:linear-gradient(180deg,#5ff0c0,#15c78c);border-color:transparent}
-
-    .wlt-oc{display:flex;flex-direction:column;gap:10px;padding-top:4px;border-top:1px solid rgba(132,150,224,.18)}
-    .wlt-oc-btns{display:flex;gap:8px}
-    .wlt-oc-btn{flex:1;border:0;cursor:pointer;border-radius:9px;padding:12px 0;
-      font:700 12px/1 'Chakra Petch',ui-monospace,monospace;letter-spacing:.06em;text-transform:uppercase;transition:.13s}
-    .wlt-oc-btn.end{color:rgba(255,209,102,.92);background:rgba(255,209,102,.1);border:1px solid rgba(255,209,102,.35)}
-    .wlt-oc-btn.wd{color:var(--cyan);background:rgba(39,231,255,.12);border:1px solid rgba(39,231,255,.38)}
-    .wlt-oc-btn:disabled{opacity:.4;cursor:not-allowed}
   `;
   document.head.appendChild(s);
 }
@@ -128,6 +134,9 @@ function injectStyles() {
 export function createWallet(parent: HTMLElement, opts: WalletOpts): Wallet {
   injectStyles();
   const currency = opts.currency ?? ACTIVE_STAKE_CURRENCY;
+  // The ledger's display unit IS the dollar here (cents / 10^displayUnitDecimals).
+  const money = (cents: number) => (cents / 10 ** currency.displayUnitDecimals).toFixed(2);
+  const usdc = (base: bigint) => (Number(base) / 10 ** USDC_DECIMALS).toFixed(2);
 
   const overlay = document.createElement("div");
   overlay.style.cssText = [
@@ -141,96 +150,178 @@ export function createWallet(parent: HTMLElement, opts: WalletOpts): Wallet {
   panel.innerHTML =
     `<div class="wlt-head"><span class="lbl">wallet</span><button class="wlt-x" data-act="close" aria-label="Close">✕</button></div>` +
     `<div class="wlt-hero"><div class="wlt-hero-glow"></div>
-       <div class="wlt-hero-top">${solCoin(22)}<span class="wlt-hero-lbl">Balance</span></div>
-       <div class="wlt-bal"><span id="wltBal">0.000</span><span class="wlt-bal-cur">${currency.symbol}</span></div>
-       <div class="wlt-hero-sub">Solana · devnet</div>
+       <div class="wlt-hero-top">${usdcCoin(22)}<span class="wlt-hero-lbl">Balance</span></div>
+       <div class="wlt-bal"><span id="wltBal">0.00</span><span class="wlt-bal-cur">${currency.symbol}</span></div>
+       <div class="wlt-hero-sub">${NETWORK_LINE}</div>
      </div>` +
-    // recv view is filled live by renderAddressUI() on each open — a Privy address only exists
-    // AFTER login, so it must be read fresh, never snapshotted at build time.
+    // Both money sections are filled live on each open — the deposit address only exists AFTER
+    // login, and the cash-out button's enabled state tracks the balance.
+    `<div id="wltDeposit"></div>` +
     `<div class="wlt-view" id="wltRecv"></div>` +
-    `<div id="wltOnchain"></div>`;
+    `<div id="wltWithdraw"></div>`;
 
   const q = <T extends HTMLElement>(s: string) => panel.querySelector(s) as T;
   const balEl = q("#wltBal");
   const heroSub = q(".wlt-hero-sub");
+  const depEl = q<HTMLElement>("#wltDeposit");
+  const wdEl = q<HTMLElement>("#wltWithdraw");
 
-  // Breakdown line under the total: wallet SOL vs money currently in play. Refreshed on
-  // every open — deposits show up here (and in the total) before the first GO.
-  const renderWalletSol = () => {
-    if (!opts.fetchWalletSol) return;
-    void opts.fetchWalletSol().then((sol) => {
-      if (sol == null) { heroSub.textContent = "Solana · devnet"; return; }
-      const inPlay = opts.onchain.status().playCents / 10 ** currency.displayUnitDecimals;
-      heroSub.textContent = `Solana · devnet · wallet ${fmt(sol)} ${currency.symbol} · in play ${fmt(inPlay)} ${currency.symbol}`;
+  let depCents = clamp(opts.deposit.minCents, opts.deposit.minCents, opts.deposit.maxCents);
+  let wdCents = clamp(opts.withdraw.minCents, opts.withdraw.minCents, opts.withdraw.maxCents);
+  let busy = false;
+  let moving = false; // a deposit/withdrawal is in flight — one money action at a time
+
+  // Breakdown line under the total: what the player's OWN wallet holds. Refreshed on every open,
+  // so USDC that arrived on-chain shows up here before it has been moved into the ledger.
+  const renderWalletUsdc = () => {
+    if (!opts.fetchWalletUsdc) { heroSub.textContent = NETWORK_LINE; return; }
+    void opts.fetchWalletUsdc().then((base) => {
+      heroSub.textContent = base == null ? NETWORK_LINE : `${NETWORK_LINE} · wallet ${usdc(base)} USDC`;
     }).catch(() => { /* keep the plain network line */ });
   };
 
-  let busy = false;
-
   const renderBalance = (bump = false) => {
-    balEl.textContent = fmt(opts.balance() / 10 ** currency.displayUnitDecimals);
+    balEl.textContent = money(opts.balance());
     if (bump) { balEl.parentElement!.classList.remove("bump"); void balEl.offsetWidth; balEl.parentElement!.classList.add("bump"); }
   };
 
-  // Re-render the Receive QR + address from the live wallet address on every open. A Privy
+  // One shared stepper renderer for Add funds / Cash out: ± buttons around a dollar readout, an
+  // action button, and a status line. `run` owns the in-flight lock so neither can double-fire.
+  function renderStepper(host: HTMLElement, cfg: {
+    key: "Dep" | "Wd";
+    label: string;
+    action: string;
+    value: () => number;
+    setValue: (cents: number) => void;
+    min: number; max: number;
+    disabled: boolean;
+    busyLabel: string;
+    run: (cents: number) => Promise<string>;
+  }) {
+    const status = (host.querySelector(`#wlt${cfg.key}Status`) as HTMLElement | null)?.textContent ?? "";
+    host.innerHTML =
+      `<div class="wlt-sec">
+         <span class="wlt-sec-lbl">${cfg.label}</span>
+         <div class="wlt-step">
+           <button class="wlt-step-btn" id="wlt${cfg.key}Dn" aria-label="Less">−</button>
+           <span class="wlt-step-val" id="wlt${cfg.key}Val">$${money(cfg.value())}</span>
+           <button class="wlt-step-btn" id="wlt${cfg.key}Up" aria-label="More">+</button>
+         </div>
+         <button class="wlt-act" id="wlt${cfg.key}Go"${cfg.disabled ? " disabled" : ""}>${cfg.action}</button>
+         <div class="wlt-status" id="wlt${cfg.key}Status">${status}</div>
+       </div>`;
+    const valEl = host.querySelector(`#wlt${cfg.key}Val`) as HTMLElement | null;
+    const statusEl = host.querySelector(`#wlt${cfg.key}Status`) as HTMLElement | null;
+    const goBtn = host.querySelector(`#wlt${cfg.key}Go`) as HTMLButtonElement | null;
+    // Re-assert the two live texts as PROPERTIES, not just markup: a re-render (after a
+    // deposit/withdrawal) must carry the stepper's amount and the last status forward.
+    if (valEl) valEl.textContent = `$${money(cfg.value())}`;
+    if (statusEl) statusEl.textContent = status;
+    if (goBtn) goBtn.textContent = cfg.action;
+    const step = (delta: number) => {
+      if (moving) return;
+      cfg.setValue(clamp(cfg.value() + delta * STEP_CENTS, cfg.min, cfg.max));
+      if (valEl) valEl.textContent = `$${money(cfg.value())}`;
+    };
+    const dn = host.querySelector(`#wlt${cfg.key}Dn`) as HTMLElement | null;
+    const up = host.querySelector(`#wlt${cfg.key}Up`) as HTMLElement | null;
+    if (dn) dn.onclick = () => step(-1);
+    if (up) up.onclick = () => step(1);
+    if (goBtn) {
+      goBtn.onclick = async () => {
+        if (moving || cfg.disabled) return;
+        moving = true;
+        goBtn.disabled = true;
+        const prev = goBtn.textContent;
+        goBtn.textContent = cfg.busyLabel;
+        try {
+          const msg = await cfg.run(cfg.value());
+          if (statusEl) statusEl.textContent = msg;
+        } catch (e) {
+          if (statusEl) statusEl.textContent = String((e as Error)?.message ?? e) || "That didn't go through — try again.";
+        } finally {
+          moving = false;
+          goBtn.textContent = prev ?? cfg.action;
+          renderBalance();
+          renderMoney();
+          renderWalletUsdc();
+        }
+      };
+    }
+  }
+
+  const DEPOSIT_CONFIRMATIONS = 2; // the server credits the ledger once its confirmer sees the transfer
+  function renderMoney() {
+    renderStepper(depEl, {
+      key: "Dep",
+      label: "Add funds",
+      action: "Deposit",
+      value: () => depCents,
+      setValue: (c) => { depCents = c; },
+      min: opts.deposit.minCents,
+      max: opts.deposit.maxCents,
+      // funding needs an address to send FROM; before login there is nothing to spend
+      disabled: !opts.address(),
+      busyLabel: "Sending…",
+      run: async (cents) => {
+        await opts.deposit.send(cents);
+        return `Deposit sent — it lands after ${DEPOSIT_CONFIRMATIONS} confirmations`;
+      },
+    });
+    renderStepper(wdEl, {
+      key: "Wd",
+      label: "Cash out",
+      action: "Cash out to wallet",
+      value: () => wdCents,
+      setValue: (c) => { wdCents = c; },
+      min: opts.withdraw.minCents,
+      max: opts.withdraw.maxCents,
+      // nothing to send: the server would refuse anything under its own minimum anyway
+      disabled: opts.balance() < opts.withdraw.minCents,
+      busyLabel: "Requesting…",
+      run: async (cents) => {
+        await opts.withdraw.request(cents);
+        return "Withdrawal requested — arrives after review.";
+      },
+    });
+  }
+
+  // Re-render the funding QR + address from the live wallet address on every open. A Privy
   // address only exists after login, so a build-time snapshot would never appear; an empty
   // address shows a "wallet loading" hint instead of a sendable address.
   const renderAddressUI = () => {
     const addr = opts.address();
     const recv = q<HTMLElement>("#wltRecv");
-    if (addr) {
-      const qr = qrSvg(qrMatrix(addr, "M"), { dark: "#0a0820", light: "#ffffff", margin: 3 });
-      recv.innerHTML =
-        `<div class="wlt-qr-wrap"><div class="wlt-qr">${qr}</div></div>` +
-        `<div class="wlt-net">${solCoin(15)} ${currency.symbol} · Solana devnet</div>` +
-        `<div class="wlt-addr"><span title="${addr}">${shortAddr(addr)}</span><button class="wlt-copy" id="wltCopy">${svg(ICONS.copy, 13)}Copy</button></div>` +
-        `<div class="wlt-note wlt-warn">Send ${currency.symbol} to this address to fund your wallet. Your first GO moves it into your play balance.</div>`;
-      const copyBtn = recv.querySelector<HTMLButtonElement>("#wltCopy");
-      if (copyBtn) {
-        let copyTimer = 0;
-        copyBtn.onclick = async () => {
-          try { await navigator.clipboard?.writeText(addr); } catch { /* clipboard unavailable */ }
-          copyBtn.classList.add("done");
-          copyBtn.innerHTML = `${svg(ICONS.check, 13)}Copied`;
-          clearTimeout(copyTimer);
-          copyTimer = window.setTimeout(() => { copyBtn.classList.remove("done"); copyBtn.innerHTML = `${svg(ICONS.copy, 13)}Copy`; }, 1400);
-        };
-      }
-    } else {
+    if (!addr) {
       recv.innerHTML =
         `<div class="wlt-note wlt-warn">Setting up your wallet… sign in if prompted, then reopen this panel to see your deposit address.</div>`;
+      return;
     }
-  };
-
-  const ocEl = q<HTMLElement>("#wltOnchain");
-  let ocBusy = false;
-  const renderOnchain = () => {
-    const { playCents } = opts.onchain.status();
-    // One button. "Cash out" moves the whole play balance to the wallet; it handles undelegating a
-    // live session under the hood (see main's onchain.cashOut), so there is no player-facing "End".
-    ocEl.innerHTML =
-      `<div class="wlt-oc">
-         <div class="wlt-oc-btns">
-           <button class="wlt-oc-btn wd" id="wltOcCash" ${playCents > 0 ? "" : "disabled"}>Cash out to wallet</button>
-         </div>
-       </div>`;
-    const cashBtn = ocEl.querySelector<HTMLButtonElement>("#wltOcCash");
-    const run = async (btn: HTMLButtonElement, label: string, fn: () => Promise<void>) => {
-      if (ocBusy) return;
-      ocBusy = true; btn.disabled = true; const prev = btn.textContent; btn.textContent = label;
-      try { await fn(); } catch { /* surfaced by main's status line */ }
-      finally { ocBusy = false; btn.textContent = prev ?? ""; renderOnchain(); renderBalance(); }
+    const qr = qrSvg(qrMatrix(addr, "M"), { dark: "#0a0820", light: "#ffffff", margin: 3 });
+    recv.innerHTML =
+      `<div class="wlt-qr-wrap"><div class="wlt-qr">${qr}</div></div>` +
+      `<div class="wlt-net">${usdcCoin(15)} USDC · ${NETWORK_LINE}</div>` +
+      `<div class="wlt-addr"><span title="${addr}">${shortAddr(addr)}</span><button class="wlt-copy" id="wltCopy">${svg(ICONS.copy, 13)}Copy</button></div>` +
+      `<div class="wlt-note wlt-warn">Fund this wallet with USDC on Robinhood Chain (plus a little ETH for gas).</div>`;
+    const copyBtn = recv.querySelector<HTMLButtonElement>("#wltCopy");
+    if (!copyBtn) return;
+    let copyTimer = 0;
+    copyBtn.onclick = async () => {
+      try { await navigator.clipboard?.writeText(addr); } catch { /* clipboard unavailable */ }
+      copyBtn.classList.add("done");
+      copyBtn.innerHTML = `${svg(ICONS.check, 13)}Copied`;
+      clearTimeout(copyTimer);
+      copyTimer = window.setTimeout(() => { copyBtn.classList.remove("done"); copyBtn.innerHTML = `${svg(ICONS.copy, 13)}Copy`; }, 1400);
     };
-    if (cashBtn) cashBtn.onclick = () => void run(cashBtn, "Cashing out…", opts.onchain.cashOut);
   };
 
   const setOpen = (open: boolean) => {
     overlay.style.display = open ? "flex" : "none";
     if (open) {
       renderBalance();
+      renderMoney();
       renderAddressUI();
-      renderOnchain();
-      renderWalletSol();
+      renderWalletUsdc();
     }
   };
   overlay.onclick = (e) => {
@@ -244,7 +335,7 @@ export function createWallet(parent: HTMLElement, opts: WalletOpts): Wallet {
 
   return {
     open() { if (!busy) setOpen(true); },
-    setBalance() { renderBalance(); renderOnchain(); },
+    setBalance() { renderBalance(); renderMoney(); },
     setBusy(b) { busy = b; if (b) setOpen(false); },
   };
 }

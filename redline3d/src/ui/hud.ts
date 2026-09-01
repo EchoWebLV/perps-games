@@ -1,5 +1,4 @@
-import { sol3 } from "../core/money";
-import { ACTIVE_STAKE_CURRENCY, type StakeCurrency } from "../core/stake-currency";
+import { ACTIVE_STAKE_CURRENCY, formatStakeUnits, type StakeCurrency } from "../core/stake-currency";
 import { onTap } from "./tap";
 
 export interface Hud {
@@ -107,7 +106,9 @@ export function createHud(parent: HTMLElement, currency: StakeCurrency = ACTIVE_
       const f = live ? "live" : "sim";
       if (f !== lastFeed) { lastFeed = f; feed.textContent = f; feed.style.color = live ? "var(--grn)" : "var(--amb)"; }
     },
-    setBalance(b) { bal.textContent = sol3(b); }, // centi-SOL units → "0.917 SOL"
+    // display units of whichever currency this HUD was built with — cents on the live rail
+    // ("9.17 USD"), centi-SOL on the parked one ("0.917 SOL").
+    setBalance(b) { bal.textContent = formatStakeUnits(b, 3, currency); },
     // wired once (main.ts calls onAsset a single time) — onTap uses addEventListener, which would
     // STACK on repeat calls, unlike the old idempotent onclick assignment. Single-caller by design.
     onAsset(cb) { for (const t of tabs) onTap(t, () => cb(t.dataset.asset!)); },

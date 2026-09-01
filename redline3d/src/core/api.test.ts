@@ -5,6 +5,37 @@ function res(status: number, body: unknown): Response {
   return new Response(JSON.stringify(body), { status, headers: { "content-type": "application/json" } });
 }
 
+describe("createApi — Robinhood Chain cashier", () => {
+  it("posts a withdrawal for the BOUND wallet (no address ever leaves the client)", async () => {
+    let seen: { url: string; init: RequestInit } | null = null;
+    const api = createApi({
+      baseUrl: "http://x:8080", userId: "web-test",
+      fetch: async (url, init) => { seen = { url: String(url), init: init ?? {} }; return res(200, { withdrawalId: "w1", state: "awaiting_approval" }); },
+    });
+
+    const out = await api.withdraw({ amountCents: 250 });
+
+    expect(out).toEqual({ withdrawalId: "w1", state: "awaiting_approval" });
+    expect(seen!.url).toBe("http://x:8080/v1/withdraw");
+    expect(seen!.init.method).toBe("POST");
+    expect(JSON.parse(String(seen!.init.body))).toEqual({ amountCents: 250 });
+  });
+
+  it("reads the treasury deposit address", async () => {
+    let seenUrl = "";
+    const api = createApi({
+      baseUrl: "http://x:8080", userId: "web-test",
+      fetch: async (url) => { seenUrl = String(url); return res(200, { treasuryUsdcAta: "0xtreasury", boundWallet: "0xme", note: "n" }); },
+    });
+
+    const out = await api.depositAddress();
+
+    expect(out.treasuryUsdcAta).toBe("0xtreasury");
+    expect(out.boundWallet).toBe("0xme");
+    expect(seenUrl).toBe("http://x:8080/v1/deposit/address");
+  });
+});
+
 describe("createApi", () => {
   it("sends x-dev-user + base url and parses openRound", async () => {
     let seen: { url: string; init: RequestInit } | null = null;

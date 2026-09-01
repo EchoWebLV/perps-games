@@ -1,4 +1,4 @@
-import { sol } from "../core/money";
+import { formatStakeUnits } from "../core/stake-currency";
 import { onTap } from "./tap";
 
 /** play-amount ceiling in 0.01-SOL units (0.10 SOL); Six Wheeler's Heavy Load raises it */
@@ -130,7 +130,7 @@ export function createControls(ctrlMount: HTMLElement, goMount: HTMLElement, ped
     <div style="${seg}"><span class="lbl" style="${lab}">play amount</span>
       <div style="display:flex;align-items:center;gap:7px">
         <div id="sdn" class="step">−</div>
-        <div id="sval" class="num" style="flex:1;text-align:center;font-size:16px">0.01 SOL</div>
+        <div id="sval" class="num" style="flex:1;text-align:center;font-size:16px">0.01 USD</div>
         <div id="sup" class="step">+</div>
       </div></div>`;
   pedalMount.innerHTML = ""; // driving hint removed for a cleaner in-race UI
@@ -138,7 +138,7 @@ export function createControls(ctrlMount: HTMLElement, goMount: HTMLElement, ped
   injectBusyPulse();
 
   const q = (s: string) => (ctrlMount.querySelector(s) || goMount.querySelector(s) || pedalMount.querySelector(s)) as HTMLElement;
-  let d: 1 | -1 = 1, playAmount = 1, playCap = DEFAULT_PLAY_CAP, live = false; // 0.01-SOL units → 0.01 SOL default
+  let d: 1 | -1 = 1, playAmount = 1, playCap = DEFAULT_PLAY_CAP, live = false; // stake units (cents) → $0.01 default
   let gasOn = false, brakeOn = false, steerL = false, steerR = false;
   let launchCb = () => {}, cashCb = () => {};
   // anti-double-tap: when a round goes live the GO button becomes BAIL in place, so a quick second
@@ -150,6 +150,8 @@ export function createControls(ctrlMount: HTMLElement, goMount: HTMLElement, ped
   // swallows taps. lastLabel/lastWarn hold the underlying GO!/BAIL state so clearing busy restores it.
   let busyLabel: string | null = null;
   let lastLabel = "GO!", lastWarn = false;
+  // The bet label speaks the ACTIVE stake currency — dollars on the Robinhood Chain rail.
+  const play = (units: number) => formatStakeUnits(units, 2);
   const long = q("#long"), short = q("#short"), sval = q("#sval"), go = q("#go"),
     golabel = q("#golabel"), gofill = q("#gofill"), callbox = q("#callbox");
 
@@ -193,8 +195,8 @@ export function createControls(ctrlMount: HTMLElement, goMount: HTMLElement, ped
     go.style.opacity = locked ? "0.5" : "";
     go.style.cursor = locked ? "not-allowed" : "";
   };
-  onTap(q("#sup"), () => { if (!live) { playAmount = stepPlay(playAmount, 1, playCap); sval.textContent = sol(playAmount); } });  // +0.01 up to the car's cap
-  onTap(q("#sdn"), () => { if (!live) { playAmount = stepPlay(playAmount, -1, playCap); sval.textContent = sol(playAmount); } }); // -0.01 → 0.01 SOL floor
+  onTap(q("#sup"), () => { if (!live) { playAmount = stepPlay(playAmount, 1, playCap); sval.textContent = play(playAmount); } });  // +0.01 up to the car's cap
+  onTap(q("#sdn"), () => { if (!live) { playAmount = stepPlay(playAmount, -1, playCap); sval.textContent = play(playAmount); } }); // one step down → $0.01 floor
   onTap(go, () => {
     if (busyLabel !== null) return; // a launch/bail is in flight — swallow the tap (and the keyboard GO, which routes here)
     if (live) { if (performance.now() < cashLockUntil) return; cashCb(); } // bail is locked for BAIL_LOCK_MS after launch
@@ -245,7 +247,7 @@ export function createControls(ctrlMount: HTMLElement, goMount: HTMLElement, ped
     playAmount: () => playAmount,
     setPlayCap(cap: number) {
       playCap = cap;
-      if (playAmount > playCap) { playAmount = playCap; sval.textContent = sol(playAmount); } // cap shrank → pull the bet down
+      if (playAmount > playCap) { playAmount = playCap; sval.textContent = play(playAmount); } // cap shrank → pull the bet down
     },
     gas: () => gasOn,
     brake: () => brakeOn,

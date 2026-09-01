@@ -49,7 +49,7 @@ describe("main trade history wiring", () => {
   });
 
   it("begins exactly after the confirmed open loop and before the local engine", () => {
-    const launch = between("for (let rebuilt = false, retried = false; ; )", "controls.onCashout");
+    const launch = between('hud.setStatus("Launching…");', "controls.onCashout");
     const confirmedOpen = launch.indexOf("opened = await session.open(");
     const begin = launch.indexOf("tradeHistoryBridge.begin({");
     const engine = launch.indexOf("engine.launch({");
@@ -58,7 +58,7 @@ describe("main trade history wiring", () => {
     expect(begin).toBeGreaterThan(confirmedOpen);
     expect(engine).toBeGreaterThan(begin);
     expect(launch.match(/tradeHistoryBridge\.begin\(/g)).toHaveLength(1);
-    expect(launch).toContain("stakeBase: unitsToBase(playAmount, SOL_STAKE_CURRENCY),");
+    expect(launch).toContain("stakeBase: unitsToBase(playAmount),");
     expect(launch).toContain("entryPrice: opened.entryHuman,");
     expect(launch).toContain("entryTs: opened.entryTs,");
 
@@ -71,12 +71,13 @@ describe("main trade history wiring", () => {
 
     expect(finalize).toMatch(/if \(!roundActive\) return;\s*roundActive = false;\s*tradeHistoryBridge\.settle\(info\);/);
     expect(finalize.match(/tradeHistoryBridge\.settle\(/g)).toHaveLength(1);
-    expect(finalize).toContain("exitHuman: number");
+    expect(finalize).toContain("info: SettledInfo");
 
-    expect(main).toContain("onSettled: (info) => finalizeSettled(info)");
     expect(between("async function closeRound", "const FRIENDLY_CODES")).toContain("finalizeSettled(res)");
-    expect(between("async function doFlip", "function applyFlipReconcile")).toContain("finalizeSettled(res)");
-    expect(between("setInterval(async () =>", "// Boot into the Slopwheels collection")).toContain("finalizeSettled(snap)"); // end-marker follows the poll setInterval (was "// Warm every mode", removed when Task 8 deferred the boot precompileModes())
+    // The server rail settles in exactly TWO places: the cash-out close, and the mark poll. A flip
+    // can no longer settle (it is queued fire-and-forget), so there is no third sink to keep honest.
+    expect(between("async function doFlip", "function samplePrice")).not.toContain("finalizeSettled");
+    expect(between("let polling = false;", "// Boot into the Slopwheels collection")).toContain("finalizeSettled(settled)"); // end-marker follows the poll setInterval (was "// Warm every mode", removed when Task 8 deferred the boot precompileModes())
   });
 
   it("renders the settlement balance before starting background RPC reconciliation", () => {

@@ -22,13 +22,15 @@ import { createBootReveal } from "./core/boot-reveal";
 import { createPriceSource } from "./core/price-source";
 import { RoundEngine } from "./core/round";
 import type { Snapshot } from "./core/types";
-import { sol3 } from "./core/money";
+import { usd } from "./core/money";
 import { SOL_STAKE_CURRENCY, baseToUnits, unitsToBase } from "./core/stake-currency";
+import { createServerSession, type SettledInfo } from "./core/server-session";
+import { selectEvmWalletPort } from "./evm/rail";
+import { connectAndBindEvmWallet } from "./core/wallet-binding";
 import { applyConfirmedWalletSpend } from "./core/wallet-balance-model";
 import { clampInt } from "./core/round-sync";
 import { niceLev, tToLev } from "./core/leverage";
 import { liqPriceOf } from "./core/economics";
-import { reconcileFlip } from "./core/flip-reconcile";
 import { createUpgrades } from "./ui/upgrades";
 import { CONFIG } from "./core/config";
 import { carLeverageCeiling } from "@perps/engine/entitlements";
@@ -98,11 +100,7 @@ import { createRaceGame, mulberry32, type RaceGame } from "./render/race-mode";
 import { buildGrid } from "./core/race-grid";
 import { elevationAt } from "./core/track";
 import { HIGHWAY_MAX_LEV, highwayPose, seedHighwayMotion, speedForLeverage, stepHighwayMotion, synchronizedHighwayMotion, type HighwayMotion } from "./core/highway-auto";
-import { PublicKey } from "@solana/web3.js";
-import { CHAIN } from "./chain/config";
-import { createGameSession } from "./chain/game-session";
-import { HIGHWAY_DURATION_SENTINEL, isHighwayRound, roundKey, type RoundSnap } from "./chain/chain-round";
-import { selectChainWalletPort } from "./chain/wallet-select";
+import type { AnchorWalletLike } from "./chain/anchor-wallet";
 import { createCrateRoll, createCrateRollDraws, makeCrateRollIo } from "./chain/crate-roll";
 import { payDevnetSol } from "./chain/sol-payment";
 import {
@@ -199,55 +197,50 @@ ctx.scene.add(fireTrail.group);
 
 // core
 const engine = new RoundEngine();
-// ── on-chain round (Slice 4) ────────────────────────────────────────────────
-// The round loop + SOL play balance run on-chain via the dev-keypair port. The local engine
-// still drives the smooth visual ×; the on-chain Round is the only money truth.
-// The play ledger is denominated in CENTI-SOL units (1 unit = 0.01 SOL). With 9-decimal
-// wSOL this maps a unit to 10^7 lamports — the same ×100 scale the old cents model used.
-const BUY_IN_BASE = SOL_STAKE_CURRENCY.initialBuyInBase;
-let roundActive = false; // a round is open locally (de-dupes finalizeSettled across crank/poll/close)
-let simRound = false;    // guest practice round: engine-only, no wallet, no chain — free to try
-let settling = false;    // a close tx is in flight
+// ── the money loop (Robinhood Chain rail) ───────────────────────────────────
+// The round loop and the cash balance are SERVER-AUTHORITATIVE: /v1/round/open|action|close owns
+// the ledger (denominated in CENTS), stamps entry/exit from the server's own price feed, and
+// settles. The wallet only ever proves who the player is and moves real USDC in and out — it never
+// signs a round. The local engine still drives the smooth visual ×; the server is the money truth.
+//
+// Server account: coins/scrap/cars live on @perps/server keyed by the player's bound wallet. The
+// auth provider holds the wallet-bound session token; `api` talks to the server. Both are built
+// HERE, above the session, because the session is an adapter over `api`.
+const auth = createSessionAuth();
+const api = createApi({ auth });
+let roundActive = false; // a round is open locally (de-dupes finalizeSettled across poll/close)
+let simRound = false;    // guest practice round: engine-only, no wallet, no server — free to try
+let settling = false;    // a close is in flight
 let nearDeath = false;   // Skull "Death's Door" danger latch (hysteresis so it doesn't flicker)
-let opening = false;     // the GO handler (ensureSession+open) is mid-flight
-const session = createGameSession({
-  mint: new PublicKey(CHAIN.STAKE_MINT),
-  onSettled: (info) => finalizeSettled(info), // terminal-first background lever
-  port: selectChainWalletPort(), // Privy by default (app id set); ?wallet=dev forces the dev keypair
+let opening = false;     // the GO handler is mid-flight
+const session = createServerSession({
+  api,
+  port: selectEvmWalletPort(), // Privy by default (app id set); ?wallet=dev forces the dev key
 });
-// The cash chip + wallet hero show the player's TOTAL money — wallet SOL + play balance —
-// one number, the way the player thinks about it ("I sent 5 SOL, I have 5 SOL"). Moving
-// money between wallet and play (buy-in / cash-out) barely moves it; wins and losses do.
-// Display-only: money logic reads `session.balance()` (base units) directly.
-let walletSolUnits = 0; // last-read wallet SOL (centi-SOL units)
-let walletSolRequest = 0;
+// Flush coalesced leverage moves on their own clock. rAF is throttled hard in Claude Preview, so
+// the lever sync must not ride the render loop — a held throttle would land as one late segment.
+setInterval(() => { if (roundActive && !simRound) session.pump(); }, 100);
+// The cash chip and the wallet hero both show the SERVER LEDGER — the money the game can actually
+// bet with. USDC still sitting in the player's own wallet is a SEPARATE line in the cashier: it has
+// to be deposited before it can play, so the two are never added into one number.
+let walletSolUnits = 0; // parked solana rail: the wallet's SOL, priced only by the SOL crate path
 function renderKnownBalance() {
-  const play = baseToUnits(session.balance(), SOL_STAKE_CURRENCY);
-  balance = play + walletSolUnits;
+  balance = baseToUnits(session.balance());
   hud.setBalance(balance);
   walletUI.setBalance(balance);
 }
-function reconcileWalletSol() {
-  const request = ++walletSolRequest;
-  // Reconcile silently after event-driven updates. Read the current play balance again when the
-  // RPC resolves so a slow wallet response cannot restore a stale pre-settlement snapshot.
-  void session.walletSol().then((sol) => {
-    if (request !== walletSolRequest) return;
-    walletSolUnits = baseToUnits(sol, SOL_STAKE_CURRENCY);
-    renderKnownBalance();
-  }).catch(() => {});
-}
 function syncOnchainBalance() {
-  // Guests have no wallet — the chip reads "practice" and never renders SOL numbers.
+  // Guests have no account — the chip reads "practice" and never renders money.
   if (identity?.mode === "guest") { hud.setTryMode(true); return; }
   hud.setTryMode(false);
-  // Render cached chain state immediately, then reconcile the wallet side in the background.
   renderKnownBalance();
-  reconcileWalletSol();
 }
-// The game is fully on-chain: the SOL play balance + round loop live in `session` (the ER round).
-// `balance` is the displayed cash chip, sourced only from the on-chain play balance (centi-SOL units).
+// The displayed cash chip, in CENTS — the server ledger's own unit (see USD_STAKE_CURRENCY).
 let balance = 0;
+// Cashier limits in cents. The steppers move in $1 steps; the deposit ceiling is what one sitting
+// is expected to move, not a risk control — the server enforces its own.
+const DEPOSIT_MIN_CENTS = 100, DEPOSIT_MAX_CENTS = 10_000;
+const WITHDRAW_MIN_CENTS = 100;
 
 // Identity is deliberately nullable during the first lobby entry. The game scene boots before
 // the returning rider is loaded or a new rider is chosen, so presence must remain offline until
@@ -274,13 +267,16 @@ async function ensureSignedIn(fresh = false): Promise<boolean> {
       accountSync.disable();
       await session.loginFresh();
     } else {
-      await session.init();
+      await session.connect();
     }
-    syncOnchainBalance();
     // A prior account logout may have checkpointed progress locally before wallet binding existed.
     // Offer only THIS wallet's stash to Railway; a non-empty server account still wins in hydrate().
     const accountStash = fresh ? readSaveSnapshot(session.address()) : null;
     await syncAccount(fresh, accountStash ?? undefined);
+    // ORDER MATTERS: /v1/me needs the session token the wallet bind inside syncAccount just earned,
+    // so the cash balance is read only after it — never before.
+    await session.hydrate();
+    syncOnchainBalance();
     signedIn = true;
     restoreHighwayPosition();
     void syncTableCap(); // clamp the bet stepper to the live table limit right away
@@ -307,12 +303,14 @@ async function ensureSignedIn(fresh = false): Promise<boolean> {
 let zeroLocalSnapshotForSignIn = false;
 async function syncAccount(required = false, snapshotOverride?: AccountSnapshot): Promise<void> {
   try {
+    // The wallet is already connected by the time we get here (ensureSignedIn / boot reconnect),
+    // so `connect` just reports it — re-connecting would pop a second login UI.
     const port = {
       connect: async () => ({ address: session.address() }),
-      signMessage: (m: Uint8Array) => session.signMessage(m),
+      signMessage: (m: string) => session.signMessage(m),
     };
     await bindAndHydrate({
-      api, auth, port, accountSync,
+      api, auth, port, bind: connectAndBindEvmWallet, accountSync,
       localSnapshot: snapshotOverride ?? (zeroLocalSnapshotForSignIn
         ? { coins: 0, scrap: 0, cars: {}, levels: { turbo: 0, tank: 0, suspension: 0 } }
         : { coins: upgrades.coins(), scrap: upgrades.scrap(), cars: inventory.snapshot(), levels: upgrades.levels() }),
@@ -358,7 +356,7 @@ addEventListener("pagehide", () => priceSource.stop());
 addEventListener("pageshow", (e) => { if ((e as PageTransitionEvent).persisted) priceSource.restart(); });
 
 // ui
-const hud = createHud(hudRoot, SOL_STAKE_CURRENCY);
+const hud = createHud(hudRoot);
 const tach = createTach(hud.tachMount);
 const controls = createControls(hud.ctrlMount, hud.goMount, hud.pedalMount);
 const highwayControls = createHighwayControls(hud.highwayMount, {
@@ -444,18 +442,14 @@ const effRmax = (upgradedRmax = CONFIG.RMAX) => Math.round(
   carLeverageCeiling(upgradedRmax, carBaseLev) * (ability === "sixWheeler" ? HEAVY_LEV : 1),
 );
 const effMaxSec = () => Math.round(CONFIG.MAXSEC * (ability === "sixWheeler" ? HEAVY_DUR : 1));
-// Server account: coins/scrap/cars live on @perps/server keyed by the Privy identity. The auth
-// provider holds the wallet-bound session token; `api` talks to the server; `accountSync` reconciles
-// on sign-in and forwards best-effort deltas. Guests never enable it (all forwarders no-op).
-const auth = createSessionAuth();
-const api = createApi({ auth });
+// `accountSync` reconciles the account on sign-in and forwards best-effort deltas (`auth` + `api`
+// are built above, with the session). Guests never enable it — all its forwarders no-op.
 const tradeRecorder = createTradeHistoryRecorder({
   api,
   wallet: () => session.address(),
 });
 const tradeHistoryBridge = createTradeHistoryBridge(tradeRecorder);
 const tradeHistory = createTradeHistory(hudRoot, {
-  currency: SOL_STAKE_CURRENCY,
   signedIn: () => identity?.mode === "privy" && signedIn,
   flush: () => tradeHistoryBridge.flush(),
   load: (cursor) => api.listTrades(cursor),
@@ -533,28 +527,32 @@ const upgrades = createUpgrades(hudRoot, {
 coins.set(upgrades.coins(), false); // no pulse on the persisted balance at load
 scrap.set(upgrades.scrap(), false);
 
-// wallet page (opened by tapping the balance chip) — shows the player's deposit QR.
+// wallet page (opened by tapping the balance chip) — the cashier: the server cash balance up top,
+// the player's own wallet USDC underneath, and one stepper each way across that line.
 const walletUI = createWallet(hudRoot, {
-  currency: SOL_STAKE_CURRENCY,
-  // the wallet shown for funding is the on-chain session wallet (Privy embedded / dev keypair)
+  // the funding wallet is the player's own EVM wallet (Privy embedded / dev key)
   address: () => session.address(),
-  balance: () => balance,
-  // the wallet's own SOL (lamports → SOL), so a deposit visibly arrives before the first GO
-  fetchWalletSol: async () => { try { return Number(await session.walletSol()) / 10 ** SOL_STAKE_CURRENCY.decimals; } catch { return null; } },
-  onchain: {
-    status: () => ({ delegated: session.delegated(), playCents: baseToUnits(session.balance(), SOL_STAKE_CURRENCY) }),
-    // One player action. "Cash out" quietly undelegates the ER session (if one is live) and THEN
-    // withdraws to the wallet — the player never sees the delegate/undelegate lifecycle, they just
-    // move their balance to their wallet in a single tap.
-    cashOut: async () => {
-      hud.setStatus("Cashing out…");
-      if (session.delegated()) await session.endSession(); // undelegate under the hood
-      await session.withdraw();
+  balance: () => balance,                                  // server ledger, in cents
+  // the wallet's own USDC, so a deposit visibly arrives before the first GO
+  fetchWalletUsdc: () => session.walletUsdc(),
+  deposit: {
+    minCents: DEPOSIT_MIN_CENTS,
+    maxCents: DEPOSIT_MAX_CENTS,
+    // A plain USDC transfer to the server's treasury. The deposit lands in the ledger once the
+    // server's watcher sees it confirm — the cashier says so rather than faking an instant credit.
+    send: (amountCents) => session.deposit(amountCents),
+  },
+  withdraw: {
+    minCents: WITHDRAW_MIN_CENTS,
+    // a getter: the ceiling IS the balance, and the balance moves every round
+    get maxCents() { return Math.max(WITHDRAW_MIN_CENTS, balance); },
+    // The client never posts a destination — the server pays the wallet it bound to this account.
+    request: async (amountCents) => {
+      await session.withdraw(amountCents);
       syncOnchainBalance();
-      hud.setStatus("Cashed out to your wallet.");
     },
   },
-  // Log out moved to the menu (settings); the wallet page is deposit-only now.
+  // Log out moved to the menu (settings); the wallet page is money-only.
 });
 hud.onWallet(() => {
   if (engine.getPhase() === "live") return;
@@ -586,7 +584,7 @@ const setAbility = (a?: CarAbility) => {
 // Effective cap = min(car ability cap, what the pot + this session's till can host); the
 // 1-unit floor keeps the stepper alive so the truly-broke-house backstop can still be named.
 let abilityPlayCap = DEFAULT_PLAY_CAP;
-let tablePlayCap = Infinity; // 0.01-SOL units; Infinity until the first successful read
+let tablePlayCap = Infinity; // cents; Infinity until the first successful read
 function syncPlayCap() {
   controls.setPlayCap(Math.max(1, Math.min(abilityPlayCap, Number.isFinite(tablePlayCap) ? tablePlayCap : abilityPlayCap)));
 }
@@ -595,8 +593,10 @@ async function syncTableCap() {
   if (capSyncing) return;
   capSyncing = true;
   try {
-    const lim = await session.tableLimit(); // null = unknown (not connected / RPC blip): keep the last cap
-    if (lim !== null) { tablePlayCap = Number(lim / BigInt(unitsToBase(1, SOL_STAKE_CURRENCY))); syncPlayCap(); }
+    // null = unknown: keep the last cap. The server rail enforces its own house limit at open,
+    // so this stays null today — kept as the seam a served cap would arrive through.
+    const lim = await session.tableLimit();
+    if (lim !== null) { tablePlayCap = Number(lim / BigInt(unitsToBase(1))); syncPlayCap(); }
   } finally { capSyncing = false; }
 }
 // keep the cap honest while the player sits on the bet screen (other tables carve the same
@@ -764,9 +764,18 @@ const garage = createCarPicker(hudRoot, CAR_DEFS, (c) => equipCar(c), () => upgr
 garageForHydration = garage;
 (window as Window & { setSplashProgress?: (pct: number) => void }).setSplashProgress?.(75); // boot milestone: inventory + garage up
 
+/**
+ * The PARKED solana rail's crate signer. The ER game session used to own an anchor wallet, and the
+ * SOL crate price + MagicBlock VRF draw both signed with it. The server-authoritative session has
+ * no such wallet — and does not need one: the live rail's crates are server-rolled commit-reveal
+ * (see `crateCommit` below). Returning null keeps both parked paths compiling and makes them take
+ * their own "unavailable" branch instead of pretending to work.
+ */
+function parkedSolanaCrateWallet(): AnchorWalletLike | null { return null; }
+
 // Crate Shop (lobby Crates building): buy a crate → roll a car by rarity odds → reveal. A NEW car
-// unlocks in the garage; a DUPLICATE melts to Scrap. Account crates use MagicBlock VRF; only guests
-// use client RNG for local practice.
+// unlocks in the garage; a DUPLICATE melts to Scrap. Account crates roll from the server's
+// commit-reveal randomness; only guests use client RNG for local practice.
 const crateBox = createCrateBox(hudRoot, {
   cars: () => CAR_DEFS,
   grantCar: (name) => inventory.grant(name),
@@ -780,7 +789,7 @@ const crateBox = createCrateBox(hudRoot, {
   lowTier: quality.tier === "low",
   buyWithSol: async (_crateKey, priceSol) => {
     if (identity?.mode !== "privy") throw new Error("sol_payment_requires_sign_in");
-    const wallet = session.anchorWallet();
+    const wallet = parkedSolanaCrateWallet();
     if (!wallet) throw new Error("sol_payment_wallet_unavailable");
     const signature = await payDevnetSol(wallet, CRATE_TREASURY, priceSol);
     walletSolUnits = applyConfirmedWalletSpend(
@@ -788,22 +797,20 @@ const crateBox = createCrateBox(hudRoot, {
       priceSol,
       SOL_STAKE_CURRENCY.displayUnitDecimals,
     );
-    walletSolRequest++; // invalidate any pre-payment wallet read still in flight
     renderKnownBalance();
-    reconcileWalletSol();
     return signature;
   },
   // MagicBlock VRF (signed-in only): one randomness request per pull, signed by the same
   // session wallet as rounds. Guests fall through to client RNG (practice parity).
   vrfDraws: () => {
     if (!identity || identity.mode !== "privy") return null;
-    const w = session.anchorWallet();
+    const w = parkedSolanaCrateWallet();
     if (!w) return null;
     return createCrateRollDraws(makeCrateRollIo(w));
   },
   vrfRoll: () => {
     if (!identity || identity.mode !== "privy") return null;
-    const w = session.anchorWallet();
+    const w = parkedSolanaCrateWallet();
     if (!w) return null;
     // The verified path ships only the raw bytes — the SERVER rolls the outcome from them — so ask
     // the roller for 0 client-side draws. (cratebox calls this zero-arg and reads only `bytesHex`.)
@@ -813,6 +820,10 @@ const crateBox = createCrateBox(hudRoot, {
   vrfRequired: () => identity?.mode === "privy",
   pity: () => loadPity(),
   recordPity: (s) => savePity(s),
+  // EVM rail: reserve the server's randomness BEFORE the open, so the commitment the reveal is
+  // checked against was published before the server knew which crate it was rolling. Without this
+  // an account-backed open has no proven-randomness source at all and cratebox refuses to roll.
+  crateCommit: () => api.crateCommit(),
   openVerified: (p) => api.openCrate(p),
   applyVerified: (r) => {
     inventory.hydrate({ ...inventory.snapshot(), [r.carId]: r.count });
@@ -1560,41 +1571,6 @@ addEventListener("pointermove", (e) => {
   touchGas = !touchBrake;
 });
 
-function assetForRoundFeed(feed?: string): "BTC" | "ETH" | "SOL" | null {
-  if (!feed) return null;
-  for (const key of Object.keys(CHAIN.FEEDS) as ("BTC" | "ETH" | "SOL")[]) {
-    if (CHAIN.FEEDS[key].toBase58() === feed) return key;
-  }
-  return null;
-}
-
-function reconcileHighwaySnapshot(snap: RoundSnap): void {
-  const dir = snap.dir === -1 ? -1 : 1;
-  const restoredAsset = assetForRoundFeed(snap.feed);
-  if (restoredAsset) {
-    asset = restoredAsset;
-    hud.setActiveAsset(asset);
-  }
-  highwayConfirmedLev = snap.lev;
-  highwayControls.setConfirmed(snap.lev);
-  game.lev = snap.lev;
-  round.entryPx = snap.entryHuman;
-  round.dir = dir;
-  roundStartMs = snap.entryTs > 0 ? snap.entryTs * 1000 : Date.now();
-  roundMaxSec = Number.POSITIVE_INFINITY;
-  engine.launch({
-    dir,
-    lev: snap.lev,
-    stake: snap.stake === undefined ? controls.playAmount() : baseToUnits(snap.stake, SOL_STAKE_CURRENCY),
-    entryRaw: snap.entryHuman,
-    banked: Number(snap.banked) / 1_000_000,
-    startMs: roundStartMs,
-    maxSec: Number.POSITIVE_INFINITY,
-    borrowBpsPerDay: 1,
-  });
-  if (roundActive) advertiseHighwayPosition(dir, snap.lev);
-}
-
 function advertiseHighwayPosition(dir: 1 | -1, lev: number): void {
   if (mode !== "highway" || identity?.mode !== "privy" || !signedIn || simRound || !roundActive) return;
   const roundPda = deriveHighwayRoundPda(session.address());
@@ -1603,42 +1579,21 @@ function advertiseHighwayPosition(dir: 1 | -1, lev: number): void {
   presence?.advertiseHighway({ asset, roundPda, dir, lev, laneSeed, carId: equippedCar.name });
 }
 
+/**
+ * Mid-round position restore, PARKED with the solana rail. The ER kept an open round alive across a
+ * reload and the client re-adopted it here. The server rail does the opposite and better: a round
+ * left dangling is SETTLED during `session.hydrate()`, at the server's own marks, whether or not
+ * the player ever comes back. So there is nothing left to restore — the call sites stay because the
+ * solana rail would need them again.
+ */
 function restoreHighwayPosition(): boolean {
-  const snap = session.liveRound();
-  if (!snap || !isHighwayRound(snap)) return false;
-  const dir = snap.dir === -1 ? -1 : 1;
-  if (mode !== "highway") {
-    controls.setDir(dir);
-    enterHighway(true);
-  }
-  reconcileHighwaySnapshot(snap);
-  const roundPda = deriveHighwayRoundPda(session.address());
-  highwayMotion = roundPda
-    ? synchronizedHighwayMotion(roundPda, dir, snap.lev, Date.now() / 1000)
-    : seedHighwayMotion(roundKey(snap, session.address()), dir);
-  roundActive = true;
-  simRound = false;
-  nearDeath = false;
-  deathsDoor.clear();
-  autoExit.setLive(true);
-  controls.setLive(true, "CASH OUT");
-  garage.setBusy(true);
-  mapBtn.setVisible(false);
-  upgrades.setBusy(true);
-  walletUI.setBusy(true);
-  highwayControls.show();
-  highwayControls.setDisabled(false);
-  hud.setOpenPosition(true);
-  syncPresenceLifecycle();
-  advertiseHighwayPosition(dir, snap.lev);
-  hud.setStatus(session.crankArmed() ? "Position restored." : "Position restored. Auto protection needs rearming.");
-  return true;
+  return false;
 }
 
 // Single sink for every ending — manual cash out, terminal-first flip/lever, and the crank poll.
 // Freezes the local visual, sets the HUD outcome from the on-chain settled payload, fires FX, and
 // refreshes the on-chain balance. Idempotent per round via `roundActive`.
-function finalizeSettled(info: { outcome: number; outcomeName: string; payout: bigint; exitHuman: number }) {
+function finalizeSettled(info: SettledInfo) {
   if (!roundActive) return;
   roundActive = false;
   tradeHistoryBridge.settle(info);
@@ -1647,7 +1602,7 @@ function finalizeSettled(info: { outcome: number; outcomeName: string; payout: b
   if (engine.getPhase() === "live") engine.cashout(price, now); // freeze the visual at the live value
   const finalEq = engine.snapshot(price, now).equity;
   const liq = info.outcome === 2; // 0 cashout · 1 cap · 2 liq · 3 time
-  const payoutUnits = baseToUnits(info.payout, SOL_STAKE_CURRENCY);
+  const payoutUnits = baseToUnits(info.payout);
   nearDeath = false;
   if (liq) deathsDoor.kill(); else deathsDoor.clear(); // Skull: shatter on liq, stand down otherwise (no-op off-Skull)
   autoExit.setLive(false); // Pink Rod panel: unlock for the next round
@@ -1663,7 +1618,7 @@ function finalizeSettled(info: { outcome: number; outcomeName: string; payout: b
   if (liq) {
     // Flintstone airbag: a liq can now carry a refund — show what the airbag saved.
     hud.setStatus(payoutUnits > 0
-      ? `💥 Wrecked — airbag saved ${sol3(payoutUnits)}.`
+      ? `💥 Wrecked — airbag saved ${usd(payoutUnits)}.`
       : "💥 Liquidated. Lost the play amount.");
     fx.liquidate(); audio.liquidate(); navigator.vibrate?.([30, 40, 30, 40, 90]);
   } else {
@@ -1673,14 +1628,14 @@ function finalizeSettled(info: { outcome: number; outcomeName: string; payout: b
     if (jackpot > 0) upgrades.addCoins(jackpot);
     hud.setStatus(
       (jackpot > 0 ? `🎰 TRIPLE 7s! +${jackpot} coins · ` : "") +
-      `Settled at ×${finalEq.toFixed(2)}. Banked ${sol3(payoutUnits)}.`,
+      `Settled at ×${finalEq.toFixed(2)}. Banked ${usd(payoutUnits)}.`,
     );
     fx.confetti(); audio.cashout(); navigator.vibrate?.(jackpot > 0 ? [35, 60, 35, 60, 120] : 35);
   }
   // Settlement responses carry the authoritative play balance. Show it now; RPC is only a
   // background reconciliation path for delayed chain indexing or older settlement fallbacks.
   renderKnownBalance();
-  void session.refreshBalance(session.delegated()).then(() => syncOnchainBalance()).catch(() => {});
+  void session.refreshBalance().then(() => syncOnchainBalance()).catch(() => {});
   void syncTableCap(); // a settle moved money between player and till — re-clamp the bet cap
   // your run goes up in lights — the board leads with real settles over the demo feed
   stripBoard?.noteSettle({ tag: identity?.name ?? "you", mult: liq ? 0 : finalEq, sol: liq ? undefined : payoutUnits / 100 }); // only rounds settle here — worlds exist by then, but guard: settles fire off async chain polls
@@ -1761,7 +1716,10 @@ async function closeRound(reason: "cashout" | "expire") {
   controls.setBusy("BAILING…"); // the big button shows the bail is in flight
   try {
     const res = await session.close();
-    finalizeSettled(res);
+    // null = the server could not settle right now (halted feed / unreachable). The round stays
+    // open and the mark poll below finishes it — never finalize on a settlement we didn't get.
+    if (res) finalizeSettled(res);
+    else hud.setStatus("Close didn't confirm — the round will settle shortly.");
   } catch {
     controls.setLive(true, "CASH OUT");
     hud.setStatus("Close didn't confirm — the round will settle shortly.");
@@ -1773,9 +1731,14 @@ async function closeRound(reason: "cashout" | "expire") {
   }
 }
 
-// Session errors that carry their own player-facing message (surface verbatim, never retry —
-// they describe a real state, not a hiccup): delegate busy / table limit / needs a deposit.
-const FRIENDLY_CODES = new Set(["delegate_busy", "bankroll_full", "wallet_unfunded"]);
+// Server states that are worth NAMING rather than retrying — they describe something real about
+// the account, not a hiccup. Keyed by ApiError.code (see core/api.ts); anything else is transient
+// and gets the generic line.
+const FRIENDLY_CODES: Record<string, string> = {
+  insufficient_balance: "Not enough cash for this bet — add funds in your wallet.",
+  round_already_open: "Still settling your last round — press GO again in a moment.",
+  feed_halt: "The price feed paused — try again in a moment.",
+};
 
 // A keyboard GO (Space/Enter) must respect the same guards the click path has: never launch off
 // the track (lobby/showroom), nor behind an open shop/crate/garage/how-to overlay. Wiring the
@@ -1810,137 +1773,42 @@ controls.onLaunch(async () => {
     // Not signed in yet? This is where the wallet connects (Privy opens its login modal here).
     if (!(await ensureSignedIn())) return;
     if (roundActive) return; // ensureSignedIn may have restored an existing Highway position
-    // First GO auto-starts the ER session (buy-in if empty + slice the bankroll + delegate).
-    let playAmount = controls.playAmount(); // 0.01-SOL units — sizes the house slice for the round
-    hud.setStatus("Getting on track…");
-    try {
-      // Devnet transients (RPC/ER hiccup, confirm flake) fail a press that would succeed if
-      // pressed again — so press again ourselves: one silent retry before surfacing anything.
-      // ensureSession is re-entrant by design (it's exactly what the next GO would run).
-      for (let attempt = 0; ; attempt++) {
-        try {
-          // bankroll_full here = the pot can't host THIS stake. The stepper cap makes that
-          // nearly impossible to dial up, but another table can carve the pot between the cap
-          // poll and this press — so clamp to the fresh limit and play that, never error.
-          for (let clamped = false; ; clamped = true) {
-            try {
-              // buy in at least the bet: a Heavy-Load bet can exceed the standard 0.1 SOL buy-in
-              await session.ensureSession(Math.max(BUY_IN_BASE, unitsToBase(playAmount, SOL_STAKE_CURRENCY)), unitsToBase(playAmount, SOL_STAKE_CURRENCY));
-              break;
-            } catch (e: any) {
-              if (e?.code !== "bankroll_full" || clamped) throw e;
-              await syncTableCap(); // pulls the stepper (and the visible bet label) down with it
-              const lower = controls.playAmount();
-              if (!(lower < playAmount) || tablePlayCap < 1) throw e; // nothing to clamp to → named backstop
-              playAmount = lower;
-              hud.setStatus(`Table's a little light — playing ${sol3(playAmount)} this round.`);
-            }
-          }
-          break;
-        } catch (e: any) {
-          if (attempt > 0 || FRIENDLY_CODES.has(e?.code)) throw e; // named states surface immediately
-          console.warn("session start hiccup — retrying once:", e);
-          hud.setStatus("Rough patch — retrying…");
-          await new Promise((r) => setTimeout(r, 1200));
-        }
-      }
-    } catch (e: any) {
-      console.error("session start failed", e); // the open() catch logs too — keep this path debuggable
-      const friendly = FRIENDLY_CODES.has(e?.code);
-      hud.setStatus(friendly ? e.message : "Couldn't start the round. Try again.");
-      if (e?.code === "wallet_unfunded") walletUI.open(); // show the deposit address right away
-      // A buy-in may have landed before the failure (e.g. bought in, then the bankroll slice
-      // was refused) — refresh so the chip shows the money that DID move into the play balance.
-      void session.refreshBalance(false).then(() => syncOnchainBalance()).catch(() => {});
-      return;
-    }
-    // NOTE: no refreshBalance(true) here — ensureSession just computed the authoritative
-    // balance (with a stale-ER-clone guard); a bare ER re-read can serve a stale 0 and
-    // bounce a funded player ("Not enough SOL" — live-hit).
-    syncOnchainBalance();
-
-    if (session.balance() < BigInt(unitsToBase(playAmount, SOL_STAKE_CURRENCY))) {
-      hud.setStatus("Not enough SOL for this bet — send SOL to your wallet first.");
+    // The server holds the ledger, so there is no session to start, no bankroll to slice and no
+    // table to delegate: a GO is one POST. `playAmount` is in cents.
+    const playAmount = controls.playAmount();
+    if (session.balance() < BigInt(unitsToBase(playAmount))) {
+      hud.setStatus("Not enough cash for this bet — add funds in your wallet.");
       walletUI.open();
       return;
     }
     const dir = controls.dir();
     // Highway: you pull onto the road from a stop — open in bottom gear (10×); the ladder
-    // takes it from there. Racer: the throttle's live leverage, on-chain RMAX=3000.
+    // takes it from there. Racer: the throttle's live leverage, RMAX=3000.
     const lev = mode === "highway" ? highwayControls.value() : clampInt(game.lev, 10, 3000);
     roundMaxSec = mode === "highway" ? Number.POSITIVE_INFINITY : effMaxSec();
-    const openDuration = mode === "highway" ? HIGHWAY_DURATION_SENTINEL : roundMaxSec;
     hud.setStatus("Launching…");
-    // liq floor in on-chain SCALE units (1e6): CONFIG.LIQ is 0.20 by default and drops toward
-    // 0.10 as the Suspension upgrade is bought. The program clamps to [100_000, 200_000] and
-    // stamps it on the round, so settlement liquidates at the player's own upgraded floor.
-    // Skull "Death's Door": pass a 2s on-chain liq-grace so the crank holds a sub-floor
-    // dip for 2s (the Death's-Door animation) instead of liquidating on the first breach —
-    // recover within the window and you survive. Every other car passes 0 (immediate liq).
-    // Pink Rod "Auto-Exit": the panel's stop-loss / take-profit thresholds (SCALE units,
-    // 0 = OFF) — the crank auto-cashes-out when equity crosses one. Other cars send 0/0.
-    const graceSecs = ability === "skull" ? 2 : 0;
-    const { slFp, tpFp } = ability === "pinkRod" ? autoExit.values() : { slFp: 0, tpFp: 0 };
-    // Flintstone "Stone-Age Airbag": a liquidation refunds min(20%, wreck equity) of the
-    // stake — settled on-chain like a forced cash-out at that equity (standard edge applies).
-    const refundFp = ability === "airbag" ? 200_000 : 0;
     let opened;
-    // One GO = one launch even when this session's house pot is spent. A 6005 open
-    // (HouseUndercapitalized: a hot streak drained the till below this round's lock) is
-    // the state the NEXT GO would recover from anyway — so rebuild the table under the
-    // hood (sweep the spent till into the master pot, carve a fresh one, redelegate) and
-    // retry the open ONCE in this same press. The player never manages sessions; only a
-    // rebuild that itself fails, or a second 6005, surfaces a message — a NAMED one.
-    for (let rebuilt = false, retried = false; ; ) {
-      try {
-        opened = await session.open(asset, dir, lev, unitsToBase(playAmount, SOL_STAKE_CURRENCY), openDuration, Math.round(CONFIG.LIQ * 1_000_000), graceSecs, slFp, tpFp, refundFp);
-        break;
-      } catch (e: any) {
-        console.error("on-chain open failed", e);
-        // HouseUndercapitalized is RaiderError #6005 — the on-chain error arrives as the raw
-        // custom code ({"Custom":6005}), not the name, so match both.
-        const emsg = String(e?.message ?? "");
-        const drained = emsg.includes("HouseUndercapitalized") || emsg.includes("6005");
-        if (drained && !rebuilt) {
-          rebuilt = true;
-          hud.setStatus("Hot streak — pulling up a fresh table…");
-          try {
-            await session.endSession();
-            await session.ensureSession(Math.max(BUY_IN_BASE, unitsToBase(playAmount, SOL_STAKE_CURRENCY)), unitsToBase(playAmount, SOL_STAKE_CURRENCY));
-            syncOnchainBalance();
-            hud.setStatus("Launching…");
-            continue;
-          } catch (re: any) {
-            console.error("table rebuild failed", re);
-            const friendly = FRIENDLY_CODES.has(re?.code);
-            hud.setStatus(friendly ? re.message : "Couldn't start the round. Try again.");
-            if (re?.code === "wallet_unfunded") walletUI.open();
-          }
-        } else if (drained) {
-          // a fresh till AND still 6005: the carve race for the last of the pot was lost —
-          // ensureSession's adaptive sizing would otherwise have named a table limit.
-          try { await session.endSession(); } catch (err) { console.warn("teardown after spent pot failed:", err); }
-          hud.setStatus("The table's bankroll is spent — try a smaller bet.");
-        } else if (!retried) {
-          // transient (RPC/ER hiccup): open() reconciles any stale round on entry, so an
-          // immediate second attempt is exactly what "press GO again" would do — do it here.
-          retried = true;
-          hud.setStatus("Rough patch — retrying…");
-          await new Promise((r) => setTimeout(r, 1200));
-          continue;
-        } else {
-          hud.setStatus("Couldn't start the round. Try again.");
-        }
-        syncOnchainBalance();
-        controls.setLive(false, "GO!");
-        return;
-      }
+    try {
+      opened = await session.open(asset, dir, lev, unitsToBase(playAmount));
+    } catch (e: any) {
+      console.error("round open failed", e);
+      // Named server states say something true about the account and must surface verbatim;
+      // everything else is a hiccup and gets the generic line. There is no retry ladder here:
+      // `session.open` already reconciles a straggler round and re-opens once by itself.
+      const friendly = FRIENDLY_CODES[String(e?.code ?? e?.message ?? "")];
+      hud.setStatus(friendly ?? "Couldn't start the round. Try again.");
+      if (e?.code === "insufficient_balance") walletUI.open();
+      void session.refreshBalance().then(() => syncOnchainBalance()).catch(() => {});
+      controls.setLive(false, "GO!");
+      return;
     }
+    // The stake left the ledger inside /v1/round/open — repaint the chip before the round starts.
+    syncOnchainBalance();
     tradeHistoryBridge.begin({
       asset,
       dir,
       lev,
-      stakeBase: unitsToBase(playAmount, SOL_STAKE_CURRENCY),
+      stakeBase: unitsToBase(playAmount),
       entryPrice: opened.entryHuman,
       entryTs: opened.entryTs,
     });
@@ -1957,10 +1825,9 @@ controls.onLaunch(async () => {
     if (mode === "highway") {
       highwayConfirmedLev = lev;
       highwayControls.setConfirmed(lev);
-      const roundPda = deriveHighwayRoundPda(session.address());
-      highwayMotion = roundPda
-        ? synchronizedHighwayMotion(roundPda, dir, lev, Date.now() / 1000)
-        : seedHighwayMotion(roundKey({ deadlineTs: opened.deadlineTs }, session.address()), dir);
+      // The server round id is the shared secret every viewer of this position already has, so it
+      // seeds the traffic exactly as the round PDA used to on the ER rail.
+      highwayMotion = seedHighwayMotion(`${session.address()}:${opened.roundId}`, dir);
       game.lev = lev;
       hud.setOpenPosition(true);
       syncPresenceLifecycle();
@@ -1970,9 +1837,7 @@ controls.onLaunch(async () => {
     }
     controls.setLive(true, "CASH OUT");
     garage.setBusy(true); mapBtn.setVisible(false); upgrades.setBusy(true); walletUI.setBusy(true);
-    hud.setStatus(session.crankArmed() ? "" : mode === "highway"
-      ? "⚠ Auto protection is off. Keep the app open or tap CASH OUT."
-      : "⚠ Auto cash-out is off this round. Tap CASH OUT before the timer ends.");
+    hud.setStatus(session.crankArmed() ? "" : "⚠ Auto cash-out is off. Tap CASH OUT yourself.");
   } finally {
     opening = false;
     highwayControls.setDisabled(false);
@@ -1988,37 +1853,22 @@ controls.onCashout(() => {
 // Lane-bet flips fire an on-chain flip() in the background (instant local feel above). A terminal-first
 // flip settles the round via finalizeSettled; single-flight via `flipping` so a held lane can't spam txs.
 let flipping = false;
+/**
+ * Flip LONG↔SHORT mid-round. On the ER rail this was a signed transaction that could disagree with
+ * the optimistic local flip, so the client reconciled against the confirmed chain read. The server
+ * rail has no such gap: the flip is queued through round-sync (retried until it lands) and the
+ * server re-anchors the entry at ITS mark, which the next poll reports. So the local flip is simply
+ * announced — there is nothing to reconcile against, and no settlement can arrive from a flip.
+ */
 async function doFlip(dir: 1 | -1) {
   if (flipping || !roundActive) return;
-  if (simRound) return; // practice: the engine's setDir already flipped — no chain to mirror
+  if (simRound) return; // practice: the engine's setDir already flipped — no server round to mirror
   flipping = true;
   try {
-    const res = await session.flip(dir);
-    if (res.settled) { finalizeSettled(res); return; }
-    // The flip landed but re-anchored to a direction that disagrees with our optimistic one →
-    // the confirmed chain read wins (reconcile back to it).
-    applyFlipReconcile(dir, { status: 1, dir: res.dir, entryHuman: res.entryHuman });
-  } catch {
-    // The on-chain flip did NOT land — the optimistic local flip is now ahead of the chain. Snap the
-    // HUD/engine back to the confirmed chain direction so we never show a position the chain doesn't
-    // hold (best-effort: if the read also fails there's nothing to revert to, and close()/the crank
-    // still settle at on-chain truth).
-    const snap = await session.poll().catch(() => null);
-    applyFlipReconcile(dir, snap);
+    session.noteFlip(dir);
   } finally {
     flipping = false;
   }
-}
-// Desired-vs-confirmed: when the confirmed chain read disagrees with the optimistic flip, revert the
-// local dir + entry to the chain's — otherwise the HUD (and liq line) show a position the chain never took.
-function applyFlipReconcile(optimisticDir: 1 | -1, confirmed: { status: number; dir: number; entryHuman: number } | null) {
-  const fix = reconcileFlip(optimisticDir, confirmed);
-  if (!fix || !roundActive) return;
-  engine.setDir(fix.dir, fix.entryPx); // re-anchor the engine to the chain's dir + entry
-  round.dir = fix.dir;
-  round.entryPx = fix.entryPx;
-  controls.setDir(fix.dir);
-  hud.setStatus(`Flip didn't take — back to ${fix.dir === 1 ? "LONG" : "SHORT"}.`);
 }
 
 // One price update per frame, shared by the race and highway branches: eases the display
@@ -2189,7 +2039,7 @@ function frame(now: number) {
         game.equity = snap.equity;
         hud.setMultiplier(Math.max(0, snap.equity), "live");
         controls.setBuffer(Math.max(0, Math.min(1, snap.buffer)));
-        controls.setLive(true, `${snap.equity >= 1 ? "CASH OUT" : "BAIL"} ${sol3(snap.payout)}`, snap.equity < 1);
+        controls.setLive(true, `${snap.equity >= 1 ? "CASH OUT" : "BAIL"} ${usd(snap.payout)}`, snap.equity < 1);
         hud.setTimer(0, true);
         car.setEquity("live", Math.max(0, snap.equity));
       }
@@ -2300,7 +2150,7 @@ function frame(now: number) {
       }
       hud.setTimer(roundMaxSec - (nowMs - roundStartMs) / 1000, true);
       car.setEquity("live", Math.max(0, snap.equity));
-      controls.setLive(true, `${snap.equity >= 1 ? "CASH OUT" : "BAIL"} ${sol3(snap.payout)}`, snap.equity < 1);
+      controls.setLive(true, `${snap.equity >= 1 ? "CASH OUT" : "BAIL"} ${usd(snap.payout)}`, snap.equity < 1);
       // Local time-cap backstop: the native crank normally settles first; this closes on-chain if it lags.
       if (roundActive && !settling && (nowMs - roundStartMs) / 1000 >= roundMaxSec) void closeRound("expire");
     }
@@ -2405,17 +2255,16 @@ function frame(now: number) {
   else ctx.renderer.render(ctx.scene, ctx.camera);
   requestAnimationFrame(frame);
 }
-// Poll the on-chain Round ~1.5×/s so a crank/keeper settlement surfaces even if the player never taps.
-// setInterval (not rAF) because rAF is throttled hard in Claude Preview.
+// Poll the server's mark ~1.5×/s so a settler-side settlement (auto cash-out, liq, expiry) surfaces
+// even if the player never taps. setInterval (not rAF) because rAF is throttled hard in Claude Preview.
 let polling = false;
 setInterval(async () => {
-  if (!roundActive || settling || polling || !session.delegated()) return;
+  if (!roundActive || settling || polling) return;
   polling = true;
   try {
-    const snap = await session.poll();
-    if (snap && snap.status === 2) finalizeSettled(snap);
-    else if (snap && mode === "highway" && isHighwayRound(snap)) reconcileHighwaySnapshot(snap);
-  } catch { /* transient RPC — keep last */ }
+    const { settled } = await session.poll();
+    if (settled) finalizeSettled(settled);
+  } catch { /* transient network — keep the last mark */ }
   finally { polling = false; }
 }, 650);
 
@@ -2622,9 +2471,12 @@ if (identity?.mode === "privy") {
   void session.reconnect().then(async (ok) => {
     if (!ok) return;
     signedIn = true;
-    syncOnchainBalance();
     void syncTableCap();
     await syncAccount();                 // hydrate coins/scrap/cars + the account's redeemed-code set
+    // Same ORDER as ensureSignedIn: /v1/me needs the session token the bind inside syncAccount just
+    // earned. hydrate() also settles any round left dangling by the reload that brought us here.
+    await session.hydrate().catch((e) => { console.error("cash hydrate failed", e); });
+    syncOnchainBalance();
     restoreHighwayPosition();
     reconnectPresenceForIdentity();
     // A guest-to-account save swap reloads before its post-wall flow can run, so the boot
