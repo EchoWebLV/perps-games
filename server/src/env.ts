@@ -35,10 +35,16 @@ const EnvShape = z.object({
   EVM_RPC_URL: z.string().url().optional(),
   EVM_RPC_URL_FALLBACK: z.string().url().optional(),
   EVM_CHAIN_ID: z.coerce.number().int().positive().optional(),
-  EVM_USDC_ADDRESS: z.string().regex(/^0x[0-9a-fA-F]{40}$/).optional(),
-  EVM_TREASURY_ADDRESS: z.string().regex(/^0x[0-9a-fA-F]{40}$/).optional(),
+  // Addresses are lowercased at the seam so every downstream store/compare sees one casing.
+  EVM_USDC_ADDRESS: z.string().regex(/^0x[0-9a-fA-F]{40}$/).optional().transform((v) => v?.toLowerCase()),
+  EVM_TREASURY_ADDRESS: z.string().regex(/^0x[0-9a-fA-F]{40}$/).optional().transform((v) => v?.toLowerCase()),
   EVM_TREASURY_SECRET: z.string().regex(/^0x[0-9a-fA-F]{64}$/).optional(),
-  EVM_CONFIRMATIONS: z.coerce.number().int().nonnegative().default(12),
+  // Deposit finality depth. A blank var must fall back to the default, not coerce to 0 — 0
+  // confirmations would accept an unmined deposit.
+  EVM_CONFIRMATIONS: z.preprocess(
+    (v) => (v === "" ? undefined : v),
+    z.coerce.number().int().nonnegative().default(12),
+  ),
   HIGHWAY_INDEXER_ENABLED: z.string().optional().default("true").transform((v) => v !== "false"),
   HIGHWAY_INDEXER_RPC: z.string().url().default("https://devnet.magicblock.app"),
   HIGHWAY_INDEXER_POLL_MS: z.coerce.number().int().positive().default(2000),
@@ -81,20 +87,32 @@ const Env = EnvShape.superRefine((e, ctx) => {
       message: "SESSION_SECRET is required in production",
     });
   }
-  // The EVM treasury signer derives its address from the secret and asserts it matches
-  // EVM_TREASURY_ADDRESS; without the address there is nothing to check against. Pair them
-  // whenever the secret is present, money rail on or off.
-  if (e.EVM_TREASURY_SECRET && !e.EVM_TREASURY_ADDRESS) {
+  // Signer pairing rules. Each is scoped to its own family so a leftover var from the other rail
+  // can never block a boot, and all of them run whether or not the money rail is on.
+  //
+  // The EVM treasury signer will derive its address from the secret and assert it matches
+  // EVM_TREASURY_ADDRESS; without the address that assertion has nothing to check against.
+  if (e.CHAIN_FAMILY === "evm" && e.EVM_TREASURY_SECRET && !e.EVM_TREASURY_ADDRESS) {
     ctx.addIssue({
       code: z.ZodIssueCode.custom,
       path: ["EVM_TREASURY_ADDRESS"],
       message: "EVM_TREASURY_ADDRESS is required when EVM_TREASURY_SECRET is set",
     });
   }
+  // The self-custody withdraw signer asserts its derived address == TREASURY_OWNER_PUBKEY at
+  // boot; without the pubkey that assertion has nothing to check against (and would throw a
+  // misleading "mismatch"). Require them together so a missing pubkey fails with a truthful message.
+  if (e.CHAIN_FAMILY === "solana" && e.TREASURY_SECRET && !e.TREASURY_OWNER_PUBKEY) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ["TREASURY_OWNER_PUBKEY"],
+      message: "TREASURY_OWNER_PUBKEY is required when TREASURY_SECRET is set",
+    });
+  }
   if (!e.REAL_MONEY_ENABLED) return;
   if (e.CHAIN_FAMILY === "solana") {
     for (const k of ["SOLANA_RPC_URL", "USDC_MINT", "TREASURY_USDC_ATA"] as const) {
-      if (!e[k]) ctx.addIssue({ code: z.ZodIssueCode.custom, path: [k], message: `${k} is required when REAL_MONEY_ENABLED=true` });
+      if (!e[k]) ctx.addIssue({ code: z.ZodIssueCode.custom, path: [k], message: `${k} is required when REAL_MONEY_ENABLED=true and CHAIN_FAMILY=solana` });
     }
     if (!!e.FEE_PAYER_SECRET !== !!e.FEE_PAYER_OWNER_PUBKEY) {
       ctx.addIssue({
@@ -115,16 +133,6 @@ const Env = EnvShape.superRefine((e, ctx) => {
     for (const k of ["EVM_RPC_URL", "EVM_CHAIN_ID", "EVM_USDC_ADDRESS", "EVM_TREASURY_ADDRESS"] as const) {
       if (!e[k]) ctx.addIssue({ code: z.ZodIssueCode.custom, path: [k], message: `${k} is required when REAL_MONEY_ENABLED=true and CHAIN_FAMILY=evm` });
     }
-  }
-  // The self-custody withdraw signer asserts its derived address == TREASURY_OWNER_PUBKEY at
-  // boot; without the pubkey that assertion has nothing to check against (and would throw a
-  // misleading "mismatch"). Require them together so a missing pubkey fails with a truthful message.
-  if (e.TREASURY_SECRET && !e.TREASURY_OWNER_PUBKEY) {
-    ctx.addIssue({
-      code: z.ZodIssueCode.custom,
-      path: ["TREASURY_OWNER_PUBKEY"],
-      message: "TREASURY_OWNER_PUBKEY is required when TREASURY_SECRET is set",
-    });
   }
 });
 

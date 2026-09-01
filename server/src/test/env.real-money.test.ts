@@ -2,6 +2,13 @@ import { describe, it, expect } from "vitest";
 import { parseEnv } from "../env.js";
 
 const base = { DATABASE_URL: "postgres://x" };
+const evmMoney = {
+  REAL_MONEY_ENABLED: "true",
+  EVM_RPC_URL: "https://rpc.testnet.chain.robinhood.com",
+  EVM_CHAIN_ID: "46630",
+  EVM_USDC_ADDRESS: "0x" + "a".repeat(40),
+  EVM_TREASURY_ADDRESS: "0x" + "b".repeat(40),
+};
 
 describe("real-money env gating", () => {
   it("defaults REAL_MONEY_ENABLED off and leaves Solana config optional", () => {
@@ -41,16 +48,8 @@ describe("CHAIN_FAMILY", () => {
 
   it("evm family requires EVM vars when real money is on", () => {
     expect(() => parseEnv({ ...base, REAL_MONEY_ENABLED: "true" } as any)).toThrow(/EVM_RPC_URL/);
-    expect(() =>
-      parseEnv({
-        ...base,
-        REAL_MONEY_ENABLED: "true",
-        EVM_RPC_URL: "https://rpc.testnet.chain.robinhood.com",
-        EVM_CHAIN_ID: "46630",
-        EVM_USDC_ADDRESS: "0x" + "a".repeat(40),
-        EVM_TREASURY_ADDRESS: "0x" + "b".repeat(40),
-      } as any),
-    ).not.toThrow();
+    const e = parseEnv({ ...base, ...evmMoney } as any);
+    expect(e.EVM_CHAIN_ID).toBe(46630);
   });
 
   it("solana family keeps the old requirements", () => {
@@ -59,9 +58,40 @@ describe("CHAIN_FAMILY", () => {
     );
   });
 
-  it("EVM_TREASURY_SECRET requires EVM_TREASURY_ADDRESS", () => {
+  it("EVM_TREASURY_SECRET requires EVM_TREASURY_ADDRESS even when real money is off", () => {
     expect(() =>
       parseEnv({ ...base, CHAIN_FAMILY: "evm", EVM_TREASURY_SECRET: "0x" + "1".repeat(64) } as any),
     ).toThrow(/EVM_TREASURY_ADDRESS/);
+  });
+
+  it("rejects an EVM address that is not a 0x-prefixed 20-byte hex string", () => {
+    expect(() => parseEnv({ ...base, EVM_TREASURY_ADDRESS: "b".repeat(40) } as any)).toThrow(
+      /EVM_TREASURY_ADDRESS/,
+    );
+  });
+
+  it("lowercases EVM addresses at the seam", () => {
+    const e = parseEnv({
+      ...base,
+      EVM_USDC_ADDRESS: "0xA0b86991c6218B36c1d19D4a2e9Eb0cE3606eB48",
+      EVM_TREASURY_ADDRESS: "0xDD8D" + "e".repeat(36),
+    } as any);
+    expect(e.EVM_USDC_ADDRESS).toBe("0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48");
+    expect(e.EVM_TREASURY_ADDRESS).toBe("0xdd8d" + "e".repeat(36));
+  });
+
+  it("falls back to 12 confirmations when EVM_CONFIRMATIONS is blank (never 0)", () => {
+    expect(parseEnv({ ...base, EVM_CONFIRMATIONS: "" } as any).EVM_CONFIRMATIONS).toBe(12);
+    expect(parseEnv({ ...base, EVM_CONFIRMATIONS: "3" } as any).EVM_CONFIRMATIONS).toBe(3);
+  });
+
+  it("ignores a leftover Solana TREASURY_SECRET on an evm boot", () => {
+    expect(() => parseEnv({ ...base, ...evmMoney, TREASURY_SECRET: "[1,2,3]" } as any)).not.toThrow();
+  });
+
+  it("still pairs TREASURY_SECRET with TREASURY_OWNER_PUBKEY on a money-off solana boot", () => {
+    expect(() => parseEnv({ ...base, CHAIN_FAMILY: "solana", TREASURY_SECRET: "[1,2,3]" } as any)).toThrow(
+      /TREASURY_OWNER_PUBKEY is required when TREASURY_SECRET is set/,
+    );
   });
 });
