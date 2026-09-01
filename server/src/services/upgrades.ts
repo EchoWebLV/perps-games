@@ -16,9 +16,8 @@ export function makeUpgrades(db: any, ledger: Ledger) {
   }
   return {
     get,
-    /** Authoritative purchase: debit escalating cost + increment level atomically. Level and cost come
-     *  from the server's own record, so the client cannot fake a level or skip the coin cost. */
-    async buy(userId: string, track: UpgradeTrack): Promise<{ track: UpgradeTrack; level: number; coins: number }> {
+    /** Authoritative purchase: debit escalating coins AND scrap + increment level atomically. */
+    async buy(userId: string, track: UpgradeTrack): Promise<{ track: UpgradeTrack; level: number; coins: number; scrap: number }> {
       if (!TRACKS.includes(track)) throw new Error("bad_track");
       return db.transaction(async (tx: any) => {
         // serialize concurrent buys for this user (mirror ledger.ts advisory-lock idiom; avoids FOR UPDATE)
@@ -28,15 +27,20 @@ export function makeUpgrades(db: any, ledger: Ledger) {
         const cur = rows[0][track] as number;
         if (cur >= MAX_UPGRADE_LEVEL) throw new Error("max_level");
         const cost = upgradeCost(cur);
-        const posted = await ledger.debitOn(tx, userId, "coin", cost, "upgrade_buy", `upgrade:${userId}:${track}:${cur}`); // throws "insufficient balance"
-        if (!posted) throw new Error("debit_replay"); // a fresh buy must never idempotently replay; refuse rather than grant a free level
+        const ref = `upgrade:${userId}:${track}:${cur}`;
+        const postedCoins = await ledger.debitOn(tx, userId, "coin", cost, "upgrade_buy", ref);
+        const postedScrap = await ledger.debitOn(tx, userId, "scrap", cost, "upgrade_buy", ref);
+        if (!postedCoins || !postedScrap) throw new Error("debit_replay");
         await tx.update(upgradeLevels).set({ [track]: cur + 1, updatedAt: new Date() }).where(eq(upgradeLevels.userId, userId));
-        const coins = await ledger.balanceOn(tx, userId, "coin");
-        return { track, level: cur + 1, coins };
+        const [coins, scrap] = await Promise.all([
+          ledger.balanceOn(tx, userId, "coin"),
+          ledger.balanceOn(tx, userId, "scrap"),
+        ]);
+        return { track, level: cur + 1, coins, scrap };
       });
     },
     /** Migration seed: set levels directly (used once when a signed-in account is server-empty and the
-     *  client offers its local levels). Never debits — coins were already spent client-side. */
+     *  client offers its local levels). Never debits — coins+scrap were already spent client-side. */
     async seed(userId: string, levels: Partial<Levels>): Promise<Levels> {
       const clamp = (n: unknown) => Math.max(0, Math.min(MAX_UPGRADE_LEVEL, Math.floor(Number(n) || 0)));
       const next = { turbo: clamp(levels.turbo), tank: clamp(levels.tank), suspension: clamp(levels.suspension) };

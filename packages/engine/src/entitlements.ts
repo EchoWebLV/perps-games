@@ -22,7 +22,7 @@ export const NITRO_MULT = 2;
 export const SKULL_GRACE_SECS = 2;
 export const AIRBAG_REFUND_FP = 200_000;
 
-/** coins to go from `level` → `level+1` (escalating). Mirrors redline3d upgrades.ts. */
+/** coins AND scrap to go from `level` → `level+1` (escalating). Mirrors redline3d upgrades.ts. */
 export const upgradeCost = (level: number): number => 20 * (level + 1);
 export type UpgradeTrack = "turbo" | "tank" | "suspension";
 

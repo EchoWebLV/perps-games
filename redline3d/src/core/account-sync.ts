@@ -34,7 +34,7 @@ export interface AccountSync {
   carGranted(carId: string): void;
   carMelted(carId: string): void;
   /** forward an upgrade purchase to the authoritative /v1/upgrades/buy (which debits coins
-   *  server-side itself — never paired with a coinsSpent for the same purchase). */
+   *  and scrap server-side — never paired with coinsSpent/scrapSpent for the same purchase). */
   levelBought(track: "turbo" | "tank" | "suspension"): void;
 }
 

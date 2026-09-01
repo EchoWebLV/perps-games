@@ -12,7 +12,7 @@ function fakeApi(over: Partial<Api> = {}): Api {
     inventoryGrant: vi.fn(async () => ({ carId: "x", isNew: true, count: 1 })),
     inventoryMelt: vi.fn(async () => ({ carId: "x", melted: true, count: 1 })),
     migrate: vi.fn(async () => ({ seeded: true })),
-    upgradesBuy: vi.fn(async () => ({ track: "turbo", level: 1, coins: 0 })),
+    upgradesBuy: vi.fn(async () => ({ track: "turbo", level: 1, coins: 0, scrap: 0 })),
   };
   return { ...base, ...over } as Api;
 }

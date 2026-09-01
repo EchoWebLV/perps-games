@@ -70,9 +70,8 @@ export interface Api {
   inventoryGrant(p: { carId: string }): Promise<{ carId: string; isNew: boolean; count: number }>;
   inventoryMelt(p: { carId: string }): Promise<{ carId: string; melted: boolean; count: number }>;
   migrate(p: { coins: number; scrap: number; cars: Record<string, number>; levels?: { turbo: number; tank: number; suspension: number } }): Promise<{ seeded: boolean; reason?: string }>;
-  /** authoritative upgrade purchase — the server debits the coins ITSELF and returns the new level.
-   *  The client must never also post a coinsSpend for the same purchase (double debit). */
-  upgradesBuy(p: { track: "turbo" | "tank" | "suspension" }): Promise<{ track: string; level: number; coins: number }>;
+  /** authoritative upgrade purchase — the server debits coins AND scrap and returns the new level. */
+  upgradesBuy(p: { track: "turbo" | "tank" | "suspension" }): Promise<{ track: string; level: number; coins: number; scrap: number }>;
   /** Read welcome eligibility without consuming the once-per-account claim. */
   openCrate(p: {
     crateKey: "wooden" | "silver" | "gold";

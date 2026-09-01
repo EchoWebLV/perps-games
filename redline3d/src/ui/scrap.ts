@@ -1,8 +1,8 @@
 import { coinLabel } from "../core/coins";
 
 // The scrap chip — a raw-steel sibling of the coin chip. Scrap is caught while driving
-// (every 3rd–5th pickup comes up scrap instead of a coin) and banked to the garage save;
-// it's spent later at the Scrap Yard, never on the leverage upgrades.
+// (every 3rd–5th pickup comes up scrap instead of a coin) and from crate melts;
+// it's spent on leverage upgrades and later at the Scrap Yard.
 export interface ScrapCounter {
   set(total: number, animate?: boolean): void;
   /** Show or hide the counter. */

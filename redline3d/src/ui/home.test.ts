@@ -61,6 +61,10 @@ describe("slopwheels hub", () => {
     expect(parent.querySelector(".sw-grid")).toBeNull();
     expect(parent.textContent).not.toMatch(/Watch & bet|Enter race|Collection|Grand Prix/i);
     expect(parent.querySelector(".sw-wordmark")?.getAttribute("alt")).toBe("Slopwheels");
+    const css = [...document.querySelectorAll("style")].map((s) => s.textContent ?? "").join("\n");
+    expect(css).toMatch(/\.sw-wordmark\{[^}]*height:104px/);
+    expect(css).toMatch(/--lime:#c1f832/);
+    expect(css).not.toMatch(/--cyan:#27e7ff/);
   });
 
   it("routes each hub button to its destination", () => {

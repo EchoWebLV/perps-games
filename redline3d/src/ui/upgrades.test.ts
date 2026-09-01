@@ -89,18 +89,34 @@ describe("upgrade levels sync (server-authoritative buys)", () => {
     expect(root.querySelector('[data-next="turbo"]')?.textContent).toContain("1550×");
   });
 
-  it("buy reports levelBought with track+cost — NOT coinsSpend (the server buy debits itself)", () => {
+  it("cannot buy with coins alone or scrap alone — both are required", () => {
+    const root = document.createElement("div");
+    const up = createUpgrades(root, {});
+    up.addCoins(100);
+    (root.querySelector('[data-buy="turbo"]') as HTMLButtonElement).click();
+    expect(up.levels().turbo).toBe(0);
+    expect(up.coins()).toBe(100);
+    up.addScrap(100);
+    up.spend(100); // coins gone, scrap remains
+    (root.querySelector('[data-buy="turbo"]') as HTMLButtonElement).click();
+    expect(up.levels().turbo).toBe(0);
+    expect(up.scrap()).toBe(100);
+  });
+
+  it("buy spends coins AND scrap and reports levelBought — not coinsSpend/scrapSpend", () => {
     const root = document.createElement("div");
     const events: { kind: string }[] = [];
     const up = createUpgrades(root, { onMutate: (e) => events.push(e) });
     up.addCoins(100);
-    events.length = 0; // drop the earn event
+    up.addScrap(100);
+    events.length = 0; // drop the earn events
 
     (root.querySelector('[data-buy="turbo"]') as HTMLButtonElement).click();
-    expect(up.coins()).toBe(80); // optimistic local debit stays (cost 20 at level 0)
+    expect(up.coins()).toBe(80);
+    expect(up.scrap()).toBe(80);
     expect(up.levels()).toEqual({ turbo: 1, tank: 0, suspension: 0 });
     expect(events).toEqual([{ kind: "levelBought", track: "turbo", cost: 20 }]);
-    expect(events.some((e) => e.kind === "coinsSpend")).toBe(false); // no double debit
+    expect(events.some((e) => e.kind === "scrapSpend" || e.kind === "coinsSpend")).toBe(false);
   });
 
   it("levels() returns a copy — mutating it never touches the save", () => {
@@ -136,6 +152,7 @@ describe("upgrade levels sync (server-authoritative buys)", () => {
     const root = document.createElement("div");
     const up = createUpgrades(root, {});
     up.addCoins(100);
+    up.addScrap(100);
     (root.querySelector('[data-buy="tank"]') as HTMLButtonElement).click();
     expect(up.levels().tank).toBe(1);
 

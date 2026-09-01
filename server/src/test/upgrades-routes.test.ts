@@ -23,11 +23,12 @@ describe("POST /v1/upgrades/buy", () => {
     ctx = await makeTestDb({ signupFaucet: false });
     await bindDevWallet(ctx, "alice");
     const userId = (await ctx.users.upsertByExternalId("dev:alice")).id;
-    await ctx.ledger.credit(userId, "coin", 100, "dev_grant", "seed");
+    await ctx.ledger.credit(userId, "coin", 100, "dev_grant", "seed-coin");
+    await ctx.ledger.credit(userId, "scrap", 100, "dev_grant", "seed");
 
     const res = await ctx.server.inject({ method: "POST", url: "/v1/upgrades/buy", headers: H, payload: { track: "turbo" } });
     expect(res.statusCode).toBe(200);
-    expect(res.json()).toEqual({ track: "turbo", level: 1, coins: 80 });
+    expect(res.json()).toEqual({ track: "turbo", level: 1, coins: 80, scrap: 80 });
 
     const me = await ctx.server.inject({ method: "GET", url: "/v1/me", headers: H });
     expect(me.json().levels.turbo).toBe(1);
@@ -52,7 +53,8 @@ describe("POST /v1/upgrades/buy", () => {
     ctx = await makeTestDb({ signupFaucet: false });
     await bindDevWallet(ctx, "alice");
     const userId = (await ctx.users.upsertByExternalId("dev:alice")).id;
-    await ctx.ledger.credit(userId, "coin", 100000, "dev_grant", "seed");
+    await ctx.ledger.credit(userId, "coin", 100000, "dev_grant", "seed-coin");
+    await ctx.ledger.credit(userId, "scrap", 100000, "dev_grant", "seed");
     for (let i = 0; i < 10; i++) {
       const r = await ctx.server.inject({ method: "POST", url: "/v1/upgrades/buy", headers: H, payload: { track: "turbo" } });
       expect(r.statusCode).toBe(200);
@@ -93,13 +95,17 @@ describe("POST /v1/migrate levels", () => {
     ctx = await makeTestDb({ signupFaucet: false });
     await bindDevWallet(ctx, "alice");
     const userId = (await ctx.users.upsertByExternalId("dev:alice")).id;
-    // give the account a level via a real buy, then drain coins back to zero via the spend route
-    await ctx.ledger.credit(userId, "coin", 100, "dev_grant", "seed");
+    // give the account a level via a real buy, then drain scrap back to zero via the spend route
+    await ctx.ledger.credit(userId, "coin", 100, "dev_grant", "seed-coin");
+    await ctx.ledger.credit(userId, "scrap", 100, "dev_grant", "seed");
     const buy = await ctx.server.inject({ method: "POST", url: "/v1/upgrades/buy", headers: H, payload: { track: "turbo" } });
-    expect(buy.statusCode).toBe(200); // coins 80, turbo 1
-    const spend = await ctx.server.inject({ method: "POST", url: "/v1/coins/spend", headers: H, payload: { amount: 80, ref: "drain" } });
-    expect(spend.statusCode).toBe(200);
-    expect(spend.json().coins).toBe(0); // coins/scrap/cars all zero — the ONLY state is turbo=1
+    expect(buy.statusCode).toBe(200); // coins 80 + scrap 80, turbo 1
+    const spendCoins = await ctx.server.inject({ method: "POST", url: "/v1/coins/spend", headers: H, payload: { amount: 80, ref: "drain-c" } });
+    const spendScrap = await ctx.server.inject({ method: "POST", url: "/v1/scrap/spend", headers: H, payload: { amount: 80, ref: "drain" } });
+    expect(spendCoins.statusCode).toBe(200);
+    expect(spendScrap.statusCode).toBe(200);
+    expect(spendCoins.json().coins).toBe(0);
+    expect(spendScrap.json().scrap).toBe(0); // coins/scrap/cars all zero — the ONLY state is turbo=1
 
     const res = await ctx.server.inject({
       method: "POST", url: "/v1/migrate", headers: H,

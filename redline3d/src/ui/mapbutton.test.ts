@@ -48,10 +48,10 @@ describe("createMapButton", () => {
     const mb = createMapButton(parent as unknown as HTMLElement, onClick);
     const btn = parent.querySelector("button")!;
     expect(btn).toBeTruthy();
-    expect(btn.attrs["aria-label"]).toBe("Open garage lobby");
-    // the classic icon square — a home glyph, no wordmark
+    expect(btn.attrs["aria-label"]).toBe("Back to hub");
     expect(btn.innerHTML).toContain("<svg");
     expect(btn.innerHTML).not.toContain("LOBBY");
+    expect(btn.innerHTML).not.toMatch(/😂|🔥|💀/);
 
     btn.click();
     expect(onClick).toHaveBeenCalledOnce();
@@ -68,9 +68,10 @@ describe("createMapButton", () => {
 
     const mb = createMapButton(parent as unknown as HTMLElement, vi.fn());
 
-    // top = base+134 (base = max(10px,inset)); 144px on desktop, shifts down under a real status bar
     const css = (mb.el as unknown as FakeElement).style.cssText;
     expect(css).toContain("env(safe-area-inset-top)");
-    expect(css).toContain("134px");
+    expect(css).toContain("env(safe-area-inset-right)");
+    expect(css).toContain("50px");
+    expect(css).toContain("width:48px");
   });
 });

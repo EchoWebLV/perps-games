@@ -513,7 +513,7 @@ function openDriverNameDialog(requiredForHighway: boolean, afterSave?: () => voi
     onCancel: () => { driverNameDialog = null; },
   });
 }
-// persistent coin balance + the upgrade tree; buying spends coins. Turbo Kit (max leverage) and
+// persistent coin/scrap balances + the upgrade tree; buying spends both. Turbo Kit (max leverage) and
 // Long-Range Tank (round time) apply live now that the on-chain program honors both.
 const upgrades = createUpgrades(hudRoot, {
   onCoins: (n) => coins.set(n),
@@ -527,7 +527,7 @@ const upgrades = createUpgrades(hudRoot, {
     else if (ev.kind === "coinsSpend") accountSync.coinsSpent(ev.amount);
     else if (ev.kind === "scrapEarn") accountSync.scrapEarned(ev.amount);
     else if (ev.kind === "scrapSpend") accountSync.scrapSpent(ev.amount);
-    else if (ev.kind === "levelBought") accountSync.levelBought(ev.track); // the server buy debits itself — no coinsSpent
+    else if (ev.kind === "levelBought") accountSync.levelBought(ev.track); // server buy debits coins+scrap — no extra spend events
   },
 });
 coins.set(upgrades.coins(), false); // no pulse on the persisted balance at load

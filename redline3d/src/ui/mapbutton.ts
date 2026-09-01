@@ -25,27 +25,26 @@ function injectPulse(): void {
   injected = true;
 }
 
-/** The classic compact icon button left of the menu — a glowing home glyph; opens the lobby. */
+/** Side home control — the main lobby chrome that returns to the Slopwheels hub. */
 export function createMapButton(parent: HTMLElement, onClick: () => void): MapButton {
   injectPulse();
 
   const btn = document.createElement("button");
   btn.type = "button";
   btn.className = "pe"; // pointer-events:auto under #hud; the button styles itself inline below
-  btn.setAttribute("aria-label", "Open garage lobby");
+  btn.setAttribute("aria-label", "Back to hub");
   btn.innerHTML = HOME_SVG;
   btn.style.cssText = [
     "position:absolute",
-    // same row as the coin chip, directly left of the menu button: base+134 rides the
-    // inset in lockstep with the graph above it (10+134 = 144 on desktop).
-    "top:calc(max(10px,env(safe-area-inset-top)) + 134px)",
-    "right:max(62px,calc(env(safe-area-inset-right) + 50px))",
+    // right rail, under LIVE — where the emoji emotes sat. Hamburger stays below this.
+    "top:calc(max(10px,env(safe-area-inset-top)) + 50px)",
+    "right:max(12px,env(safe-area-inset-right))",
     "z-index:8",
-    "width:42px", "height:42px", "padding:0", // the original 42×42 icon square
+    "width:48px", "height:48px", "padding:0",
     "display:grid", "place-items:center",
-    "border:1.5px solid var(--cyan)", // bright cyan glowing rim — noticeable, unlike the old flat panel
-    "border-radius:11px", "cursor:pointer",
-    "background:rgba(12,10,26,.9)", // opaque so it pops off the 3D scene
+    "border:1.5px solid var(--cyan)",
+    "border-radius:12px", "cursor:pointer",
+    "background:rgba(12,10,26,.9)",
     "color:var(--cyan)",
     "animation:mapBtnPulse 2.4s ease-in-out infinite",
   ].join(";");

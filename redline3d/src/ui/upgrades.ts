@@ -4,7 +4,7 @@ import { addCoins as addCoinsRaw } from "../core/coins";
 export type Track = "tank" | "turbo" | "suspension";
 export const MAX_LEVEL = 10;
 
-/** coins to go from `level` → `level+1` (escalating) */
+/** coins AND scrap to go from `level` → `level+1` (escalating) */
 export function upgradeCost(level: number): number {
   return 20 * (level + 1);
 }
@@ -18,7 +18,7 @@ interface TrackDef {
   field: "MAXSEC" | "RMAX" | "LIQ"; step: number;
   fmt: (v: number) => string;
   /** wired end-to-end (the on-chain program honors it). Non-live tracks are hidden until the
-   *  program supports them per-round — showing them would spend coins for no real effect. */
+   *  program supports them per-round — showing them would spend coins+scrap for no real effect. */
   live: boolean;
 }
 
@@ -71,8 +71,8 @@ export interface Upgrades {
   /** Settle a prior hold: commit=true forwards the spend to the server (one coinsSpend); commit=false
    *  restores the coins quietly (no events — a coinsEarn refund would be eaten by the earn cap). */
   settleHold(n: number, commit: boolean): void;
-  /** scrap earned by driving (every 3rd–5th pickup); banked to the garage save and
-   *  spent later at the Scrap Yard — never on the leverage upgrades below */
+  /** scrap earned by driving (every 3rd–5th pickup) and crate melts; spent on upgrades
+   *  together with coins, and later at the Scrap Yard */
   scrap(): number;
   addScrap(n: number): void;
   /** debit scrap for a Scrap Yard purchase; false + no-op if the balance can't cover it */
@@ -106,6 +106,8 @@ function injectStyles() {
     .upg-head .lbl{flex:1}
     .upg-coins{display:flex;align-items:center;gap:5px;font:700 14px/1 'Chakra Petch',ui-monospace,monospace;color:var(--amb);
       text-shadow:0 0 9px rgba(255,209,102,.5)}
+    .upg-scrap{display:flex;align-items:center;gap:5px;font:700 14px/1 'Chakra Petch',ui-monospace,monospace;color:#c2cad6;
+      text-shadow:0 0 9px rgba(154,164,178,.5)}
     .upg-x{cursor:pointer;color:var(--mut);font:700 16px/1 Chakra Petch,ui-monospace,monospace;padding:3px 5px;border:0;background:transparent}
     .upg-row{display:flex;flex-direction:column;gap:8px;padding:13px;border-radius:12px;
       background:rgba(18,14,40,.72);border:1px solid rgba(132,150,224,.24)}
@@ -157,9 +159,10 @@ export function createUpgrades(
   ].join(";");
   const panel = document.createElement("div");
   panel.className = "panel upg-panel";
-  const coinChip = `<span class="upg-coins">◈ <span id="upgCoins">0</span></span>`;
+  const coinsChip = `<span class="upg-coins">◈ <span id="upgCoins">0</span></span>`;
+  const scrapChip = `<span class="upg-scrap">scrap <span id="upgScrap">0</span></span>`;
   panel.innerHTML =
-    `<div class="upg-head"><span class="lbl">upgrades</span>${coinChip}<button class="upg-x" aria-label="Close">✕</button></div>` +
+    `<div class="upg-head"><span class="lbl">upgrades</span>${coinsChip}${scrapChip}<button class="upg-x" aria-label="Close">✕</button></div>` +
     ACTIVE.map((t) => `
       <div class="upg-row" data-row="${t.key}">
         <div class="upg-top">
@@ -172,11 +175,13 @@ export function createUpgrades(
       </div>`).join("");
 
   const coinsEl = panel.querySelector("#upgCoins") as HTMLElement;
+  const scrapEl = panel.querySelector("#upgScrap") as HTMLElement;
   const shownValue = (track: TrackDef, value: number) =>
     track.key === "turbo" && opts.leverageValue ? opts.leverageValue(value) : value;
 
   const render = () => {
     coinsEl.textContent = String(saved.coins);
+    scrapEl.textContent = String(saved.scrap);
     for (const t of ACTIVE) {
       const lvl = saved.levels[t.key];
       const val = trackValue(base[t.field], t.step, lvl);
@@ -191,9 +196,9 @@ export function createUpgrades(
       } else {
         const cost = upgradeCost(lvl);
         const nextVal = trackValue(base[t.field], t.step, lvl + 1);
-        nextEl.innerHTML = `Lv ${lvl}/${MAX_LEVEL} → <b>${t.fmt(shownValue(t, nextVal))}</b> · ${cost} ◈`;
-        buy.textContent = `${cost} ◈`; buy.classList.remove("max");
-        buy.disabled = saved.coins < cost;
+        nextEl.innerHTML = `Lv ${lvl}/${MAX_LEVEL} → <b>${t.fmt(shownValue(t, nextVal))}</b> · ${cost} ◈ + ${cost} scrap`;
+        buy.textContent = `${cost} ◈ + ${cost} scrap`; buy.classList.remove("max");
+        buy.disabled = saved.coins < cost || saved.scrap < cost;
       }
     }
   };
@@ -202,14 +207,14 @@ export function createUpgrades(
     const lvl = saved.levels[key];
     if (lvl >= MAX_LEVEL) return;
     const cost = upgradeCost(lvl);
-    if (saved.coins < cost) return;
+    if (saved.coins < cost || saved.scrap < cost) return;
     saved.coins -= cost;
+    saved.scrap -= cost;
     saved.levels[key] = lvl + 1;
     apply(); persist(); render();
     opts.onCoins?.(saved.coins);
-    // The authoritative buy (/v1/upgrades/buy) debits the coins SERVER-SIDE itself — also posting
-    // a generic coinsSpend would double-debit. The local debit above is optimistic; if the server
-    // buy fails, the next hydrate reconciles (server wins).
+    opts.onScrap?.(saved.scrap);
+    // Server /v1/upgrades/buy debits both currencies itself — do not also fire coinsSpend/scrapSpend.
     opts.onMutate?.({ kind: "levelBought", track: key, cost });
   };
   panel.querySelectorAll("[data-buy]").forEach((b) =>
