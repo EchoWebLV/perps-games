@@ -80,6 +80,7 @@ function fakeApi(over: Partial<Api> = {}): Api {
     inventoryMelt: async (p) => ({ carId: p.carId, melted: true, count: 0 }),
     migrate: async () => ({ seeded: true }),
     upgradesBuy: async (p) => ({ track: p.track, level: 1, coins: 0, scrap: 0 }),
+    crateCommit: async () => ({ commitId: "commit-1", commitment: "0".repeat(64) }),
     openCrate: async () => ({
       carId: "car", isNew: true, count: 1, scrap: 0, scrapTotal: 0, coins: 0, levelKey: null,
       pity: { wooden: 0, silver: 0, gold: 0 },

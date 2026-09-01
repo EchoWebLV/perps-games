@@ -2,7 +2,11 @@ import * as THREE from "three";
 import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader.js";
 import { RoomEnvironment } from "three/examples/jsm/environments/RoomEnvironment.js";
 import { tierOf } from "../core/rarity";
-import { dupeScrap, pickLevel, clientRandom, CRATES, crateByKey, type CrateType, type CrateCar, type RandomnessProvider } from "../core/crate";
+import {
+  dupeScrap, pickLevel, clientRandom, CRATES, crateByKey, verifyCrateOpen,
+  type CrateType, type CrateCar, type RandomnessProvider, type CrateRevealed,
+} from "../core/crate";
+import { currentChainRail, type ChainRail } from "../evm/rail";
 import { PITY, emptyPity, hitTopTier, nextPity, rollCrateWithPity, type CrateKey, type PityState } from "../core/pity";
 import { createRevealCar } from "./reveal-car";
 import { scrapPileHtml, levelPosterHtml, type LevelPoster } from "./reveal-bits";
@@ -47,10 +51,23 @@ export interface CrateBoxDeps {
   openVerified?: (p: {
     crateKey: CrateKey;
     payment: "coins" | "sol" | "gift";
-    vrfBytes: string;
+    /** EVM rail: the commit this open spends (from `crateCommit`). */
+    commitId?: string;
+    /** parked Solana rail: MagicBlock VRF bytes. */
+    vrfBytes?: string;
     solSignature?: string;
   }) => Promise<VerifiedCrateOpen>;
   applyVerified?: (result: VerifiedCrateOpen) => void;
+  /**
+   * Which chain rail this build talks to. EVM = server commit-reveal crates; "solana" keeps the
+   * parked MagicBlock-VRF path alive. Injectable so tests can pin either rail.
+   */
+  rail?: () => ChainRail;
+  /**
+   * EVM rail: reserve server randomness BEFORE the open. The returned commitment is shown to the
+   * player while the crate shakes, and the open's reveal must hash back to it.
+   */
+  crateCommit?: () => Promise<{ commitId: string; commitment: string }>;
 }
 
 export interface VerifiedCrateOpen {
@@ -62,7 +79,14 @@ export interface VerifiedCrateOpen {
   coins: number;
   levelKey: string | null;
   pity: PityState;
+  /** commit-reveal only: the seed+nonce behind the commitment published before this open. */
+  reveal?: CrateRevealed | null;
+  /** the draws the server rolled from, re-derived here from the revealed seed. */
+  draws?: number[] | null;
 }
+
+/** How a reveal advertises where its randomness came from. */
+export type CrateProofBadge = { kind: "vrf" } | { kind: "proven"; commitment: string };
 export interface CrateBox {
   open(): void;
   /** first-login welcome: show the overlay and run a FREE Wooden open (no coin cost) */
@@ -78,6 +102,23 @@ export type CrateRandomnessMode = "vrf" | "client" | "blocked";
 export function crateRandomnessMode(vrfRequired: boolean, hasProvider: boolean): CrateRandomnessMode {
   if (hasProvider) return "vrf";
   return vrfRequired ? "blocked" : "client";
+}
+
+/**
+ * EVM rail: an account-backed crate MUST come from a server commit-reveal — it can never fall back
+ * to browser randomness, because the server is the one debiting and granting. A guest has no account
+ * to charge, so it practices locally.
+ */
+export function provenRandomnessMode(accountBacked: boolean, canProve: boolean): CrateRandomnessMode {
+  if (!accountBacked) return "client";
+  return canProve ? "vrf" : "blocked";
+}
+
+/** What the player is told when a reveal fails to prove itself. Never phrased as a success. */
+export function proofFailureMessage(reason: "missing_reveal" | "commitment_mismatch" | "draws_mismatch"): string {
+  if (reason === "missing_reveal") return "This open returned no proof, so it could not be verified.";
+  if (reason === "draws_mismatch") return "The revealed seed does not produce this result.";
+  return "The revealed seed does not match the published commitment.";
 }
 
 /** A free account reward is applied only after the once-per-account claim wins. */
@@ -195,6 +236,13 @@ function injectStyles() {
     .cb-vrf{display:inline-flex;align-items:center;gap:5px;margin-top:7px;padding:4px 9px;border-radius:6px;
       font:700 9px/1 'Chakra Petch',ui-monospace,monospace;letter-spacing:.08em;color:#a7f0d9;
       background:rgba(20,199,140,.12);border:1px solid rgba(20,199,140,.4)}
+    .cb-commit{margin-top:10px;max-width:88%;text-align:center;font:700 9px/1.5 'Chakra Petch',ui-monospace,monospace;letter-spacing:.06em;color:#8f9bb3;word-break:break-all}
+    .cb-commit b{display:block;letter-spacing:.14em;color:#a7f0d9;text-transform:uppercase}
+    .cb-proof{margin-top:5px;font:700 8px/1.4 'Chakra Petch',ui-monospace,monospace;letter-spacing:.06em;color:#7d879b;word-break:break-all;max-width:200px;text-align:center}
+    .cb-fail{display:flex;flex-direction:column;align-items:center;gap:9px;padding:18px;border-radius:14px;text-align:center;
+      border:2px solid #ff5c7a;background:rgba(40,10,22,.92);box-shadow:0 0 24px rgba(255,92,122,.35)}
+    .cb-fail-ttl{font:800 15px/1 'Chakra Petch',ui-monospace,monospace;letter-spacing:.14em;text-transform:uppercase;color:#ff8098}
+    .cb-fail-msg{font:700 11px/1.5 'Chakra Petch',ui-monospace,monospace;color:#e6ecf7;max-width:260px}
     .cb-flash{position:absolute;top:20px;width:200px;height:200px;background:radial-gradient(circle,#fff,transparent 62%);opacity:0;pointer-events:none}
     .cb-flash.go{animation:cbFlash .5s ease-out}
     .cb-halo{position:absolute;top:8px;width:210px;height:210px;border-radius:50%;background:radial-gradient(circle,var(--tc),transparent 66%);opacity:.6;animation:cbGlow 2.4s ease-in-out infinite;pointer-events:none}
@@ -241,6 +289,7 @@ function injectStyles() {
 export function createCrateBox(parent: HTMLElement, deps: CrateBoxDeps): CrateBox {
   injectStyles();
   const rng = deps.rng ?? clientRandom;
+  const railOf = (): ChainRail => deps.rail?.() ?? currentChainRail();
 
   const overlay = document.createElement("div");
   overlay.style.cssText = [
@@ -356,7 +405,16 @@ export function createCrateBox(parent: HTMLElement, deps: CrateBoxDeps): CrateBo
     syncCoins();
   };
 
-  const showReveal = (crate: CrateType, car: CrateCar, isNew: boolean, scrap: number, lvlKey: string | null, vrf: boolean) => {
+  // The provenance line under the car name: the parked VRF badge, or the commit-reveal proof with
+  // the commitment the server published BEFORE this open (the thing that makes it checkable).
+  const proofHtml = (proof: CrateProofBadge | null): string => {
+    if (!proof) return "";
+    if (proof.kind === "vrf") return `<span class="cb-vrf">⛓ MagicBlock VRF</span>`;
+    return `<span class="cb-vrf" data-cb="proof-badge">✓ provably fair</span>` +
+      `<div class="cb-proof" data-cb="proof" data-commitment="${proof.commitment}">commit ${proof.commitment.slice(0, 16)}…</div>`;
+  };
+
+  const showReveal = (crate: CrateType, car: CrateCar, isNew: boolean, scrap: number, lvlKey: string | null, proof: CrateProofBadge | null) => {
     opening = false;
     const t = tierOf(car.rarity);
     const lvl = lvlKey ? deps.levelInfo(lvlKey) : null;
@@ -369,7 +427,7 @@ export function createCrateBox(parent: HTMLElement, deps: CrateBoxDeps): CrateBo
         `<div class="cb-tier" style="--tc:${t.color}">${t.name}</div>` +
         `<div class="cb-gems">${gems(t.id)}</div>` +
         `<div class="cb-name" style="--tc:${t.color}">${car.name}</div>` +
-        (vrf ? `<span class="cb-vrf">⛓ MagicBlock VRF</span>` : "") +
+        proofHtml(proof) +
       `</div>` +
       `<div class="cb-loot">` +
         scrapPileHtml(scrap) +
@@ -396,18 +454,44 @@ export function createCrateBox(parent: HTMLElement, deps: CrateBoxDeps): CrateBo
       : `<div class="cb-crate ${loop ? "shakeloop" : "shake"}" style="--cc:${crate.color}"></div>`) + `<div class="cb-flash"></div>`;
     stage.classList.add("on");
   };
+  // Publish the server's commitment WHILE the crate shakes — before the outcome is known. Showing it
+  // only afterwards would prove nothing, since the player could not tell it was picked in advance.
+  const showCommitment = (commitment: string) => {
+    const line = document.createElement("div");
+    line.className = "cb-commit";
+    line.dataset.cb = "commit";
+    line.dataset.commitment = commitment;
+    line.innerHTML = `<b>server commitment</b>${commitment}`;
+    stage.appendChild(line);
+  };
+
+  // A reveal that does not hash back to the published commitment is NEVER shown as a win.
+  const showVerificationFailed = (message: string) => {
+    opening = false;
+    revealCar.clear();
+    rows.style.display = "none";
+    stage.innerHTML =
+      `<div class="cb-fail" data-cb="verify-failed">` +
+        `<div class="cb-fail-ttl">verification failed</div>` +
+        `<div class="cb-fail-msg">${message}</div>` +
+      `</div>`;
+    stage.classList.add("on");
+    btns.style.display = "flex";
+    btns.innerHTML = `<button class="cb-btn ghost" data-cb="done">Done</button>`;
+  };
+
   // The burst → reveal handoff (shared): stop the shake, flash, then swap to the reward card.
-  const burstToReveal = (crate: CrateType, car: CrateCar, isNew: boolean, scrap: number, lvlKey: string | null, vrf: boolean) => {
+  const burstToReveal = (crate: CrateType, car: CrateCar, isNew: boolean, scrap: number, lvlKey: string | null, proof: CrateProofBadge | null) => {
     const crateEl = stage.querySelector(".cb-crate3d, .cb-crate") as HTMLElement;
     const flash = stage.querySelector(".cb-flash") as HTMLElement;
     if (tierOf(car.rarity).id >= 4) flash.style.transform = "scale(1.5)";
     crateEl.classList.remove("shake", "shakeloop"); crateEl.classList.add("gone");
     flash.classList.add("go");
-    window.setTimeout(() => showReveal(crate, car, isNew, scrap, lvlKey, vrf), 230);
+    window.setTimeout(() => showReveal(crate, car, isNew, scrap, lvlKey, proof), 230);
   };
   // Map the resolved draws → car/scrap/level grants → reveal. false if nothing droppable (never happens
   // with the full roster, but keeps both paths honest about not charging for an empty pull).
-  const resolveAndReveal = (crate: CrateType, draws: number[], vrf: boolean): boolean => {
+  const resolveAndReveal = (crate: CrateType, draws: number[], proof: CrateProofBadge | null): boolean => {
     const misses = (deps.pity?.() ?? emptyPity())[crate.key];
     const car = rollCrateWithPity(deps.cars(), crate.key, crate.tierWeights, misses, draws[0], draws[1]);
     if (!car) return false; // nothing droppable
@@ -419,13 +503,100 @@ export function createCrateBox(parent: HTMLElement, deps: CrateBoxDeps): CrateBo
     const lvlKey = pickLevel(deps.lockedLevels(), crate.levelChance, draws[2], draws[3]); // additive level roll
     if (lvlKey) deps.grantLevel(lvlKey);
     bumpPity(crate.key, car);
-    burstToReveal(crate, car, isNew, scrap, lvlKey, vrf);
+    burstToReveal(crate, car, isNew, scrap, lvlKey, proof);
     return true;
+  };
+
+  // ── guest / not connected: client RNG + local pity (practice). No account is charged, so nothing
+  // here needs proving; a signed-in open never reaches this path on either rail. ──
+  const openPractice = (crate: CrateType, free: boolean): void => {
+    if (!free && deps.coins() < crate.priceCoins) { syncCoins(); return; }
+    const draws = [rng.next(), rng.next(), rng.next(), rng.next()];
+    const misses = (deps.pity?.() ?? emptyPity())[crate.key];
+    const car = rollCrateWithPity(deps.cars(), crate.key, crate.tierWeights, misses, draws[0], draws[1]);
+    if (!car) { if (free) { giftMode = false; close(); } return; } // nothing droppable — never charge
+    if (!free && !deps.spend(crate.priceCoins)) return;
+    opening = true;
+    syncCoins();
+    rows.style.display = "none";
+    stage.classList.add("on");
+    void cinematic.play({
+      color: crate.color,
+      rarity: car.rarity ?? 1,
+      cratePng: cratePng[crate.key],
+    }).then(() => {
+      const isNew = deps.grantCar(car.name);
+      let scrap = crate.scrap;
+      if (isNew) deps.unlockUI(car.name); else scrap += dupeScrap(car.rarity);
+      deps.addScrap(scrap);
+      const lvlKey = pickLevel(deps.lockedLevels(), crate.levelChance, draws[2], draws[3]);
+      if (lvlKey) deps.grantLevel(lvlKey);
+      bumpPity(crate.key, car);
+      showReveal(crate, car, isNew, scrap, lvlKey, null);
+    });
+  };
+
+  // ── EVM rail: server commit-reveal. The server publishes sha256(seed‖nonce) BEFORE it knows which
+  // crate is being opened, then debits, rolls, grants, and reveals the seed. Nothing is applied here
+  // until the reveal hashes back to that commitment AND re-derives the draws the outcome used. ──
+  const openProven = (crate: CrateType, free: boolean, payment: "coins" | "sol"): void => {
+    if (payment === "sol") {
+      // devnet SOL purchases are Solana-rail plumbing; they are parked with that rail.
+      deps.onVrfFail?.("SOL crate payments are temporarily unavailable.");
+      return;
+    }
+    const accountBacked = deps.vrfRequired?.() ?? false;
+    const mode = provenRandomnessMode(accountBacked, !!(deps.crateCommit && deps.openVerified));
+    if (mode === "client") { openPractice(crate, free); return; }
+    if (mode === "blocked") {
+      deps.onVrfFail?.("Provably fair crates are unavailable right now. Try again shortly.");
+      if (giftMode) { giftMode = false; close(); }
+      return;
+    }
+
+    opening = true;
+    syncCoins();
+    showCrateAnim(crate, true); // loop the shake while the server commits + rolls
+    void (async () => {
+      const { commitId, commitment } = await deps.crateCommit!();
+      showCommitment(commitment); // published while the outcome is still unknown
+      const result = await deps.openVerified!({
+        crateKey: crate.key,
+        payment: free ? "gift" : "coins",
+        commitId,
+      });
+      if (free) {
+        const claimed = await completeVrfReward(true, deps.completeGift, () => true);
+        if (!claimed) throw new Error("welcome_already_claimed");
+      }
+      const proof = verifyCrateOpen({ commitment, reveal: result.reveal, draws: result.draws });
+      if (!proof.ok) {
+        // The server already granted this server-side, but an unproven roll is never shown as a win
+        // and never written into local state — the player is told the check failed.
+        console.warn("[crate] proof failed:", proof.reason, commitment);
+        deps.onVrfFail?.(proofFailureMessage(proof.reason));
+        showVerificationFailed(proofFailureMessage(proof.reason));
+        return;
+      }
+      deps.applyVerified?.(result);
+      deps.recordPity?.(result.pity);
+      const car = deps.cars().find((c) => c.name === result.carId);
+      if (!car) throw new Error("crate_car_missing");
+      showReveal(crate, car, result.isNew, result.scrap, result.levelKey, { kind: "proven", commitment });
+    })().catch((error) => {
+      opening = false;
+      console.warn("[crate] proven open failed:", error);
+      // no client-side escrow on this path (the server debits), so never claim coins were restored
+      deps.onVrfFail?.(vrfFailureMessage(error, false));
+      if (giftMode) { giftMode = false; close(); } else showShop();
+    });
   };
 
   const doOpen = (crate: CrateType, free = false, payment: "coins" | "sol" = "coins") => {
     if (opening) return;
     if (!free) giftMode = false; // a paid open ends the welcome flow → its reveal returns to the shop
+    if (railOf() === "evm") { openProven(crate, free, payment); return; }
+    // ── parked Solana rail: MagicBlock VRF ──
     const vrfRequired = deps.vrfRequired?.() ?? false;
     const availableVrf = deps.vrfDraws?.() ?? null;
     const randomnessMode = crateRandomnessMode(vrfRequired, !!availableVrf);
@@ -470,12 +641,12 @@ export function createCrateBox(parent: HTMLElement, deps: CrateBoxDeps): CrateBo
           const car = deps.cars().find((c) => c.name === result.carId);
           if (car) {
             pendingSol = null;
-            showReveal(crate, car, result.isNew, result.scrap, result.levelKey, true);
+            showReveal(crate, car, result.isNew, result.scrap, result.levelKey, { kind: "vrf" });
             return;
           }
         } else {
           const draws = await vrfProvider(4);
-          const revealed = resolveAndReveal(crate, draws, true);
+          const revealed = resolveAndReveal(crate, draws, { kind: "vrf" });
           if (revealed) {
             pendingSol = null;
             return;
@@ -497,34 +668,7 @@ export function createCrateBox(parent: HTMLElement, deps: CrateBoxDeps): CrateBo
       return;
     }
 
-    if (!vrfProvider) {
-      // ── guest / not connected: client RNG + local pity (practice) ──
-      if (!free && deps.coins() < crate.priceCoins) { syncCoins(); return; }
-      const draws = [rng.next(), rng.next(), rng.next(), rng.next()];
-      const misses = (deps.pity?.() ?? emptyPity())[crate.key];
-      const car = rollCrateWithPity(deps.cars(), crate.key, crate.tierWeights, misses, draws[0], draws[1]);
-      if (!car) { if (free) { giftMode = false; close(); } return; } // nothing droppable — never charge
-      if (!free && !deps.spend(crate.priceCoins)) return;
-      opening = true;
-      syncCoins();
-      rows.style.display = "none";
-      stage.classList.add("on");
-      void cinematic.play({
-        color: crate.color,
-        rarity: car.rarity ?? 1,
-        cratePng: cratePng[crate.key],
-      }).then(() => {
-        const isNew = deps.grantCar(car.name);
-        let scrap = crate.scrap;
-        if (isNew) deps.unlockUI(car.name); else scrap += dupeScrap(car.rarity);
-        deps.addScrap(scrap);
-        const lvlKey = pickLevel(deps.lockedLevels(), crate.levelChance, draws[2], draws[3]);
-        if (lvlKey) deps.grantLevel(lvlKey);
-        bumpPity(crate.key, car);
-        showReveal(crate, car, isNew, scrap, lvlKey, false);
-      });
-      return;
-    }
+    if (!vrfProvider) { openPractice(crate, free); return; }
 
     // ── signed-in: MagicBlock VRF. Debit FIRST (the mapping is public — randomness must never
     // be knowable before payment), request, shake while the oracle answers, fail closed. ──
@@ -548,7 +692,7 @@ export function createCrateBox(parent: HTMLElement, deps: CrateBoxDeps): CrateBo
         deps.recordPity?.(result.pity);
         const car = deps.cars().find((c) => c.name === result.carId);
         if (!car) throw new Error("crate_car_missing");
-        showReveal(crate, car, result.isNew, result.scrap, result.levelKey, true);
+        showReveal(crate, car, result.isNew, result.scrap, result.levelKey, { kind: "vrf" });
       })().catch((error) => {
         opening = false;
         console.warn("[crate] verified open failed:", error);
@@ -569,7 +713,7 @@ export function createCrateBox(parent: HTMLElement, deps: CrateBoxDeps): CrateBo
       const revealed = await completeVrfReward(
         free,
         deps.completeGift,
-        () => resolveAndReveal(crate, draws, true),
+        () => resolveAndReveal(crate, draws, { kind: "vrf" }),
       );
       if (!revealed) {
         opening = false;

@@ -289,6 +289,31 @@ export const roundActions = pgTable(
 
 export type RoundAction = typeof roundActions.$inferSelect;
 
+/**
+ * Commit-reveal crate randomness. The server draws a secret seed + nonce BEFORE the player commits
+ * to an open and publishes only `sha256(seed‖nonce)`; the open reveals seed+nonce so the client can
+ * re-derive the commitment and the draws. `usedAt` makes a commit SINGLE-SHOT (a conditional update
+ * claims it), which is also what stops a revealed seed from being replayed for a second free roll.
+ */
+export const crateCommits = pgTable(
+  "crate_commits",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    userId: uuid("user_id").notNull().references(() => users.id),
+    /** 32-byte secret, hex. Never leaves the server until the matching open consumes the commit. */
+    seedHex: text("seed_hex").notNull(),
+    /** 16-byte blinding nonce, hex — keeps the commitment un-brute-forceable across a known seed space. */
+    nonceHex: text("nonce_hex").notNull(),
+    commitmentHex: text("commitment_hex").notNull(),
+    usedAt: timestamp("used_at", { withTimezone: true }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => ({
+    userIdx: index("crate_commits_user_idx").on(t.userId, t.createdAt),
+  }),
+);
+export type CrateCommitRow = typeof crateCommits.$inferSelect;
+
 /** Authoritative per-user upgrade levels (Turbo/Tank/Suspension). Client localStorage is a mirror;
  *  the server wins on sign-in. Levels feed the entitlement envelope, so they MUST be authoritative. */
 export const upgradeLevels = pgTable("upgrade_levels", {

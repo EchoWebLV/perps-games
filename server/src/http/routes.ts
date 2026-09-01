@@ -38,6 +38,13 @@ export interface RouteDeps {
   adminSecret: string | null;
   upgrades: import("../services/upgrades.js").Upgrades;
   crateOpen: import("../services/crate-open.js").CrateOpen;
+  /** server commit-reveal randomness for crates. Null/absent disables /v1/crates/commit (503). */
+  crateRoll?: import("../services/crate-roll.js").CrateRoll | null;
+  /**
+   * Which rail this deployment runs on (env.CHAIN_FAMILY). Only "solana" still accepts the parked
+   * MagicBlock-VRF crate fields; the EVM rail rolls from server commit-reveal only.
+   */
+  chainFamily?: import("../auth/wallet-binding.js").ChainFamily;
   /** not consumed by any Phase 1 route — the seam Phase 2's /authorize validates against */
   entitlements: import("../services/entitlements.js").Entitlements;
   earnLimit: import("../services/earn-limit.js").EarnLimit;
@@ -48,7 +55,10 @@ const CoinDelta = z.object({ amount: z.number().int().positive().max(1_000_000_0
 const OpenCrate = z.object({
   crateKey: z.enum(["wooden", "silver", "gold"]),
   payment: z.enum(["coins", "sol", "gift"]),
-  vrfBytes: z.string().min(64).max(66),
+  /** commit-reveal: the id of a /v1/crates/commit this open spends. Preferred on every rail. */
+  commitId: z.string().uuid().optional(),
+  /** parked Solana VRF bytes — only honoured when CHAIN_FAMILY=solana. */
+  vrfBytes: z.string().min(64).max(66).optional(),
   solSignature: z.string().min(32).max(128).optional(),
 });
 const GrantCar = z.object({ carId: z.string().min(1) });
@@ -128,6 +138,8 @@ export function registerRoutes(server: FastifyInstance, deps: RouteDeps): void {
   // economy-MUTATING endpoints require a wallet-bound (non-anonymous) session — see the preHandler.
   const requireWalletBoundUser = makeRequireWalletBoundUser({ users: deps.users, devAuth: deps.devAuth, sessionAuth: deps.sessionAuth });
   const requireAdmin = makeRequireAdmin(deps.adminSecret);
+  // env.CHAIN_FAMILY defaults to "evm"; deps omit it only in callsites predating the rail split.
+  const solanaRail = (deps.chainFamily ?? "evm") === "solana";
 
   server.post("/v1/session", async () => deps.sessionAuth.issueAnonymous());
 
@@ -238,16 +250,43 @@ export function registerRoutes(server: FastifyInstance, deps: RouteDeps): void {
     return deps.users.redeemAccess(req.userId!, p.data.code);
   });
 
+  // Commit-reveal crate randomness. The server publishes sha256(seed‖nonce) BEFORE the player picks
+  // a crate; /v1/crates/open then reveals seed+nonce so the client can prove the roll wasn't ground.
+  server.post("/v1/crates/commit", { preHandler: requireWalletBoundUser }, async (req, reply) => {
+    if (!deps.crateRoll) return reply.code(503).send({ error: "crate_commit_unavailable" });
+    return deps.crateRoll.commit(req.userId!);
+  });
+
   server.post("/v1/crates/open", { preHandler: requireWalletBoundUser }, async (req, reply) => {
     const p = OpenCrate.safeParse(req.body);
     if (!p.success) return reply.code(400).send({ error: "bad_request" });
+    const { commitId, ...open } = p.data;
+    // The parked Solana rail may still roll from VRF bytes; the EVM rail is commit-reveal only, so a
+    // client that sends only vrfBytes there is refused rather than silently trusted.
+    if (!commitId && !(solanaRail && open.vrfBytes)) {
+      return reply.code(400).send({ error: "commit_required" });
+    }
     try {
-      return await deps.crateOpen.open(req.userId!, p.data);
+      let reveal: { seedHex: string; nonceHex: string; commitment: string } | null = null;
+      if (commitId) {
+        if (!deps.crateRoll) return reply.code(503).send({ error: "crate_commit_unavailable" });
+        const consumed = await deps.crateRoll.consume(req.userId!, commitId, 4);
+        reveal = { seedHex: consumed.seedHex, nonceHex: consumed.nonceHex, commitment: consumed.commitment };
+        const result = await deps.crateOpen.open(req.userId!, {
+          ...open,
+          vrfBytes: undefined, // commit-reveal wins outright; never mix two randomness sources
+          roll: { draws: consumed.draws, ref: commitId },
+        });
+        return { ...result, reveal, draws: consumed.draws };
+      }
+      return await deps.crateOpen.open(req.userId!, open);
     } catch (e: any) {
       const msg = String(e?.message ?? e);
       if (msg === "insufficient balance") return reply.code(402).send({ error: "insufficient_balance" });
       if (msg === "welcome_already_claimed") return reply.code(409).send({ error: "welcome_already_claimed" });
-      if (msg === "bad_vrf_bytes" || msg === "sol_signature_required" || msg === "bad_crate" || msg === "bad_payment") {
+      if (msg === "commit_not_found") return reply.code(404).send({ error: "commit_not_found" });
+      if (msg === "commit_used") return reply.code(409).send({ error: "commit_used" });
+      if (msg === "bad_vrf_bytes" || msg === "bad_draws" || msg === "sol_signature_required" || msg === "bad_crate" || msg === "bad_payment") {
         return reply.code(400).send({ error: msg });
       }
       if (msg === "crate_replay") return reply.code(409).send({ error: "crate_replay" });

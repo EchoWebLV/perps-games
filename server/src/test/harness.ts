@@ -5,6 +5,7 @@ import { makeInventory, type Inventory } from "../services/inventory.js";
 import { makeRounds, type Rounds } from "../services/rounds.js";
 import { makeUpgrades, type Upgrades } from "../services/upgrades.js";
 import { makeCrateOpen } from "../services/crate-open.js";
+import { makeCrateRoll } from "../services/crate-roll.js";
 import { makeEntitlements, type Entitlements } from "../services/entitlements.js";
 import { makeEarnLimit, type EarnLimit } from "../services/earn-limit.js";
 import { makeTradeHistory, type TradeHistory } from "../services/trade-history.js";
@@ -47,6 +48,8 @@ interface MakeTestDbOptions {
   walletBinding?: WalletBinding;
   /** chain family for the default wallet binding; unset keeps the historical "solana" default. */
   walletBindingFamily?: ChainFamily;
+  /** rail the routes run on (env.CHAIN_FAMILY); "solana" keeps the parked VRF crate fields alive. */
+  chainFamily?: ChainFamily;
   realMoney?: { enabled: boolean; treasuryUsdcAta: string | null };
   depositTxBuilder?: import("../services/deposit-tx.js").DepositTxBuilder | null;
   walletBalanceReader?: import("../services/wallet-balance.js").WalletBalanceReader | null;
@@ -88,6 +91,7 @@ export async function makeTestDb(opts: MakeTestDbOptions = {}): Promise<TestCtx>
   const rounds = makeRounds({ db, ledger, feed, stakeAsset, houseUserId });
   const upgrades = makeUpgrades(db, ledger);
   const crateOpen = makeCrateOpen(ledger, inventory, users);
+  const crateRoll = makeCrateRoll(db);
   const entitlements = makeEntitlements({ inventory, upgrades });
   // deliberately huge default ceiling so unrelated suites never trip the cap; cap tests override it.
   const earnLimit = makeEarnLimit(db, opts.earnLimit ?? { ceiling: 1_000_000, windowMs: 60_000 });
@@ -99,7 +103,9 @@ export async function makeTestDb(opts: MakeTestDbOptions = {}): Promise<TestCtx>
   const presenceRoom = makePresenceRoom();
   const server = buildServer({
     users, ledger, inventory, rounds, tradeHistory, feed,
-    upgrades, crateOpen, entitlements, earnLimit,
+    upgrades, crateOpen, crateRoll, entitlements, earnLimit,
+    // matches env.CHAIN_FAMILY's own default; crate suites flip it to exercise the parked rail.
+    chainFamily: opts.chainFamily ?? "evm",
     stakeAsset,
     devEndpoints: true,
     signupFaucet: opts.signupFaucet ?? false,

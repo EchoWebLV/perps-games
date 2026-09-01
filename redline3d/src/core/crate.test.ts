@@ -1,5 +1,9 @@
+import { createHash } from "node:crypto";
 import { describe, expect, test } from "vitest";
-import { rollCrate, dupeScrap, DUPE_SCRAP, pickLevel, CRATES, crateByKey, type CrateCar } from "./crate";
+import {
+  rollCrate, dupeScrap, DUPE_SCRAP, pickLevel, CRATES, crateByKey,
+  drawsFromSeed, verifyCrateOpen, type CrateCar,
+} from "./crate";
 
 // a synthetic roster with cars in every tier so pulls are deterministic
 const ROSTER: CrateCar[] = [
@@ -81,5 +85,75 @@ describe("pickLevel — additive level-skin roll", () => {
   });
   test("null when nothing is left to unlock", () => {
     expect(pickLevel([], 1, 0, 0)).toBeNull();
+  });
+});
+
+// ── commit-reveal proof: the client re-derives everything the server claims ──
+const SEED = "07".repeat(32);
+const NONCE = "5a".repeat(16);
+const commitmentOf = (seedHex: string, nonceHex: string) =>
+  createHash("sha256").update(Buffer.from(seedHex, "hex")).update(Buffer.from(nonceHex, "hex")).digest("hex");
+
+describe("drawsFromSeed — mirrors the server's published derivation", () => {
+  test("draw[i] = sha256(seed‖[i]) top 32 bits / 2^32", () => {
+    const draws = drawsFromSeed(SEED, 4);
+    expect(draws).toHaveLength(4);
+    draws.forEach((d) => { expect(d).toBeGreaterThanOrEqual(0); expect(d).toBeLessThan(1); });
+    const h = createHash("sha256").update(Buffer.from(SEED, "hex")).update(Buffer.from([0])).digest();
+    expect(draws[0]).toBeCloseTo(h.readUInt32BE(0) / 2 ** 32, 12);
+    expect(drawsFromSeed(SEED, 4)).toEqual(draws); // deterministic
+  });
+
+  test("a 0x prefix and upper case parse identically", () => {
+    expect(drawsFromSeed(`0x${SEED.toUpperCase()}`, 2)).toEqual(drawsFromSeed(SEED, 2));
+  });
+
+  test("refuses a malformed seed rather than inventing draws", () => {
+    expect(() => drawsFromSeed("nothex", 2)).toThrow();
+    expect(() => drawsFromSeed("abc", 2)).toThrow(); // odd length
+  });
+});
+
+describe("verifyCrateOpen — never silently accept an unproven roll", () => {
+  const commitment = commitmentOf(SEED, NONCE);
+  const reveal = { seedHex: SEED, nonceHex: NONCE, commitment };
+  const draws = drawsFromSeed(SEED, 4);
+
+  test("accepts a reveal that hashes to the pre-published commitment and derives the draws", () => {
+    expect(verifyCrateOpen({ commitment, reveal, draws })).toEqual({ ok: true, checkedDraws: true });
+  });
+
+  test("rejects a seed that does not hash to the commitment", () => {
+    const forged = { ...reveal, seedHex: "08".repeat(32) };
+    expect(verifyCrateOpen({ commitment, reveal: forged, draws })).toEqual({ ok: false, reason: "commitment_mismatch" });
+  });
+
+  test("rejects a swapped nonce", () => {
+    expect(verifyCrateOpen({ commitment, reveal: { ...reveal, nonceHex: "5b".repeat(16) }, draws }))
+      .toEqual({ ok: false, reason: "commitment_mismatch" });
+  });
+
+  test("rejects draws that the revealed seed does not produce", () => {
+    expect(verifyCrateOpen({ commitment, reveal, draws: [0.5, 0.5, 0.5, 0.5] }))
+      .toEqual({ ok: false, reason: "draws_mismatch" });
+  });
+
+  test("rejects a response that reveals nothing at all", () => {
+    expect(verifyCrateOpen({ commitment, reveal: null, draws })).toEqual({ ok: false, reason: "missing_reveal" });
+    expect(verifyCrateOpen({ commitment, reveal: undefined, draws: undefined })).toEqual({ ok: false, reason: "missing_reveal" });
+  });
+
+  test("rejects a reveal whose echoed commitment disagrees with the one we were handed", () => {
+    expect(verifyCrateOpen({ commitment, reveal: { ...reveal, commitment: "ff".repeat(32) }, draws }))
+      .toEqual({ ok: false, reason: "commitment_mismatch" });
+  });
+
+  test("verifies the commitment alone when the response echoes no draws, and says so", () => {
+    expect(verifyCrateOpen({ commitment, reveal })).toEqual({ ok: true, checkedDraws: false });
+  });
+
+  test("a malformed reveal fails closed instead of throwing", () => {
+    expect(verifyCrateOpen({ commitment, reveal: { seedHex: "zz", nonceHex: NONCE, commitment }, draws }))
+      .toEqual({ ok: false, reason: "commitment_mismatch" });
   });
 });

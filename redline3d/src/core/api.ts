@@ -72,11 +72,16 @@ export interface Api {
   migrate(p: { coins: number; scrap: number; cars: Record<string, number>; levels?: { turbo: number; tank: number; suspension: number } }): Promise<{ seeded: boolean; reason?: string }>;
   /** authoritative upgrade purchase — the server debits coins AND scrap and returns the new level. */
   upgradesBuy(p: { track: "turbo" | "tank" | "suspension" }): Promise<{ track: string; level: number; coins: number; scrap: number }>;
+  /** Reserve server randomness for the NEXT open: returns sha256(seed‖nonce) with the seed withheld. */
+  crateCommit(): Promise<{ commitId: string; commitment: string }>;
   /** Read welcome eligibility without consuming the once-per-account claim. */
   openCrate(p: {
     crateKey: "wooden" | "silver" | "gold";
     payment: "coins" | "sol" | "gift";
-    vrfBytes: string;
+    /** commit-reveal: spends the commit from crateCommit(). Required on the EVM rail. */
+    commitId?: string;
+    /** parked Solana rail: MagicBlock VRF bytes the server rolls from. */
+    vrfBytes?: string;
     solSignature?: string;
   }): Promise<{
     carId: string;
@@ -87,6 +92,10 @@ export interface Api {
     coins: number;
     levelKey: string | null;
     pity: { wooden: number; silver: number; gold: number };
+    /** present only for a commit-reveal open — the seed+nonce behind the pre-published commitment. */
+    reveal?: { seedHex: string; nonceHex: string; commitment: string };
+    /** the draws the server rolled the outcome from, so the client can re-derive them. */
+    draws?: number[];
   }>;
   welcomeStatus(): Promise<{ pending: boolean }>;
   /** claim the first-login welcome crate ONCE PER ACCOUNT (server-side). granted=true only the first time. */
@@ -206,6 +215,8 @@ export function createApi(opts: ApiOpts = {}): Api {
     inventoryMelt: (p) => call("POST", "/v1/inventory/melt", p),
     migrate: (p) => call("POST", "/v1/migrate", p),
     upgradesBuy: (p) => call("POST", "/v1/upgrades/buy", p),
+    // {} body: `call` always sets content-type:application/json, which Fastify 400s on an empty body.
+    crateCommit: () => call("POST", "/v1/crates/commit", {}),
     openCrate: (p) => call("POST", "/v1/crates/open", p),
     welcomeStatus: () => call("GET", "/v1/welcome/status"),
     // send an empty {} body: `call` always sets content-type:application/json, and Fastify 400s an
