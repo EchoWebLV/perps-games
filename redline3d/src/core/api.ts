@@ -102,7 +102,9 @@ export interface Api {
   recordTrade(input: TradeRecordInput, expectedWallet?: string): Promise<TradeHistoryItem>;
   listTrades(cursor?: string): Promise<TradeHistoryPage>;
   bindWalletChallenge(wallet: string): Promise<{ challenge: string; message: string; wallet: string; expiresAt: string }>;
-  bindWallet(input: { challenge: string; signatureBase58: string }): Promise<{
+  /** One of the two signature fields the server accepts: `signature` is the 0x-hex EIP-191
+   *  signature (EVM rail, preferred), `signatureBase58` the ed25519 one (Solana rail). */
+  bindWallet(input: { challenge: string; signature?: string; signatureBase58?: string }): Promise<{
     wallet: string;
     token?: string;
     userId?: string;
