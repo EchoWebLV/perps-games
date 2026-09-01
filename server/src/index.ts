@@ -294,6 +294,7 @@ async function main(): Promise<void> {
     entitlements,
     earnLimit,
     presenceRoom,
+    feedAssets: feedAssetKeys(),
   });
 
   const addr = await server.listen({ port: env.PORT, host: "0.0.0.0" });

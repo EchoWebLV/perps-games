@@ -1,6 +1,8 @@
 import Fastify, { type FastifyInstance } from "fastify";
 import cors from "@fastify/cors";
 import websocket from "@fastify/websocket";
+import { registerFeedSocket } from "../feed/socket.js";
+import { feedAssetKeys } from "../feed/symbols.js";
 import type { PresenceRoom } from "../presence/room.js";
 import {
   registerPresenceSocket,
@@ -12,6 +14,8 @@ export type ServerDeps = RouteDeps & {
   corsOrigins: string[];
   presenceRoom: PresenceRoom;
   presenceSocketOptions?: PresenceSocketOptions;
+  /** symbols /v1/feed fans out; defaults to the whole symbol table */
+  feedAssets?: string[];
 };
 
 export function buildServer(deps: ServerDeps): FastifyInstance {
@@ -33,6 +37,11 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
     });
     presenceGateway.start();
     routes.addHook("onClose", async () => presenceGateway.stop());
+    const feedGateway = registerFeedSocket(routes, {
+      feed: deps.feed,
+      assets: deps.feedAssets ?? feedAssetKeys(),
+    });
+    routes.addHook("onClose", async () => feedGateway.stop());
     routes.get("/healthz", async () => ({ ok: true }));
     registerRoutes(routes, deps);
   });
