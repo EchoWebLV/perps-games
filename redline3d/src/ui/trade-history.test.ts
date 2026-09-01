@@ -2,6 +2,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { TradeHistoryItem, TradeHistoryPage } from "../core/api";
 import { createTradeHistory } from "./trade-history";
+import { SOL_STAKE_CURRENCY } from "../core/stake-currency";
 
 const firstTrade: TradeHistoryItem = {
   id: "11111111-1111-4111-8111-111111111111",
@@ -54,6 +55,8 @@ function mount(options: {
   const flush = vi.fn(options.flush ?? (async () => undefined));
   const load = vi.fn(options.load ?? (async () => ({ items: [], nextCursor: null })));
   const panel = createTradeHistory(host, {
+    // the parked solana rail's framing — these rows assert SOL formatting explicitly
+    currency: SOL_STAKE_CURRENCY,
     signedIn: () => options.signedIn ?? true,
     flush,
     load,

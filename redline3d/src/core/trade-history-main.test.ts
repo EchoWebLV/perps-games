@@ -58,7 +58,7 @@ describe("main trade history wiring", () => {
     expect(begin).toBeGreaterThan(confirmedOpen);
     expect(engine).toBeGreaterThan(begin);
     expect(launch.match(/tradeHistoryBridge\.begin\(/g)).toHaveLength(1);
-    expect(launch).toContain("stakeBase: unitsToBase(playAmount),");
+    expect(launch).toContain("stakeBase: unitsToBase(playAmount, SOL_STAKE_CURRENCY),");
     expect(launch).toContain("entryPrice: opened.entryHuman,");
     expect(launch).toContain("entryTs: opened.entryTs,");
 

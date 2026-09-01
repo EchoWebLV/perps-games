@@ -1,4 +1,4 @@
-import { ACTIVE_STAKE_CURRENCY, formatStakeUnits } from "./stake-currency";
+import { SOL_STAKE_CURRENCY, formatStakeUnits } from "./stake-currency";
 
 /**
  * Money formatting. The soft-coin ledger is denominated in CENTS — 1 coin = $0.01 —
@@ -14,9 +14,12 @@ export function usd(coins: number): string {
  * Format a stake/balance/payout amount as SOL. The on-chain stake mint is wSOL, and the
  * play ledger is denominated in CENTI-SOL units (1 unit = 0.01 SOL) — the same ×100 scale
  * the cents model used — so this is the SOL-native sibling of `usd()`.
+ *
+ * Pinned to SOL_STAKE_CURRENCY, not the ACTIVE one: these two are the PARKED solana rail's
+ * formatters. The live rail's money reads as dollars — route it through `usd()`.
  */
 export function sol(units: number): string {
-  return formatStakeUnits(units, 2, ACTIVE_STAKE_CURRENCY);
+  return formatStakeUnits(units, 2, SOL_STAKE_CURRENCY);
 }
 
 /**
@@ -25,5 +28,5 @@ export function sol(units: number): string {
  * and may be fractional (pass the un-floored value so the extra digit is meaningful).
  */
 export function sol3(units: number): string {
-  return formatStakeUnits(units, 3, ACTIVE_STAKE_CURRENCY);
+  return formatStakeUnits(units, 3, SOL_STAKE_CURRENCY);
 }

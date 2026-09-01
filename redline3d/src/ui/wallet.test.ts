@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createWallet } from "./wallet";
+import { SOL_STAKE_CURRENCY } from "../core/stake-currency";
 
 class FakeClassList {
   private classes = new Set<string>();
@@ -194,6 +195,7 @@ describe("createWallet", () => {
   it("renders the deposit QR + address + copy for the session wallet (SOL framing)", () => {
     const parent = new FakeElement("div");
     const wallet = createWallet(parent as unknown as HTMLElement, {
+      currency: SOL_STAKE_CURRENCY,
       address: () => ADDR,
       balance: () => 0,
       onchain: makeOnchain(),

@@ -23,7 +23,7 @@ import { createPriceSource } from "./core/price-source";
 import { RoundEngine } from "./core/round";
 import type { Snapshot } from "./core/types";
 import { sol3 } from "./core/money";
-import { ACTIVE_STAKE_CURRENCY, baseToUnits, unitsToBase } from "./core/stake-currency";
+import { SOL_STAKE_CURRENCY, baseToUnits, unitsToBase } from "./core/stake-currency";
 import { applyConfirmedWalletSpend } from "./core/wallet-balance-model";
 import { clampInt } from "./core/round-sync";
 import { niceLev, tToLev } from "./core/leverage";
@@ -204,7 +204,7 @@ const engine = new RoundEngine();
 // still drives the smooth visual ×; the on-chain Round is the only money truth.
 // The play ledger is denominated in CENTI-SOL units (1 unit = 0.01 SOL). With 9-decimal
 // wSOL this maps a unit to 10^7 lamports — the same ×100 scale the old cents model used.
-const BUY_IN_BASE = ACTIVE_STAKE_CURRENCY.initialBuyInBase;
+const BUY_IN_BASE = SOL_STAKE_CURRENCY.initialBuyInBase;
 let roundActive = false; // a round is open locally (de-dupes finalizeSettled across crank/poll/close)
 let simRound = false;    // guest practice round: engine-only, no wallet, no chain — free to try
 let settling = false;    // a close tx is in flight
@@ -222,7 +222,7 @@ const session = createGameSession({
 let walletSolUnits = 0; // last-read wallet SOL (centi-SOL units)
 let walletSolRequest = 0;
 function renderKnownBalance() {
-  const play = baseToUnits(session.balance());
+  const play = baseToUnits(session.balance(), SOL_STAKE_CURRENCY);
   balance = play + walletSolUnits;
   hud.setBalance(balance);
   walletUI.setBalance(balance);
@@ -233,7 +233,7 @@ function reconcileWalletSol() {
   // RPC resolves so a slow wallet response cannot restore a stale pre-settlement snapshot.
   void session.walletSol().then((sol) => {
     if (request !== walletSolRequest) return;
-    walletSolUnits = baseToUnits(sol);
+    walletSolUnits = baseToUnits(sol, SOL_STAKE_CURRENCY);
     renderKnownBalance();
   }).catch(() => {});
 }
@@ -358,7 +358,7 @@ addEventListener("pagehide", () => priceSource.stop());
 addEventListener("pageshow", (e) => { if ((e as PageTransitionEvent).persisted) priceSource.restart(); });
 
 // ui
-const hud = createHud(hudRoot, ACTIVE_STAKE_CURRENCY);
+const hud = createHud(hudRoot, SOL_STAKE_CURRENCY);
 const tach = createTach(hud.tachMount);
 const controls = createControls(hud.ctrlMount, hud.goMount, hud.pedalMount);
 const highwayControls = createHighwayControls(hud.highwayMount, {
@@ -455,7 +455,7 @@ const tradeRecorder = createTradeHistoryRecorder({
 });
 const tradeHistoryBridge = createTradeHistoryBridge(tradeRecorder);
 const tradeHistory = createTradeHistory(hudRoot, {
-  currency: ACTIVE_STAKE_CURRENCY,
+  currency: SOL_STAKE_CURRENCY,
   signedIn: () => identity?.mode === "privy" && signedIn,
   flush: () => tradeHistoryBridge.flush(),
   load: (cursor) => api.listTrades(cursor),
@@ -535,14 +535,14 @@ scrap.set(upgrades.scrap(), false);
 
 // wallet page (opened by tapping the balance chip) — shows the player's deposit QR.
 const walletUI = createWallet(hudRoot, {
-  currency: ACTIVE_STAKE_CURRENCY,
+  currency: SOL_STAKE_CURRENCY,
   // the wallet shown for funding is the on-chain session wallet (Privy embedded / dev keypair)
   address: () => session.address(),
   balance: () => balance,
   // the wallet's own SOL (lamports → SOL), so a deposit visibly arrives before the first GO
-  fetchWalletSol: async () => { try { return Number(await session.walletSol()) / 10 ** ACTIVE_STAKE_CURRENCY.decimals; } catch { return null; } },
+  fetchWalletSol: async () => { try { return Number(await session.walletSol()) / 10 ** SOL_STAKE_CURRENCY.decimals; } catch { return null; } },
   onchain: {
-    status: () => ({ delegated: session.delegated(), playCents: baseToUnits(session.balance()) }),
+    status: () => ({ delegated: session.delegated(), playCents: baseToUnits(session.balance(), SOL_STAKE_CURRENCY) }),
     // One player action. "Cash out" quietly undelegates the ER session (if one is live) and THEN
     // withdraws to the wallet — the player never sees the delegate/undelegate lifecycle, they just
     // move their balance to their wallet in a single tap.
@@ -596,7 +596,7 @@ async function syncTableCap() {
   capSyncing = true;
   try {
     const lim = await session.tableLimit(); // null = unknown (not connected / RPC blip): keep the last cap
-    if (lim !== null) { tablePlayCap = Number(lim / BigInt(unitsToBase(1))); syncPlayCap(); }
+    if (lim !== null) { tablePlayCap = Number(lim / BigInt(unitsToBase(1, SOL_STAKE_CURRENCY))); syncPlayCap(); }
   } finally { capSyncing = false; }
 }
 // keep the cap honest while the player sits on the bet screen (other tables carve the same
@@ -786,7 +786,7 @@ const crateBox = createCrateBox(hudRoot, {
     walletSolUnits = applyConfirmedWalletSpend(
       walletSolUnits,
       priceSol,
-      ACTIVE_STAKE_CURRENCY.displayUnitDecimals,
+      SOL_STAKE_CURRENCY.displayUnitDecimals,
     );
     walletSolRequest++; // invalidate any pre-payment wallet read still in flight
     renderKnownBalance();
@@ -1585,7 +1585,7 @@ function reconcileHighwaySnapshot(snap: RoundSnap): void {
   engine.launch({
     dir,
     lev: snap.lev,
-    stake: snap.stake === undefined ? controls.playAmount() : baseToUnits(snap.stake),
+    stake: snap.stake === undefined ? controls.playAmount() : baseToUnits(snap.stake, SOL_STAKE_CURRENCY),
     entryRaw: snap.entryHuman,
     banked: Number(snap.banked) / 1_000_000,
     startMs: roundStartMs,
@@ -1647,7 +1647,7 @@ function finalizeSettled(info: { outcome: number; outcomeName: string; payout: b
   if (engine.getPhase() === "live") engine.cashout(price, now); // freeze the visual at the live value
   const finalEq = engine.snapshot(price, now).equity;
   const liq = info.outcome === 2; // 0 cashout · 1 cap · 2 liq · 3 time
-  const payoutUnits = baseToUnits(info.payout);
+  const payoutUnits = baseToUnits(info.payout, SOL_STAKE_CURRENCY);
   nearDeath = false;
   if (liq) deathsDoor.kill(); else deathsDoor.clear(); // Skull: shatter on liq, stand down otherwise (no-op off-Skull)
   autoExit.setLive(false); // Pink Rod panel: unlock for the next round
@@ -1825,7 +1825,7 @@ controls.onLaunch(async () => {
           for (let clamped = false; ; clamped = true) {
             try {
               // buy in at least the bet: a Heavy-Load bet can exceed the standard 0.1 SOL buy-in
-              await session.ensureSession(Math.max(BUY_IN_BASE, unitsToBase(playAmount)), unitsToBase(playAmount));
+              await session.ensureSession(Math.max(BUY_IN_BASE, unitsToBase(playAmount, SOL_STAKE_CURRENCY)), unitsToBase(playAmount, SOL_STAKE_CURRENCY));
               break;
             } catch (e: any) {
               if (e?.code !== "bankroll_full" || clamped) throw e;
@@ -1859,7 +1859,7 @@ controls.onLaunch(async () => {
     // bounce a funded player ("Not enough SOL" — live-hit).
     syncOnchainBalance();
 
-    if (session.balance() < BigInt(unitsToBase(playAmount))) {
+    if (session.balance() < BigInt(unitsToBase(playAmount, SOL_STAKE_CURRENCY))) {
       hud.setStatus("Not enough SOL for this bet — send SOL to your wallet first.");
       walletUI.open();
       return;
@@ -1893,7 +1893,7 @@ controls.onLaunch(async () => {
     // rebuild that itself fails, or a second 6005, surfaces a message — a NAMED one.
     for (let rebuilt = false, retried = false; ; ) {
       try {
-        opened = await session.open(asset, dir, lev, unitsToBase(playAmount), openDuration, Math.round(CONFIG.LIQ * 1_000_000), graceSecs, slFp, tpFp, refundFp);
+        opened = await session.open(asset, dir, lev, unitsToBase(playAmount, SOL_STAKE_CURRENCY), openDuration, Math.round(CONFIG.LIQ * 1_000_000), graceSecs, slFp, tpFp, refundFp);
         break;
       } catch (e: any) {
         console.error("on-chain open failed", e);
@@ -1906,7 +1906,7 @@ controls.onLaunch(async () => {
           hud.setStatus("Hot streak — pulling up a fresh table…");
           try {
             await session.endSession();
-            await session.ensureSession(Math.max(BUY_IN_BASE, unitsToBase(playAmount)), unitsToBase(playAmount));
+            await session.ensureSession(Math.max(BUY_IN_BASE, unitsToBase(playAmount, SOL_STAKE_CURRENCY)), unitsToBase(playAmount, SOL_STAKE_CURRENCY));
             syncOnchainBalance();
             hud.setStatus("Launching…");
             continue;
@@ -1940,7 +1940,7 @@ controls.onLaunch(async () => {
       asset,
       dir,
       lev,
-      stakeBase: unitsToBase(playAmount),
+      stakeBase: unitsToBase(playAmount, SOL_STAKE_CURRENCY),
       entryPrice: opened.entryHuman,
       entryTs: opened.entryTs,
     });
