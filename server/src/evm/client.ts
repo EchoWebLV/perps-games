@@ -6,7 +6,6 @@ import {
   http,
   type Chain,
   type PublicClient,
-  type WalletClient,
 } from "viem";
 import { privateKeyToAccount } from "viem/accounts";
 
@@ -27,11 +26,13 @@ export function makePublicClient(cfg: { chainId: number; rpcUrl: string; rpcUrlF
   return createPublicClient({ chain, transport });
 }
 
-/** Treasury signer. The returned address is lowercased to match how env.ts stores EVM addresses. */
-export function makeTreasuryWalletClient(cfg: { chainId: number; rpcUrl: string; secret: `0x${string}` }): {
-  client: WalletClient;
-  address: string;
-} {
+/**
+ * Treasury signer. The returned address is lowercased to match how env.ts stores EVM addresses.
+ *
+ * The return type is inferred deliberately: annotating `client` as a bare `WalletClient` erases the
+ * bound account and chain, and every call site would then have to restate `account` on each write.
+ */
+export function makeTreasuryWalletClient(cfg: { chainId: number; rpcUrl: string; secret: `0x${string}` }) {
   const chain = defineEvmChain({ chainId: cfg.chainId, rpcUrl: cfg.rpcUrl });
   const account = privateKeyToAccount(cfg.secret);
   return {
@@ -39,3 +40,6 @@ export function makeTreasuryWalletClient(cfg: { chainId: number; rpcUrl: string;
     address: account.address.toLowerCase(),
   };
 }
+
+/** Spellable name for the inferred, account-and-chain-bound treasury signer. */
+export type TreasuryWalletClient = ReturnType<typeof makeTreasuryWalletClient>["client"];

@@ -44,3 +44,11 @@ describe("makeTreasuryWalletClient", () => {
     expect(client.chain?.id).toBe(4663);
   });
 });
+
+// Compile-time regression guard, never executed: a bare `WalletClient` return annotation erases the
+// bound account and chain, so this call fails TS2345 demanding an explicit `account`/`chain`.
+// The inferred return type keeps the binding. Type-checked by `npm run build`.
+async function _sendsWithoutRestatingTheAccount() {
+  const { client } = makeTreasuryWalletClient({ chainId: 4663, rpcUrl: RPC, secret: SECRET });
+  await client.sendTransaction({ to: `0x${"22".repeat(20)}`, value: 1n });
+}

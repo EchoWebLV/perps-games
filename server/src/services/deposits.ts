@@ -34,6 +34,7 @@ export type DepositOutcome =
 
 export function makeDeposits(db: any, ledger: Ledger, cfg: DepositsConfig) {
   const expectedProgram = cfg.expectedTokenProgram ?? LEGACY_TOKEN_PROGRAM;
+  if (!expectedProgram) throw new Error("DepositsConfig.expectedTokenProgram must be non-empty");
 
   async function quarantine(t: InboundTransfer, reason: string, cents: number | null, userId: string | null): Promise<DepositOutcome> {
     await db.insert(deposits).values({
@@ -49,7 +50,7 @@ export function makeDeposits(db: any, ledger: Ledger, cfg: DepositsConfig) {
       if (!t.finalized) return { status: "quarantine", reason: "not_finalized" };
       if (t.destAta !== cfg.treasuryAta) return quarantine(t, "wrong_dest", null, null);
       if (t.mint !== cfg.usdcMint) return quarantine(t, "wrong_mint", null, null);
-      if (t.tokenProgram !== expectedProgram) return quarantine(t, "wrong_program", null, null);
+      if (!t.tokenProgram || t.tokenProgram !== expectedProgram) return quarantine(t, "wrong_program", null, null);
 
       let cents: number;
       try { cents = Number(baseUnitsToCents(t.amountBaseUnits)); }

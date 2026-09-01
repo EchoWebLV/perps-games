@@ -93,6 +93,20 @@ describe("deposits.recordInbound", () => {
     expect(await ctx.ledger.balance(userId, "cash")).toBe(200);
   });
 
+  // A set-but-empty label would have matched the "" the Solana source emits when it cannot
+  // determine the program (solana/deposit-source.ts), so both sides reject empty outright.
+  it("refuses to construct with an empty expected token label", () => {
+    expect(() => makeDeposits(ctx.db, ctx.ledger, { ...cfg, expectedTokenProgram: "" })).toThrow(
+      /expectedTokenProgram must be non-empty/,
+    );
+  });
+
+  it("quarantines a transfer carrying an empty tokenProgram", async () => {
+    const r = await deposits.recordInbound(transfer({ txSig: "noprog", tokenProgram: "" }));
+    expect(r).toEqual({ status: "quarantine", reason: "wrong_program" });
+    expect(await ctx.ledger.balance(userId, "cash")).toBe(0);
+  });
+
   it("quarantines the legacy Solana program id when an EVM label is configured", async () => {
     const svc = makeDeposits(ctx.db, ctx.ledger, { ...cfg, expectedTokenProgram: "erc20" });
     const r = await svc.recordInbound(transfer({ txSig: "spl-on-evm", tokenProgram: LEGACY_TOKEN_PROGRAM }));
