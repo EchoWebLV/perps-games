@@ -1,9 +1,11 @@
 /**
  * The tradable symbol table. ONE place the whole server learns what it can price.
  *
- * Pyth price-feed ids (same set the client uses in main.ts ASSETS). Adding an equity later is
- * literally adding a row here — the Hermes query, the `/v1/feed` fan-out and the round validator
- * all read this table rather than carrying their own copies.
+ * Pyth price-feed ids (same set the client uses in main.ts ASSETS). The Hermes subscription and
+ * the `/v1/feed` fan-out both read this table rather than carrying their own copies, so adding a
+ * row is all those two need.
+ *
+ * routes.ts zod enums still carry copies — widen them when adding a symbol.
  */
 export interface FeedSymbol {
   /** Pyth Hermes price-feed id, 64 lowercase hex chars, no 0x prefix. */

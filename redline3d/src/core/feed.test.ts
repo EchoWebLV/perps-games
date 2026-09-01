@@ -225,6 +225,47 @@ describe("connectFeed /v1/prices fallback", () => {
     h.stop();
   });
 
+  // The server sends `{type:"hb"}` on a dark table so a fleet of clients does not poll /v1/prices
+  // forever for symbols the server would omit anyway. These two pin the client half of that
+  // contract: the frame is inert as data, but it IS a sign of life on the rail.
+  it("ignores an unknown frame type without emitting a price", () => {
+    const sockets: FakeWs[] = [];
+    const prices: Array<[string, number]> = [];
+    const h = connectFeed({
+      feeds: [{ key: "BTC" }],
+      onPrice: (k, v) => prices.push([k, v]),
+      wsCtor: fakeWsCtor(sockets),
+      apiBase: "http://x",
+      fetchImpl: hangingFetch().impl,
+    });
+
+    expect(() => sockets[0].onmessage!({ data: JSON.stringify({ type: "hb" }) })).not.toThrow();
+    expect(prices).toEqual([]);
+    expect(h.state.live).toBe(false);
+    h.stop();
+  });
+
+  it("counts a heartbeat frame as WS liveness and holds the poll off", async () => {
+    vi.useFakeTimers();
+    const sockets: FakeWs[] = [];
+    const server = fakePrices({ prices: { BTC: 50000 }, live: { BTC: true } });
+    const h = connectFeed({
+      feeds: [{ key: "BTC" }],
+      onPrice: () => {},
+      wsCtor: fakeWsCtor(sockets),
+      apiBase: "http://x",
+      fetchImpl: server.impl,
+    });
+
+    sockets[0].onmessage!({ data: JSON.stringify({ type: "hb" }) });
+    await vi.advanceTimersByTimeAsync(600);
+    expect(server.calls).toEqual([]);          // without the hb this would already have polled
+
+    await vi.advanceTimersByTimeAsync(1200);   // 1800ms since the hb — silence window elapsed
+    expect(server.calls.length).toBeGreaterThan(0);
+    h.stop();
+  });
+
   it("does not stack requests when a poll outlives the interval", async () => {
     vi.useFakeTimers();
     const sockets: FakeWs[] = [];
