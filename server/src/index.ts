@@ -63,86 +63,141 @@ async function main(): Promise<void> {
   let payoutSigner: WithdrawSigner | null = null;
   let withdrawProcessor: import("./services/withdraw-worker.js").WithdrawProcessor | null = null;
   if (env.REAL_MONEY_ENABLED) {
-    const { makeRpcDepositSource } = await import("./solana/deposit-source.js");
-    const { assertUsdcMint } = await import("./solana/mint-assert.js");
-    const { makeDeposits } = await import("./services/deposits.js");
-    const { makeDepositConfirmer, makeDbDepositCursorStore } = await import("./services/deposit-worker.js");
-    const { makeRpcWalletBalanceReader } = await import("./services/wallet-balance.js");
-    const { makeRpcSignedTxBroadcaster } = await import("./services/signed-tx-broadcaster.js");
-    const source = makeRpcDepositSource(env.SOLANA_RPC_URL!);
-    await assertUsdcMint((m) => source.fetchMintInfo(m), env.USDC_MINT!); // refuse to boot on a bad mint
-    const deposits = makeDeposits(db, ledger, {
-      usdcMint: env.USDC_MINT!, treasuryAta: env.TREASURY_USDC_ATA!,
-      minCents: env.DEPOSIT_MIN_CENTS, maxCents: env.DEPOSIT_MAX_CENTS,
-    });
-    if (env.RUN_CONFIRMER) {
-      depositConfirmer = makeDepositConfirmer({ deposits, source, store: makeDbDepositCursorStore(db), treasuryAta: env.TREASURY_USDC_ATA!, pollMs: env.DEPOSIT_POLL_MS });
-      depositConfirmer.start();
-    }
-    realMoney = { enabled: true, treasuryUsdcAta: env.TREASURY_USDC_ATA! };
-    signedTxBroadcaster = makeRpcSignedTxBroadcaster(env.SOLANA_RPC_URL!);
-
-    let signFeePayerTx: ((txBase64: string) => Promise<string>) | undefined;
-    let feePayerOwner = env.FEE_PAYER_OWNER_PUBKEY;
-    if (env.FEE_PAYER_SECRET && env.FEE_PAYER_OWNER_PUBKEY) {
-      const { makeFeePayerSigner } = await import("./solana/fee-payer-signer.js");
-      const signer = await makeFeePayerSigner(env.FEE_PAYER_SECRET);
-      if (signer.address !== env.FEE_PAYER_OWNER_PUBKEY) {
-        throw new Error("FEE_PAYER_OWNER_PUBKEY does not match FEE_PAYER_SECRET");
+    // Both rails assign the SAME locals above, so buildServer never learns which chain is live.
+    // Solana-only legs (fee sponsorship, the server-built deposit tx, the signed-tx broadcaster) stay
+    // null on EVM — see the EVM branch.
+    if (env.CHAIN_FAMILY === "solana") {
+      const { makeRpcDepositSource } = await import("./solana/deposit-source.js");
+      const { assertUsdcMint } = await import("./solana/mint-assert.js");
+      const { makeDeposits } = await import("./services/deposits.js");
+      const { makeDepositConfirmer, makeDbDepositCursorStore } = await import("./services/deposit-worker.js");
+      const { makeRpcWalletBalanceReader } = await import("./services/wallet-balance.js");
+      const { makeRpcSignedTxBroadcaster } = await import("./services/signed-tx-broadcaster.js");
+      const source = makeRpcDepositSource(env.SOLANA_RPC_URL!);
+      await assertUsdcMint((m) => source.fetchMintInfo(m), env.USDC_MINT!); // refuse to boot on a bad mint
+      const deposits = makeDeposits(db, ledger, {
+        usdcMint: env.USDC_MINT!, treasuryAta: env.TREASURY_USDC_ATA!,
+        minCents: env.DEPOSIT_MIN_CENTS, maxCents: env.DEPOSIT_MAX_CENTS,
+      });
+      if (env.RUN_CONFIRMER) {
+        depositConfirmer = makeDepositConfirmer({ deposits, source, store: makeDbDepositCursorStore(db), treasuryAta: env.TREASURY_USDC_ATA!, pollMs: env.DEPOSIT_POLL_MS });
+        depositConfirmer.start();
       }
-      if (env.FEE_PAYER_OWNER_PUBKEY === env.TREASURY_OWNER_PUBKEY) {
-        throw new Error("fee payer must not be the treasury token authority");
+      realMoney = { enabled: true, treasuryUsdcAta: env.TREASURY_USDC_ATA! };
+      signedTxBroadcaster = makeRpcSignedTxBroadcaster(env.SOLANA_RPC_URL!);
+
+      let signFeePayerTx: ((txBase64: string) => Promise<string>) | undefined;
+      let feePayerOwner = env.FEE_PAYER_OWNER_PUBKEY;
+      if (env.FEE_PAYER_SECRET && env.FEE_PAYER_OWNER_PUBKEY) {
+        const { makeFeePayerSigner } = await import("./solana/fee-payer-signer.js");
+        const signer = await makeFeePayerSigner(env.FEE_PAYER_SECRET);
+        if (signer.address !== env.FEE_PAYER_OWNER_PUBKEY) {
+          throw new Error("FEE_PAYER_OWNER_PUBKEY does not match FEE_PAYER_SECRET");
+        }
+        if (env.FEE_PAYER_OWNER_PUBKEY === env.TREASURY_OWNER_PUBKEY) {
+          throw new Error("fee payer must not be the treasury token authority");
+        }
+        signFeePayerTx = signer.signFeePayerTx;
+      } else {
+        feePayerOwner = undefined;
+        console.warn("[fee_payer_disabled] falling back to user-paid Solana fees");
       }
-      signFeePayerTx = signer.signFeePayerTx;
-    } else {
-      feePayerOwner = undefined;
-      console.warn("[fee_payer_disabled] falling back to user-paid Solana fees");
-    }
 
-    depositTxBuilder = makeDepositTxBuilder({
-      usdcMint: env.USDC_MINT!,
-      treasuryUsdcAta: env.TREASURY_USDC_ATA!,
-      treasuryOwner: signFeePayerTx ? feePayerOwner : undefined,
-      signFeePayerTx,
-      getLatestBlockhash: makeRpcBlockhash(env.SOLANA_RPC_URL!),
-    });
-    walletBalanceReader = makeRpcWalletBalanceReader(env.SOLANA_RPC_URL!, env.USDC_MINT!);
-
-    const { makeWithdrawals } = await import("./services/withdrawals.js");
-    withdrawalsSvc = makeWithdrawals(db, ledger, {
-      minCents: env.WITHDRAW_MIN_CENTS, maxCents: env.WITHDRAW_MAX_CENTS,
-      userDailyCapCents: env.WITHDRAW_USER_DAILY_CAP_CENTS, globalDailyCapCents: env.WITHDRAW_GLOBAL_DAILY_CAP_CENTS,
-      holdHours: env.WITHDRAW_HOLD_HOURS, quorumThresholdCents: env.WITHDRAW_QUORUM_THRESHOLD_CENTS,
-    }, () => source.readTreasuryBaseUnits(env.TREASURY_USDC_ATA!));
-    // Self-custody send-leg: enabled only when a treasury keypair secret is configured.
-    // Unset => withdrawProcessor stays null and the admin-approve endpoint 404s (unchanged).
-    if (env.TREASURY_SECRET) {
-      const { makeTreasuryWithdrawSigner } = await import("./solana/treasury-signer.js");
-      const treasurySigner = await makeTreasuryWithdrawSigner(env.TREASURY_SECRET, {
-        rpcUrl: env.SOLANA_RPC_URL!,
-        treasuryUsdcAta: env.TREASURY_USDC_ATA!,
+      depositTxBuilder = makeDepositTxBuilder({
         usdcMint: env.USDC_MINT!,
+        treasuryUsdcAta: env.TREASURY_USDC_ATA!,
+        treasuryOwner: signFeePayerTx ? feePayerOwner : undefined,
+        signFeePayerTx,
         getLatestBlockhash: makeRpcBlockhash(env.SOLANA_RPC_URL!),
       });
-      if (treasurySigner.address !== env.TREASURY_OWNER_PUBKEY) {
-        throw new Error("TREASURY_OWNER_PUBKEY does not match TREASURY_SECRET");
+      walletBalanceReader = makeRpcWalletBalanceReader(env.SOLANA_RPC_URL!, env.USDC_MINT!);
+
+      const { makeWithdrawals } = await import("./services/withdrawals.js");
+      withdrawalsSvc = makeWithdrawals(db, ledger, {
+        minCents: env.WITHDRAW_MIN_CENTS, maxCents: env.WITHDRAW_MAX_CENTS,
+        userDailyCapCents: env.WITHDRAW_USER_DAILY_CAP_CENTS, globalDailyCapCents: env.WITHDRAW_GLOBAL_DAILY_CAP_CENTS,
+        holdHours: env.WITHDRAW_HOLD_HOURS, quorumThresholdCents: env.WITHDRAW_QUORUM_THRESHOLD_CENTS,
+      }, () => source.readTreasuryBaseUnits(env.TREASURY_USDC_ATA!));
+      // Self-custody send-leg: enabled only when a treasury keypair secret is configured.
+      // Unset => withdrawProcessor stays null and the admin-approve endpoint 404s (unchanged).
+      if (env.TREASURY_SECRET) {
+        const { makeTreasuryWithdrawSigner } = await import("./solana/treasury-signer.js");
+        const treasurySigner = await makeTreasuryWithdrawSigner(env.TREASURY_SECRET, {
+          rpcUrl: env.SOLANA_RPC_URL!,
+          treasuryUsdcAta: env.TREASURY_USDC_ATA!,
+          usdcMint: env.USDC_MINT!,
+          getLatestBlockhash: makeRpcBlockhash(env.SOLANA_RPC_URL!),
+        });
+        if (treasurySigner.address !== env.TREASURY_OWNER_PUBKEY) {
+          throw new Error("TREASURY_OWNER_PUBKEY does not match TREASURY_SECRET");
+        }
+        const { makeWithdrawProcessor, makeWithdrawConfirmer } = await import("./services/withdraw-worker.js");
+        withdrawProcessor = makeWithdrawProcessor(db, treasurySigner);
+
+        if (env.RUN_CONFIRMER) {
+          const { makeRpcChainStatusReader } = await import("./solana/chain-status.js");
+          const { makeWithdrawConfirmLoop } = await import("./services/withdraw-confirm-loop.js");
+          const confirmer = makeWithdrawConfirmer(db, ledger, makeRpcChainStatusReader(env.SOLANA_RPC_URL!));
+          const loop = makeWithdrawConfirmLoop({
+            confirmer,
+            pollMs: env.WITHDRAW_POLL_MS,
+            listSentIds: async () =>
+              (await db.select({ id: withdrawals.id }).from(withdrawals).where(eq(withdrawals.status, "sent"))).map(
+                (r: { id: string }) => r.id,
+              ),
+          });
+          loop.start();
+        }
       }
-      const { makeWithdrawProcessor, makeWithdrawConfirmer } = await import("./services/withdraw-worker.js");
-      withdrawProcessor = makeWithdrawProcessor(db, treasurySigner);
+    }
+
+    if (env.CHAIN_FAMILY === "evm") {
+      const { bootEvmRail } = await import("./evm/boot.js");
+      const { makeDbDepositCursorStore } = await import("./services/deposit-worker.js");
+      // Throws on any misconfiguration (wrong token decimals, a treasury secret that is not the
+      // treasury's), so a bad EVM config never reaches a listening server.
+      const rail = await bootEvmRail(env, { db, ledger });
 
       if (env.RUN_CONFIRMER) {
-        const { makeRpcChainStatusReader } = await import("./solana/chain-status.js");
-        const { makeWithdrawConfirmLoop } = await import("./services/withdraw-confirm-loop.js");
-        const confirmer = makeWithdrawConfirmer(db, ledger, makeRpcChainStatusReader(env.SOLANA_RPC_URL!));
-        const loop = makeWithdrawConfirmLoop({
-          confirmer,
-          pollMs: env.WITHDRAW_POLL_MS,
-          listSentIds: async () =>
-            (await db.select({ id: withdrawals.id }).from(withdrawals).where(eq(withdrawals.status, "sent"))).map(
-              (r: { id: string }) => r.id,
-            ),
-        });
-        loop.start();
+        depositConfirmer = rail.makeConfirmer(makeDbDepositCursorStore(db));
+        depositConfirmer.start();
+      }
+      // /v1/deposit/address serves this verbatim: on EVM the deposit destination is the treasury EOA
+      // itself (no ATA to derive), and the client sends its own ERC-20 transfer to it.
+      realMoney = { enabled: true, treasuryUsdcAta: rail.treasury };
+      // depositTxBuilder / signedTxBroadcaster stay null: there is no server-built deposit tx on this
+      // rail, so /v1/deposit/build and /v1/deposit/send 404 exactly as they do with the legs unset.
+      walletBalanceReader = { balanceCents: (wallet) => rail.walletUsdcCents(wallet) };
+
+      const { makeWithdrawals } = await import("./services/withdrawals.js");
+      withdrawalsSvc = makeWithdrawals(db, ledger, {
+        minCents: env.WITHDRAW_MIN_CENTS, maxCents: env.WITHDRAW_MAX_CENTS,
+        userDailyCapCents: env.WITHDRAW_USER_DAILY_CAP_CENTS, globalDailyCapCents: env.WITHDRAW_GLOBAL_DAILY_CAP_CENTS,
+        holdHours: env.WITHDRAW_HOLD_HOURS, quorumThresholdCents: env.WITHDRAW_QUORUM_THRESHOLD_CENTS,
+      }, rail.readTreasuryBaseUnits);
+
+      // Same rule as Solana: no treasury secret => withdrawProcessor stays null and the
+      // admin-approve endpoint 404s, so nothing can be sent.
+      if (rail.treasurySigner) {
+        const { makeWithdrawProcessor, makeWithdrawConfirmer } = await import("./services/withdraw-worker.js");
+        withdrawProcessor = makeWithdrawProcessor(db, rail.treasurySigner);
+
+        if (env.RUN_CONFIRMER) {
+          const { makeWithdrawConfirmLoop } = await import("./services/withdraw-confirm-loop.js");
+          // 600s, well above the 180s Solana default: an EVM tx has no blockhash expiry, so a
+          // still-unconfirmed send is usually a low-fee tx waiting in the mempool, not a dropped one.
+          // Escalating on the Solana window would flag healthy withdrawals for manual review.
+          const confirmer = makeWithdrawConfirmer(db, ledger, rail.chainStatus, { staleSeconds: 600 });
+          const loop = makeWithdrawConfirmLoop({
+            confirmer,
+            pollMs: env.WITHDRAW_POLL_MS,
+            listSentIds: async () =>
+              (await db.select({ id: withdrawals.id }).from(withdrawals).where(eq(withdrawals.status, "sent"))).map(
+                (r: { id: string }) => r.id,
+              ),
+          });
+          loop.start();
+        }
       }
     }
   }
