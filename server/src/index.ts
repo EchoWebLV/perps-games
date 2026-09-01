@@ -162,6 +162,7 @@ async function main(): Promise<void> {
   });
   const walletBinding = createWalletBinding({
     secret: env.SESSION_SECRET ?? "development-session-secret-change-before-production",
+    family: env.CHAIN_FAMILY,
   });
   const depositIntents = makeDepositIntents({
     secret: env.SESSION_SECRET ?? "development-session-secret-change-before-production",

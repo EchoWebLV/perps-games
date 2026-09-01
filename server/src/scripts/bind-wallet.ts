@@ -5,11 +5,29 @@ import "dotenv/config";
 import { createDb } from "../db/client.js";
 import { makeUsers } from "../services/users.js";
 
+// Address shapes per chain family — mirrors auth/wallet-binding.ts. EVM addresses are stored
+// lowercased so bound-wallet == deposit-source `from` compares exactly.
+const SOLANA_ADDRESS_RE = /^[1-9A-HJ-NP-Za-km-z]{32,44}$/;
+const EVM_ADDRESS_RE = /^0x[0-9a-fA-F]{40}$/;
+
 async function main(): Promise<void> {
-  const [externalId, wallet] = process.argv.slice(2);
+  const [externalId, rawWallet] = process.argv.slice(2);
   const dbUrl = process.env.DATABASE_URL;
-  if (!externalId || !wallet) { console.error("usage: bind-wallet <externalId> <walletAddress>"); process.exit(1); }
+  // Same default as src/env.ts (CHAIN_FAMILY defaults to "evm").
+  const family = process.env.CHAIN_FAMILY === "solana" ? "solana" : "evm";
+  if (!externalId || !rawWallet) { console.error("usage: bind-wallet <externalId> <walletAddress>"); process.exit(1); }
   if (!dbUrl) { console.error("set DATABASE_URL=…"); process.exit(1); }
+
+  const valid = family === "evm" ? EVM_ADDRESS_RE.test(rawWallet) : SOLANA_ADDRESS_RE.test(rawWallet);
+  if (!valid) {
+    console.error(
+      `✗ invalid wallet address for CHAIN_FAMILY=${family} — expected ` +
+        (family === "evm" ? "a 0x-prefixed 40-hex EVM address" : "a base58 Solana address (32–44 chars)") +
+        `, got: ${rawWallet}`,
+    );
+    process.exit(1);
+  }
+  const wallet = family === "evm" ? rawWallet.toLowerCase() : rawWallet;
 
   const raw = createDb(dbUrl);
   const users = makeUsers(raw.db);

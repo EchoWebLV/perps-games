@@ -55,10 +55,16 @@ const CarRef = z.object({ carId: z.string().min(1) });
 const RedeemAccess = z.object({ code: z.string().trim().min(1).max(24) });
 const DriverNameBody = z.object({ name: z.string() });
 const WalletBindChallengeBody = z.object({ wallet: z.string().min(32).max(44) });
-const WalletBindBody = z.object({
-  challenge: z.string().min(1),
-  signatureBase58: z.string().min(1),
-});
+const WalletBindBody = z
+  .object({
+    challenge: z.string().min(1),
+    // EVM (EIP-191) sends `signature` as 0x-hex; Solana sends `signatureBase58`.
+    signature: z.string().min(1).optional(),
+    signatureBase58: z.string().min(1).optional(),
+  })
+  .refine((b) => Boolean(b.signature || b.signatureBase58), {
+    message: "signature or signatureBase58 is required",
+  });
 const DepositSendBody = z.object({
   depositIntent: z.string().min(1),
   signedTxBase64: z.string().min(1),
