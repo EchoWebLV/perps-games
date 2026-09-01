@@ -26,9 +26,19 @@ const EnvShape = z.object({
   // even when on, boot still fails closed until an autonomous settler is wired (see
   // assertRoundSettlerForStake). No settler exists yet, so cash rounds cannot run.
   CASH_SETTLER_ENABLED: z.string().optional().transform((v) => v === "true"),
+  // Which chain rail the money vars describe. `evm` is Robinhood Chain (the live rail); `solana`
+  // keeps the parked Solana rail bootable. Money-var requirements below are scoped to this.
+  CHAIN_FAMILY: z.enum(["evm", "solana"]).default("evm"),
   SOLANA_RPC_URL: z.string().url().optional(),
   SOLANA_RPC_URL_FALLBACK: z.string().url().optional(),
   SOLANA_CLUSTER: z.enum(["mainnet-beta", "devnet"]).default("mainnet-beta"),
+  EVM_RPC_URL: z.string().url().optional(),
+  EVM_RPC_URL_FALLBACK: z.string().url().optional(),
+  EVM_CHAIN_ID: z.coerce.number().int().positive().optional(),
+  EVM_USDC_ADDRESS: z.string().regex(/^0x[0-9a-fA-F]{40}$/).optional(),
+  EVM_TREASURY_ADDRESS: z.string().regex(/^0x[0-9a-fA-F]{40}$/).optional(),
+  EVM_TREASURY_SECRET: z.string().regex(/^0x[0-9a-fA-F]{64}$/).optional(),
+  EVM_CONFIRMATIONS: z.coerce.number().int().nonnegative().default(12),
   HIGHWAY_INDEXER_ENABLED: z.string().optional().default("true").transform((v) => v !== "false"),
   HIGHWAY_INDEXER_RPC: z.string().url().default("https://devnet.magicblock.app"),
   HIGHWAY_INDEXER_POLL_MS: z.coerce.number().int().positive().default(2000),
@@ -71,23 +81,40 @@ const Env = EnvShape.superRefine((e, ctx) => {
       message: "SESSION_SECRET is required in production",
     });
   }
+  // The EVM treasury signer derives its address from the secret and asserts it matches
+  // EVM_TREASURY_ADDRESS; without the address there is nothing to check against. Pair them
+  // whenever the secret is present, money rail on or off.
+  if (e.EVM_TREASURY_SECRET && !e.EVM_TREASURY_ADDRESS) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ["EVM_TREASURY_ADDRESS"],
+      message: "EVM_TREASURY_ADDRESS is required when EVM_TREASURY_SECRET is set",
+    });
+  }
   if (!e.REAL_MONEY_ENABLED) return;
-  for (const k of ["SOLANA_RPC_URL", "USDC_MINT", "TREASURY_USDC_ATA"] as const) {
-    if (!e[k]) ctx.addIssue({ code: z.ZodIssueCode.custom, path: [k], message: `${k} is required when REAL_MONEY_ENABLED=true` });
+  if (e.CHAIN_FAMILY === "solana") {
+    for (const k of ["SOLANA_RPC_URL", "USDC_MINT", "TREASURY_USDC_ATA"] as const) {
+      if (!e[k]) ctx.addIssue({ code: z.ZodIssueCode.custom, path: [k], message: `${k} is required when REAL_MONEY_ENABLED=true` });
+    }
+    if (!!e.FEE_PAYER_SECRET !== !!e.FEE_PAYER_OWNER_PUBKEY) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["FEE_PAYER_SECRET"],
+        message: "FEE_PAYER_SECRET and FEE_PAYER_OWNER_PUBKEY must be set together",
+      });
+    }
+    if (e.FEE_PAYER_SECRET && e.FEE_PAYER_OWNER_PUBKEY && !e.TREASURY_OWNER_PUBKEY) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["TREASURY_OWNER_PUBKEY"],
+        message: "TREASURY_OWNER_PUBKEY is required when fee sponsorship is configured",
+      });
+    }
   }
-  if (!!e.FEE_PAYER_SECRET !== !!e.FEE_PAYER_OWNER_PUBKEY) {
-    ctx.addIssue({
-      code: z.ZodIssueCode.custom,
-      path: ["FEE_PAYER_SECRET"],
-      message: "FEE_PAYER_SECRET and FEE_PAYER_OWNER_PUBKEY must be set together",
-    });
-  }
-  if (e.FEE_PAYER_SECRET && e.FEE_PAYER_OWNER_PUBKEY && !e.TREASURY_OWNER_PUBKEY) {
-    ctx.addIssue({
-      code: z.ZodIssueCode.custom,
-      path: ["TREASURY_OWNER_PUBKEY"],
-      message: "TREASURY_OWNER_PUBKEY is required when fee sponsorship is configured",
-    });
+  if (e.CHAIN_FAMILY === "evm") {
+    for (const k of ["EVM_RPC_URL", "EVM_CHAIN_ID", "EVM_USDC_ADDRESS", "EVM_TREASURY_ADDRESS"] as const) {
+      if (!e[k]) ctx.addIssue({ code: z.ZodIssueCode.custom, path: [k], message: `${k} is required when REAL_MONEY_ENABLED=true and CHAIN_FAMILY=evm` });
+    }
   }
   // The self-custody withdraw signer asserts its derived address == TREASURY_OWNER_PUBKEY at
   // boot; without the pubkey that assertion has nothing to check against (and would throw a

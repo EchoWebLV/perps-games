@@ -21,6 +21,13 @@ describe("env withdraw send-leg vars", () => {
     expect(e.PYTH_API_KEY).toBe("pyth-test-key");
   });
 
+  it("defaults EVM_CONFIRMATIONS and leaves the EVM rail vars undefined", () => {
+    const e = parseEnv({});
+    expect(e.EVM_CONFIRMATIONS).toBe(12);
+    expect(e.EVM_RPC_URL).toBeUndefined();
+    expect(e.EVM_TREASURY_SECRET).toBeUndefined();
+  });
+
   it("accepts a provided TREASURY_SECRET and WITHDRAW_POLL_MS", () => {
     const e = parseEnv({ TREASURY_SECRET: "[1,2,3]", WITHDRAW_POLL_MS: "1500" });
     expect(e.TREASURY_SECRET).toBe("[1,2,3]");
@@ -32,6 +39,7 @@ describe("env TREASURY_SECRET requires TREASURY_OWNER_PUBKEY (real money)", () =
   const PUBKEY = "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v"; // any valid 32+ char base58
   const realMoneyBase = {
     REAL_MONEY_ENABLED: "true",
+    CHAIN_FAMILY: "solana",
     SOLANA_RPC_URL: "https://api.devnet.solana.com",
     USDC_MINT: PUBKEY,
     TREASURY_USDC_ATA: PUBKEY,

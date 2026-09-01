@@ -24,6 +24,7 @@ describe("parseEnv auth flags", () => {
   it("requires FEE_PAYER_SECRET and FEE_PAYER_OWNER_PUBKEY together when real money is enabled", () => {
     expect(() => parseEnv({
       REAL_MONEY_ENABLED: "true",
+      CHAIN_FAMILY: "solana",
       SOLANA_RPC_URL: "https://rpc.example/devnet",
       USDC_MINT: "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
       TREASURY_USDC_ATA: "9wFF1111111111111111111111111111111111111111",
@@ -31,6 +32,7 @@ describe("parseEnv auth flags", () => {
     })).toThrowError(/FEE_PAYER_SECRET and FEE_PAYER_OWNER_PUBKEY must be set together/);
     expect(() => parseEnv({
       REAL_MONEY_ENABLED: "true",
+      CHAIN_FAMILY: "solana",
       SOLANA_RPC_URL: "https://rpc.example/devnet",
       USDC_MINT: "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
       TREASURY_USDC_ATA: "9wFF1111111111111111111111111111111111111111",
@@ -40,6 +42,7 @@ describe("parseEnv auth flags", () => {
   it("accepts FEE_PAYER_SECRET and FEE_PAYER_OWNER_PUBKEY together when real money is enabled", () => {
     const e = parseEnv({
       REAL_MONEY_ENABLED: "true",
+      CHAIN_FAMILY: "solana",
       SOLANA_RPC_URL: "https://rpc.example/devnet",
       USDC_MINT: "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
       TREASURY_USDC_ATA: "9wFF1111111111111111111111111111111111111111",
@@ -53,6 +56,7 @@ describe("parseEnv auth flags", () => {
   it("requires TREASURY_OWNER_PUBKEY when fee sponsorship is configured", () => {
     expect(() => parseEnv({
       REAL_MONEY_ENABLED: "true",
+      CHAIN_FAMILY: "solana",
       SOLANA_RPC_URL: "https://rpc.example/devnet",
       USDC_MINT: "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
       TREASURY_USDC_ATA: "9wFF1111111111111111111111111111111111111111",
