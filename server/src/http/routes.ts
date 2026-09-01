@@ -6,6 +6,7 @@ import type { Inventory } from "../services/inventory.js";
 import type { Rounds } from "../services/rounds.js";
 import type { TradeHistory } from "../services/trade-history.js";
 import type { PriceFeed } from "../feed/types.js";
+import { FEED_ASSET_KEYS } from "../feed/symbols.js";
 import { FeedHaltError, RoundNotFoundError, RoundClosedError, OpenRoundExistsError } from "../services/errors.js";
 import { makeRequireUser, makeRequireAdmin, makeRequireWalletBoundUser } from "./auth.js";
 import { normalizeWalletForCompare } from "../auth/wallet-binding.js";
@@ -100,7 +101,7 @@ const MigrateBody = z.object({
 
 const TradeBody = z.object({
   id: z.string().uuid(),
-  asset: z.enum(["BTC", "ETH", "SOL"]),
+  asset: z.enum(FEED_ASSET_KEYS),
   dir: z.union([z.literal(1), z.literal(-1)]),
   lev: z.number().int().min(1).max(3000),
   stakeBase: z.number().int().positive().safe(),
@@ -117,7 +118,7 @@ const TradeQuery = z.object({
 });
 
 const OpenRound = z.object({
-  asset: z.enum(["BTC", "ETH", "SOL"]),
+  asset: z.enum(FEED_ASSET_KEYS),
   dir: z.union([z.literal(1), z.literal(-1)]),
   lev: z.number().int().min(10).max(1000),
   stake: z.number().int().min(1).max(5000), // cents: 1¢ floor … $50.00 cap
@@ -146,7 +147,7 @@ export function registerRoutes(server: FastifyInstance, deps: RouteDeps): void {
   // Public mark for the HUD: same ticks the server settles against. No auth — prices aren't secret,
   // and the browser cannot send a Hermes API key on EventSource. Empty/unhealthy assets are omitted.
   server.get("/v1/prices", async () => {
-    const assets = ["BTC", "ETH", "SOL"] as const;
+    const assets = FEED_ASSET_KEYS;
     const prices: Record<string, number> = {};
     const live: Record<string, boolean> = {};
     for (const asset of assets) {

@@ -1,8 +1,10 @@
 import { and, desc, eq, lt, or } from "drizzle-orm";
 import { tradeHistory, type TradeHistoryRow } from "../db/schema.js";
 import type { Users } from "./users.js";
+import type { FeedAssetKey } from "../feed/symbols.js";
 
-export type TradeAsset = "BTC" | "ETH" | "SOL";
+/** Whatever the feed symbol table can price is what a settled trade can name. */
+export type TradeAsset = FeedAssetKey;
 export type TradeOutcome = "cashout" | "cap" | "liq" | "time";
 
 export interface TradeRecordInput {

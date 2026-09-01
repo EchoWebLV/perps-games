@@ -221,7 +221,7 @@ export const rounds = pgTable(
     userId: uuid("user_id")
       .notNull()
       .references(() => users.id),
-    asset: text("asset").notNull(), // "SOL" | "BTC" | "ETH"
+    asset: text("asset").notNull(), // a key of FEED_SYMBOLS (server/src/feed/symbols.ts)
     dir: integer("dir").notNull(), // 1 long, -1 short (the OPEN direction)
     lev: integer("lev").notNull(), // OPEN leverage (post-niceLev; integer)
     stake: bigint("stake", { mode: "number" }).notNull(), // integer coins debited at open

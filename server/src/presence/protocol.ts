@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { FEED_ASSET_KEYS } from "../feed/symbols.js";
 
 export const MAX_MESSAGE_BYTES = 2048;
 // Keep these visual-only limits aligned with redline3d's LOT_BOUNDS and DRIVE.MAX_FWD.
@@ -36,7 +37,7 @@ const clientMessageSchema = z.discriminatedUnion("type", [
   z
     .object({
       type: z.literal("highway"),
-      asset: z.enum(["BTC", "ETH", "SOL"]),
+      asset: z.enum(FEED_ASSET_KEYS),
       roundPda: z.string().min(32).max(44),
       dir: z.union([z.literal(1), z.literal(-1)]),
       lev: z.number().int().min(10).max(250).multipleOf(10),

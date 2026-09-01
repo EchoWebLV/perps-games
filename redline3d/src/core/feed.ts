@@ -7,6 +7,8 @@
      1) WS  ws(s)://<API_BASE>/v1/feed  — push, ~4/s, messages:
             { type: "tick",  symbol, price, tsUs }
             { type: "stale", symbol }                 (server has no fresh price)
+            { type: "hb" }                            (liveness only, no symbol —
+                                                       refreshes wsLastMsg, payload ignored)
      2) GET <API_BASE>/v1/prices        — poll backstop, used only while the WS
                                           has been silent for >1200ms
 
