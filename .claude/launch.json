@@ -57,6 +57,20 @@
       "port": 4500
     },
     {
+      "name": "rh-server",
+      "runtimeExecutable": "bash",
+      "runtimeArgs": ["-c", "LAN_IP=$(ipconfig getifaddr en0 2>/dev/null || true); K=$(grep -E '^PYTH_API_KEY=' .env 2>/dev/null | head -1 | cut -d= -f2- | tr -d '\"' | tr -d '\\r'); env ${K:+PYTH_API_KEY=$K} DOTENV_CONFIG_PATH=/dev/null CHAIN_FAMILY=evm REAL_MONEY_ENABLED=false CORS_ORIGINS=\"http://localhost:3100,http://127.0.0.1:3100${LAN_IP:+,http://$LAN_IP:3100}\" SIGNUP_FAUCET=true DEV_ENDPOINTS=true PORT=8099 NODE_ENV=development npx tsx src/index.ts"],
+      "cwd": "server",
+      "port": 8099
+    },
+    {
+      "name": "rh-web",
+      "runtimeExecutable": "bash",
+      "runtimeArgs": ["-c", "LAN_IP=$(ipconfig getifaddr en0 2>/dev/null || echo localhost); VITE_API_BASE=http://$LAN_IP:8099 VITE_WALLET=dev npm run dev -- --port 3100 --strictPort --host"],
+      "cwd": "redline3d",
+      "port": 3100
+    },
+    {
       "name": "perps-server",
       "runtimeExecutable": "bash",
       "runtimeArgs": ["-c", "LAN_IP=$(ipconfig getifaddr en0 2>/dev/null || true); REAL_MONEY_ENABLED=false CORS_ORIGINS=\"http://localhost:4000,http://127.0.0.1:4000,http://localhost:4100,http://127.0.0.1:4100,http://localhost:4333,http://127.0.0.1:4333${LAN_IP:+,http://$LAN_IP:4000,http://$LAN_IP:4100,http://$LAN_IP:4333}\" SIGNUP_FAUCET=true DEV_ENDPOINTS=true PORT=8081 NODE_ENV=development npx tsx src/index.ts"],
